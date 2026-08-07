@@ -38,19 +38,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.window.DialogWindowProvider
-import android.view.ViewGroup
-import android.view.WindowManager
-import android.graphics.drawable.ColorDrawable
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
@@ -125,6 +117,8 @@ fun extractOpsAndComment(notification: NotificationEntity): NotifParsedInfo {
 
 sealed class ChatItem {
     abstract val timestamp: Long
+    open val isFromUser: Boolean get() = false
+    open val isRead: Boolean get() = true
 }
 data class ChatWelcomeItem(override val timestamp: Long = 0L) : ChatItem()
 data class ChatChangelogItem(override val timestamp: Long = 500L) : ChatItem()
@@ -132,11 +126,18 @@ data class ChatAuditOfferItem(override val timestamp: Long = 1000L) : ChatItem()
 data class ChatUnreadSeparatorItem(override val timestamp: Long) : ChatItem()
 data class ChatNotificationUserItem(val notification: NotificationEntity) : ChatItem() {
     override val timestamp: Long = notification.timestamp
+    override val isFromUser: Boolean get() = true
+    override val isRead: Boolean get() = true
 }
 data class ChatNotificationDavidItem(val notification: NotificationEntity) : ChatItem() {
     override val timestamp: Long = notification.timestamp + 10L
+    override val isFromUser: Boolean get() = false
+    override val isRead: Boolean get() = notification.isRead
 }
-data class ChatAuditRequestItem(override val timestamp: Long, val text: String = "", val fileName: String? = null, val hasError: Boolean = false) : ChatItem()
+data class ChatAuditRequestItem(override val timestamp: Long, val text: String = "", val fileName: String? = null, val hasError: Boolean = false) : ChatItem() {
+    override val isFromUser: Boolean get() = true
+    override val isRead: Boolean get() = true
+}
 data class ChatAuditSystemItem(override val timestamp: Long) : ChatItem()
 data class ChatAuditBlockItem(override val timestamp: Long, val text: String, val isFirst: Boolean) : ChatItem()
 data class ChatAuditRetryItem(override val timestamp: Long) : ChatItem()
@@ -275,34 +276,15 @@ fun ReportDetailsDialog(
         }
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Slate950
     ) {
-        val view = LocalView.current
-        DisposableEffect(view) {
-            val window = (view.parent as? DialogWindowProvider)?.window
-            window?.let { w ->
-                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                w.setBackgroundDrawable(ColorDrawable(Slate950.toArgb()))
-                w.setDimAmount(0f)
-                w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
-                w.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
-                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(w, false)
-            }
-            onDispose {}
-        }
-
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            color = Slate950
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Slate950)
         ) {
-            Column(
-                modifier = Modifier.fillMaxSize()
-            ) {
                 // Header (Telegram Style Top Bar)
                 Row(
                     modifier = Modifier
@@ -440,13 +422,12 @@ fun ReportDetailsDialog(
                     val sorted = items.sortedBy { it.timestamp }.toMutableList()
                     val profileKey = profileName.ifBlank { "default" }
                     val unreadIdsSet = initialUnreadIds.toMutableSet()
-                    if (filteredNotifications.any { initialUnreadIds.contains(it.id) || !it.isRead }) {
-                        filteredNotifications.firstOrNull()?.let { unreadIdsSet.add(it.id) }
-                    }
 
-                    val firstUnreadNotifIndex = sorted.indexOfFirst {
-                        (it is ChatNotificationDavidItem && (unreadIdsSet.contains(it.notification.id) || !it.notification.isRead)) ||
-                        (it is ChatNotificationUserItem && (unreadIdsSet.contains(it.notification.id) || !it.notification.isRead))
+                    val firstUnreadNotifIndex = sorted.indexOfFirst { item ->
+                        !item.isFromUser && (
+                            (item is ChatNotificationDavidItem && (unreadIdsSet.contains(item.notification.id) || !item.notification.isRead)) ||
+                            !item.isRead
+                        )
                     }
 
                     if (firstUnreadNotifIndex != -1) {
@@ -1178,7 +1159,6 @@ fun ReportDetailsDialog(
             }
         }
     }
-}
 
 @Composable
 fun ChatNotificationUser(notification: NotificationEntity, profileName: String) {
