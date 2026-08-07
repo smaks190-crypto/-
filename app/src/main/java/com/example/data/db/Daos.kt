@@ -146,7 +146,7 @@ interface AccountDao {
 
 @Dao
 interface NotificationDao {
-    @Query("SELECT * FROM notifications WHERE budgetId = :budgetId ORDER BY timestamp ASC")
+    @Query("SELECT * FROM notifications WHERE budgetId = :budgetId ORDER BY timestamp ASC, id ASC")
     fun getNotificationsByBudgetId(budgetId: String): Flow<List<NotificationEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.PriorityHigh
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
@@ -247,13 +248,17 @@ fun ReportDetailsDialog(
         }
     }
 
-    val auditTimestamp = remember {
-        val savedTime = prefs.getLong("audit_last_success_timestamp", 0L)
-        if (savedTime != 0L) savedTime else System.currentTimeMillis()
+    val actualAuditTimestamp = remember(auditTimestamp) {
+        if (auditTimestamp != null && auditTimestamp > 0L) {
+            auditTimestamp
+        } else {
+            val savedTime = prefs.getLong("audit_last_success_timestamp", 0L)
+            if (savedTime != 0L) savedTime else System.currentTimeMillis()
+        }
     }
 
-    LaunchedEffect(auditText) {
-        if (auditText.isNotEmpty() && auditText != "ERROR_NO_CONNECTION") {
+    LaunchedEffect(auditText, hasSentRequest) {
+        if (hasSentRequest && auditText.isNotEmpty() && auditText != "ERROR_NO_CONNECTION") {
             prefs.edit().putLong("audit_last_success_timestamp", System.currentTimeMillis()).apply()
         }
     }
@@ -390,7 +395,7 @@ fun ReportDetailsDialog(
                         items.add(ChatNotificationDavidItem(notif))
                     }
 
-                    val baseAuditTime = auditTimestamp
+                    val baseAuditTime = actualAuditTimestamp
                     val reqTime = requestTimestamp ?: (baseAuditTime + 100)
                     val responseBaseTime = reqTime + 200
 
@@ -761,10 +766,10 @@ fun ReportDetailsDialog(
                                                         )
                                                     } else {
                                                         Icon(
-                                                            imageVector = Icons.Default.Check,
-                                                            contentDescription = "Отправлено",
-                                                            tint = Color.White.copy(alpha = 0.8f),
-                                                            modifier = Modifier.size(12.dp)
+                                                            imageVector = if (item.isRead) Icons.Default.DoneAll else Icons.Default.Check,
+                                                            contentDescription = if (item.isRead) "Прочитано" else "Отправлено",
+                                                            tint = if (item.isRead) Emerald400 else Color.White.copy(alpha = 0.8f),
+                                                            modifier = Modifier.size(13.dp)
                                                         )
                                                     }
                                                 }
@@ -1208,10 +1213,10 @@ fun ChatNotificationUser(notification: NotificationEntity, profileName: String) 
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "Прочитано",
-                        tint = Color(0xFF64B5F6),
-                        modifier = Modifier.size(12.dp)
+                        imageVector = if (notification.isRead) Icons.Default.DoneAll else Icons.Default.Check,
+                        contentDescription = if (notification.isRead) "Прочитано" else "Отправлено",
+                        tint = if (notification.isRead) Emerald400 else Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(13.dp)
                     )
                 }
             }
