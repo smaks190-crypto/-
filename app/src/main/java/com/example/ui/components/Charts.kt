@@ -74,6 +74,8 @@ import com.example.ui.theme.Slate900
 import com.example.ui.theme.DarkBg
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Fill
 import com.example.data.db.TransactionEntity
 import java.util.Calendar
@@ -782,12 +784,12 @@ fun ExpenseDynamicsAreaChartCard(
                         Offset(x, y)
                     }
 
-                    // Build Area Path
+                    // Build Area Path with smooth Cubic Bezier
                     val areaPath = Path().apply {
                         moveTo(points[0].x, h)
                         lineTo(points[0].x, points[0].y)
 
-                        val tension = 0.2f
+                        val tension = 0.25f
                         for (i in 0 until points.size - 1) {
                             val p1 = points[i]
                             val p2 = points[i + 1]
@@ -795,9 +797,9 @@ fun ExpenseDynamicsAreaChartCard(
                             val p3 = if (i + 2 < points.size) points[i + 2] else p2
 
                             val controlX1 = p1.x + (p2.x - p0.x) * tension
-                            val controlY1 = (p1.y + (p2.y - p0.y) * tension).coerceAtMost(h - 8.dp.toPx())
+                            val controlY1 = (p1.y + (p2.y - p0.y) * tension).coerceIn(0f, h)
                             val controlX2 = p2.x - (p3.x - p1.x) * tension
-                            val controlY2 = (p2.y - (p3.y - p1.y) * tension).coerceAtMost(h - 8.dp.toPx())
+                            val controlY2 = (p2.y - (p3.y - p1.y) * tension).coerceIn(0f, h)
 
                             cubicTo(controlX1, controlY1, controlX2, controlY2, p2.x, p2.y)
                         }
@@ -806,10 +808,10 @@ fun ExpenseDynamicsAreaChartCard(
                         close()
                     }
 
-                    // Build Stroke Line Path
+                    // Build Stroke Line Path with smooth Cubic Bezier
                     val strokePath = Path().apply {
                         moveTo(points[0].x, points[0].y)
-                        val tension = 0.2f
+                        val tension = 0.25f
                         for (i in 0 until points.size - 1) {
                             val p1 = points[i]
                             val p2 = points[i + 1]
@@ -817,88 +819,61 @@ fun ExpenseDynamicsAreaChartCard(
                             val p3 = if (i + 2 < points.size) points[i + 2] else p2
 
                             val controlX1 = p1.x + (p2.x - p0.x) * tension
-                            val controlY1 = (p1.y + (p2.y - p0.y) * tension).coerceAtMost(h - 8.dp.toPx())
+                            val controlY1 = (p1.y + (p2.y - p0.y) * tension).coerceIn(0f, h)
                             val controlX2 = p2.x - (p3.x - p1.x) * tension
-                            val controlY2 = (p2.y - (p3.y - p1.y) * tension).coerceAtMost(h - 8.dp.toPx())
+                            val controlY2 = (p2.y - (p3.y - p1.y) * tension).coerceIn(0f, h)
 
                             cubicTo(controlX1, controlY1, controlX2, controlY2, p2.x, p2.y)
                         }
                     }
 
-                    // Dynamic Vertical Gradient depending on Daily Income limits:
-                    // If max expense is close to or exceeds daily income limit, color gets progressively redder (Rose500).
-                    // If expenses are healthy (well under daily income), the peak stays safe (Indigo500 or Emerald400).
                     val minY = points.minOf { it.y }
-                    val startYVal = if (h - minY < 10.dp.toPx()) h - 40.dp.toPx() else minY
-                    
-                    val maxExpense = currentTarget.maxOrNull() ?: 0.0
-                    val ratio = (maxExpense / if (dailyIncomeLimit > 0.0) dailyIncomeLimit else 1.0).coerceIn(0.0, 2.5)
 
-                    val peakColor = when {
-                        ratio >= 1.0 -> Rose500
-                        ratio >= 0.5 -> {
-                            val fraction = ((ratio - 0.5) / 0.5).toFloat().coerceIn(0f, 1f)
-                            androidx.compose.ui.graphics.lerp(Indigo500, Rose500, fraction)
-                        }
-                        else -> {
-                            val fraction = (ratio / 0.5).toFloat().coerceIn(0f, 1f)
-                            androidx.compose.ui.graphics.lerp(Emerald400, Indigo500, fraction)
-                        }
-                    }
+                    // Horizontal gradient for neon line (Emerald -> Indigo -> Rose) as seen in reference
+                    val strokeGradient = Brush.horizontalGradient(
+                        colors = listOf(Emerald400, Indigo500, Rose500),
+                        startX = 0f,
+                        endX = w
+                    )
 
-                    val midColor = when {
-                        ratio >= 1.0 -> Indigo500
-                        ratio >= 0.5 -> {
-                            val fraction = ((ratio - 0.5) / 0.5).toFloat().coerceIn(0f, 1f)
-                            androidx.compose.ui.graphics.lerp(Emerald400, Indigo500, fraction)
-                        }
-                        else -> Emerald400
-                    }
-
-                    val bottomColor = Emerald400
-
+                    // Vertical glowing gradient fill under curve
                     val areaGradient = Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0.0f to peakColor.copy(alpha = 0.50f),
-                            0.35f to peakColor.copy(alpha = 0.35f),
-                            0.70f to midColor.copy(alpha = 0.15f),
-                            1.0f to Color.Transparent
+                        colors = listOf(
+                            Color(0x66A855F7), // Soft purple/indigo neon glow
+                            Color.Transparent
                         ),
-                        startY = startYVal,
+                        startY = minY.coerceAtLeast(0f),
                         endY = h
                     )
 
-                    val strokeGradient = Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0.0f to peakColor,
-                            0.35f to peakColor,
-                            0.70f to midColor,
-                            1.0f to bottomColor
-                        ),
-                        startY = startYVal,
-                        endY = h
-                    )
-
-                    // Draw Gradient Area Fill (The bump itself is filled with glowing gradient)
+                    // Draw Gradient Area Fill under curve
                     drawPath(
                         path = areaPath,
                         brush = areaGradient,
                         style = Fill
                     )
                     
-                    // Draw Glowing Neon stroke behind the main stroke
+                    // Draw Glowing Neon Halo behind main line
                     drawPath(
                         path = strokePath,
                         brush = strokeGradient,
-                        style = Stroke(width = 12.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round),
-                        alpha = 0.45f
+                        style = Stroke(
+                            width = 10.dp.toPx(),
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round
+                        ),
+                        alpha = 0.30f
                     )
 
-                    // Draw Main Neon Stroke Line
+                    // Draw Main Neon Line (3.5dp thickness with round caps and joins)
                     drawPath(
                         path = strokePath,
                         brush = strokeGradient,
-                        style = Stroke(width = 3.5.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                        style = Stroke(
+                            width = 3.5.dp.toPx(),
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round
+                        )
                     )
 
                     // Text Paint for Amount Badges

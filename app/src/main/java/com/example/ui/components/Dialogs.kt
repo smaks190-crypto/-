@@ -60,6 +60,8 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -5398,6 +5400,12 @@ fun AllTransactionsDialog(
                     LazyColumn(
                         state = lazyListState,
                         modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            top = 0.dp,
+                            start = 0.dp,
+                            end = 0.dp,
+                            bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                        ),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         // Unpinned Search Input at the top of scroll list

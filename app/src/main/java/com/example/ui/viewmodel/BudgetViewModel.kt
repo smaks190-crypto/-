@@ -1088,113 +1088,115 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             _aiAuditLoading.value = true
             _aiAuditResult.value = ""
 
-            val monthNames = listOf("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
-            val periodName = when (_periodType.value) {
-                PeriodType.DAY -> "День ($dateDay)"
-                PeriodType.WEEK -> "Неделя ($dateDay)"
-                PeriodType.MONTH -> "${monthNames.getOrElse(month - 1) { "Месяц" }} $year года"
-                PeriodType.ALL -> "Весь $year год"
-            }
-
-            // Save user audit request to chat history DB with unique UUID
-            val reqTime = System.currentTimeMillis()
-            val reqId = java.util.UUID.randomUUID().toString()
-            repository.insertNotification(
-                com.example.data.db.NotificationEntity(
-                    id = reqId,
-                    budgetId = bId,
-                    title = "Запрос аналитики",
-                    description = "||audit_req||Давид, проведи аудит за $periodName",
-                    icon = "david",
-                    color = "indigo500",
-                    timestamp = reqTime,
-                    isRead = true
-                )
-            )
-
-            var fullText = ""
             try {
-                repository.requestAiAuditStream(
-                    apiKey = key,
-                    periodName = periodName,
-                    year = year,
-                    filteredTransactions = currentFilteredTransactions,
-                    previousTransactions = previousTransactions,
-                    activeDebts = accounts.value,
-                    activeGoals = goals.value,
-                    allTransactions = transactions.value
-                ).collect { chunk ->
-                    fullText += chunk
+                val monthNames = listOf("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
+                val periodName = when (_periodType.value) {
+                    PeriodType.DAY -> "День ($dateDay)"
+                    PeriodType.WEEK -> "Неделя ($dateDay)"
+                    PeriodType.MONTH -> "${monthNames.getOrElse(month - 1) { "Месяц" }} $year года"
+                    PeriodType.ALL -> "Весь $year год"
+                }
+
+                // Save user audit request to chat history DB with unique UUID
+                val reqTime = System.currentTimeMillis()
+                val reqId = java.util.UUID.randomUUID().toString()
+                repository.insertNotification(
+                    com.example.data.db.NotificationEntity(
+                        id = reqId,
+                        budgetId = bId,
+                        title = "Запрос аналитики",
+                        description = "||audit_req||Давид, проведи аудит за $periodName",
+                        icon = "david",
+                        color = "indigo500",
+                        timestamp = reqTime,
+                        isRead = true
+                    )
+                )
+
+                var fullText = ""
+                try {
+                    repository.requestAiAuditStream(
+                        apiKey = key,
+                        periodName = periodName,
+                        year = year,
+                        filteredTransactions = currentFilteredTransactions,
+                        previousTransactions = previousTransactions,
+                        activeDebts = accounts.value,
+                        activeGoals = goals.value,
+                        allTransactions = transactions.value
+                    ).collect { chunk ->
+                        fullText += chunk
+                        _aiAuditResult.value = fullText
+                    }
+                } catch (e: Exception) {
+                    fullText = "ERROR_NO_CONNECTION"
                     _aiAuditResult.value = fullText
                 }
-            } catch (e: Exception) {
-                fullText = "ERROR_NO_CONNECTION"
-                _aiAuditResult.value = fullText
-            }
 
-            if (fullText.isNotEmpty() && !fullText.contains("🏆 **Достижение: Сбой Сети**") && fullText != "ERROR_NO_CONNECTION") {
-                val currentMeme = currentFilteredTransactions.filter { tx ->
-                    tx.type == "expense" && (
-                        tx.category.contains("Развлечения", ignoreCase = true) ||
-                        tx.category.contains("Прочее", ignoreCase = true) ||
-                        tx.subcategory.lowercase(Locale.getDefault()).contains("мошеннич") ||
-                        tx.subcategory.lowercase(Locale.getDefault()).contains("крипт") ||
-                        tx.subcategory.lowercase(Locale.getDefault()).contains("казик") ||
-                        tx.subcategory.lowercase(Locale.getDefault()).contains("тарелоч") ||
-                        tx.subcategory.lowercase(Locale.getDefault()).contains("альтуш")
-                    )
-                }
-                val sillySummaryText = if (currentMeme.isNotEmpty()) {
-                    currentMeme.take(3).joinToString("; ") { "${it.subcategory} (${it.amount.toInt()} ₽)" }
-                } else {
-                    val topExpense = currentFilteredTransactions.filter { it.type == "expense" }.maxByOrNull { it.amount }
-                    if (topExpense != null) "Крупный расход: ${topExpense.category} (${topExpense.amount.toInt()} ₽)" else "Равномерные расходы"
-                }
-
-                val entity = com.example.data.db.AiAuditEntity(
-                    id = java.util.UUID.randomUUID().toString(),
-                    budgetId = bId,
-                    periodType = _periodType.value.name,
-                    periodKey = pKey,
-                    year = year,
-                    month = month,
-                    auditText = fullText,
-                    sillyExpensesSummary = sillySummaryText,
-                    timestamp = System.currentTimeMillis()
-                )
-                repository.saveAudit(entity)
-
-                // Human-like streaming & queueing of section messages
-                val sections = splitAuditIntoSections(fullText)
-                val baseTime = System.currentTimeMillis()
-
-                for ((index, section) in sections.withIndex()) {
-                    _aiAuditLoading.value = true // Enables "Давид печатает..." typing status
-
-                    val delayMs = (section.length * 15L).coerceIn(1200L, 3500L)
-                    kotlinx.coroutines.delay(delayMs)
-
-                    val blockId = java.util.UUID.randomUUID().toString()
-                    val blockTime = baseTime + index * 10L
-                    val isFirstBlock = index == 0
-                    val blockTitle = if (isFirstBlock) "Жабов Давид (Аналитика)" else "Аналитика"
-
-                    repository.insertNotification(
-                        com.example.data.db.NotificationEntity(
-                            id = blockId,
-                            budgetId = bId,
-                            title = blockTitle,
-                            description = "||audit_block||$section",
-                            icon = "david",
-                            color = "emerald400",
-                            timestamp = blockTime,
-                            isRead = true
+                if (fullText.isNotEmpty() && !fullText.contains("🏆 **Достижение: Сбой Сети**") && fullText != "ERROR_NO_CONNECTION") {
+                    val currentMeme = currentFilteredTransactions.filter { tx ->
+                        tx.type == "expense" && (
+                            tx.category.contains("Развлечения", ignoreCase = true) ||
+                            tx.category.contains("Прочее", ignoreCase = true) ||
+                            tx.subcategory.lowercase(Locale.getDefault()).contains("мошеннич") ||
+                            tx.subcategory.lowercase(Locale.getDefault()).contains("крипт") ||
+                            tx.subcategory.lowercase(Locale.getDefault()).contains("казик") ||
+                            tx.subcategory.lowercase(Locale.getDefault()).contains("тарелоч") ||
+                            tx.subcategory.lowercase(Locale.getDefault()).contains("альтуш")
                         )
-                    )
-                }
-            }
+                    }
+                    val sillySummaryText = if (currentMeme.isNotEmpty()) {
+                        currentMeme.take(3).joinToString("; ") { "${it.subcategory} (${it.amount.toInt()} ₽)" }
+                    } else {
+                        val topExpense = currentFilteredTransactions.filter { it.type == "expense" }.maxByOrNull { it.amount }
+                        if (topExpense != null) "Крупный расход: ${topExpense.category} (${topExpense.amount.toInt()} ₽)" else "Равномерные расходы"
+                    }
 
-            _aiAuditLoading.value = false
+                    val entity = com.example.data.db.AiAuditEntity(
+                        id = java.util.UUID.randomUUID().toString(),
+                        budgetId = bId,
+                        periodType = _periodType.value.name,
+                        periodKey = pKey,
+                        year = year,
+                        month = month,
+                        auditText = fullText,
+                        sillyExpensesSummary = sillySummaryText,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    repository.saveAudit(entity)
+
+                    // Human-like streaming & queueing of section messages
+                    val sections = splitAuditIntoSections(fullText)
+                    val baseTime = System.currentTimeMillis()
+
+                    for ((index, section) in sections.withIndex()) {
+                        _aiAuditLoading.value = true // Enables "Давид печатает..." typing status
+
+                        val delayMs = (section.length * 15L).coerceIn(1200L, 3500L)
+                        kotlinx.coroutines.delay(delayMs)
+
+                        val blockId = java.util.UUID.randomUUID().toString()
+                        val blockTime = baseTime + index * 10L
+                        val isFirstBlock = index == 0
+                        val blockTitle = if (isFirstBlock) "Жабов Давид (Аналитика)" else "Аналитика"
+
+                        repository.insertNotification(
+                            com.example.data.db.NotificationEntity(
+                                id = blockId,
+                                budgetId = bId,
+                                title = blockTitle,
+                                description = "||audit_block||$section",
+                                icon = "david",
+                                color = "emerald400",
+                                timestamp = blockTime,
+                                isRead = true
+                            )
+                        )
+                    }
+                }
+            } finally {
+                _aiAuditLoading.value = false
+            }
         }
     }
 

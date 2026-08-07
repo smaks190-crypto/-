@@ -18,11 +18,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -123,11 +129,12 @@ fun CategoryLimitsDialog(
 
     SwipeToDismissDialog(
         onDismissRequest = onDismiss,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 0.dp, end = 0.dp, top = 12.dp, bottom = 0.dp)
+        contentPadding = PaddingValues(start = 0.dp, end = 0.dp, top = 12.dp, bottom = 0.dp)
     ) {
         Surface(
             modifier = Modifier
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .navigationBarsPadding(),
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             color = DarkSlate,
             border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
@@ -135,7 +142,7 @@ fun CategoryLimitsDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp, bottom = 20.dp, start = 20.dp, end = 20.dp)
+                    .padding(top = 10.dp, bottom = 16.dp, start = 20.dp, end = 20.dp)
             ) {
                 // Drag handle / swipe indicator
                 Box(
@@ -197,7 +204,10 @@ fun CategoryLimitsDialog(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(420.dp),
+                        .heightIn(max = 440.dp),
+                    contentPadding = PaddingValues(
+                        bottom = 16.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                    ),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(allCategoryNames) { catName ->

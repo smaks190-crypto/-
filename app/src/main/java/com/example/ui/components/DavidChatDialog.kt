@@ -224,26 +224,36 @@ fun ReportDetailsDialog(
         }
     }
 
+    val hasAuditInHistory = remember(notifications, auditText) {
+        notifications.any { it.description.startsWith("||audit_req||") || it.description.startsWith("||audit_block||") } ||
+        (auditText.isNotEmpty() && auditText != "ERROR_NO_CONNECTION")
+    }
+
     val displayedSections = remember { mutableStateListOf<String>() }
     var isSimulatingTyping by remember { mutableStateOf(false) }
     var hasSentRequest by remember { mutableStateOf(false) }
 
-    var userMessageText by remember {
-        mutableStateOf(if (auditText.isEmpty() && !isLoading) "Давид, проведи аудит за $periodTitle" else "")
+    var userMessageText by remember(hasAuditInHistory) {
+        mutableStateOf(if (!hasAuditInHistory && !isLoading) "Давид, проведи аудит за $periodTitle" else "")
     }
     var attachedFileName by remember { mutableStateOf("Выписка_$periodTitle.csv") }
-    var isFileAttached by remember {
-        mutableStateOf(auditText.isEmpty() && !isLoading)
+    var isFileAttached by remember(hasAuditInHistory) {
+        mutableStateOf(!hasAuditInHistory && !isLoading)
     }
 
-    LaunchedEffect(periodTitle, auditText) {
+    LaunchedEffect(periodTitle, auditText, notifications.size, isLoading, hasSentRequest) {
         val isErr = auditText == "ERROR_NO_CONNECTION" || auditText.contains("⚠️") || auditText.lowercase().contains("ошибка") || auditText.contains("Сбой")
         if (isErr) {
             hasSentRequest = false
-            userMessageText = "Давид, проведи аудит за "
-            isFileAttached = true
-        } else if (auditText.isEmpty() && !isLoading && userMessageText.isEmpty() && !hasSentRequest) {
-            userMessageText = "Давид, проведи аудит за "
+            if (userMessageText.isEmpty()) {
+                userMessageText = "Давид, проведи аудит за $periodTitle"
+                isFileAttached = true
+            }
+        } else if (hasSentRequest || hasAuditInHistory || isLoading) {
+            userMessageText = ""
+            isFileAttached = false
+        } else if (userMessageText.isEmpty() && !hasSentRequest && !hasAuditInHistory && !isLoading) {
+            userMessageText = "Давид, проведи аудит за $periodTitle"
             isFileAttached = true
         }
     }
@@ -1114,14 +1124,14 @@ fun ReportDetailsDialog(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 BasicTextField(
                                     value = userMessageText,
-                                    onValueChange = { },
-                                    readOnly = true,
+                                    onValueChange = { userMessageText = it },
+                                    readOnly = false,
                                     modifier = Modifier.weight(1f),
                                     textStyle = TextStyle(
                                         color = Color.White,
                                         fontSize = 14.sp
                                     ),
-                                    cursorBrush = SolidColor(Color.Transparent),
+                                    cursorBrush = SolidColor(Emerald400),
                                     decorationBox = { innerTextField ->
                                         if (userMessageText.isEmpty()) {
                                             Text(
