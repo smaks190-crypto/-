@@ -588,15 +588,19 @@ fun PeriodBudgetScreen(
                         colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.6f)),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Slate800.copy(alpha = 0.8f)),
                         shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(118.dp)
                     ) {
                         Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(34.dp)
+                                    .size(32.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(color.copy(alpha = 0.12f))
                                     .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
@@ -617,7 +621,8 @@ fun PeriodBudgetScreen(
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
-                                lineHeight = 12.sp
+                                lineHeight = 12.sp,
+                                modifier = Modifier.height(26.dp)
                             )
 
                             Text(
@@ -664,15 +669,19 @@ fun PeriodBudgetScreen(
                         colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.6f)),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Slate800.copy(alpha = 0.8f)),
                         shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(118.dp)
                     ) {
                         Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.SpaceBetween
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(34.dp)
+                                    .size(32.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(color.copy(alpha = 0.12f))
                                     .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
@@ -693,7 +702,8 @@ fun PeriodBudgetScreen(
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
-                                lineHeight = 12.sp
+                                lineHeight = 12.sp,
+                                modifier = Modifier.height(26.dp)
                             )
 
                             Text(
@@ -731,19 +741,20 @@ fun PeriodBudgetScreen(
                     colors = CardDefaults.cardColors(containerColor = Indigo500.copy(alpha = 0.08f)),
                     border = androidx.compose.foundation.BorderStroke(1.dp, Indigo500.copy(alpha = 0.35f)),
                     shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(118.dp)
                 ) {
                     Column(
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .fillMaxSize()
                             .padding(10.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        Spacer(modifier = Modifier.height(4.dp))
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(32.dp)
                                 .clip(CircleShape)
                                 .background(Indigo500),
                             contentAlignment = Alignment.Center
@@ -755,6 +766,7 @@ fun PeriodBudgetScreen(
                                 modifier = Modifier.size(18.dp)
                             )
                         }
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = "Добавить",
                             color = Indigo500,
@@ -762,7 +774,6 @@ fun PeriodBudgetScreen(
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
                     }
                 }
             }

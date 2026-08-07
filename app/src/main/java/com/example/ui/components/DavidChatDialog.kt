@@ -38,6 +38,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.window.DialogWindowProvider
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.graphics.drawable.ColorDrawable
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -276,12 +282,22 @@ fun ReportDetailsDialog(
             decorFitsSystemWindows = false
         )
     ) {
+        val view = LocalView.current
+        DisposableEffect(view) {
+            val window = (view.parent as? DialogWindowProvider)?.window
+            window?.let { w ->
+                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                w.setBackgroundDrawable(ColorDrawable(Slate950.toArgb()))
+                w.setDimAmount(0f)
+                w.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+                w.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(w, false)
+            }
+            onDispose {}
+        }
+
         Surface(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .imePadding(),
+            modifier = Modifier.fillMaxSize(),
             color = Slate950
         ) {
             Column(
@@ -292,6 +308,7 @@ fun ReportDetailsDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Slate900)
+                        .statusBarsPadding()
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -372,46 +389,12 @@ fun ReportDetailsDialog(
                         }
                     }
                     
-                    val groupedSystemNotifs = notificationsToProcess.groupBy { notif ->
+                    for (notif in notificationsToProcess) {
                         val (ops, _, _) = extractOpsAndComment(notif)
-                        if (ops.size == 1 && ops[0].category == "Прочее") "OTHER" else "SYSTEM"
-                    }
-
-                    val otherNotifs = groupedSystemNotifs["OTHER"] ?: emptyList()
-                    items.addAll(otherNotifs.map { ChatNotificationDavidItem(it) })
-
-                    val systemNotifs = groupedSystemNotifs["SYSTEM"] ?: emptyList()
-                    if (systemNotifs.isNotEmpty()) {
-                        val earliestTime = systemNotifs.minOf { it.timestamp }
-                        val latestTime = systemNotifs.maxOf { it.timestamp }
-                        val allOps = mutableListOf<ExtractedOp>()
-                        val comments = mutableListOf<String>()
-                        var isAllRead = true
-                        for (sn in systemNotifs) {
-                            if (!sn.isRead) isAllRead = false
-                            val (ops, _, comment) = extractOpsAndComment(sn)
-                            allOps.addAll(ops)
-                            if (comment.isNotBlank()) comments.add(comment)
+                        if (ops.isNotEmpty()) {
+                            items.add(ChatNotificationUserItem(notif))
                         }
-                        val multiDesc = StringBuilder("||MULTI||")
-                        allOps.forEachIndexed { i, op ->
-                            multiDesc.append("${op.type}|${op.category}|${op.subcategory}|${op.amount}")
-                            if (i < allOps.size - 1) multiDesc.append(";")
-                        }
-                        multiDesc.append("||COMMENT||").append(comments.distinct().joinToString("; "))
-                        
-                        val groupedNotif = NotificationEntity(
-                            id = systemNotifs.first().id,
-                            budgetId = systemNotifs.first().budgetId,
-                            title = "Операции",
-                            description = multiDesc.toString(),
-                            timestamp = latestTime,
-                            isRead = isAllRead
-                        )
-                        if (allOps.isNotEmpty()) {
-                            items.add(ChatNotificationUserItem(groupedNotif))
-                        }
-                        items.add(ChatNotificationDavidItem(groupedNotif))
+                        items.add(ChatNotificationDavidItem(notif))
                     }
 
                     items.add(ChatAuditOfferItem(validAuditOfferTime))
@@ -457,8 +440,8 @@ fun ReportDetailsDialog(
                     val sorted = items.sortedBy { it.timestamp }.toMutableList()
                     val profileKey = profileName.ifBlank { "default" }
                     val unreadIdsSet = initialUnreadIds.toMutableSet()
-                    if (systemNotifs.any { initialUnreadIds.contains(it.id) || !it.isRead }) {
-                        systemNotifs.firstOrNull()?.let { unreadIdsSet.add(it.id) }
+                    if (filteredNotifications.any { initialUnreadIds.contains(it.id) || !it.isRead }) {
+                        filteredNotifications.firstOrNull()?.let { unreadIdsSet.add(it.id) }
                     }
 
                     val firstUnreadNotifIndex = sorted.indexOfFirst {
@@ -613,7 +596,7 @@ fun ReportDetailsDialog(
                                                 if (isFirstEver) {
                                                     prefsInner.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
                                                 }
-                                                val greetingWord = if (isFirstEver) "Рад знакомству" else "С возвращением"
+                                                val greetingWord = if (isFirstEver) "Добро пожаловать" else "С возвращением"
                                                 "$greetingWord, $profileName! Я Жабов Давид — твой персональный фин-аналитик 🐸. Готов помочь разобрать расходы за $periodTitle."
                                             }
                                             Text(
@@ -1058,6 +1041,8 @@ fun ReportDetailsDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Slate900)
+                        .navigationBarsPadding()
+                        .imePadding()
                         .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
                     AnimatedVisibility(visible = isFileAttached) {
@@ -1213,13 +1198,15 @@ fun ChatNotificationUser(notification: NotificationEntity, profileName: String) 
             modifier = Modifier.fillMaxWidth(0.85f)
         ) {
             Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    for (op in ops) {
-                        val isIncome = op.type == "income"
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                if (userPhrase.isNotBlank()) {
+                    Text(
+                        text = userPhrase,
+                        color = Color.White,
+                        fontSize = 13.sp
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        for (op in ops) {
                             Text(
                                 text = "• ${op.category} (${op.subcategory})",
                                 color = Color.White,
@@ -1227,14 +1214,6 @@ fun ChatNotificationUser(notification: NotificationEntity, profileName: String) 
                             )
                         }
                     }
-                }
-                if (userPhrase.isNotBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = userPhrase,
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 12.sp
-                    )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(
@@ -1290,8 +1269,13 @@ fun ChatNotificationDavid(notification: NotificationEntity) {
                         fontSize = 12.sp
                     )
                     Spacer(modifier = Modifier.height(4.dp))
+                    val davidText = if (comment.isNotBlank() && !comment.startsWith("||")) {
+                        comment
+                    } else {
+                        "Принял ${ops.size} операций. Отличный учет! 🐸"
+                    }
                     Text(
-                        text = "Принято ${ops.size} операций на сумму ${String.format(Locale.US, "%.0f", totalAmount)} ₽ по $categoryCount категориям.${if (comment.isNotBlank()) "\n\n$comment" else " Отличный учет! 🐸"}",
+                        text = davidText,
                         color = Color.White,
                         fontSize = 13.sp
                     )
@@ -1333,8 +1317,13 @@ fun ChatNotificationDavid(notification: NotificationEntity) {
                         fontSize = 12.sp
                     )
                     Spacer(modifier = Modifier.height(4.dp))
+                    val davidText = if (commentText.isNotBlank()) {
+                        commentText
+                    } else {
+                        "Зафиксировал ${if (isIncome) "доход" else "расход"}. Отличный учет! 🐸"
+                    }
                     Text(
-                        text = "Зафиксировал ${if (isIncome) "доход" else "расход"}: ${op.category} (${op.subcategory}) — ${String.format(Locale.US, "%.0f", op.amount)} ₽.${if (commentText.isNotBlank()) "\n\n$commentText" else ""}",
+                        text = davidText,
                         color = Color.White,
                         fontSize = 13.sp
                     )

@@ -602,7 +602,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             if (isFirstLaunch) {
                 prefs.edit().putBoolean("has_welcomed_first_time_$currentProfileKey", true).apply()
                 prefs.edit().putString("last_greeting_date_$currentProfileKey", todayDate).apply()
-                val welcomeText = "$timeGreeting$nameStr! Я Жабов Давид — твой персональный фин-аналитик 🐸. Буду следить за твоей финансовой дисциплиной!"
+                val welcomeText = "Добро пожаловать$nameStr! Я Жабов Давид — твой персональный фин-аналитик 🐸. Буду следить за твоей финансовой дисциплиной!"
                 repository.insertNotification(
                     com.example.data.db.NotificationEntity(
                         budgetId = currentBudgetId,
@@ -616,7 +616,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 )
             } else if (!hasUnread && lastGreetingDate != todayDate) {
                 prefs.edit().putString("last_greeting_date_$currentProfileKey", todayDate).apply()
-                val greetingText = "$timeGreeting$nameStr! 🐸"
+                val greetingText = "С возвращением$nameStr! 🐸"
                 repository.insertNotification(
                     com.example.data.db.NotificationEntity(
                         budgetId = currentBudgetId,

@@ -629,7 +629,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                 )
                                             )
                                             .clickable {
-                                                prefs.edit().putBoolean("has_opened_david_chat_before_$pName", true).apply()
                                                 showWelcomeBubble = false
                                                 isExpandedByNeon = false
                                                 if (hasUnread) {
@@ -699,20 +698,13 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                             )
                                                         }
                                                     } else if (showWelcomeBubble) {
-                                                        val welcomeGreeting = remember(currentProfile?.name) {
+                                                        val welcomeGreeting = remember(currentProfile?.id, currentProfile?.name) {
                                                             val prefs = context.getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-                                                            val profileKey = currentProfile?.name ?: "default"
-                                                            val hasOpened = prefs.getBoolean("has_opened_app_before_", false)
-                                                            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-                                                            val timeGreeting = when (hour) {
-                                                                in 5..11 -> "Доброе утро"
-                                                                in 12..16 -> "Добрый день"
-                                                                in 17..22 -> "Добрый вечер"
-                                                                else -> "Доброй ночи"
-                                                            }
+                                                            val profileKey = currentProfile?.id ?: currentProfile?.name ?: "default"
+                                                            val hasOpened = prefs.getBoolean("has_opened_profile_$profileKey", false)
                                                             if (!hasOpened) {
-                                                                prefs.edit().putBoolean("has_opened_app_before_", true).apply()
-                                                                timeGreeting
+                                                                prefs.edit().putBoolean("has_opened_profile_$profileKey", true).apply()
+                                                                "Добро пожаловать"
                                                             } else {
                                                                 "С возвращением"
                                                             }
