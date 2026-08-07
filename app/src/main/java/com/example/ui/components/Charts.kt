@@ -828,15 +828,30 @@ fun ExpenseDynamicsAreaChartCard(
                         )
                     }
 
-                    // Vertical glowing gradient fill under curve
-                    val areaGradient = Brush.verticalGradient(
-                        colors = listOf(
-                            if (isBudgetExceeded) Color(0x66F43F5E) else Color(0x66A855F7), // Red glow on deficit, purple glow on normal
-                            Color.Transparent
-                        ),
-                        startY = minY.coerceAtLeast(0f),
-                        endY = h
-                    )
+                    // Vertical glowing gradient fill under curve matching line colors
+                    val areaGradient = if (isBudgetExceeded) {
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0x55F43F5E), // На самом верху (пик) — полупрозрачный розовато-красный (33% alpha)
+                                Color(0x336366F1), // В средней части — полупрозрачный индиго (20% alpha)
+                                Color(0x2234D399), // Ближе к базовой линии — полупрозрачный изумрудно-зеленый (13% alpha)
+                                Color.Transparent  // В самом низу Canvas — полностью прозрачный
+                            ),
+                            startY = 0f,
+                            endY = h
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0x446366F1), // На верху (пик) — полупрозрачный индиго
+                                Color(0x3360A5FA), // В средней части — полупрозрачный голубой
+                                Color(0x2234D399), // Ближе к базовой линии — полупрозрачный изумрудно-зеленый
+                                Color.Transparent  // В самом низу Canvas — полностью прозрачный
+                            ),
+                            startY = 0f,
+                            endY = h
+                        )
+                    }
 
                     // Draw Gradient Area Fill under curve
                     drawPath(
@@ -866,30 +881,40 @@ fun ExpenseDynamicsAreaChartCard(
                     }
 
                     // Highlight / Draw Neon Dots & Sums
+                    // Calculate exact Y coordinates on the smoothed quadratic path for each node
+                    val actualPoints = points.mapIndexed { i, pt ->
+                        val actualY = when {
+                            i == 0 || i == points.size - 1 -> pt.y
+                            else -> 0.125f * points[i - 1].y + 0.75f * points[i].y + 0.125f * points[i + 1].y
+                        }
+                        Offset(pt.x, actualY)
+                    }
+
                     points.forEachIndexed { i, pt ->
                         val amount = currentTarget.getOrNull(i) ?: 0.0
                         val isSelected = selectedPointIdx == i
 
                         if (isSelected) {
+                            val actualPt = actualPoints.getOrElse(i) { pt }
                             val dotColor = if (amount > 0) Rose500 else Indigo500
                             
                             // Glowing Outer Ring
                             drawCircle(
                                 color = dotColor.copy(alpha = 0.35f),
                                 radius = 7.dp.toPx(),
-                                center = pt
+                                center = actualPt
                             )
                             // Solid Node
                             drawCircle(
                                 color = dotColor,
                                 radius = 4.dp.toPx(),
-                                center = pt
+                                center = actualPt
                             )
                             // White Center Core
                             drawCircle(
                                 color = Color.White,
                                 radius = 2.dp.toPx(),
-                                center = pt
+                                center = actualPt
                             )
 
                             // Formatted Sum above the point
@@ -904,8 +929,8 @@ fun ExpenseDynamicsAreaChartCard(
                             val textWidth = textPaint.measureText(textStr)
                             val pillHeight = 15.dp.toPx()
                             val pillWidth = textWidth + 8.dp.toPx()
-                            val pillX = (pt.x - pillWidth / 2f).coerceIn(2.dp.toPx(), w - pillWidth - 2.dp.toPx())
-                            val pillY = (pt.y - 18.dp.toPx()).coerceIn(2.dp.toPx(), h - pillHeight - 2.dp.toPx())
+                            val pillX = (actualPt.x - pillWidth / 2f).coerceIn(2.dp.toPx(), w - pillWidth - 2.dp.toPx())
+                            val pillY = (actualPt.y - 18.dp.toPx()).coerceIn(2.dp.toPx(), h - pillHeight - 2.dp.toPx())
 
                             // Draw Pill Background
                             drawRoundRect(

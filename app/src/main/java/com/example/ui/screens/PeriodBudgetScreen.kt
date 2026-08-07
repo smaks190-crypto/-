@@ -45,6 +45,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Checkroom
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.AccountBalance
@@ -988,7 +989,7 @@ fun getCategoryColorAndIcon(category: String, subcategory: String): Pair<android
         text.contains("жилье") || text.contains("коммунал") || text.contains("дом") || text.contains("жкх") || text.contains("аренд") || text.contains("квартир") -> Pair(androidx.compose.ui.graphics.Color(0xFF06B6D4), Icons.Default.Home)
         text.contains("связь") || text.contains("интернет") || text.contains("телефон") || text.contains("мобильн") || text.contains("техник") -> Pair(androidx.compose.ui.graphics.Color(0xFF3B82F6), Icons.Default.Call)
         text.contains("зарплат") || text.contains("доход") || text.contains("преми") || text.contains("аванс") || text.contains("кэшбэк") -> Pair(Emerald400, Icons.Default.Payments)
-        text.contains("одежд") || text.contains("обувь") || text.contains("гардероб") || text.contains("красот") || text.contains("салон") -> Pair(androidx.compose.ui.graphics.Color(0xFFF43F5E), Icons.Default.ShoppingBag)
+        text.contains("одежд") || text.contains("обувь") || text.contains("гардероб") || text.contains("сумка") || text.contains("красот") || text.contains("салон") -> Pair(androidx.compose.ui.graphics.Color(0xFFEC4899), Icons.Default.Checkroom)
         text.contains("подарок") || text.contains("подарк") || text.contains("праздник") || text.contains("цветы") -> Pair(Rose500, Icons.Default.CardGiftcard)
         text.contains("книг") || text.contains("литератур") || text.contains("чтени") || text.contains("литрес") -> Pair(androidx.compose.ui.graphics.Color(0xFF8B5CF6), Icons.Default.List)
         text.contains("обучени") || text.contains("образовани") || text.contains("курсы") || text.contains("школа") -> Pair(androidx.compose.ui.graphics.Color(0xFF60A5FA), Icons.Default.School)
