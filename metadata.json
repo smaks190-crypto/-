@@ -1,0 +1,8 @@
+{
+  "name": "Релизная: Личный Бюджет AI",
+  "description": "Управление финансами, целями и ИИ-аналитикой бюджета с Gemini",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
