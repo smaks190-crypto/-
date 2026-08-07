@@ -528,6 +528,13 @@ fun ExpenseDynamicsAreaChartCard(
 
     val hasRealExpenses = remember(expenseTx) { expenseTx.isNotEmpty() }
 
+    val totalIncome = remember(transactions) {
+        transactions.filter { it.type == "income" }.sumOf { it.amount }
+    }
+    val totalExpenses = remember(transactions) {
+        transactions.filter { it.type == "expense" }.sumOf { it.amount }
+    }
+
     // Group income data depending on selected tab to compute corresponding period income reference
     val periodTotalIncome = remember(transactions, selectedPeriod) {
         val incomeTxs = transactions.filter { it.type == "income" }
@@ -794,22 +801,37 @@ fun ExpenseDynamicsAreaChartCard(
 
                     val minY = points.minOf { it.y }
 
-                    // Vertical gradient for neon line based on expense height (Rose at top -> Indigo -> Blue -> Emerald at bottom)
-                    val strokeGradient = Brush.verticalGradient(
-                        colors = listOf(
-                            Color(0xFFF43F5E), // Верх (максимальные траты) — Красный
-                            Color(0xFF6366F1), // Середина — Фиолетовый/Индиго
-                            Color(0xFF60A5FA), // Чуть ниже — Голубой
-                            Color(0xFF34D399)  // Самый низ (минимальные траты) — Зеленый
-                        ),
-                        startY = 0f,
-                        endY = h
-                    )
+                    val isBudgetExceeded = (totalExpenses > totalIncome) || (selectedPeriod == "Неделя" && dataPoints.sum() > periodTotalIncome)
+
+                    val strokeGradient = if (isBudgetExceeded) {
+                        // Режим дефицита бюджета: вершина и пики ярко-красные
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFFF43F5E), // Самый верх (пик) — Красный
+                                Color(0xFFF43F5E), // Верхняя часть бугорка — Красный
+                                Color(0xFF6366F1), // Середина — Индиго
+                                Color(0xFF34D399)  // Базовый уровень — Зеленый
+                            ),
+                            startY = 0f,
+                            endY = h
+                        )
+                    } else {
+                        // Режим нормы: стандартный переход
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF6366F1), // Нормальный пик — Индиго/Фиолетовый
+                                Color(0xFF60A5FA), // Середина — Голубой
+                                Color(0xFF34D399)  // Низ — Зеленый
+                            ),
+                            startY = 0f,
+                            endY = h
+                        )
+                    }
 
                     // Vertical glowing gradient fill under curve
                     val areaGradient = Brush.verticalGradient(
                         colors = listOf(
-                            Color(0x66A855F7), // Soft purple/indigo neon glow
+                            if (isBudgetExceeded) Color(0x66F43F5E) else Color(0x66A855F7), // Red glow on deficit, purple glow on normal
                             Color.Transparent
                         ),
                         startY = minY.coerceAtLeast(0f),

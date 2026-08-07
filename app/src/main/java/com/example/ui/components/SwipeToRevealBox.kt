@@ -134,7 +134,7 @@ fun SwipeToRevealBox(
             val actionsCount = (if (onDelete != null) 1 else 0) + (if (onEdit != null) 1 else 0) + (if (onExport != null) 1 else 0)
             val isSingleDeleteOnly = onDelete != null && onEdit == null && onExport == null
 
-            val dismissThresholdPx = parentWidthPx * 0.38f
+            val dismissThresholdPx = parentWidthPx * 0.50f
 
             val maxRevealLeftPx = with(density) {
                 when (swipeDirection) {
@@ -365,6 +365,7 @@ fun SwipeToRevealBox(
                                 val pointerId = down.id
 
                                 var totalDragX = 0f
+                                var totalDragY = 0f
                                 var isDraggingBox = false
                                 val touchSlop = viewConfiguration.touchSlop
                                 val startOffsetX = offsetX.value
@@ -403,14 +404,14 @@ fun SwipeToRevealBox(
                                                 } else {
                                                     // Multi-action reveal snap logic
                                                     if (currentOffsetX > 0f) {
-                                                        if (currentOffsetX > maxRevealLeftPx * 0.35f) {
+                                                        if (currentOffsetX > maxRevealLeftPx * 0.45f) {
                                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                             offsetX.animateTo(maxRevealLeftPx, spring(stiffness = Spring.StiffnessMediumLow))
                                                         } else {
                                                             offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
                                                         }
                                                     } else {
-                                                        if (currentOffsetX < -maxRevealRightPx * 0.35f) {
+                                                        if (currentOffsetX < -maxRevealRightPx * 0.45f) {
                                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                             offsetX.animateTo(-maxRevealRightPx, spring(stiffness = Spring.StiffnessMediumLow))
                                                         } else {
@@ -423,11 +424,22 @@ fun SwipeToRevealBox(
                                         break
                                     }
 
-                                    val dragDelta = dragEvent.position.x - dragEvent.previousPosition.x
-                                    totalDragX += dragDelta
+                                    val dragDeltaX = dragEvent.position.x - dragEvent.previousPosition.x
+                                    val dragDeltaY = dragEvent.position.y - dragEvent.previousPosition.y
+                                    totalDragX += dragDeltaX
+                                    totalDragY += dragDeltaY
 
                                     if (!isDraggingBox) {
-                                        if (abs(totalDragX) >= touchSlop) {
+                                        val absX = abs(totalDragX)
+                                        val absY = abs(totalDragY)
+
+                                        // Prioritize vertical scrolling: if Y displacement exceeds touch slop and Y > X, pass gestures to LazyColumn
+                                        if (absY >= touchSlop && absY > absX) {
+                                            break
+                                        }
+
+                                        // Only capture as horizontal swipe if horizontal displacement is strictly dominant (X > 1.8 * Y)
+                                        if (absX >= touchSlop && absX > absY * 1.8f) {
                                             val isValidDirection = when (swipeDirection) {
                                                 SwipeDirection.StartToEnd -> totalDragX > 0f
                                                 SwipeDirection.EndToStart -> totalDragX < 0f
@@ -445,7 +457,7 @@ fun SwipeToRevealBox(
                                         dragEvent.consume()
                                         val minLimit = -maxRevealRightPx
                                         val maxLimit = maxRevealLeftPx
-                                        val newOffset = (offsetX.value + dragDelta).coerceIn(minLimit, maxLimit)
+                                        val newOffset = (offsetX.value + dragDeltaX).coerceIn(minLimit, maxLimit)
                                         launch { offsetX.snapTo(newOffset) }
                                     }
                                 }
