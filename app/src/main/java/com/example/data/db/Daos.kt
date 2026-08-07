@@ -104,7 +104,7 @@ interface CategoryDao {
 
 @Dao
 interface AiAuditDao {
-    @Query("SELECT * FROM ai_audits WHERE budgetId = :budgetId AND periodKey = :periodKey LIMIT 1")
+    @Query("SELECT * FROM ai_audits WHERE budgetId = :budgetId AND periodKey = :periodKey ORDER BY timestamp DESC LIMIT 1")
     fun getAuditForPeriod(budgetId: String, periodKey: String): Flow<AiAuditEntity?>
 
     @Query("SELECT * FROM ai_audits WHERE budgetId = :budgetId AND year = :year AND periodType = 'MONTH' AND periodKey < :currentPeriodKey ORDER BY month ASC")

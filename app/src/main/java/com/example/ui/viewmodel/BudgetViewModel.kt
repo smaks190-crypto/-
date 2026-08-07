@@ -1096,6 +1096,22 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 PeriodType.ALL -> "Весь $year год"
             }
 
+            // Save user audit request to chat history DB with unique UUID
+            val reqTime = System.currentTimeMillis()
+            val reqId = java.util.UUID.randomUUID().toString()
+            repository.insertNotification(
+                com.example.data.db.NotificationEntity(
+                    id = reqId,
+                    budgetId = bId,
+                    title = "Запрос аналитики",
+                    description = "||audit_req||Давид, проведи аудит за $periodName",
+                    icon = "david",
+                    color = "indigo500",
+                    timestamp = reqTime,
+                    isRead = true
+                )
+            )
+
             var fullText = ""
             try {
                 repository.requestAiAuditStream(
@@ -1116,9 +1132,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 _aiAuditResult.value = fullText
             }
 
-            _aiAuditLoading.value = false
-
-            if (fullText.isNotEmpty() && !fullText.contains("🏆 **Достижение: Сбой Сети**")) {
+            if (fullText.isNotEmpty() && !fullText.contains("🏆 **Достижение: Сбой Сети**") && fullText != "ERROR_NO_CONNECTION") {
                 val currentMeme = currentFilteredTransactions.filter { tx ->
                     tx.type == "expense" && (
                         tx.category.contains("Развлечения", ignoreCase = true) ||
@@ -1138,17 +1152,59 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 }
 
                 val entity = com.example.data.db.AiAuditEntity(
+                    id = java.util.UUID.randomUUID().toString(),
                     budgetId = bId,
                     periodType = _periodType.value.name,
                     periodKey = pKey,
                     year = year,
                     month = month,
                     auditText = fullText,
-                    sillyExpensesSummary = sillySummaryText
+                    sillyExpensesSummary = sillySummaryText,
+                    timestamp = System.currentTimeMillis()
                 )
                 repository.saveAudit(entity)
+
+                // Human-like streaming & queueing of section messages
+                val sections = splitAuditIntoSections(fullText)
+                val baseTime = System.currentTimeMillis()
+
+                for ((index, section) in sections.withIndex()) {
+                    _aiAuditLoading.value = true // Enables "Давид печатает..." typing status
+
+                    val delayMs = (section.length * 15L).coerceIn(1200L, 3500L)
+                    kotlinx.coroutines.delay(delayMs)
+
+                    val blockId = java.util.UUID.randomUUID().toString()
+                    val blockTime = baseTime + index * 10L
+                    val isFirstBlock = index == 0
+                    val blockTitle = if (isFirstBlock) "Жабов Давид (Аналитика)" else "Аналитика"
+
+                    repository.insertNotification(
+                        com.example.data.db.NotificationEntity(
+                            id = blockId,
+                            budgetId = bId,
+                            title = blockTitle,
+                            description = "||audit_block||$section",
+                            icon = "david",
+                            color = "emerald400",
+                            timestamp = blockTime,
+                            isRead = true
+                        )
+                    )
+                }
             }
+
+            _aiAuditLoading.value = false
         }
+    }
+
+    private fun splitAuditIntoSections(auditText: String): List<String> {
+        if (auditText.isBlank() || auditText == "ERROR_NO_CONNECTION") return emptyList()
+        val headerRegex = Regex("(?m)^(?=#{1,6}\\s+|(?i)(?:Главный Вердикт|Цифры и Динамика|Прожарка|Ачивки|Выводы))")
+        val rawBlocks = auditText.split(headerRegex)
+        return rawBlocks
+            .map { it.trim() }
+            .filter { it.isNotBlank() && it != "ERROR_NO_CONNECTION" }
     }
 
     suspend fun suggestCategory(

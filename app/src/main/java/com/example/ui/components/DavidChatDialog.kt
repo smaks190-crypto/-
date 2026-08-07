@@ -398,44 +398,38 @@ fun ReportDetailsDialog(
                         }
                     }
                     
-                    for (notif in notificationsToProcess) {
-                        val (ops, _, _) = extractOpsAndComment(notif)
-                        if (ops.isNotEmpty()) {
-                            items.add(ChatNotificationUserItem(notif))
+                    val processNotifToItems: (NotificationEntity) -> List<ChatItem> = { notif ->
+                        val res = mutableListOf<ChatItem>()
+                        if (notif.description.startsWith("||audit_req||")) {
+                            val reqText = notif.description.removePrefix("||audit_req||")
+                            res.add(ChatAuditRequestItem(notif.timestamp, text = reqText, fileName = "Выписка_.csv"))
+                        } else if (notif.description.startsWith("||audit_block||")) {
+                            val blockText = notif.description.removePrefix("||audit_block||")
+                            val isFirst = notif.title.contains("Главный Вердикт") || notif.title.contains("Аналитика")
+                            res.add(ChatAuditBlockItem(notif.timestamp, text = blockText, isFirst = isFirst))
+                        } else {
+                            val (ops, _, _) = extractOpsAndComment(notif)
+                            if (ops.isNotEmpty()) {
+                                res.add(ChatNotificationUserItem(notif))
+                            }
+                            res.add(ChatNotificationDavidItem(notif))
                         }
-                        items.add(ChatNotificationDavidItem(notif))
+                        res
+                    }
+
+                    for (notif in notificationsToProcess) {
+                        items.addAll(processNotifToItems(notif))
                     }
 
                     items.add(ChatAuditOfferItem(validAuditOfferTime))
 
                     val notifsAfterOffer = filteredNotifications.filter { it.timestamp >= validAuditOfferTime }
                     for (notif in notifsAfterOffer) {
-                        val (ops, _, _) = extractOpsAndComment(notif)
-                        if (ops.isNotEmpty()) {
-                            items.add(ChatNotificationUserItem(notif))
-                        }
-                        items.add(ChatNotificationDavidItem(notif))
+                        items.addAll(processNotifToItems(notif))
                     }
 
-                    val baseAuditTime = actualAuditTimestamp
-                    val reqTime = requestTimestamp ?: (baseAuditTime + 100)
-                    val responseBaseTime = reqTime + 200
-
-                    val isAuditError = auditText == "ERROR_NO_CONNECTION" || auditText.contains("⚠️") || auditText.lowercase().contains("ошибка") || auditText.contains("Сбой")
-                    if (hasSentRequest || isAuditError || displayedSections.isNotEmpty() || (auditText.isNotEmpty() && auditText != "ERROR_NO_CONNECTION")) {
-                        items.add(ChatAuditRequestItem(reqTime, text = "Давид, проведи аудит за $periodTitle", fileName = "Выписка_.csv", hasError = isAuditError))
-                        if (hasSentRequest && !isAuditError) items.add(ChatAuditSystemItem(reqTime + 100))
-                    }
-
-                    if (displayedSections.isNotEmpty()) {
-                        displayedSections.forEachIndexed { index, txt ->
-                            items.add(ChatAuditBlockItem(responseBaseTime + index * 10, txt, index == 0))
-                        }
-                        if ((isLoading || isSimulatingTyping) && !showConnectingNeon) {
-                            items.add(ChatTypingItem(responseBaseTime + displayedSections.size * 10 + 100, "audit"))
-                        }
-                    } else if (auditText.isNotEmpty() && auditText != "ERROR_NO_CONNECTION" && !isAuditError) {
-                        items.add(ChatAuditBlockItem(responseBaseTime, "Нет данных для отчета.", true))
+                    if ((isLoading || isSimulatingTyping) && !showConnectingNeon) {
+                        items.add(ChatTypingItem(System.currentTimeMillis(), "audit"))
                     }
 
                     if (showConnectingNeon) {
@@ -850,45 +844,47 @@ fun ReportDetailsDialog(
                                 }
                             }
                             is ChatAuditBlockItem -> {
-                                val timeStr = remember(item.timestamp) {
-                                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
-                                }
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .animateContentSize(),
-                                    horizontalAlignment = Alignment.Start
-                                ) {
-                                    Surface(
-                                        shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                                        color = Slate800.copy(alpha = 0.85f),
-                                        border = BorderStroke(1.dp, Slate700),
-                                        modifier = Modifier.fillMaxWidth(0.92f)
+                                if (item.text.isNotBlank()) {
+                                    val timeStr = remember(item.timestamp) {
+                                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
+                                    }
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .animateContentSize(),
+                                        horizontalAlignment = Alignment.Start
                                     ) {
-                                        Column(modifier = Modifier.padding(12.dp)) {
-                                            if (item.isFirst) {
-                                                Text(
-                                                    text = "Жабов Давид (Аналитика)",
-                                                    color = Emerald400,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 12.sp
+                                        Surface(
+                                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+                                            color = Slate800.copy(alpha = 0.85f),
+                                            border = BorderStroke(1.dp, Slate700),
+                                            modifier = Modifier.fillMaxWidth(0.92f)
+                                        ) {
+                                            Column(modifier = Modifier.padding(12.dp)) {
+                                                if (item.isFirst) {
+                                                    Text(
+                                                        text = "Жабов Давид (Аналитика)",
+                                                        color = Emerald400,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 12.sp
+                                                    )
+                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                }
+                                                MarkdownFormattedText(
+                                                    markdownText = item.text,
+                                                    fontSize = 13.sp
                                                 )
-                                                Spacer(modifier = Modifier.height(6.dp))
-                                            }
-                                            MarkdownFormattedText(
-                                                markdownText = item.text,
-                                                fontSize = 13.sp
-                                            )
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.End
-                                            ) {
-                                                Text(
-                                                    text = timeStr,
-                                                    color = Slate400,
-                                                    fontSize = 10.sp
-                                                )
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.End
+                                                ) {
+                                                    Text(
+                                                        text = timeStr,
+                                                        color = Slate400,
+                                                        fontSize = 10.sp
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -1393,14 +1389,13 @@ fun ChatNotificationDavid(notification: NotificationEntity) {
 }
 
 private fun splitIntoSections(auditText: String): List<String> {
-    if (auditText.isEmpty() || auditText == "ERROR_NO_CONNECTION") return emptyList()
-    val rawSections = auditText.split("\n\n")
-    val processed = mutableListOf<String>()
-    for (sec in rawSections) {
-        val trimmed = sec.trim()
-        if (trimmed.isNotEmpty() && trimmed != "ERROR_NO_CONNECTION") {
-            processed.add(trimmed)
-        }
-    }
-    return processed
+    if (auditText.isBlank() || auditText == "ERROR_NO_CONNECTION") return emptyList()
+    
+    // Split by Markdown headers (#, ##, ###) or key section titles at the start of a line
+    val headerRegex = Regex("(?m)^(?=#{1,6}\\s+|(?i)(?:Главный Вердикт|Цифры и Динамика|Прожарка|Ачивки|Выводы))")
+    val rawBlocks = auditText.split(headerRegex)
+    
+    return rawBlocks
+        .map { it.trim() }
+        .filter { it.isNotBlank() && it != "ERROR_NO_CONNECTION" }
 }
