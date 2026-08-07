@@ -1,6 +1,13 @@
 package com.example.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -62,6 +69,7 @@ import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.DarkBg
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlin.math.abs
@@ -87,7 +95,7 @@ fun SwipeToRevealBox(
     onDelete: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
     onExport: (() -> Unit)? = null,
-    swipeDirection: SwipeDirection = SwipeDirection.EndToStart,
+    swipeDirection: SwipeDirection = SwipeDirection.Both,
     resetSwipe: Boolean = false,
     shape: Shape = RoundedCornerShape(16.dp),
     modifier: Modifier = Modifier,
@@ -97,408 +105,373 @@ fun SwipeToRevealBox(
     val coroutineScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val offsetX = remember { Animatable(0f) }
-    var dragStartOffset by remember { mutableStateOf(0f) }
+    var isItemRemoved by remember { mutableStateOf(false) }
+    var hasCrossedThreshold by remember { mutableStateOf(false) }
 
-    LaunchedEffect(offsetX.value) {
-        if (offsetX.value != 0f) {
-            activeOpenedBox = offsetX
-        } else if (activeOpenedBox == offsetX) {
-            activeOpenedBox = null
-        }
-    }
-
-    DisposableEffect(offsetX) {
-        onDispose {
-            if (activeOpenedBox == offsetX) {
-                activeOpenedBox = null
-            }
-        }
-    }
-
-    LaunchedEffect(resetSwipe) {
-        if (resetSwipe && offsetX.value != 0f) {
-            offsetX.snapTo(0f)
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        SwipeToRevealController.collapseRequests.collect {
-            if (offsetX.value != 0f) {
-                offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-            }
-        }
-    }
-
-    BoxWithConstraints(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(shape)
-    ) {
-        val parentWidth = maxWidth
-        val actionsCount = (if (onDelete != null) 1 else 0) + (if (onEdit != null) 1 else 0) + (if (onExport != null) 1 else 0)
-        val isSingleDeleteOnly = onDelete != null && onEdit == null && onExport == null
-
-        val maxRevealLeftPx = with(density) {
-            when (swipeDirection) {
-                SwipeDirection.StartToEnd -> {
-                    if (isSingleDeleteOnly) parentWidth.toPx() else (72 * actionsCount).dp.toPx()
-                }
-                SwipeDirection.Both -> {
-                    val count = (if (onEdit != null) 1 else 0) + (if (onExport != null) 1 else 0)
-                    (72 * count).dp.toPx()
-                }
-                SwipeDirection.EndToStart -> 0f
-            }
-        }
-
-        val maxRevealRightPx = with(density) {
-            when (swipeDirection) {
-                SwipeDirection.EndToStart -> {
-                    if (isSingleDeleteOnly) parentWidth.toPx() else (72 * actionsCount).dp.toPx()
-                }
-                SwipeDirection.Both -> {
-                    parentWidth.toPx()
-                }
-                SwipeDirection.StartToEnd -> 0f
-            }
-        }
-
-        val hasActions = maxRevealLeftPx > 0f || maxRevealRightPx > 0f
-
-        fun triggerDelete() {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+    LaunchedEffect(isItemRemoved) {
+        if (isItemRemoved) {
+            delay(280)
             onDelete?.invoke()
         }
+    }
 
-        // Background layer (Actions) - only render when swiped past 0.5px to prevent background color bleed
-        if (hasActions && !resetSwipe && abs(offsetX.value) > 0.5f) {
-            val isStartToEnd = offsetX.value > 0f
-            val isCurrentlySingleDelete = when (swipeDirection) {
-                SwipeDirection.Both -> !isStartToEnd
-                else -> isSingleDeleteOnly
-            }
-
-            val limitPx = if (isStartToEnd) maxRevealLeftPx else maxRevealRightPx
-            val swipeProgress = if (limitPx > 0f) {
-                (abs(offsetX.value) / limitPx).coerceIn(0f, 1f)
-            } else 0f
-
-            if (isCurrentlySingleDelete) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clip(shape)
-                        .clip(RevealedWidthShape(abs(offsetX.value), isStartToEnd))
-                        .background(Rose500)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .matchParentSize()
-                            .padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // 1. Trash icon
-                        val trashButton = @Composable {
-                            Box(
-                                modifier = Modifier
-                                    .padding(horizontal = 12.dp)
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.2f))
-                                    .clickable { triggerDelete() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Удалить",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        // 2. Clickable middle text area (the "red plate" / красная плашка)
-                        val middleText = @Composable {
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .clickable { triggerDelete() }
-                                    .padding(horizontal = 4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "⚠️ Нажмите для подтверждения",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    softWrap = false
-                                )
-                            }
-                        }
-
-                        // 3. Close icon
-                        val closeButton = @Composable {
-                            Box(
-                                modifier = Modifier
-                                    .padding(horizontal = 12.dp)
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.2f))
-                                    .clickable {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        coroutineScope.launch {
-                                            offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-                                        }
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Отмена",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        if (isStartToEnd) {
-                            closeButton()
-                            middleText()
-                            trashButton()
-                        } else {
-                            trashButton()
-                            middleText()
-                            closeButton()
-                        }
-                    }
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clip(shape)
-                        .clip(RevealedWidthShape(abs(offsetX.value), isStartToEnd))
-                ) {
-                    val actionsWidthDp = with(density) { (if (isStartToEnd) maxRevealLeftPx else maxRevealRightPx).toDp() }
-                    Row(
-                        modifier = Modifier
-                            .width(actionsWidthDp)
-                            .matchParentSize()
-                            .align(if (isStartToEnd) Alignment.CenterStart else Alignment.CenterEnd)
-                            .padding(horizontal = 4.dp),
-                        horizontalArrangement = if (isStartToEnd) Arrangement.Start else Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (onDelete != null && isStartToEnd && swipeDirection != SwipeDirection.Both) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .width(64.dp)
-                                    .padding(horizontal = 2.dp)
-                                    .graphicsLayer {
-                                        alpha = swipeProgress
-                                    }
-                                    .clip(shape)
-                                    .background(Rose500)
-                                    .clickable { triggerDelete() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Удалить",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-
-                        if (onExport != null) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .width(64.dp)
-                                    .padding(horizontal = 2.dp)
-                                    .graphicsLayer {
-                                        alpha = swipeProgress
-                                    }
-                                    .clip(shape)
-                                    .background(Emerald400)
-                                    .clickable {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        coroutineScope.launch { offsetX.animateTo(0f) }
-                                        onExport()
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                                                Icon(
-                                    imageVector = Icons.Default.ArrowDropDown,
-                                    contentDescription = "Скачать",
-                                    tint = DarkBg,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                        }
-
-                        if (onEdit != null) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .width(64.dp)
-                                    .padding(horizontal = 2.dp)
-                                    .graphicsLayer {
-                                        alpha = swipeProgress
-                                    }
-                                    .clip(shape)
-                                    .background(Slate700)
-                                    .clickable {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        coroutineScope.launch { offsetX.animateTo(0f) }
-                                        onEdit()
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = "Редактировать",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                        }
-
-                        if (onDelete != null && !isStartToEnd && swipeDirection != SwipeDirection.Both) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .width(64.dp)
-                                    .padding(horizontal = 2.dp)
-                                    .graphicsLayer {
-                                        alpha = swipeProgress
-                                    }
-                                    .clip(shape)
-                                    .background(Rose500)
-                                    .clickable { triggerDelete() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Удалить",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Foreground Content Item Card
-        Box(
+    AnimatedVisibility(
+        visible = !isItemRemoved,
+        enter = fadeIn() + expandVertically(),
+        exit = shrinkVertically(
+            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
+        ) + fadeOut(
+            animationSpec = tween(durationMillis = 200)
+        ),
+        modifier = modifier
+    ) {
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
-                .pointerInput(swipeDirection, maxRevealLeftPx, maxRevealRightPx) {
-                    coroutineScope {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            val pointerId = down.id
-                            
-                            // Collapse other opened box if there is one
-                            val otherBox = activeOpenedBox
-                            if (otherBox != null && otherBox != offsetX) {
-                                launch {
-                                    otherBox.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                .clip(shape)
+        ) {
+            val parentWidthPx = with(density) { maxWidth.toPx() }
+            val actionsCount = (if (onDelete != null) 1 else 0) + (if (onEdit != null) 1 else 0) + (if (onExport != null) 1 else 0)
+            val isSingleDeleteOnly = onDelete != null && onEdit == null && onExport == null
+
+            val dismissThresholdPx = parentWidthPx * 0.38f
+
+            val maxRevealLeftPx = with(density) {
+                when (swipeDirection) {
+                    SwipeDirection.StartToEnd, SwipeDirection.Both -> {
+                        if (isSingleDeleteOnly) parentWidthPx else (72 * actionsCount).dp.toPx()
+                    }
+                    SwipeDirection.EndToStart -> 0f
+                }
+            }
+
+            val maxRevealRightPx = with(density) {
+                when (swipeDirection) {
+                    SwipeDirection.EndToStart, SwipeDirection.Both -> {
+                        if (isSingleDeleteOnly) parentWidthPx else (72 * actionsCount).dp.toPx()
+                    }
+                    SwipeDirection.StartToEnd -> 0f
+                }
+            }
+
+            val currentOffsetAbs = abs(offsetX.value)
+            val isPastThreshold = isSingleDeleteOnly && currentOffsetAbs >= dismissThresholdPx
+
+            // Haptic Feedback trigger on crossing threshold
+            LaunchedEffect(isPastThreshold) {
+                if (currentOffsetAbs > 10f) {
+                    if (isPastThreshold && !hasCrossedThreshold) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        hasCrossedThreshold = true
+                    } else if (!isPastThreshold && hasCrossedThreshold) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        hasCrossedThreshold = false
+                    }
+                }
+            }
+
+            // Reset handling
+            LaunchedEffect(resetSwipe) {
+                if (resetSwipe && offsetX.value != 0f) {
+                    offsetX.snapTo(0f)
+                }
+            }
+
+            // Collapse controller handling
+            LaunchedEffect(Unit) {
+                SwipeToRevealController.collapseRequests.collect {
+                    if (offsetX.value != 0f) {
+                        offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                    }
+                }
+            }
+
+            // Background layer (Actions / Notification Style Delete Background)
+            if (currentOffsetAbs > 0.5f) {
+                val isStartToEnd = offsetX.value > 0f
+
+                if (isSingleDeleteOnly) {
+                    val fraction = (currentOffsetAbs / dismissThresholdPx).coerceIn(0f, 1f)
+                    val iconScale = if (isPastThreshold) 1.18f else (0.55f + 0.45f * fraction)
+                    val iconAlpha = (currentOffsetAbs / (dismissThresholdPx * 0.30f)).coerceIn(0f, 1f)
+
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clip(shape)
+                            .background(Rose500)
+                    ) {
+                        val iconAlignment = if (isStartToEnd) Alignment.CenterStart else Alignment.CenterEnd
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .padding(horizontal = 22.dp)
+                                .align(iconAlignment),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .graphicsLayer {
+                                        scaleX = iconScale
+                                        scaleY = iconScale
+                                        alpha = iconAlpha
+                                    }
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.25f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Удалить",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // Multi-action background handling (for other screens with edit/export)
+                    val limitPx = if (isStartToEnd) maxRevealLeftPx else maxRevealRightPx
+                    val swipeProgress = if (limitPx > 0f) (currentOffsetAbs / limitPx).coerceIn(0f, 1f) else 0f
+
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clip(shape)
+                            .clip(RevealedWidthShape(currentOffsetAbs, isStartToEnd))
+                    ) {
+                        val actionsWidthDp = with(density) { limitPx.toDp() }
+                        Row(
+                            modifier = Modifier
+                                .width(actionsWidthDp)
+                                .matchParentSize()
+                                .align(if (isStartToEnd) Alignment.CenterStart else Alignment.CenterEnd)
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = if (isStartToEnd) Arrangement.Start else Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (onDelete != null && isStartToEnd && swipeDirection != SwipeDirection.Both) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .width(64.dp)
+                                        .padding(horizontal = 2.dp)
+                                        .graphicsLayer { alpha = swipeProgress }
+                                        .clip(shape)
+                                        .background(Rose500)
+                                        .clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            isItemRemoved = true
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Удалить",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
                                 }
                             }
-                            
-                            var totalDragX = 0f
-                            var isDraggingBox = false
-                            val touchSlop = viewConfiguration.touchSlop
-                            val startOffsetX = offsetX.value
- 
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val dragEvent = event.changes.firstOrNull { it.id == pointerId } ?: break
- 
-                                if (!dragEvent.pressed) {
-                                    if (isDraggingBox) {
-                                        dragEvent.consume()
-                                        val currentOffsetX = offsetX.value
-                                        launch {
-                                            if (currentOffsetX > 0f) {
-                                                if (currentOffsetX > maxRevealLeftPx * 0.35f) {
-                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                    offsetX.animateTo(maxRevealLeftPx, spring(stiffness = Spring.StiffnessMediumLow))
+
+                            if (onExport != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .width(64.dp)
+                                        .padding(horizontal = 2.dp)
+                                        .graphicsLayer { alpha = swipeProgress }
+                                        .clip(shape)
+                                        .background(Emerald400)
+                                        .clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            coroutineScope.launch { offsetX.animateTo(0f) }
+                                            onExport()
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowDropDown,
+                                        contentDescription = "Скачать",
+                                        tint = DarkBg,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            if (onEdit != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .width(64.dp)
+                                        .padding(horizontal = 2.dp)
+                                        .graphicsLayer { alpha = swipeProgress }
+                                        .clip(shape)
+                                        .background(Slate700)
+                                        .clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            coroutineScope.launch { offsetX.animateTo(0f) }
+                                            onEdit()
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Редактировать",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            if (onDelete != null && !isStartToEnd && swipeDirection != SwipeDirection.Both) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .width(64.dp)
+                                        .padding(horizontal = 2.dp)
+                                        .graphicsLayer { alpha = swipeProgress }
+                                        .clip(shape)
+                                        .background(Rose500)
+                                        .clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            isItemRemoved = true
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Удалить",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Foreground Content Item Card
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                    .pointerInput(swipeDirection, maxRevealLeftPx, maxRevealRightPx, isSingleDeleteOnly) {
+                        coroutineScope {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                val pointerId = down.id
+
+                                var totalDragX = 0f
+                                var isDraggingBox = false
+                                val touchSlop = viewConfiguration.touchSlop
+                                val startOffsetX = offsetX.value
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val dragEvent = event.changes.firstOrNull { it.id == pointerId } ?: break
+
+                                    if (!dragEvent.pressed) {
+                                        if (isDraggingBox) {
+                                            dragEvent.consume()
+                                            val currentOffsetX = offsetX.value
+                                            val absOffset = abs(currentOffsetX)
+
+                                            launch {
+                                                if (isSingleDeleteOnly && absOffset >= dismissThresholdPx) {
+                                                    val targetX = if (currentOffsetX > 0f) parentWidthPx else -parentWidthPx
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    offsetX.animateTo(
+                                                        targetValue = targetX,
+                                                        animationSpec = tween(durationMillis = 200, easing = FastOutLinearInEasing)
+                                                    )
+                                                    isItemRemoved = true
+                                                } else if (isSingleDeleteOnly) {
+                                                    if (hasCrossedThreshold) {
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        hasCrossedThreshold = false
+                                                    }
+                                                    offsetX.animateTo(
+                                                        targetValue = 0f,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                            stiffness = Spring.StiffnessMediumLow
+                                                        )
+                                                    )
                                                 } else {
-                                                    offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-                                                }
-                                            } else {
-                                                if (currentOffsetX < -maxRevealRightPx * 0.35f) {
-                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                                    offsetX.animateTo(-maxRevealRightPx, spring(stiffness = Spring.StiffnessMediumLow))
-                                                } else {
-                                                    offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                                    // Multi-action reveal snap logic
+                                                    if (currentOffsetX > 0f) {
+                                                        if (currentOffsetX > maxRevealLeftPx * 0.35f) {
+                                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                            offsetX.animateTo(maxRevealLeftPx, spring(stiffness = Spring.StiffnessMediumLow))
+                                                        } else {
+                                                            offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                                        }
+                                                    } else {
+                                                        if (currentOffsetX < -maxRevealRightPx * 0.35f) {
+                                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                            offsetX.animateTo(-maxRevealRightPx, spring(stiffness = Spring.StiffnessMediumLow))
+                                                        } else {
+                                                            offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
+                                        break
                                     }
-                                    break
-                                }
- 
-                                val dragDelta = dragEvent.position.x - dragEvent.previousPosition.x
-                                totalDragX += dragDelta
- 
-                                if (!isDraggingBox) {
-                                    if (abs(totalDragX) >= touchSlop) {
-                                        val isValidDirection = when (swipeDirection) {
-                                            SwipeDirection.StartToEnd -> totalDragX > 0f
-                                            SwipeDirection.EndToStart -> totalDragX < 0f
-                                            SwipeDirection.Both -> true
+
+                                    val dragDelta = dragEvent.position.x - dragEvent.previousPosition.x
+                                    totalDragX += dragDelta
+
+                                    if (!isDraggingBox) {
+                                        if (abs(totalDragX) >= touchSlop) {
+                                            val isValidDirection = when (swipeDirection) {
+                                                SwipeDirection.StartToEnd -> totalDragX > 0f
+                                                SwipeDirection.EndToStart -> totalDragX < 0f
+                                                SwipeDirection.Both -> true
+                                            }
+
+                                            if (startOffsetX != 0f || isValidDirection) {
+                                                isDraggingBox = true
+                                                dragEvent.consume()
+                                            } else {
+                                                break
+                                            }
                                         }
- 
-                                        if (startOffsetX != 0f || isValidDirection) {
-                                            isDraggingBox = true
-                                            dragStartOffset = offsetX.value
-                                            dragEvent.consume()
-                                        } else {
-                                            break
-                                        }
+                                    } else {
+                                        dragEvent.consume()
+                                        val minLimit = -maxRevealRightPx
+                                        val maxLimit = maxRevealLeftPx
+                                        val newOffset = (offsetX.value + dragDelta).coerceIn(minLimit, maxLimit)
+                                        launch { offsetX.snapTo(newOffset) }
                                     }
-                                } else {
-                                    dragEvent.consume()
-                                    val minLimit = -maxRevealRightPx
-                                    val maxLimit = maxRevealLeftPx
-                                    val newOffset = (offsetX.value + dragDelta).coerceIn(minLimit, maxLimit)
-                                    launch { offsetX.snapTo(newOffset) }
                                 }
                             }
                         }
                     }
-                }
-        ) {
-            content()
-            
-            // If revealed, overlay a clickable surface to catch clicks and close the swipe
-            if (abs(offsetX.value) > 0.5f) {
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clip(shape)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null // no ripple
-                        ) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            coroutineScope.launch {
-                                offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+            ) {
+                content()
+
+                // Overlay to collapse when swiped open in multi-action mode
+                if (!isSingleDeleteOnly && currentOffsetAbs > 0.5f) {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clip(shape)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                coroutineScope.launch {
+                                    offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                }
                             }
-                        }
-                )
+                    )
+                }
             }
         }
     }

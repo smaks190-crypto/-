@@ -45,6 +45,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.SmartToy
@@ -476,7 +477,7 @@ fun PeriodBudgetScreen(
         
 
         com.example.ui.components.ExpenseDynamicsAreaChartCard(
-            transactions = monthExpenses,
+            transactions = monthTransactions,
             title = "ДИНАМИКА РАСХОДОВ",
             onClick = null
         )
@@ -967,6 +968,7 @@ fun PeriodButton(
 fun getCategoryColorAndIcon(category: String, subcategory: String): Pair<androidx.compose.ui.graphics.Color, androidx.compose.ui.graphics.vector.ImageVector> {
     val text = "$category $subcategory".lowercase()
     return when {
+        text.contains("кредит") || text.contains("займ") || text.contains("ипотек") || text.contains("долг") || text.contains("банк") -> Pair(Rose500, Icons.Default.AccountBalance)
         text.contains("аптек") || text.contains("лекарст") || text.contains("здоровье") || text.contains("больниц") || text.contains("врач") || text.contains("медицин") -> Pair(Rose500, Icons.Default.MedicalServices)
         text.contains("сбережен") || text.contains("копилк") || text.contains("накоплен") || text.contains("вклад") || text.contains("инвест") || text.contains("фонд") || text.contains("цель") -> Pair(Indigo500, Icons.Default.Savings)
         text.contains("яндекс") || text.contains("yandex") -> Pair(androidx.compose.ui.graphics.Color(0xFFFC3F1D), Icons.Default.ShoppingBag)
@@ -1075,7 +1077,7 @@ fun TransactionRowItem(
 
     if (canDelete) {
         SwipeToRevealBox(
-            swipeDirection = SwipeDirection.StartToEnd,
+            swipeDirection = SwipeDirection.Both,
             onDelete = { onDelete(item.id) },
             shape = RoundedCornerShape(16.dp),
             modifier = modifier

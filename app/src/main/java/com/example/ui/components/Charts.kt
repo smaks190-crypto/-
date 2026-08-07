@@ -495,30 +495,18 @@ fun ExpenseDynamicsAreaChartCard(
 
         if (selectedPeriod == "Неделя") {
             val map = DoubleArray(7) { 0.0 }
-            val now = java.util.Calendar.getInstance()
-            val currentWeek = now.get(java.util.Calendar.WEEK_OF_YEAR)
-            val currentYear = now.get(java.util.Calendar.YEAR)
-            val todayDayOfWeek = (now.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7 // 0=Mon .. 6=Sun
-
             expenseTx.forEach { tx ->
                 try {
                     val txDate = sdf.parse(tx.date)
                     if (txDate != null) {
                         val cal = java.util.Calendar.getInstance().apply { time = txDate }
-                        val txWeek = cal.get(java.util.Calendar.WEEK_OF_YEAR)
-                        val txYear = cal.get(java.util.Calendar.YEAR)
                         val dayOfWeek = (cal.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7 // 0=Mon .. 6=Sun
-
-                        if (txWeek == currentWeek && txYear == currentYear && dayOfWeek <= todayDayOfWeek) {
-                            map[dayOfWeek] += tx.amount
-                        }
+                        map[dayOfWeek] += tx.amount
                     }
                 } catch (e: Exception) {
                     val day = tx.date.split("-").lastOrNull()?.toIntOrNull() ?: 1
                     val dayOfWeek = (day - 1) % 7
-                    if (dayOfWeek <= todayDayOfWeek) {
-                        map[dayOfWeek] += tx.amount
-                    }
+                    map[dayOfWeek] += tx.amount
                 }
             }
             Pair(map.toList(), weekDays)
@@ -543,35 +531,10 @@ fun ExpenseDynamicsAreaChartCard(
     // Group income data depending on selected tab to compute corresponding period income reference
     val periodTotalIncome = remember(transactions, selectedPeriod) {
         val incomeTxs = transactions.filter { it.type == "income" }
-        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-        
+        val sum = incomeTxs.sumOf { it.amount }
         if (selectedPeriod == "Неделя") {
-            var sum = 0.0
-            val now = java.util.Calendar.getInstance()
-            val currentWeek = now.get(java.util.Calendar.WEEK_OF_YEAR)
-            val currentYear = now.get(java.util.Calendar.YEAR)
-            
-            incomeTxs.forEach { tx ->
-                try {
-                    val txDate = sdf.parse(tx.date)
-                    if (txDate != null) {
-                        val cal = java.util.Calendar.getInstance().apply { time = txDate }
-                        val txWeek = cal.get(java.util.Calendar.WEEK_OF_YEAR)
-                        val txYear = cal.get(java.util.Calendar.YEAR)
-                        if (txWeek == currentWeek && txYear == currentYear) {
-                            sum += tx.amount
-                        }
-                    }
-                } catch (e: Exception) {
-                    sum += tx.amount / 4.3 // fallback average per week
-                }
-            }
-            if (sum > 0.0) sum else 15000.0 // Default fallback weekly
+            if (sum > 0.0) sum / 4.3 else 15000.0 // Default fallback weekly
         } else {
-            var sum = 0.0
-            incomeTxs.forEach { tx ->
-                sum += tx.amount
-            }
             if (sum > 0.0) sum else 60000.0 // Default fallback monthly
         }
     }
@@ -588,18 +551,17 @@ fun ExpenseDynamicsAreaChartCard(
 
     LaunchedEffect(dataPoints) {
         selectedPointIdx = null
-        if (targetPoints.isNotEmpty() && targetPoints != dataPoints) {
+        if (targetPoints.isNotEmpty()) {
             oldPoints = targetPoints
-            targetPoints = dataPoints
-            morphAnim.snapTo(0f)
-            morphAnim.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 550, easing = FastOutSlowInEasing)
-            )
         } else {
-            targetPoints = dataPoints
-            morphAnim.snapTo(1f)
+            oldPoints = List(dataPoints.size) { 0.0 }
         }
+        targetPoints = dataPoints
+        morphAnim.snapTo(0f)
+        morphAnim.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing)
+        )
     }
 
     val targetMax = remember(targetPoints) {
@@ -784,56 +746,64 @@ fun ExpenseDynamicsAreaChartCard(
                         Offset(x, y)
                     }
 
-                    // Build Area Path with smooth Cubic Bezier
+                    // Build Area Path with safe quadratic midpoint smoothing
                     val areaPath = Path().apply {
                         moveTo(points[0].x, h)
                         lineTo(points[0].x, points[0].y)
 
-                        val tension = 0.25f
                         for (i in 0 until points.size - 1) {
                             val p1 = points[i]
                             val p2 = points[i + 1]
-                            val p0 = if (i > 0) points[i - 1] else p1
-                            val p3 = if (i + 2 < points.size) points[i + 2] else p2
+                            val midX = (p1.x + p2.x) / 2f
+                            val midY = (p1.y + p2.y) / 2f
 
-                            val controlX1 = p1.x + (p2.x - p0.x) * tension
-                            val controlY1 = (p1.y + (p2.y - p0.y) * tension).coerceIn(0f, h)
-                            val controlX2 = p2.x - (p3.x - p1.x) * tension
-                            val controlY2 = (p2.y - (p3.y - p1.y) * tension).coerceIn(0f, h)
-
-                            cubicTo(controlX1, controlY1, controlX2, controlY2, p2.x, p2.y)
+                            if (i == 0) {
+                                lineTo(midX, midY)
+                            } else {
+                                quadraticTo(p1.x, p1.y, midX, midY)
+                            }
+                        }
+                        if (points.isNotEmpty()) {
+                            lineTo(points.last().x, points.last().y)
                         }
 
                         lineTo(points.last().x, h)
                         close()
                     }
 
-                    // Build Stroke Line Path with smooth Cubic Bezier
+                    // Build Stroke Line Path with safe quadratic midpoint smoothing
                     val strokePath = Path().apply {
                         moveTo(points[0].x, points[0].y)
-                        val tension = 0.25f
+
                         for (i in 0 until points.size - 1) {
                             val p1 = points[i]
                             val p2 = points[i + 1]
-                            val p0 = if (i > 0) points[i - 1] else p1
-                            val p3 = if (i + 2 < points.size) points[i + 2] else p2
+                            val midX = (p1.x + p2.x) / 2f
+                            val midY = (p1.y + p2.y) / 2f
 
-                            val controlX1 = p1.x + (p2.x - p0.x) * tension
-                            val controlY1 = (p1.y + (p2.y - p0.y) * tension).coerceIn(0f, h)
-                            val controlX2 = p2.x - (p3.x - p1.x) * tension
-                            val controlY2 = (p2.y - (p3.y - p1.y) * tension).coerceIn(0f, h)
-
-                            cubicTo(controlX1, controlY1, controlX2, controlY2, p2.x, p2.y)
+                            if (i == 0) {
+                                lineTo(midX, midY)
+                            } else {
+                                quadraticTo(p1.x, p1.y, midX, midY)
+                            }
+                        }
+                        if (points.isNotEmpty()) {
+                            lineTo(points.last().x, points.last().y)
                         }
                     }
 
                     val minY = points.minOf { it.y }
 
-                    // Horizontal gradient for neon line (Emerald -> Indigo -> Rose) as seen in reference
-                    val strokeGradient = Brush.horizontalGradient(
-                        colors = listOf(Emerald400, Indigo500, Rose500),
-                        startX = 0f,
-                        endX = w
+                    // Vertical gradient for neon line based on expense height (Rose at top -> Indigo -> Blue -> Emerald at bottom)
+                    val strokeGradient = Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFFF43F5E), // Верх (максимальные траты) — Красный
+                            Color(0xFF6366F1), // Середина — Фиолетовый/Индиго
+                            Color(0xFF60A5FA), // Чуть ниже — Голубой
+                            Color(0xFF34D399)  // Самый низ (минимальные траты) — Зеленый
+                        ),
+                        startY = 0f,
+                        endY = h
                     )
 
                     // Vertical glowing gradient fill under curve
@@ -853,18 +823,6 @@ fun ExpenseDynamicsAreaChartCard(
                         style = Fill
                     )
                     
-                    // Draw Glowing Neon Halo behind main line
-                    drawPath(
-                        path = strokePath,
-                        brush = strokeGradient,
-                        style = Stroke(
-                            width = 10.dp.toPx(),
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round
-                        ),
-                        alpha = 0.30f
-                    )
-
                     // Draw Main Neon Line (3.5dp thickness with round caps and joins)
                     drawPath(
                         path = strokePath,
@@ -984,10 +942,15 @@ fun ExpenseDynamicsAreaChartCard(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             xLabels.forEach { label ->
+                val isWeekend = label.equals("СБ", ignoreCase = true) || 
+                                label.equals("ВС", ignoreCase = true) ||
+                                label.equals("СБ.", ignoreCase = true) ||
+                                label.equals("ВС.", ignoreCase = true)
                 Text(
                     text = label,
-                    color = Slate500,
+                    color = if (isWeekend) Rose500 else Slate500,
                     fontSize = 10.sp,
+                    fontWeight = if (isWeekend) FontWeight.Bold else FontWeight.Normal,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 )
             }
