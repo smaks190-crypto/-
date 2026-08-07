@@ -121,8 +121,8 @@ sealed class ChatItem {
     open val isFromUser: Boolean get() = false
     open val isRead: Boolean get() = true
 }
-data class ChatWelcomeItem(override val timestamp: Long = 0L) : ChatItem()
-data class ChatChangelogItem(override val timestamp: Long = 500L) : ChatItem()
+data class ChatWelcomeItem(override val timestamp: Long = System.currentTimeMillis()) : ChatItem()
+data class ChatChangelogItem(override val timestamp: Long = System.currentTimeMillis()) : ChatItem()
 data class ChatAuditOfferItem(override val timestamp: Long = 1000L) : ChatItem()
 data class ChatUnreadSeparatorItem(override val timestamp: Long) : ChatItem()
 data class ChatNotificationUserItem(val notification: NotificationEntity) : ChatItem() {
@@ -248,6 +248,28 @@ fun ReportDetailsDialog(
         }
     }
 
+    val welcomeTimestamp = remember(profileName) {
+        val profileKey = profileName.ifBlank { "default" }
+        val key = "chat_welcome_timestamp_$profileKey"
+        val saved = prefs.getLong(key, 0L)
+        if (saved != 0L) saved else {
+            val now = System.currentTimeMillis()
+            prefs.edit().putLong(key, now).apply()
+            now
+        }
+    }
+
+    val changelogTimestamp = remember(profileName, welcomeTimestamp) {
+        val profileKey = profileName.ifBlank { "default" }
+        val key = "chat_changelog_timestamp_$profileKey"
+        val saved = prefs.getLong(key, 0L)
+        if (saved != 0L) saved else {
+            val now = welcomeTimestamp + 500L
+            prefs.edit().putLong(key, now).apply()
+            now
+        }
+    }
+
     val actualAuditTimestamp = remember(auditTimestamp) {
         if (auditTimestamp != null && auditTimestamp > 0L) {
             auditTimestamp
@@ -355,11 +377,11 @@ fun ReportDetailsDialog(
                 // Unified Chat Feed
                 val listState = rememberLazyListState()
 
-                val chatItems = remember(notifications, displayedSections.toList(), isLoading, isGeneratingReaction, isSimulatingTyping, hasSentRequest, auditTimestamp, auditText, requestTimestamp, showConnectingNeon, isConnectionRestored) {
+                val chatItems = remember(notifications, displayedSections.toList(), isLoading, isGeneratingReaction, isSimulatingTyping, hasSentRequest, auditTimestamp, auditText, requestTimestamp, showConnectingNeon, isConnectionRestored, welcomeTimestamp, changelogTimestamp) {
                     val items = mutableListOf<ChatItem>()
                     
-                    items.add(ChatWelcomeItem(0L))
-                    items.add(ChatChangelogItem(500L))
+                    items.add(ChatWelcomeItem(welcomeTimestamp))
+                    items.add(ChatChangelogItem(changelogTimestamp))
 
                     val filteredNotifications = notifications.filterNot {
                         it.title == "Жабов Давид" ||
@@ -448,8 +470,9 @@ fun ReportDetailsDialog(
 
                 var hasInitialScrolled by remember { mutableStateOf(false) }
 
-                LaunchedEffect(unreadSeparatorIndex, chatItems.size) {
+                LaunchedEffect(unreadSeparatorIndex, chatItems.size, displayedSections.size) {
                     if (chatItems.isNotEmpty()) {
+                        kotlinx.coroutines.delay(100)
                         if (!hasInitialScrolled) {
                             if (unreadSeparatorIndex != -1) {
                                 listState.scrollToItem(unreadSeparatorIndex)
@@ -459,6 +482,8 @@ fun ReportDetailsDialog(
                             hasInitialScrolled = true
                         } else if (hasSentRequest || isLoading || isSimulatingTyping) {
                             listState.animateScrollToItem(chatItems.size - 1)
+                        } else {
+                            listState.scrollToItem(chatItems.size - 1)
                         }
                     }
                 }
@@ -544,9 +569,8 @@ fun ReportDetailsDialog(
                                 }
                             }
                             is ChatWelcomeItem -> {
-                                val timeStr = remember {
-                                    val now = System.currentTimeMillis()
-                                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(now))
+                                val timeStr = remember(item.timestamp) {
+                                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
                                 }
                                 Column(horizontalAlignment = Alignment.Start) {
                                     Surface(
@@ -595,9 +619,8 @@ fun ReportDetailsDialog(
                                 }
                             }
                             is ChatChangelogItem -> {
-                                val timeStr = remember {
-                                    val now = System.currentTimeMillis()
-                                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(now))
+                                val timeStr = remember(item.timestamp) {
+                                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
                                 }
                                 Column(horizontalAlignment = Alignment.Start) {
                                     Surface(

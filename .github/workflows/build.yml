@@ -74,7 +74,7 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        run: gradle bundleRelease --no-configuration-cache -PversionCode=${{ github.run_number }}
+        run: gradle bundleRelease --no-configuration-cache
 
       # СОБИРАЕМ РЕЛИЗНЫЙ APK (.APK)
       - name: Build Release APK
@@ -83,7 +83,7 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        run: gradle assembleRelease --no-configuration-cache -PversionCode=${{ github.run_number }}
+        run: gradle assembleRelease --no-configuration-cache
 
       # СОХРАНЯЕМ ГОТОВЫЕ РЕЛИЗНЫЕ ФАЙЛЫ
       - name: Upload Release Artifacts

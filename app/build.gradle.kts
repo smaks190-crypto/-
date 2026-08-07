@@ -36,7 +36,7 @@ if (isBuilding) {
     versionPropsFile.outputStream().use { versionProps.store(it, "Auto-incremented build version.") }
 }
 
-val buildNum = project.findProperty("versionCode")?.toString()?.toIntOrNull() ?: manualVersionCode
+val buildNum = manualVersionCode
 
 // Функция расчета: x.xx (до 100, после 99 идет 0)
 fun getVersionLetterName(number: Int): String {
