@@ -78,3 +78,14 @@
 -dontwarn javax.annotation.**
 -dontwarn org.checkerframework.**
 
+# Release Isolation & GlobalConsoleLogger Stripping
+-assumenosideeffects class com.example.utils.GlobalConsoleLogger {
+    public static *** d(...);
+    public static *** i(...);
+    public static *** w(...);
+    public static *** e(...);
+    public static *** clear(...);
+    public static *** setupUncaughtExceptionHandler(...);
+}
+
+

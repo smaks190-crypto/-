@@ -1759,7 +1759,7 @@ val neonColor1 = getGradientColor(progress)
                                     )
                                 }
 
-                                if (activeText.isNotBlank()) {
+                                if (activeText.isNotBlank() && !isListening) {
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text = "«$activeText»",

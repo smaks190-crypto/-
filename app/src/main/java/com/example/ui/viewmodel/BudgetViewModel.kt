@@ -148,38 +148,13 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         _voiceErrorMessage.value = null
         voiceInputManager.onErrorCallback = { cancelVoiceRecording() }
         voiceInputManager.startListening(context)
-
-        voiceCollectionJob?.cancel()
-        voiceCollectionJob = viewModelScope.launch {
-            kotlinx.coroutines.flow.combine(
-                voiceInputManager.recognizedText,
-                voiceInputManager.partialText
-            ) { recognized, partial ->
-                val combined = when {
-                    partial.isNotBlank() && recognized.isNotBlank() -> "$recognized $partial"
-                    partial.isNotBlank() -> partial
-                    else -> recognized
-                }
-                combined
-            }.collect { combinedText ->
-                if (combinedText.isNotBlank()) {
-                    val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
-                    val incCats = categories.value.filter { it.type == "income" }.map { it.name }
-                    val parsed = com.example.utils.VoiceParserHelper.parseHeuristically(
-                        text = combinedText,
-                        expenseCategories = expCats,
-                        incomeCategories = incCats
-                    )
-                    _parsedVoiceOperations.value = parsed.ifEmpty { null }
-                }
-            }
-        }
     }
 
     fun stopVoiceRecordingAndProcess() {
         voiceCollectionJob?.cancel()
         voiceCollectionJob = null
         voiceInputManager.stopListening()
+        _isVoiceActive.value = false
         val textToProcess = when {
             _manualText.value.isNotBlank() -> _manualText.value
             voiceInputManager.recognizedText.value.isNotBlank() -> voiceInputManager.recognizedText.value
@@ -710,6 +685,10 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                     _parsedVoiceOperations.value = null
                 } else {
                     _parsedVoiceOperations.value = result
+                    val finalDate = _selectedDateDay.value.ifBlank {
+                        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+                    }
+                    confirmVoiceOperations(result, finalDate)
                 }
             } catch (e: Exception) {
                 _voiceErrorMessage.value = "Ошибка при анализе: ${e.message}"
@@ -734,6 +713,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         dateStr: String
     ) {
         val currentBudgetId = _selectedBudgetId.value ?: "default"
+        com.example.utils.GlobalConsoleLogger.i("UI", "Подтверждение операций (${operations.size} шт.), дата: $dateStr")
         viewModelScope.launch {
             if (operations.isEmpty()) return@launch
             
@@ -756,6 +736,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                     amount = op.amount
                 )
                 repository.insertTransaction(tx)
+                com.example.utils.GlobalConsoleLogger.i("ROOM", "Сохранена транзакция в DB: ${tx.category} / ${tx.subcategory} (${tx.amount} ₽)")
 
                 try {
                     val isFirstToday = transactions.value.none { it.date == finalDate && it.id != tx.id }

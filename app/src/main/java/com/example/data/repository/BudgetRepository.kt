@@ -1,5 +1,6 @@
 package com.example.data.repository
 
+import com.example.utils.GlobalConsoleLogger
 import com.example.data.api.GeminiApiService
 import com.example.data.api.GeminiContent
 import com.example.data.api.GeminiPart
@@ -185,8 +186,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
             "gemini-flash-latest"
         )
 
@@ -270,8 +271,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
             "gemini-flash-latest"
         )
 
@@ -320,8 +321,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
             "gemini-flash-latest"
         )
 
@@ -377,8 +378,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
             "gemini-flash-latest"
         )
 
@@ -859,9 +860,8 @@ class BudgetRepository(
 
         var lastExceptionMessage = ""
         val modelsToTry = listOf(
-            "gemini-3.6-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
             "gemini-flash-latest"
         )
 
@@ -996,9 +996,8 @@ class BudgetRepository(
         var lastExceptionMessage = ""
 
         val modelsToTry = listOf(
-            "gemini-3.6-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
             "gemini-flash-latest"
         )
 
@@ -1132,8 +1131,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
             "gemini-flash-latest"
         )
 
@@ -1257,13 +1256,16 @@ class BudgetRepository(
         var lastError: String? = null
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
             "gemini-flash-latest"
         )
 
+        GlobalConsoleLogger.i("GEMINI", "Запрос к Gemini API для разбора голоса: «$trimmedText»")
+
         for (model in modelsToTry) {
             try {
+                GlobalConsoleLogger.d("GEMINI", "Пробуем модель: $model")
                 val response = apiService.generateContent(model, apiKey, request)
                 if (response.error == null) {
                     val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
@@ -1272,18 +1274,22 @@ class BudgetRepository(
                         if (jsonString.isNotBlank()) {
                             val parsed = parseJsonOperations(jsonString, todayStr)
                             if (parsed.isNotEmpty()) {
+                                GlobalConsoleLogger.i("GEMINI", "Успешный ответ Gemini ($model): распознано ${parsed.size} операций")
                                 return parsed
                             }
                         }
                     }
                 } else {
                     lastError = response.error.message
+                    GlobalConsoleLogger.w("GEMINI", "Ошибка от Gemini ($model): ${response.error.message}")
                 }
             } catch (e: Exception) {
                 lastError = e.message
+                GlobalConsoleLogger.e("GEMINI", "Исключение при обращении к $model: ${e.localizedMessage}", e)
             }
         }
 
+        GlobalConsoleLogger.e("GEMINI", "Все Gemini модели завершились ошибкой: $lastError")
         throw IllegalStateException(lastError ?: "Не удалось разбрать операции из текста. Попробуйте сформулировать точнее.")
     }
 

@@ -154,6 +154,7 @@ class MainActivity : FragmentActivity() {
     private val viewModel: BudgetViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        com.example.utils.GlobalConsoleLogger.setupUncaughtExceptionHandler()
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -245,6 +246,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     var splashStage by remember { mutableStateOf("loading") }
 
     var showWelcomeBubble by remember { mutableStateOf(false) }
+    var showDebugConsole by remember { mutableStateOf(false) }
+    var avatarTapCount by remember { mutableStateOf(0) }
+    var lastAvatarTapTime by remember { mutableStateOf(0L) }
 
     val infiniteTransition = rememberInfiniteTransition(label = "wave")
     val waveRotation by infiniteTransition.animateFloat(
@@ -484,6 +488,18 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                                             indication = null
                                         ) {
+                                            val now = System.currentTimeMillis()
+                                            if (now - lastAvatarTapTime < 500) {
+                                                avatarTapCount++
+                                                if (avatarTapCount >= 3) {
+                                                    showDebugConsole = true
+                                                    avatarTapCount = 0
+                                                }
+                                            } else {
+                                                avatarTapCount = 1
+                                            }
+                                            lastAvatarTapTime = now
+
                                             settingsInitialScreen = com.example.ui.components.SettingsScreen.HUB
                                             showSettingsHubModal = true
                                         }
@@ -1097,6 +1113,24 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
         }
 
         }
+        if (com.example.BuildConfig.DEBUG) {
+            com.example.ui.components.GlobalConsoleOverlay(
+                isVisible = showDebugConsole,
+                onDismiss = { showDebugConsole = false }
+            )
+
+            if (!showDebugConsole) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = 80.dp, end = 12.dp),
+                    contentAlignment = Alignment.BottomEnd
+                ) {
+                    com.example.ui.components.DebugConsoleFloatingButton(onClick = { showDebugConsole = true })
+                }
+            }
+        }
+
         if (splashStage != "done") {
             GrowthChartSplashScreen(
                 isExiting = splashStage == "exiting",

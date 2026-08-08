@@ -190,6 +190,7 @@ class VoiceInputManager(private val context: Context) {
 
     private fun initVoskAndStart(callerContext: Context) {
         try {
+            GlobalConsoleLogger.i("VOSK", "Инициализация офлайн-модели VOSK...")
             val targetDir = File(context.filesDir, "vosk-model-small-ru-0.22")
             if (voskModel == null) {
                 voskModel = Model(targetDir.absolutePath)
@@ -206,6 +207,7 @@ class VoiceInputManager(private val context: Context) {
                 override fun onResult(hypothesis: String) {
                     val text = parseResultHypothesis(hypothesis)
                     if (text.isNotBlank()) {
+                        GlobalConsoleLogger.d("VOSK", "Распознан фрагмент: «$text»")
                         accumulatedText = if (accumulatedText.isBlank()) text else "$accumulatedText $text"
                         _recognizedText.value = accumulatedText
                         _partialText.value = ""
@@ -222,6 +224,7 @@ class VoiceInputManager(private val context: Context) {
                 override fun onFinalResult(hypothesis: String) {
                     val text = parseResultHypothesis(hypothesis)
                     if (text.isNotBlank()) {
+                        GlobalConsoleLogger.i("VOSK", "Финальный результат VOSK: «$text»")
                         accumulatedText = if (accumulatedText.isBlank()) text else "$accumulatedText $text"
                         _recognizedText.value = accumulatedText
                         _partialText.value = ""
@@ -229,6 +232,7 @@ class VoiceInputManager(private val context: Context) {
                 }
 
                 override fun onError(exception: Exception) {
+                    GlobalConsoleLogger.e("VOSK", "Ошибка VOSK слушателя: ${exception.localizedMessage}", exception)
                     Log.e("VoiceInputManager", "Vosk listener error", exception)
                     _errorState.value = exception.localizedMessage
                 }
@@ -240,8 +244,10 @@ class VoiceInputManager(private val context: Context) {
 
             _isListening.value = true
             _errorState.value = null
+            GlobalConsoleLogger.i("VOSK", "VOSK успешно запущен и слушатель готов (offline)")
             Log.d("VoiceInputManager", "Vosk successfully started listening offline!")
         } catch (e: Throwable) {
+            GlobalConsoleLogger.e("VOSK", "Ошибка JNI VOSK, переход на системный SpeechRecognizer: ${e.localizedMessage}", e)
             Log.e("VoiceInputManager", "Vosk JNI error, falling back to system SpeechRecognizer", e)
             startSystemSpeechRecognizer(callerContext)
         }
