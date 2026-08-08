@@ -82,6 +82,7 @@ class VoiceInputManager(private val context: Context) {
     }
 
     fun startListening(callerContext: Context) {
+        GlobalConsoleLogger.i("VOICE", "Запуск непрерывного прослушивания микрофона...")
         activeContextRef = java.lang.ref.WeakReference(callerContext)
         isContinuous = true
         isPaused = false
@@ -96,8 +97,10 @@ class VoiceInputManager(private val context: Context) {
         val targetDir = File(context.filesDir, "vosk-model-small-ru-0.22")
         if (targetDir.exists() && targetDir.isDirectory && targetDir.list()?.isNotEmpty() == true) {
             _voskStatus.value = "READY"
+            GlobalConsoleLogger.i("VOSK", "Найдена локальная офлайн-модель VOSK")
             initVoskAndStart(callerContext)
         } else {
+            GlobalConsoleLogger.i("VOSK", "Модель VOSK не найдена локально, запускаем загрузку")
             downloadAndInitModel(callerContext)
         }
     }
@@ -293,11 +296,13 @@ class VoiceInputManager(private val context: Context) {
                 systemSpeechRecognizer = recognizer
                 recognizer.setRecognitionListener(object : SystemRecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {
+                        GlobalConsoleLogger.d("VOICE", "Системный распознаватель готов к приему речи")
                         _isListening.value = true
                         _errorState.value = null
                     }
 
                     override fun onBeginningOfSpeech() {
+                        GlobalConsoleLogger.d("VOICE", "Обнаружено начало речи")
                         _isListening.value = true
                     }
 
@@ -309,12 +314,14 @@ class VoiceInputManager(private val context: Context) {
                     override fun onBufferReceived(buffer: ByteArray?) {}
 
                     override fun onEndOfSpeech() {
+                        GlobalConsoleLogger.d("VOICE", "Завершение речевого фрагмента")
                         if (!isContinuous || isPaused) {
                             _isListening.value = false
                         }
                     }
 
                     override fun onError(error: Int) {
+                        GlobalConsoleLogger.w("VOICE", "Системный распознаватель вернул ошибку code: $error")
                         Log.d("VoiceInputManager", "System recognizer onError code: $error")
                         if (isContinuous && !isPaused) {
                             _isListening.value = true
@@ -335,6 +342,7 @@ class VoiceInputManager(private val context: Context) {
                             val text = matches[0].trim()
                             if (text.isNotBlank() && text != lastProcessedChunk) {
                                 lastProcessedChunk = text
+                                GlobalConsoleLogger.i("VOICE", "Системный движок распознал: «$text»")
                                 _recognizedText.value = text
                                 _partialText.value = ""
                                 onChunkRecognized?.invoke(text)
@@ -385,6 +393,7 @@ class VoiceInputManager(private val context: Context) {
     }
 
     fun stopListening() {
+        GlobalConsoleLogger.i("VOICE", "Остановка распознавания речи")
         isProcessingAllowed = false
         isContinuous = false
         isPaused = false

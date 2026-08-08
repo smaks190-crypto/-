@@ -437,7 +437,7 @@ fun VoiceRecordingOverlay(
     val desiredWidth = when {
         isConsentNeeded || isApiKeyNeeded -> (screenWidthDp - 32f).coerceAtLeast(300f)
         showManualInput || isEditingOperations -> (screenWidthDp - 32f).coerceAtLeast(300f)
-        isVoiceActive -> (screenWidthDp - 120f).coerceAtLeast(220f)
+        isVoiceActive -> (screenWidthDp - 48f).coerceAtLeast(280f)
         else -> 56f
     }
 
@@ -1519,7 +1519,7 @@ val neonColor1 = getGradientColor(progress)
                         modifier = Modifier
                             .fillMaxWidth()
                             .graphicsLayer { alpha = contentAlpha }
-                            .padding(start = 16.dp, top = 12.dp, end = 0.dp, bottom = 12.dp)
+                            .padding(start = 16.dp, top = 8.dp, end = 0.dp, bottom = 8.dp)
                     ) {
                         if (editingIndex == null) {
                             Row(
@@ -1530,37 +1530,37 @@ val neonColor1 = getGradientColor(progress)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(
                                         modifier = Modifier
-                                            .size(32.dp)
+                                            .size(28.dp)
                                             .clip(CircleShape)
                                             .background(Emerald400.copy(alpha = 0.2f)),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Icon(Icons.Default.Star, contentDescription = null, tint = Emerald400, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Star, contentDescription = null, tint = Emerald400, modifier = Modifier.size(14.dp))
                                     }
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Column {
                                         Text(
                                             text = "Распознано: ${editableList.size}",
                                             color = Color.White,
-                                            fontSize = 15.sp,
+                                            fontSize = 14.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                         val totalAmount = editableList.sumOf { if (it.type == "expense") -it.amount else it.amount }
                                         Text(
                                             text = if (totalAmount >= 0) "+${String.format(Locale.US, "%.0f", totalAmount)} ₽" else "${String.format(Locale.US, "%.0f", totalAmount)} ₽",
                                             color = if (totalAmount >= 0) Emerald400 else Rose500,
-                                            fontSize = 12.sp,
+                                            fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     }
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(14.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
 
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 editableList.forEachIndexed { index, op ->
                                     CompactParsedOperationCard(
@@ -1589,6 +1589,7 @@ val neonColor1 = getGradientColor(progress)
                             ) {
                                 Button(
                                     onClick = {
+                                        com.example.utils.GlobalConsoleLogger.i("UI", "Подтверждение сохранения ${editableList.size} распознанных операций")
                                         if (editableList.isNotEmpty()) {
                                             viewModel.confirmVoiceOperations(editableList, selectedDate)
                                             viewModel.clearParsedVoiceOperations()
@@ -1697,7 +1698,7 @@ val neonColor1 = getGradientColor(progress)
                     exit = fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing)) + slideOutHorizontally(animationSpec = tween(150)) { -it / 4 },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(end = 56.dp)
+                        .padding(start = 56.dp, end = 56.dp)
                 ) {
                     Box(
                         modifier = Modifier
@@ -1876,11 +1877,11 @@ fun CompactParsedOperationCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(DarkBg)
-            .border(1.dp, Slate800, RoundedCornerShape(12.dp))
+            .border(1.dp, Slate800, RoundedCornerShape(10.dp))
             .clickable { onClick() }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1888,7 +1889,7 @@ fun CompactParsedOperationCard(
             Text(
                 text = operation.subcategory.ifBlank { operation.category },
                 color = Color.White,
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1904,23 +1905,23 @@ fun CompactParsedOperationCard(
 
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(
                 text = "${if (isExpense) "-" else "+"}${numberFormat.format(operation.amount)} ₽",
                 color = color,
-                fontSize = 13.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold
             )
             IconButton(
                 onClick = onDelete,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(22.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Удалить",
                     tint = Rose500.copy(alpha = 0.8f),
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(14.dp)
                 )
             }
         }

@@ -546,6 +546,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addTransaction(type: String, date: String, category: String, subcategory: String, amount: Double, accountId: String? = null) {
         val currentBudgetId = _selectedBudgetId.value ?: "default"
+        com.example.utils.GlobalConsoleLogger.i("UI", "Добавление транзакции [$type]: $amount ₽ ($category / $subcategory), дата=$date")
         viewModelScope.launch {
             ensureCategoryExists(category, type)
             val tx = TransactionEntity(
@@ -886,6 +887,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deleteTransaction(id: String) {
+        com.example.utils.GlobalConsoleLogger.i("UI", "Удаление транзакции ID: $id")
         viewModelScope.launch {
             repository.deleteTransaction(id)
             _toastMessage.emit("Операция удалена")
@@ -894,6 +896,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addGoalProgress(goalId: String, amount: Double) {
         val currentBudgetId = _selectedBudgetId.value ?: "default"
+        com.example.utils.GlobalConsoleLogger.i("UI", "Взнос в финансовую цель ID=$goalId на сумму $amount ₽")
         viewModelScope.launch {
             val currentGoals = goals.value
             val goal = currentGoals.find { it.id == goalId } ?: return@launch
@@ -963,6 +966,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     fun saveNewGoal(name: String, target: Double, current: Double) {
         val currentBudgetId = _selectedBudgetId.value ?: "default"
+        com.example.utils.GlobalConsoleLogger.i("UI", "Создание финансовой цели: «$name» (цель: $target ₽, начально: $current ₽)")
         viewModelScope.launch {
             if (current > 0) {
                 val tx = TransactionEntity(
@@ -1029,6 +1033,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deleteGoal(id: String) {
+        com.example.utils.GlobalConsoleLogger.i("UI", "Удаление финансовой цели ID: $id")
         viewModelScope.launch {
             repository.deleteGoal(id)
             _toastMessage.emit("Цель удалена")
@@ -1037,6 +1042,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addCategory(type: String, name: String) {
         val currentBudgetId = _selectedBudgetId.value ?: "default"
+        com.example.utils.GlobalConsoleLogger.i("UI", "Добавление категории [$type]: «$name»")
         viewModelScope.launch {
             val cat = CategoryEntity(budgetId = currentBudgetId, type = type, name = name)
             repository.insertCategory(cat)
@@ -1045,6 +1051,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deleteCategory(id: String) {
+        com.example.utils.GlobalConsoleLogger.i("UI", "Удаление категории ID: $id")
         viewModelScope.launch {
             repository.deleteCategory(id)
             _toastMessage.emit("Категория удалена")
@@ -1310,6 +1317,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun addAccount(name: String, initialBalance: Double, type: String = "card", accountNumber: String = "**** 0000") {
+        com.example.utils.GlobalConsoleLogger.i("UI", "Добавление счета/долга: «$name» (тип=$type, сумма=$initialBalance ₽)")
         viewModelScope.launch {
             val bId = _selectedBudgetId.value ?: "default"
             repository.insertAccount(
@@ -1372,6 +1380,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deleteAccount(accountId: String) {
+        com.example.utils.GlobalConsoleLogger.i("UI", "Удаление счета/долга ID: $accountId")
         viewModelScope.launch {
             repository.deleteAccountById(accountId)
         }
@@ -1384,6 +1393,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         fromName: String,
         toName: String
     ) {
+        com.example.utils.GlobalConsoleLogger.i("UI", "Перевод $amount ₽ с «$fromName» на «$toName»")
         viewModelScope.launch {
             val bId = _selectedBudgetId.value ?: "default"
             repository.transferBetweenAccounts(

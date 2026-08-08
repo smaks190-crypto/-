@@ -91,10 +91,12 @@ class BudgetRepository(
     }
 
     suspend fun insertNotification(notification: NotificationEntity) {
+        GlobalConsoleLogger.i("NOTIFICATION", "Создано новое уведомление: [${notification.title}] ${notification.description}")
         notificationDao.insertNotification(notification)
     }
 
     suspend fun markNotificationsAsRead(budgetId: String) {
+        GlobalConsoleLogger.i("NOTIFICATION", "Отметка всех уведомлений как прочитанных (бюджет: $budgetId)")
         notificationDao.markAllAsRead(budgetId)
     }
 

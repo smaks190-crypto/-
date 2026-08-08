@@ -25,7 +25,7 @@ data class LogEntry(
 )
 
 object GlobalConsoleLogger {
-    private const val MAX_LOGS = 200
+    private const val MAX_LOGS = 500
     private var nextId = 1L
 
     private val _logs = MutableStateFlow<List<LogEntry>>(emptyList())

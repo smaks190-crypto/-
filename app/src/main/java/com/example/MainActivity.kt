@@ -589,9 +589,11 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
 
                                     LaunchedEffect(shouldShowMessage, unreadNotificationsCount) {
                                         if (shouldShowMessage) {
+                                            com.example.utils.GlobalConsoleLogger.i("ANIM", "Запуск анимации плашки уведомлений (непрочитанных: $unreadNotificationsCount, приветствие: $showWelcomeBubble)")
                                             // Step 1: Collapse box & start neon flickering first
                                             isExpandedByNeon = false
                                             isNeonFlickering = true
+                                            com.example.utils.GlobalConsoleLogger.d("ANIM", "Эффект неонового мерцания [Старт]: мигание лампы 0.15f -> 1.0f")
 
                                             // Neon lamp turning-on flickering animation sequence
                                             neonAlpha.snapTo(0.15f)
@@ -609,14 +611,17 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             neonAlpha.snapTo(1f)
 
                                             isNeonFlickering = false
+                                            com.example.utils.GlobalConsoleLogger.d("ANIM", "Эффект неонового мерцания [Завершен]")
 
                                             // Step 2: Expand container after flickering completes
                                             isExpandedByNeon = true
+                                            com.example.utils.GlobalConsoleLogger.i("ANIM", "Раскрытие плашки уведомлений: isExpandedByNeon = true")
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 
                                             // Step 3: Show message for 4 seconds, then auto-collapse back to glowing icon
                                             kotlinx.coroutines.delay(4000)
                                             isExpandedByNeon = false
+                                            com.example.utils.GlobalConsoleLogger.i("ANIM", "Авто-сворачивание плашки уведомлений по таймауту (4 сек)")
                                         } else {
                                             isNeonFlickering = false
                                             isExpandedByNeon = false
@@ -653,6 +658,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                 )
                                             )
                                             .clickable {
+                                                com.example.utils.GlobalConsoleLogger.i("UI", "Нажатие на плашку уведомлений/чата (непрочитанных: $hasUnread), открытие диалога")
                                                 showWelcomeBubble = false
                                                 isExpandedByNeon = false
                                                 if (hasUnread) {
