@@ -9,7 +9,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -35,6 +33,9 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.VerticalAlignBottom
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -51,18 +52,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
-import androidx.compose.ui.zIndex
 import com.example.BuildConfig
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
@@ -75,7 +71,6 @@ import com.example.ui.theme.Slate900
 import com.example.utils.GlobalConsoleLogger
 import com.example.utils.LogEntry
 import com.example.utils.LogLevel
-import kotlin.math.roundToInt
 
 @Composable
 fun GlobalConsoleOverlay(
@@ -92,24 +87,15 @@ fun GlobalConsoleOverlay(
     var selectedTagFilter by remember { mutableStateOf("ВСЕ") }
     var autoScrollEnabled by remember { mutableStateOf(true) }
 
-    val tags = listOf("ВСЕ", "UI_ACTION", "UI_DIALOG", "CALCULATION", "ROOM_QUERY", "VOSK_STREAM", "GEMINI", "ERROR")
+    val tags = listOf("ВСЕ", "UI", "STATE", "ROOM", "NETWORK", "VOSK", "GEMINI", "ERROR")
 
     val filteredLogs = remember(logs, selectedTagFilter) {
         if (selectedTagFilter == "ВСЕ") {
             logs
         } else if (selectedTagFilter == "ERROR") {
-            logs.filter {
-                it.level == LogLevel.ERROR ||
-                it.tag.contains("ERROR", ignoreCase = true) ||
-                it.tag.contains("CRASH", ignoreCase = true) ||
-                it.message.contains("[ERROR]", ignoreCase = true)
-            }
+            logs.filter { it.level == LogLevel.ERROR || it.tag.contains("ERROR", ignoreCase = true) || it.tag.contains("CRASH", ignoreCase = true) }
         } else {
-            logs.filter {
-                it.tag.contains(selectedTagFilter, ignoreCase = true) ||
-                it.message.contains("[$selectedTagFilter]", ignoreCase = true) ||
-                it.message.contains(selectedTagFilter, ignoreCase = true)
-            }
+            logs.filter { it.tag.equals(selectedTagFilter, ignoreCase = true) || it.tag.contains(selectedTagFilter, ignoreCase = true) }
         }
     }
 
@@ -129,7 +115,6 @@ fun GlobalConsoleOverlay(
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .zIndex(Float.MAX_VALUE)
                 .background(Color.Black.copy(alpha = 0.75f))
                 .padding(top = 36.dp, bottom = 16.dp, start = 12.dp, end = 12.dp),
             contentAlignment = Alignment.Center
@@ -208,7 +193,7 @@ fun GlobalConsoleOverlay(
                                         if (isSelected) {
                                             when (tag) {
                                                 "ERROR" -> Rose500.copy(alpha = 0.3f)
-                                                "VOSK_STREAM" -> Emerald400.copy(alpha = 0.3f)
+                                                "VOSK" -> Emerald400.copy(alpha = 0.3f)
                                                 "GEMINI" -> Indigo500.copy(alpha = 0.3f)
                                                 else -> Slate700
                                             }
@@ -219,7 +204,7 @@ fun GlobalConsoleOverlay(
                                         if (isSelected) {
                                             when (tag) {
                                                 "ERROR" -> Rose500
-                                                "VOSK_STREAM" -> Emerald400
+                                                "VOSK" -> Emerald400
                                                 "GEMINI" -> Indigo500
                                                 else -> Emerald400
                                             }
@@ -227,11 +212,11 @@ fun GlobalConsoleOverlay(
                                         RoundedCornerShape(8.dp)
                                     )
                                     .clickable { selectedTagFilter = tag }
-                                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
                             ) {
                                 Text(
                                     text = tag,
-                                    fontSize = 10.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                     fontFamily = FontFamily.Monospace,
                                     color = if (isSelected) Color.White else Slate400
@@ -438,54 +423,21 @@ fun DebugConsoleFloatingButton(
 ) {
     if (!BuildConfig.DEBUG) return
 
-    var offsetX by remember { mutableStateOf(0f) }
-    var offsetY by remember { mutableStateOf(0f) }
-
-    Popup(
-        alignment = Alignment.BottomEnd,
-        properties = PopupProperties(
-            focusable = false,
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false
-        )
+    Box(
+        modifier = modifier
+            .size(42.dp)
+            .shadow(8.dp, CircleShape, spotColor = Emerald400)
+            .clip(CircleShape)
+            .background(DarkBg)
+            .border(1.5.dp, Emerald400, CircleShape)
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = modifier
-                .zIndex(Float.MAX_VALUE)
-                .padding(bottom = 80.dp, end = 16.dp)
-                .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-                .pointerInput(Unit) {
-                    var totalDragDistance = 0f
-                    detectDragGestures(
-                        onDragStart = { totalDragDistance = 0f },
-                        onDragEnd = {
-                            if (totalDragDistance < 12f) {
-                                onClick()
-                            }
-                        },
-                        onDragCancel = { },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            totalDragDistance += dragAmount.getDistance()
-                            offsetX += dragAmount.x
-                            offsetY += dragAmount.y
-                        }
-                    )
-                }
-                .size(48.dp)
-                .shadow(10.dp, CircleShape, spotColor = Emerald400)
-                .clip(CircleShape)
-                .background(DarkBg)
-                .border(1.5.dp, Emerald400, CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.BugReport,
-                contentDescription = "Debug Console Trigger",
-                tint = Emerald400,
-                modifier = Modifier.size(24.dp)
-            )
-        }
+        Icon(
+            imageVector = Icons.Default.BugReport,
+            contentDescription = "Console",
+            tint = Emerald400,
+            modifier = Modifier.size(22.dp)
+        )
     }
 }
-
