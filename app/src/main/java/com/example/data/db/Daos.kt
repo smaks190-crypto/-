@@ -137,6 +137,12 @@ interface AccountDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAccounts(accounts: List<AccountEntity>)
 
+    @Query("SELECT * FROM accounts")
+    fun getAllAccounts(): Flow<List<AccountEntity>>
+
+    @Query("DELETE FROM accounts")
+    suspend fun deleteAllAccounts()
+
     @Query("DELETE FROM accounts WHERE id = :id")
     suspend fun deleteAccountById(id: String)
 
@@ -160,6 +166,9 @@ interface NotificationDao {
 
     @Query("DELETE FROM notifications WHERE budgetId = :budgetId")
     suspend fun deleteNotificationsByBudgetId(budgetId: String)
+
+    @Query("DELETE FROM notifications")
+    suspend fun deleteAllNotifications()
 }
 
 

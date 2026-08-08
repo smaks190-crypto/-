@@ -35,7 +35,8 @@ import java.util.Locale
 data class BudgetBackup(
     val transactions: List<TransactionEntity>? = emptyList(),
     val goals: List<GoalEntity>? = emptyList(),
-    val categories: List<CategoryEntity>? = emptyList()
+    val categories: List<CategoryEntity>? = emptyList(),
+    val accounts: List<AccountEntity>? = emptyList()
 )
 
 class BudgetRepository(
@@ -527,6 +528,7 @@ class BudgetRepository(
     val allTransactions: Flow<List<TransactionEntity>> = transactionDao.getAllTransactions()
     val allGoals: Flow<List<GoalEntity>> = goalDao.getAllGoals()
     val allCategories: Flow<List<CategoryEntity>> = categoryDao.getAllCategories()
+    val allAccounts: Flow<List<AccountEntity>> = accountDao.getAllAccounts()
 
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val backupAdapter = moshi.adapter(BudgetBackup::class.java)
@@ -538,7 +540,8 @@ class BudgetRepository(
             val txs = allTransactions.first()
             val goals = allGoals.first()
             val cats = allCategories.first()
-            val backup = BudgetBackup(txs, goals, cats)
+            val accs = allAccounts.first()
+            val backup = BudgetBackup(txs, goals, cats, accs)
             val json = backupAdapter.toJson(backup)
             storageFile.writeText(json)
         } catch (_: Exception) {}
@@ -571,6 +574,8 @@ class BudgetRepository(
         categoryDao.deleteAllCategories()
         aiAuditDao.deleteAllAudits()
         budgetProfileDao.deleteAllProfiles()
+        accountDao.deleteAllAccounts()
+        notificationDao.deleteAllNotifications()
         if (storageFile.exists()) {
             try { storageFile.delete() } catch (_: Exception) {}
         }
@@ -697,7 +702,8 @@ class BudgetRepository(
         val txs = allTransactions.first()
         val goals = allGoals.first()
         val cats = allCategories.first()
-        val backup = BudgetBackup(txs, goals, cats)
+        val accs = allAccounts.first()
+        val backup = BudgetBackup(txs, goals, cats, accs)
         val json = backupAdapter.toJson(backup)
         try {
             storageFile.writeText(json)
@@ -709,7 +715,8 @@ class BudgetRepository(
         val txs = transactionDao.getTransactionsByBudgetId(budgetId).first()
         val goals = goalDao.getGoalsByBudgetId(budgetId).first()
         val cats = categoryDao.getCategoriesByBudgetId(budgetId).first()
-        val backup = BudgetBackup(txs, goals, cats)
+        val accs = accountDao.getAccountsByBudgetId(budgetId).first()
+        val backup = BudgetBackup(txs, goals, cats, accs)
         val json = backupAdapter.toJson(backup)
         try {
             val file = java.io.File(context.filesDir, "budget_${budgetId}.json")
@@ -729,17 +736,34 @@ class BudgetRepository(
             val rawTxs = backup.transactions ?: emptyList()
             val rawGoals = backup.goals ?: emptyList()
             val rawCats = backup.categories ?: emptyList()
+            val rawAccs = backup.accounts ?: emptyList()
 
-            val txs = rawTxs.map { it.copy(id = java.util.UUID.randomUUID().toString(), budgetId = newBudgetId) }
+            // Map old account IDs to new UUIDs to prevent collision and preserve foreign key relationships in transactions
+            val accountIdMap = mutableMapOf<String, String>()
+            val accs = rawAccs.map { oldAcc ->
+                val newId = java.util.UUID.randomUUID().toString()
+                accountIdMap[oldAcc.id] = newId
+                oldAcc.copy(id = newId, budgetId = newBudgetId)
+            }
+
+            val txs = rawTxs.map { oldTx ->
+                val mappedAccountId = oldTx.accountId?.let { accountIdMap[it] } ?: oldTx.accountId
+                oldTx.copy(
+                    id = java.util.UUID.randomUUID().toString(),
+                    budgetId = newBudgetId,
+                    accountId = mappedAccountId
+                )
+            }
             val goals = rawGoals.map { it.copy(id = java.util.UUID.randomUUID().toString(), budgetId = newBudgetId) }
             val cats = rawCats.map { it.copy(id = java.util.UUID.randomUUID().toString(), budgetId = newBudgetId) }
 
+            if (accs.isNotEmpty()) accountDao.insertAccounts(accs)
             if (txs.isNotEmpty()) transactionDao.insertTransactions(txs)
             if (goals.isNotEmpty()) goalDao.insertGoals(goals)
             if (cats.isNotEmpty()) categoryDao.insertCategories(cats)
 
             val file = java.io.File(context.filesDir, "budget_${newBudgetId}.json")
-            val updatedBackup = BudgetBackup(txs, goals, cats)
+            val updatedBackup = BudgetBackup(txs, goals, cats, accs)
             file.writeText(backupAdapter.toJson(updatedBackup))
             profile
         } catch (e: Exception) {
@@ -757,16 +781,19 @@ class BudgetRepository(
             val rawTxs = backup.transactions ?: emptyList()
             val rawGoals = backup.goals ?: emptyList()
             val rawCats = backup.categories ?: emptyList()
+            val rawAccs = backup.accounts ?: emptyList()
 
+            val accs = rawAccs.map { if (it.budgetId.isBlank()) it.copy(budgetId = bId) else it }
             val txs = rawTxs.map { if (it.budgetId.isBlank()) it.copy(budgetId = bId) else it }
             val goals = rawGoals.map { if (it.budgetId.isBlank()) it.copy(budgetId = bId) else it }
             val cats = rawCats.map { if (it.budgetId.isBlank()) it.copy(budgetId = bId) else it }
 
+            if (accs.isNotEmpty()) accountDao.insertAccounts(accs)
             if (txs.isNotEmpty()) transactionDao.insertTransactions(txs)
             if (goals.isNotEmpty()) goalDao.insertGoals(goals)
             if (cats.isNotEmpty()) categoryDao.insertCategories(cats)
 
-            val updatedBackup = BudgetBackup(txs, goals, cats)
+            val updatedBackup = BudgetBackup(txs, goals, cats, accs)
             val updatedJson = backupAdapter.toJson(updatedBackup)
             storageFile.writeText(updatedJson)
             true
