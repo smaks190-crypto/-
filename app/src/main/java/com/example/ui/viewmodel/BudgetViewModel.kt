@@ -145,7 +145,23 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         _manualText.value = ""
         _voiceErrorMessage.value = null
         voiceInputManager.onErrorCallback = { cancelVoiceRecording() }
+        voiceInputManager.onHotwordDetected = { initialPhrase ->
+            _voiceStartTime = System.currentTimeMillis()
+            _isVoiceActive.value = true
+            _manualText.value = ""
+            _voiceErrorMessage.value = null
+        }
         voiceInputManager.startListening(context)
+    }
+
+    fun startHotwordDetection(context: Context) {
+        voiceInputManager.onHotwordDetected = { initialPhrase ->
+            _voiceStartTime = System.currentTimeMillis()
+            _isVoiceActive.value = true
+            _manualText.value = ""
+            _voiceErrorMessage.value = null
+        }
+        voiceInputManager.startHotwordListening(context)
     }
 
     fun stopVoiceRecordingAndProcess() {
