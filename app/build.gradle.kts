@@ -163,4 +163,7 @@ dependencies {
 
   // Автоматический парсинг Markdown для Jetpack Compose
   implementation("com.github.jeziellago:compose-markdown:0.5.0")
+  
+  // Локальное офлайн-распознавание речи VOSK
+  implementation("com.alphacephei:vosk-android:0.3.47")
 }

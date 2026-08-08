@@ -35,13 +35,9 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -67,11 +63,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.Canvas
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -94,9 +85,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Check
@@ -237,6 +225,8 @@ fun VoiceRecordingOverlay(
     val partialText by voiceManager.partialText.collectAsState()
     val rmsDb by voiceManager.rmsDb.collectAsState()
     val voiceErrorState by voiceManager.errorState.collectAsState()
+    val voskStatus by voiceManager.voskStatus.collectAsState()
+    val voskProgress by voiceManager.voskProgress.collectAsState()
 
     val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
     val voiceErrorMessage by viewModel.voiceErrorMessage.collectAsState()
@@ -579,8 +569,8 @@ fun VoiceRecordingOverlay(
     }
     val fabTestTag = when {
         !showAsExpanded -> "fab_add_button"
-        showManualInput -> "dismiss_manual_input_button"
-        isEditingOperations -> "dismiss_voice_operations_button"
+        showManualInput -> "close_manual_input_fab"
+        isEditingOperations -> "close_voice_operations_fab"
         else -> "unified_fab"
     }
 
@@ -766,38 +756,15 @@ val neonColor1 = getGradientColor(progress)
         }
 
 
-    Column(
+    Box(
         modifier = modifier
             .padding(bottom = boxBottomPadding, end = boxEndPadding),
-        horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.Bottom
+        contentAlignment = Alignment.BottomEnd
     ) {
-        AnimatedVisibility(
-            visible = isVoiceActive && (activeText.isNotBlank() || isListening || isAnalyzingVoice),
-            enter = slideInVertically(initialOffsetY = { it / 2 }) + expandVertically() + fadeIn(),
-            exit = slideOutVertically(targetOffsetY = { it / 2 }) + shrinkVertically() + fadeOut(),
-            modifier = Modifier
-                .width(cardWidthAnim.value.dp)
-                .padding(bottom = 12.dp)
-        ) {
-            SpeechRecognitionPopupCard(
-                activeText = activeText,
-                isListening = isListening,
-                isAnalyzingVoice = isAnalyzingVoice,
-                rmsDb = rmsDb,
-                categories = categories,
-                dynamicGradient = dynamicGradient
-            )
-        }
-
         Box(
-            modifier = Modifier,
-            contentAlignment = Alignment.BottomEnd
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(cardWidthAnim.value.dp)
-                    .height(cardHeightAnim.value.dp)
+            modifier = Modifier
+                                .width(cardWidthAnim.value.dp)
+                .height(cardHeightAnim.value.dp)
                 .shadow(
                     elevation = if (showAsExpanded) (24 * borderAlpha).dp else 24.dp,
                     shape = RoundedCornerShape(28.dp),
@@ -917,8 +884,7 @@ val neonColor1 = getGradientColor(progress)
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(top = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Button(
                                         onClick = {
@@ -956,7 +922,8 @@ val neonColor1 = getGradientColor(progress)
                                         )
                                     }
 
-                                    Spacer(modifier = Modifier.width(56.dp))
+                                    Spacer(modifier = Modifier.width(28.dp))
+                                    Spacer(modifier = Modifier.size(56.dp))
                                 }
                             }
                         }
@@ -1117,8 +1084,7 @@ val neonColor1 = getGradientColor(progress)
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(top = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Button(
                                         onClick = {
@@ -1152,22 +1118,8 @@ val neonColor1 = getGradientColor(progress)
                                         Text("Сохранить ключ", color = DarkBg, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                     }
 
-                                    IconButton(
-                                        onClick = {
-                                            showApiKeyRequested = false
-                                        },
-                                        modifier = Modifier
-                                            .size(56.dp)
-                                            .background(Color(0xFF1E293B), CircleShape)
-                                            .border(1.dp, Slate700, CircleShape)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Close,
-                                            contentDescription = "Закрыть",
-                                            tint = Rose500,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
+                                    Spacer(modifier = Modifier.width(28.dp))
+                                    Spacer(modifier = Modifier.size(56.dp))
                                 }
                             }
                         }
@@ -1510,9 +1462,8 @@ val neonColor1 = getGradientColor(progress)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 8.dp, end = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                .padding(top = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Button(
                                 onClick = {
@@ -1554,21 +1505,8 @@ val neonColor1 = getGradientColor(progress)
                                 Text("Сохранить", color = currentContentColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                             }
 
-                            IconButton(
-                                onClick = { handleDismissManualInput() },
-                                modifier = Modifier
-                                    .size(56.dp)
-                                    .background(Color(0xFF1E293B), CircleShape)
-                                    .border(1.dp, Slate700, CircleShape)
-                                    .testTag("dismiss_manual_input_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Закрыть",
-                                    tint = Rose500,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
+                            Spacer(modifier = Modifier.width(28.dp))
+                            Spacer(modifier = Modifier.size(56.dp))
                         }
                     }
                 }
@@ -1645,7 +1583,7 @@ val neonColor1 = getGradientColor(progress)
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 16.dp, end = 16.dp),
+                                    .padding(top = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
@@ -1670,21 +1608,8 @@ val neonColor1 = getGradientColor(progress)
                                     Text("Сохранить", color = Emerald400, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                 }
 
-                                IconButton(
-                                    onClick = { handleDismissVoiceOperations() },
-                                    modifier = Modifier
-                                        .size(56.dp)
-                                        .background(Color(0xFF1E293B), CircleShape)
-                                        .border(1.dp, Slate700, CircleShape)
-                                        .testTag("dismiss_voice_operations_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Закрыть",
-                                        tint = Rose500,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
+                                Spacer(modifier = Modifier.width(28.dp))
+                            Spacer(modifier = Modifier.size(56.dp))
                             }
 
                         } else {
@@ -1735,7 +1660,7 @@ val neonColor1 = getGradientColor(progress)
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 16.dp, end = 16.dp),
+                                    .padding(top = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
@@ -1752,104 +1677,99 @@ val neonColor1 = getGradientColor(progress)
                                     Text("Готово", color = Emerald400, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                                 }
 
-                                IconButton(
-                                    onClick = { editingIndex = null },
-                                    modifier = Modifier
-                                        .size(56.dp)
-                                        .background(Color(0xFF1E293B), CircleShape)
-                                        .border(1.dp, Slate700, CircleShape)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Закрыть",
-                                        tint = Rose500,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                            }
+                                Spacer(modifier = Modifier.width(28.dp))
+                            Spacer(modifier = Modifier.size(56.dp))
+                        }
                     }
                 }
                         }
                         OverlayState.COLLAPSED -> {
                             // Unified Voice Recording / Idle FAB Capsule
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(56.dp),
-                                contentAlignment = Alignment.Center
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                AnimatedVisibility(
+                    visible = isVoiceActive,
+                    enter = fadeIn(animationSpec = tween(250, easing = FastOutSlowInEasing)) + slideInHorizontally(animationSpec = tween(250)) { -it / 4 },
+                    exit = fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing)) + slideOutHorizontally(animationSpec = tween(150)) { -it / 4 },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(end = 56.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .clickable { viewModel.stopVoiceRecordingAndProcess() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isAnalyzingVoice) {
+                            Row(
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                androidx.compose.animation.AnimatedVisibility(
-                                    visible = isVoiceActive,
-                                    enter = fadeIn(animationSpec = tween(250, easing = FastOutSlowInEasing)) + slideInHorizontally(animationSpec = tween(250)) { -it / 4 },
-                                    exit = fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing)) + slideOutHorizontally(animationSpec = tween(150)) { -it / 4 },
-                                    modifier = Modifier.fillMaxWidth()
+                                CircularProgressIndicator(
+                                    color = Indigo500,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Анализ ИИ...",
+                                    color = Indigo500,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(56.dp)
-                                            .clickable { viewModel.stopVoiceRecordingAndProcess() },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        if (isAnalyzingVoice) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(start = 16.dp, end = 56.dp),
-                                                horizontalArrangement = Arrangement.Center,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                CircularProgressIndicator(
-                                                    color = Indigo500,
-                                                    strokeWidth = 2.dp,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Text(
-                                                    text = "Анализ ИИ...",
-                                                    color = Indigo500,
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        } else {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(start = 16.dp, end = 56.dp),
-                                                horizontalArrangement = Arrangement.Center,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                if (isRecordingLocked) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Lock,
-                                                        contentDescription = "Зафиксировано",
-                                                        tint = Rose500,
-                                                        modifier = Modifier.size(14.dp)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                } else {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(10.dp)
-                                                            .graphicsLayer {
-                                                                scaleX = pulseScale
-                                                                scaleY = pulseScale
-                                                            }
-                                                            .clip(CircleShape)
-                                                            .background(Rose500)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                }
-                                                Text(
-                                                    text = "Слушаю...",
-                                                    color = Rose500,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        }
+                                    if (isRecordingLocked) {
+                                        Icon(
+                                            imageVector = Icons.Default.Lock,
+                                            contentDescription = "Зафиксировано",
+                                            tint = Rose500,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
                                     }
+                                    val statusText = when (voskStatus) {
+                                        "DOWNLOADING" -> {
+                                            val pct = (voskProgress?.let { (it * 100).toInt() } ?: 0)
+                                            "Скачивание офлайн-модели ($pct%)"
+                                        }
+                                        "EXTRACTING" -> "Настройка модели..."
+                                        else -> "Слушаю..."
+                                    }
+                                    Text(
+                                        text = statusText,
+                                        color = if (voskStatus == "DOWNLOADING" || voskStatus == "EXTRACTING") Emerald400 else Rose500,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
+                                }
+
+                                if (activeText.isNotBlank()) {
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "«$activeText»",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
                         }
@@ -1857,128 +1777,79 @@ val neonColor1 = getGradientColor(progress)
                 }
             }
         }
+    }
 
-        if (!showAsExpanded) {
-            FABContainer(
-                modifier = Modifier.padding(bottom = fabPaddingBottom, end = fabPaddingEnd),
-                fabIcon = fabIcon,
-                fabIconRotation = fabRotationAngle,
-                fabTint = fabTint,
-                fabContentDescription = fabContentDescription,
-                surfaceColor = surfaceColor,
-                isClickable = isConsentNeeded || isApiKeyNeeded || showManualInput || isEditingOperations || isVoiceActive
-            )
-        }
+        // Single Unified FAB Button
+        Box(
+            modifier = Modifier,
+            contentAlignment = Alignment.Center
+        ) {
+            Spacer(modifier = Modifier.size(56.dp))
         }
     }
 }
+                    FABContainer(
+                        modifier = Modifier.padding(bottom = fabPaddingBottom, end = fabPaddingEnd),
+                        fabIcon = fabIcon,
+                        fabIconRotation = fabRotationAngle,
+                        fabTint = fabTint,
+                        fabContentDescription = fabContentDescription,
+                        surfaceColor = surfaceColor,
+                        isClickable = isConsentNeeded || isApiKeyNeeded || showManualInput || isEditingOperations || isVoiceActive
+                    )
+                }
+            }
+        }
 
 @Composable
 private fun NeonWaveVisualizer(
     rmsDb: Float,
-    isListening: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val animatedRmsDb by animateFloatAsState(
-        targetValue = if (isListening) rmsDb.coerceIn(0.05f, 1.0f) else 0f,
-        animationSpec = tween(durationMillis = 100, easing = LinearEasing),
+        targetValue = rmsDb,
+        animationSpec = tween(durationMillis = 120, easing = LinearEasing),
         label = "animatedRmsDb"
     )
 
-    val transition = rememberInfiniteTransition(label = "canvasWaveform")
+    val transition = rememberInfiniteTransition(label = "spectrometerWaves")
     val phase by transition.animateFloat(
         initialValue = 0f,
-        targetValue = 6.28318f,
+        targetValue = 6.28f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = LinearEasing),
+            animation = tween(1000, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "phase"
     )
 
-    val barCount = 17
-    val centerIndex = (barCount - 1) / 2f
-
-    Canvas(
-        modifier = modifier
-            .width(110.dp)
-            .height(28.dp)
+    Row(
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier.height(30.dp)
     ) {
-        val width = size.width
-        val height = size.height
-        val centerY = height / 2f
-        val barWidth = 3.5.dp.toPx()
-        val barSpacing = (width - (barCount * barWidth)) / (barCount - 1)
-
-        if (isListening && animatedRmsDb > 0.02f) {
-            val wavePath = Path()
-            var firstPoint = true
-
-            for (i in 0 until barCount) {
-                val x = i * (barWidth + barSpacing) + barWidth / 2f
-                val distFromCenter = kotlin.math.abs(i - centerIndex) / centerIndex
-                val factor = (1.0f - distFromCenter * 0.45f).coerceIn(0.2f, 1.0f)
-
-                val sinVal1 = kotlin.math.sin(phase + i * 0.45f).toFloat()
-                val sinVal2 = kotlin.math.cos(phase * 1.5f + i * 0.3f).toFloat()
-                val combinedWave = (sinVal1 * 0.6f + sinVal2 * 0.4f)
-
-                val barHeight = (6.dp.toPx() + (animatedRmsDb * (height * 0.75f) * factor * (0.6f + combinedWave * 0.4f)))
-                    .coerceIn(4.dp.toPx(), height)
-
-                val top = centerY - barHeight / 2f
-                val left = x - barWidth / 2f
-
-                val barColor = if (i % 2 == 0) Emerald400 else Indigo500
-
-                drawRoundRect(
-                    color = barColor,
-                    topLeft = Offset(left, top),
-                    size = Size(barWidth, barHeight),
-                    cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
-                )
-
-                val waveY = centerY + sinVal1 * (animatedRmsDb * 8.dp.toPx() * factor)
-                if (firstPoint) {
-                    wavePath.moveTo(x, waveY)
-                    firstPoint = false
-                } else {
-                    wavePath.lineTo(x, waveY)
-                }
-            }
-
-            drawPath(
-                path = wavePath,
-                color = Emerald400.copy(alpha = 0.35f),
-                style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round)
-            )
-        } else {
-            val mutedPath = Path()
-            val pointCount = 20
-            val step = width / (pointCount - 1)
-
-            for (i in 0 until pointCount) {
-                val x = i * step
-                val waveY = centerY + kotlin.math.sin(phase * 0.8f + i * 0.35f).toFloat() * 1.8.dp.toPx()
-                if (i == 0) {
-                    mutedPath.moveTo(x, waveY)
-                } else {
-                    mutedPath.lineTo(x, waveY)
-                }
-            }
-
-            val mutedColor = if (!isListening) Rose500.copy(alpha = 0.5f) else Slate400.copy(alpha = 0.3f)
-
-            drawPath(
-                path = mutedPath,
-                color = mutedColor,
-                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+        val totalBars = 15
+        val centerIndex = 7
+        repeat(totalBars) { index ->
+            val distFromCenter = kotlin.math.abs(index - centerIndex)
+            val symIndex = centerIndex - distFromCenter
+            val sinVal = Math.sin((phase + symIndex * 0.5f).toDouble()).toFloat()
+            val baseHeight = 4f + ((sinVal + 1f) * 5f)
+            val dynamicHeight = (baseHeight + (animatedRmsDb * 16f * (1.0f - distFromCenter * 0.07f))).coerceIn(4f, 26f)
+            val animatedHeight by animateFloatAsState(
+                targetValue = dynamicHeight,
+                animationSpec = tween(durationMillis = 120),
+                label = "barHeight_$index"
             )
 
-            drawCircle(
-                color = mutedColor,
-                radius = 2.5.dp.toPx(),
-                center = Offset(width / 2f, centerY)
+            val barColor = if (distFromCenter % 2 == 0) Emerald400 else Indigo500
+
+            Box(
+                modifier = Modifier
+                    .width(3.5.dp)
+                    .height(animatedHeight.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(barColor)
             )
         }
     }
@@ -2219,316 +2090,6 @@ fun FullParsedOperationFormCard(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("Удалить операцию", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
-        }
-    }
-}
-
-data class StructuredKeyFields(
-    val title: String? = null,
-    val amount: String? = null,
-    val date: String? = null,
-    val category: String? = null
-)
-
-fun parseSpokenTextToKeyFields(rawText: String, categories: List<CategoryEntity>): StructuredKeyFields {
-    if (rawText.isBlank()) return StructuredKeyFields()
-
-    val lowerText = rawText.lowercase(Locale.getDefault())
-
-    // 1. EXTRACT DATE
-    var dateField: String? = null
-    var cleanedForDate = lowerText
-    when {
-        lowerText.contains("сегодня") -> {
-            dateField = "Сегодня"
-            cleanedForDate = cleanedForDate.replace("сегодня", "")
-        }
-        lowerText.contains("позавчера") -> {
-            dateField = "Позавчера"
-            cleanedForDate = cleanedForDate.replace("позавчера", "")
-        }
-        lowerText.contains("вчера") -> {
-            dateField = "Вчера"
-            cleanedForDate = cleanedForDate.replace("вчера", "")
-        }
-        lowerText.contains("понедельник") -> { dateField = "Пн"; cleanedForDate = cleanedForDate.replace("понедельник", "") }
-        lowerText.contains("вторник") -> { dateField = "Вт"; cleanedForDate = cleanedForDate.replace("вторник", "") }
-        lowerText.contains("среду") || lowerText.contains("среда") -> { dateField = "Ср"; cleanedForDate = cleanedForDate.replace(Regex("сред[уа]"), "") }
-        lowerText.contains("четверг") -> { dateField = "Чт"; cleanedForDate = cleanedForDate.replace("четверг", "") }
-        lowerText.contains("пятницу") || lowerText.contains("пятница") -> { dateField = "Пт"; cleanedForDate = cleanedForDate.replace(Regex("пятниц[уа]"), "") }
-        lowerText.contains("субботу") || lowerText.contains("суббота") -> { dateField = "Сб"; cleanedForDate = cleanedForDate.replace(Regex("суббот[уа]"), "") }
-        lowerText.contains("воскресенье") -> { dateField = "Вс"; cleanedForDate = cleanedForDate.replace("воскресенье", "") }
-    }
-
-    // 2. EXTRACT AMOUNT
-    var amountField: String? = null
-    var cleanedForAmount = cleanedForDate
-
-    val digitRegex = Regex("""(\d+[\d\s]*([.,]\d+)?)""")
-    val matchDigits = digitRegex.find(cleanedForAmount)
-
-    if (matchDigits != null) {
-        val numStr = matchDigits.value.replace(" ", "").replace(",", ".")
-        val parsedNum = numStr.toDoubleOrNull()
-        if (parsedNum != null && parsedNum > 0) {
-            val formatted = if (parsedNum % 1.0 == 0.0) {
-                String.format(Locale.US, "%,.0f", parsedNum).replace(",", " ")
-            } else {
-                String.format(Locale.US, "%,.2f", parsedNum).replace(",", " ")
-            }
-            amountField = "$formatted ₽"
-            cleanedForAmount = cleanedForAmount.replace(matchDigits.value, "")
-        }
-    } else {
-        var wordAmount = 0.0
-        val numberWords = mapOf(
-            "один" to 1, "одна" to 1, "два" to 2, "две" to 2, "три" to 3, "четыре" to 4, "пять" to 5,
-            "шесть" to 6, "семь" to 7, "восемь" to 8, "девять" to 9, "десять" to 10,
-            "одиннадцать" to 11, "двенадцать" to 12, "тринадцать" to 13, "четырнадцать" to 14, "пятнадцать" to 15,
-            "двадцать" to 20, "тридцать" to 30, "сорок" to 40, "пятьдесят" to 50, "шестьдесят" to 60,
-            "семьдесят" to 70, "восемьдесят" to 80, "девяносто" to 90,
-            "сто" to 100, "двести" to 200, "триста" to 300, "четыреста" to 400, "пятьсот" to 500,
-            "шестьсот" to 600, "семьсот" to 700, "восемьсот" to 800, "девятьсот" to 900,
-            "тысяча" to 1000, "тысячи" to 1000, "тысяч" to 1000, "тыс" to 1000
-        )
-        for (w in cleanedForAmount.split("\\s+".toRegex())) {
-            val cleanW = w.trim().lowercase(Locale.getDefault())
-            if (numberWords.containsKey(cleanW)) {
-                val valNum = numberWords[cleanW] ?: 0
-                if (valNum == 1000 && wordAmount > 0) {
-                    wordAmount *= 1000
-                } else {
-                    wordAmount += valNum
-                }
-                cleanedForAmount = cleanedForAmount.replace(cleanW, "")
-            }
-        }
-        if (wordAmount > 0) {
-            val formatted = String.format(Locale.US, "%,.0f", wordAmount).replace(",", " ")
-            amountField = "$formatted ₽"
-        }
-    }
-
-    // 3. EXTRACT CATEGORY
-    var categoryField: String? = null
-    val categoryKeywords = mapOf(
-        "такси" to "Транспорт", "яндекс" to "Транспорт", "метро" to "Транспорт", "автобус" to "Транспорт",
-        "бензин" to "Транспорт", "заправка" to "Транспорт", "проезд" to "Транспорт",
-        "пятерочка" to "Продукты", "пятёрочка" to "Продукты", "магнит" to "Продукты", "перекресток" to "Продукты",
-        "продукты" to "Продукты", "еда" to "Продукты", "хлеб" to "Продукты", "молоко" to "Продукты", "супермаркет" to "Продукты",
-        "кафе" to "Развлечения", "ресторан" to "Развлечения", "кино" to "Развлечения", "бар" to "Развлечения", "игра" to "Развлечения",
-        "зарплата" to "Зарплата", "аванс" to "Зарплата", "премия" to "Зарплата", "оклад" to "Зарплата",
-        "аренда" to "Обязательные", "жкх" to "Обязательные", "свет" to "Обязательные", "газ" to "Обязательные", "интернет" to "Обязательные", "кредит" to "Обязательные"
-    )
-
-    for ((kw, catName) in categoryKeywords) {
-        if (lowerText.contains(kw)) {
-            categoryField = categories.firstOrNull { it.name.contains(catName, ignoreCase = true) }?.name ?: catName
-            break
-        }
-    }
-
-    // 4. EXTRACT TITLE / DESCRIPTION
-    val fillerWords = listOf(
-        "эээ", "ээ", "эм", "ммм", "добавь", "добавить", "пожалуйста", "запиши", "записать",
-        "потратил", "потратила", "потрачено", "купил", "купила", "оплатил", "оплатила",
-        "рублей", "рубля", "руб", "рублях", "тысяч", "тысячи", "тыс", "р",
-        "сегодня", "вчера", "позавчера", "на", "в", "за", "и", "для"
-    )
-
-    var cleanedTitle = cleanedForAmount
-    for (filler in fillerWords) {
-        cleanedTitle = cleanedTitle.replace(Regex("\\b$filler\\b", RegexOption.IGNORE_CASE), "")
-    }
-    cleanedTitle = cleanedTitle.replace(Regex("[^a-zA-Zа-яА-Я0-9\\s]"), "").trim()
-    cleanedTitle = cleanedTitle.replace(Regex("\\s+"), " ")
-
-    val titleField = if (cleanedTitle.length >= 2) {
-        cleanedTitle.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
-    } else null
-
-    return StructuredKeyFields(
-        title = titleField,
-        amount = amountField,
-        date = dateField,
-        category = categoryField
-    )
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun SpeechRecognitionPopupCard(
-    activeText: String,
-    isListening: Boolean,
-    isAnalyzingVoice: Boolean,
-    rmsDb: Float,
-    categories: List<CategoryEntity>,
-    dynamicGradient: Brush,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        color = Color(0xEE0F172A),
-        shape = RoundedCornerShape(20.dp),
-        border = BorderStroke(1.dp, dynamicGradient),
-        shadowElevation = 12.dp,
-        modifier = modifier.fillMaxWidth()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(if (isListening) Rose500.copy(alpha = 0.2f) else Slate800),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = null,
-                            tint = if (isListening) Rose500 else Slate400,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                    Text(
-                        text = when {
-                            isAnalyzingVoice -> "Анализ ИИ..."
-                            isListening -> "Распознавание речи"
-                            else -> "Микрофон выключен"
-                        },
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                NeonWaveVisualizer(rmsDb = rmsDb, isListening = isListening)
-            }
-
-            val parsedFields = remember(activeText, categories) {
-                parseSpokenTextToKeyFields(activeText, categories)
-            }
-
-            val hasAnyFields = parsedFields.title != null || parsedFields.amount != null ||
-                    parsedFields.date != null || parsedFields.category != null
-
-            if (hasAnyFields) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = parsedFields.title != null,
-                        enter = fadeIn() + scaleIn(),
-                        exit = fadeOut() + scaleOut()
-                    ) {
-                        parsedFields.title?.let { titleVal ->
-                            KeyFieldChip(
-                                icon = "🏷️",
-                                value = titleVal,
-                                chipColor = Indigo500
-                            )
-                        }
-                    }
-
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = parsedFields.amount != null,
-                        enter = fadeIn() + scaleIn(),
-                        exit = fadeOut() + scaleOut()
-                    ) {
-                        parsedFields.amount?.let { amountVal ->
-                            KeyFieldChip(
-                                icon = "💰",
-                                value = amountVal,
-                                chipColor = Emerald400
-                            )
-                        }
-                    }
-
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = parsedFields.date != null,
-                        enter = fadeIn() + scaleIn(),
-                        exit = fadeOut() + scaleOut()
-                    ) {
-                        parsedFields.date?.let { dateVal ->
-                            KeyFieldChip(
-                                icon = "📅",
-                                value = dateVal,
-                                chipColor = Color(0xFF38BDF8)
-                            )
-                        }
-                    }
-
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = parsedFields.category != null,
-                        enter = fadeIn() + scaleIn(),
-                        exit = fadeOut() + scaleOut()
-                    ) {
-                        parsedFields.category?.let { categoryVal ->
-                            KeyFieldChip(
-                                icon = "📁",
-                                value = categoryVal,
-                                chipColor = Rose500
-                            )
-                        }
-                    }
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Slate800.copy(alpha = 0.5f))
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = if (activeText.isBlank()) "Говорите: например, «Такси 500 рублей сегодня»" else "«$activeText»",
-                        color = Slate400,
-                        fontSize = 12.sp,
-                        fontStyle = if (activeText.isBlank()) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun KeyFieldChip(
-    icon: String,
-    value: String,
-    chipColor: Color
-) {
-    Surface(
-        color = chipColor.copy(alpha = 0.18f),
-        shape = RoundedCornerShape(12.dp),
-        border = BorderStroke(1.dp, chipColor.copy(alpha = 0.5f))
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Text(text = icon, fontSize = 12.sp)
-            Text(
-                text = value,
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
         }
     }
 }

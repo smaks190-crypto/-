@@ -139,32 +139,46 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     private val _manualText = MutableStateFlow("")
     val manualText: StateFlow<String> = _manualText.asStateFlow()
 
+    private var voiceCollectionJob: kotlinx.coroutines.Job? = null
+
     fun startVoiceRecording(context: Context) {
         _voiceStartTime = System.currentTimeMillis()
         _isVoiceActive.value = true
         _manualText.value = ""
         _voiceErrorMessage.value = null
         voiceInputManager.onErrorCallback = { cancelVoiceRecording() }
-        voiceInputManager.onHotwordDetected = { initialPhrase ->
-            _voiceStartTime = System.currentTimeMillis()
-            _isVoiceActive.value = true
-            _manualText.value = ""
-            _voiceErrorMessage.value = null
-        }
         voiceInputManager.startListening(context)
-    }
 
-    fun startHotwordDetection(context: Context) {
-        voiceInputManager.onHotwordDetected = { initialPhrase ->
-            _voiceStartTime = System.currentTimeMillis()
-            _isVoiceActive.value = true
-            _manualText.value = ""
-            _voiceErrorMessage.value = null
+        voiceCollectionJob?.cancel()
+        voiceCollectionJob = viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                voiceInputManager.recognizedText,
+                voiceInputManager.partialText
+            ) { recognized, partial ->
+                val combined = when {
+                    partial.isNotBlank() && recognized.isNotBlank() -> "$recognized $partial"
+                    partial.isNotBlank() -> partial
+                    else -> recognized
+                }
+                combined
+            }.collect { combinedText ->
+                if (combinedText.isNotBlank()) {
+                    val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
+                    val incCats = categories.value.filter { it.type == "income" }.map { it.name }
+                    val parsed = com.example.utils.VoiceParserHelper.parseHeuristically(
+                        text = combinedText,
+                        expenseCategories = expCats,
+                        incomeCategories = incCats
+                    )
+                    _parsedVoiceOperations.value = parsed.ifEmpty { null }
+                }
+            }
         }
-        voiceInputManager.startHotwordListening(context)
     }
 
     fun stopVoiceRecordingAndProcess() {
+        voiceCollectionJob?.cancel()
+        voiceCollectionJob = null
         voiceInputManager.stopListening()
         val textToProcess = when {
             _manualText.value.isNotBlank() -> _manualText.value
@@ -180,6 +194,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun cancelVoiceRecording() {
+        voiceCollectionJob?.cancel()
+        voiceCollectionJob = null
         voiceInputManager.stopListening()
         _isVoiceActive.value = false
         _voiceErrorMessage.value = null
