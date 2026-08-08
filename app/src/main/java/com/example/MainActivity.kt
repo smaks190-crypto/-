@@ -1128,14 +1128,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             )
 
             if (!showDebugConsole) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(bottom = 80.dp, end = 12.dp),
-                    contentAlignment = Alignment.BottomEnd
-                ) {
-                    com.example.ui.components.DebugConsoleFloatingButton(onClick = { showDebugConsole = true })
-                }
+                com.example.ui.components.DebugConsoleFloatingButton(onClick = { showDebugConsole = true })
             }
         }
 

@@ -147,7 +147,44 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         _manualText.value = ""
         _voiceErrorMessage.value = null
         voiceInputManager.onErrorCallback = { cancelVoiceRecording() }
+        voiceInputManager.onChunkRecognized = { chunkText ->
+            processContinuousVoiceChunk(chunkText)
+        }
         voiceInputManager.startListening(context)
+    }
+
+    fun processContinuousVoiceChunk(chunkText: String) {
+        val trimmed = chunkText.trim()
+        if (trimmed.isBlank() || !_isVoiceActive.value) return
+
+        viewModelScope.launch {
+            _isAnalyzingVoice.value = true
+            _voiceErrorMessage.value = null
+            try {
+                val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
+                val incCats = categories.value.filter { it.type == "income" }.map { it.name }
+
+                val result = repository.parseVoiceOperations(
+                    voiceText = trimmed,
+                    apiKey = _apiKey.value,
+                    expenseCategories = expCats,
+                    incomeCategories = incCats
+                )
+
+                if (result.isNotEmpty()) {
+                    val currentList = _parsedVoiceOperations.value ?: emptyList()
+                    val updatedList = currentList + result
+                    _parsedVoiceOperations.value = updatedList
+                    com.example.utils.GlobalConsoleLogger.i("UI", "Добавлены новые операции (${result.size} шт.). Всего: ${updatedList.size} шт.")
+                } else {
+                    com.example.utils.GlobalConsoleLogger.d("GEMINI", "В фрагменте «$trimmed» операции не найдены")
+                }
+            } catch (e: Exception) {
+                com.example.utils.GlobalConsoleLogger.e("GEMINI", "Ошибка при обработке фрагмента «$trimmed»: ${e.localizedMessage}", e)
+            } finally {
+                _isAnalyzingVoice.value = false
+            }
+        }
     }
 
     fun stopVoiceRecordingAndProcess() {

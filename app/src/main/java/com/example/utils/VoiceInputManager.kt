@@ -59,10 +59,13 @@ class VoiceInputManager(private val context: Context) {
     private var accumulatedText = ""
     private var isContinuous = false
     private var isPaused = false
+    @Volatile private var isProcessingAllowed = true
+    private var lastProcessedChunk = ""
 
     private var activeContextRef: java.lang.ref.WeakReference<Context>? = null
 
     var onErrorCallback: (() -> Unit)? = null
+    var onChunkRecognized: ((String) -> Unit)? = null
 
     private fun parsePartialHypothesis(json: String): String {
         return try {
@@ -82,6 +85,8 @@ class VoiceInputManager(private val context: Context) {
         activeContextRef = java.lang.ref.WeakReference(callerContext)
         isContinuous = true
         isPaused = false
+        isProcessingAllowed = true
+        lastProcessedChunk = ""
 
         accumulatedText = ""
         _recognizedText.value = ""
@@ -205,33 +210,39 @@ class VoiceInputManager(private val context: Context) {
 
             service.startListening(object : VoskRecognitionListener {
                 override fun onResult(hypothesis: String) {
-                    val text = parseResultHypothesis(hypothesis)
-                    if (text.isNotBlank()) {
+                    if (!isProcessingAllowed) return
+                    val text = parseResultHypothesis(hypothesis).trim()
+                    if (text.isNotBlank() && text != lastProcessedChunk) {
+                        lastProcessedChunk = text
                         GlobalConsoleLogger.d("VOSK", "Распознан фрагмент: «$text»")
-                        accumulatedText = if (accumulatedText.isBlank()) text else "$accumulatedText $text"
-                        _recognizedText.value = accumulatedText
+                        _recognizedText.value = text
                         _partialText.value = ""
+                        onChunkRecognized?.invoke(text)
                     }
                 }
 
                 override fun onPartialResult(hypothesis: String) {
-                    val partial = parsePartialHypothesis(hypothesis)
+                    if (!isProcessingAllowed) return
+                    val partial = parsePartialHypothesis(hypothesis).trim()
                     if (partial.isNotBlank()) {
                         _partialText.value = partial
                     }
                 }
 
                 override fun onFinalResult(hypothesis: String) {
-                    val text = parseResultHypothesis(hypothesis)
-                    if (text.isNotBlank()) {
+                    if (!isProcessingAllowed) return
+                    val text = parseResultHypothesis(hypothesis).trim()
+                    if (text.isNotBlank() && text != lastProcessedChunk) {
+                        lastProcessedChunk = text
                         GlobalConsoleLogger.i("VOSK", "Финальный результат VOSK: «$text»")
-                        accumulatedText = if (accumulatedText.isBlank()) text else "$accumulatedText $text"
-                        _recognizedText.value = accumulatedText
+                        _recognizedText.value = text
                         _partialText.value = ""
+                        onChunkRecognized?.invoke(text)
                     }
                 }
 
                 override fun onError(exception: Exception) {
+                    if (!isProcessingAllowed) return
                     GlobalConsoleLogger.e("VOSK", "Ошибка VOSK слушателя: ${exception.localizedMessage}", exception)
                     Log.e("VoiceInputManager", "Vosk listener error", exception)
                     _errorState.value = exception.localizedMessage
@@ -318,13 +329,15 @@ class VoiceInputManager(private val context: Context) {
                     }
 
                     override fun onResults(results: Bundle?) {
+                        if (!isProcessingAllowed) return
                         val matches = results?.getStringArrayList(SystemSpeechRecognizer.RESULTS_RECOGNITION)
                         if (!matches.isNullOrEmpty()) {
-                            val text = matches[0]
-                            if (text.isNotBlank()) {
-                                accumulatedText = if (accumulatedText.isBlank()) text else "$accumulatedText $text"
-                                _recognizedText.value = accumulatedText
+                            val text = matches[0].trim()
+                            if (text.isNotBlank() && text != lastProcessedChunk) {
+                                lastProcessedChunk = text
+                                _recognizedText.value = text
                                 _partialText.value = ""
+                                onChunkRecognized?.invoke(text)
                             }
                         }
 
@@ -372,6 +385,7 @@ class VoiceInputManager(private val context: Context) {
     }
 
     fun stopListening() {
+        isProcessingAllowed = false
         isContinuous = false
         isPaused = false
         stopRecognizerOnly()
