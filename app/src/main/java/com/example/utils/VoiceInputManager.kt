@@ -83,6 +83,7 @@ class VoiceInputManager(private val context: Context) {
 
     fun startListening(callerContext: Context) {
         GlobalConsoleLogger.i("VOICE", "Запуск непрерывного прослушивания микрофона...")
+        muteSystemBeeps()
         activeContextRef = java.lang.ref.WeakReference(callerContext)
         isContinuous = true
         isPaused = false
@@ -380,6 +381,8 @@ class VoiceInputManager(private val context: Context) {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ru-RU")
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                    putExtra("android.speech.extra.DICTATION_MODE", true)
+                    putExtra("android.speech.extra.SOUND_OFF", true)
                 }
 
                 recognizer.startListening(intent)
@@ -400,6 +403,41 @@ class VoiceInputManager(private val context: Context) {
         stopRecognizerOnly()
     }
 
+    private var isMutedByVoice = false
+
+    private fun muteSystemBeeps() {
+        try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_SYSTEM, android.media.AudioManager.ADJUST_MUTE, 0)
+                audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_NOTIFICATION, android.media.AudioManager.ADJUST_MUTE, 0)
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.setStreamMute(android.media.AudioManager.STREAM_SYSTEM, true)
+                @Suppress("DEPRECATION")
+                audioManager.setStreamMute(android.media.AudioManager.STREAM_NOTIFICATION, true)
+            }
+            isMutedByVoice = true
+        } catch (_: Throwable) {}
+    }
+
+    private fun restoreSystemBeeps() {
+        if (!isMutedByVoice) return
+        try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_SYSTEM, android.media.AudioManager.ADJUST_UNMUTE, 0)
+                audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_NOTIFICATION, android.media.AudioManager.ADJUST_UNMUTE, 0)
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.setStreamMute(android.media.AudioManager.STREAM_SYSTEM, false)
+                @Suppress("DEPRECATION")
+                audioManager.setStreamMute(android.media.AudioManager.STREAM_NOTIFICATION, false)
+            }
+            isMutedByVoice = false
+        } catch (_: Throwable) {}
+    }
+
     private fun stopRecognizerOnly() {
         try {
             systemSpeechRecognizer?.stopListening()
@@ -411,6 +449,8 @@ class VoiceInputManager(private val context: Context) {
             voskSpeechService?.stop()
         } catch (_: Throwable) {}
         voskSpeechService = null
+
+        restoreSystemBeeps()
 
         activeContextRef = null
         _isListening.value = false

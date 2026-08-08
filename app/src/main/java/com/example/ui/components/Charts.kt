@@ -573,7 +573,7 @@ fun ExpenseDynamicsAreaChartCard(
 
     val targetMax = remember(targetPoints) {
         val max = targetPoints.maxOrNull() ?: 0.0
-        if (max <= 0) 1000.0 else max * 1.30
+        if (max <= 0) 1000.0 else max * 1.10
     }
 
     val animatedMaxVal by animateFloatAsState(
@@ -748,12 +748,13 @@ fun ExpenseDynamicsAreaChartCard(
                         } else 0.0
 
                         val morphedValue = oldValInterpolated + morphProgress * (targetValue - oldValInterpolated)
-                        val normalizedY = ((morphedValue / maxVal) * (h - 28.dp.toPx())).toFloat()
+                        val rawNormalizedY = ((morphedValue / maxVal) * (h - 28.dp.toPx())).toFloat()
+                        val normalizedY = if (morphedValue > 0.0) maxOf(rawNormalizedY, 4.dp.toPx()) else 0f
                         val y = h - 8.dp.toPx() - normalizedY
                         Offset(x, y)
                     }
 
-                    // Build Area Path with safe quadratic midpoint smoothing
+                    // Build Area Path with sharp, localized cubic Bezier smoothing
                     val areaPath = Path().apply {
                         moveTo(points[0].x, h)
                         lineTo(points[0].x, points[0].y)
@@ -761,14 +762,13 @@ fun ExpenseDynamicsAreaChartCard(
                         for (i in 0 until points.size - 1) {
                             val p1 = points[i]
                             val p2 = points[i + 1]
-                            val midX = (p1.x + p2.x) / 2f
-                            val midY = (p1.y + p2.y) / 2f
+                            val dx = p2.x - p1.x
+                            val cp1x = p1.x + dx * 0.35f
+                            val cp1y = p1.y
+                            val cp2x = p2.x - dx * 0.35f
+                            val cp2y = p2.y
 
-                            if (i == 0) {
-                                lineTo(midX, midY)
-                            } else {
-                                quadraticTo(p1.x, p1.y, midX, midY)
-                            }
+                            cubicTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
                         }
                         if (points.isNotEmpty()) {
                             lineTo(points.last().x, points.last().y)
@@ -778,21 +778,20 @@ fun ExpenseDynamicsAreaChartCard(
                         close()
                     }
 
-                    // Build Stroke Line Path with safe quadratic midpoint smoothing
+                    // Build Stroke Line Path with sharp, localized cubic Bezier smoothing
                     val strokePath = Path().apply {
                         moveTo(points[0].x, points[0].y)
 
                         for (i in 0 until points.size - 1) {
                             val p1 = points[i]
                             val p2 = points[i + 1]
-                            val midX = (p1.x + p2.x) / 2f
-                            val midY = (p1.y + p2.y) / 2f
+                            val dx = p2.x - p1.x
+                            val cp1x = p1.x + dx * 0.35f
+                            val cp1y = p1.y
+                            val cp2x = p2.x - dx * 0.35f
+                            val cp2y = p2.y
 
-                            if (i == 0) {
-                                lineTo(midX, midY)
-                            } else {
-                                quadraticTo(p1.x, p1.y, midX, midY)
-                            }
+                            cubicTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y)
                         }
                         if (points.isNotEmpty()) {
                             lineTo(points.last().x, points.last().y)
@@ -881,14 +880,7 @@ fun ExpenseDynamicsAreaChartCard(
                     }
 
                     // Highlight / Draw Neon Dots & Sums
-                    // Calculate exact Y coordinates on the smoothed quadratic path for each node
-                    val actualPoints = points.mapIndexed { i, pt ->
-                        val actualY = when {
-                            i == 0 || i == points.size - 1 -> pt.y
-                            else -> 0.125f * points[i - 1].y + 0.75f * points[i].y + 0.125f * points[i + 1].y
-                        }
-                        Offset(pt.x, actualY)
-                    }
+                    val actualPoints = points
 
                     points.forEachIndexed { i, pt ->
                         val amount = currentTarget.getOrNull(i) ?: 0.0

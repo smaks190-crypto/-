@@ -113,7 +113,6 @@ import com.example.ui.components.AddTransactionDialog
 import com.example.ui.components.GeminiConsentDialog
 import com.example.ui.components.ApiKeyDialog
 import com.example.ui.components.CategoriesDialog
-import com.example.ui.components.ExportImportDialog
 import com.example.ui.components.GrowthChartSplashScreen
 import com.example.ui.screens.DebtsScreen
 import com.example.ui.screens.AnnualReportScreen
@@ -235,7 +234,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     var triggerAuditAfterKeySave by remember { mutableStateOf(false) }
     var showCategoriesModal by remember { mutableStateOf(false) }
     var showAddGoalModal by remember { mutableStateOf(false) }
-    var showExportImportModal by remember { mutableStateOf(false) }
     var showSettingsHubModal by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
     var reportDialogTab by remember { mutableStateOf(0) }
@@ -304,11 +302,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     }
 
     // Consent dialog is now triggered on demand when pressing the FAB (+) button on the Period tab or using AI features.
-    var exportJsonStr by remember { mutableStateOf("") }
     var pendingExportJson by remember { mutableStateOf<String?>(null) }
-    var showExportFolderPicker by remember { mutableStateOf(false) }
-    var exportFolderPickerJson by remember { mutableStateOf("") }
-    var exportFolderPickerFileName by remember { mutableStateOf("") }
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -337,9 +331,11 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 val dateSuffix = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(java.util.Date())
                 val fileName = "${safeName}_$dateSuffix.json"
                 
-                exportFolderPickerJson = json
-                exportFolderPickerFileName = fileName
-                showExportFolderPicker = true
+                try {
+                    createDocumentLauncher.launch(fileName)
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Не удалось открыть системный проводник: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -944,23 +940,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 )
             }
 
-            if (showExportFolderPicker) {
-                com.example.ui.components.ExportFolderPickerDialog(
-                    defaultFileName = exportFolderPickerFileName,
-                    jsonContent = exportFolderPickerJson,
-                    onDismiss = { showExportFolderPicker = false },
-                    onSaveSuccess = { showExportFolderPicker = false }
-                )
-            }
-
-            if (showExportImportModal) {
-                ExportImportDialog(
-                    initialJson = exportJsonStr,
-                    onDismiss = { showExportImportModal = false },
-                    onImport = { json -> viewModel.importBackup(json) {} }
-                )
-            }
-
             if (showSettingsHubModal) {
                 com.example.ui.components.SettingsHubDialog(
                     securityManager = securityManager,
@@ -1072,7 +1051,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             val isVoicePipelineActive = isVoiceActive || isAnalyzingVoice || !parsedVoiceOperations.isNullOrEmpty() || showAddTxModal || isVoiceOverlayActive
 
             val isImeVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
-            val isAnyModalOpen = showSettingsHubModal || showCategoriesModal || showExportImportModal || showExportFolderPicker || showAddGoalModal || showConsentDialog || showReportDialog
+            val isAnyModalOpen = showSettingsHubModal || showCategoriesModal || showAddGoalModal || showConsentDialog || showReportDialog
 
             Box(
                 modifier = Modifier

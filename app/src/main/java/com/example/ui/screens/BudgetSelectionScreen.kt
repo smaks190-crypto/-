@@ -135,7 +135,6 @@ fun BudgetSelectionScreen(
     var confirmDeleteId by remember { mutableStateOf<String?>(null) }
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
     var animatingOutId by remember { mutableStateOf<String?>(null) }
-    var showImportFilePicker by remember { mutableStateOf(false) }
 
     // Delayed deletion handler
     LaunchedEffect(pendingDeleteId) {
@@ -270,7 +269,11 @@ fun BudgetSelectionScreen(
 
                     Surface(
                         onClick = {
-                            showImportFilePicker = true
+                            try {
+                                openDocumentLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Не удалось открыть проводник: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
                         },
                         shape = RoundedCornerShape(12.dp),
                         color = Slate900,
@@ -440,20 +443,6 @@ fun BudgetSelectionScreen(
                 .testTag("create_budget_fab")
         ) {
             Icon(Icons.Default.Add, contentDescription = "Создать профиль")
-        }
-
-        if (showImportFilePicker) {
-            com.example.ui.components.ImportFilePickerDialog(
-                onFileSelected = { json ->
-                    try {
-                        onImportFromBackup(json)
-                        Toast.makeText(context, "Бюджет успешно импортирован", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Ошибка импорта: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onDismiss = { showImportFilePicker = false }
-            )
         }
     }
 }
