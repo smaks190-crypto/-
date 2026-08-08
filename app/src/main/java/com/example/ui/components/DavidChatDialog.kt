@@ -858,42 +858,50 @@ fun ReportDetailsDialog(
                                     val timeStr = remember(item.timestamp) {
                                         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
                                     }
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .animateContentSize(),
-                                        horizontalAlignment = Alignment.Start
+                                    AnimatedVisibility(
+                                        visible = true,
+                                        enter = androidx.compose.animation.slideInVertically(
+                                            initialOffsetY = { it / 2 },
+                                            animationSpec = tween(durationMillis = 350)
+                                        ) + androidx.compose.animation.fadeIn(animationSpec = tween(durationMillis = 350))
                                     ) {
-                                        Surface(
-                                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                                            color = Slate800.copy(alpha = 0.85f),
-                                            border = BorderStroke(1.dp, Slate700),
-                                            modifier = Modifier.fillMaxWidth(0.92f)
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .animateContentSize(),
+                                            horizontalAlignment = Alignment.Start
                                         ) {
-                                            Column(modifier = Modifier.padding(12.dp)) {
-                                                if (item.isFirst) {
-                                                    Text(
-                                                        text = "Жабов Давид (Аналитика)",
-                                                        color = Emerald400,
-                                                        fontWeight = FontWeight.Bold,
-                                                        fontSize = 12.sp
+                                            Surface(
+                                                shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+                                                color = Slate800.copy(alpha = 0.85f),
+                                                border = BorderStroke(1.dp, Slate700),
+                                                modifier = Modifier.fillMaxWidth(0.92f)
+                                            ) {
+                                                Column(modifier = Modifier.padding(12.dp)) {
+                                                    if (item.isFirst) {
+                                                        Text(
+                                                            text = "Жабов Давид (Аналитика)",
+                                                            color = Emerald400,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 12.sp
+                                                        )
+                                                        Spacer(modifier = Modifier.height(6.dp))
+                                                    }
+                                                    MarkdownFormattedText(
+                                                        markdownText = item.text,
+                                                        fontSize = 13.sp
                                                     )
-                                                    Spacer(modifier = Modifier.height(6.dp))
-                                                }
-                                                MarkdownFormattedText(
-                                                    markdownText = item.text,
-                                                    fontSize = 13.sp
-                                                )
-                                                Spacer(modifier = Modifier.height(4.dp))
-                                                Row(
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.End
-                                                ) {
-                                                    Text(
-                                                        text = timeStr,
-                                                        color = Slate400,
-                                                        fontSize = 10.sp
-                                                    )
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.End
+                                                    ) {
+                                                        Text(
+                                                            text = timeStr,
+                                                            color = Slate400,
+                                                            fontSize = 10.sp
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }

@@ -186,9 +186,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash",
-            "gemini-2.5-flash",
-            "gemini-flash-latest"
+            "gemini-3.5-flash-lite",
+            "gemini-3.0-flash-lite"
         )
 
         for (model in modelsToTry) {
@@ -271,9 +270,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash",
-            "gemini-2.5-flash",
-            "gemini-flash-latest"
+            "gemini-3.5-flash-lite",
+            "gemini-3.0-flash-lite"
         )
 
         for (model in modelsToTry) {
@@ -321,9 +319,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash",
-            "gemini-2.5-flash",
-            "gemini-flash-latest"
+            "gemini-3.5-flash-lite",
+            "gemini-3.0-flash-lite"
         )
 
         for (model in modelsToTry) {
@@ -378,9 +375,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash",
-            "gemini-2.5-flash",
-            "gemini-flash-latest"
+            "gemini-3.5-flash-lite",
+            "gemini-3.0-flash-lite"
         )
 
         for (model in modelsToTry) {
@@ -847,6 +843,7 @@ class BudgetRepository(
                 "Краткий финальный совет, как перестать банкротить себя."
 
         val systemPrompt = "Ты — искрометный, безжалостный и высокоэрудированный финансовый аудитор с циничным черным юмором. Твоя цель — провести жесткий аудит и прожарить пользователя за его финансовые грехи.\n\n" +
+                "Дели свой ответ на короткие, законченные по смыслу блоки (как отдельные СМС-сообщения). Разделяй каждый блок двумя переносами строк (\\n\\n). Не пиши всё одним монолитным текстом.\n\n" +
                 "РОЛЬ И СТИЛЬ:\n" +
                 "- Виртуозно миксуй 3 элемента:\n" +
                 "  а) популярные классические и самые актуальные интернет-мемы, тренды и вирусы поп-культуры (от культовых мемов прошлых лет до свежих трендов и забавных ситуаций),\n" +
@@ -866,9 +863,9 @@ class BudgetRepository(
 
         var lastExceptionMessage = ""
         val modelsToTry = listOf(
+            "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-2.5-flash",
-            "gemini-flash-latest"
+            "gemini-3.0-flash"
         )
 
         var success = false
@@ -1002,9 +999,9 @@ class BudgetRepository(
         var lastExceptionMessage = ""
 
         val modelsToTry = listOf(
+            "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-2.5-flash",
-            "gemini-flash-latest"
+            "gemini-3.0-flash"
         )
 
         for (model in modelsToTry) {
@@ -1137,9 +1134,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash",
-            "gemini-2.5-flash",
-            "gemini-flash-latest"
+            "gemini-3.5-flash-lite",
+            "gemini-3.0-flash-lite"
         )
 
         for (model in modelsToTry) {
@@ -1262,10 +1258,8 @@ class BudgetRepository(
         var lastError: String? = null
 
         val modelsToTry = listOf(
-            "gemini-2.5-flash",
-            "gemini-1.5-flash",
-            "gemini-3.5-flash",
-            "gemini-flash-latest"
+            "gemini-3.5-flash-lite",
+            "gemini-3.0-flash-lite"
         )
 
         GlobalConsoleLogger.i("GEMINI", "Запрос к Gemini API для разбора голоса: «$trimmedText»")

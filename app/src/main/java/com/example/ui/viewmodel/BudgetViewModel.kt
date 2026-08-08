@@ -1175,6 +1175,12 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 )
 
                 var fullText = ""
+                var currentBlockBuffer = ""
+                val baseTime = System.currentTimeMillis()
+                var blockCount = 0
+
+                _aiAuditLoading.value = true
+
                 try {
                     repository.requestAiAuditStream(
                         apiKey = key,
@@ -1187,7 +1193,59 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                         allTransactions = transactions.value
                     ).collect { chunk ->
                         fullText += chunk
+                        currentBlockBuffer += chunk
                         _aiAuditResult.value = fullText
+
+                        // Streaming Chunk Accumulator: Slice blocks when paragraph separator (\n\n) appears
+                        while (currentBlockBuffer.contains("\n\n")) {
+                            val parts = currentBlockBuffer.split("\n\n", limit = 2)
+                            val completedBlock = parts[0].trim()
+                            currentBlockBuffer = parts.getOrElse(1) { "" }
+
+                            if (completedBlock.isNotBlank() && completedBlock != "ERROR_NO_CONNECTION") {
+                                blockCount++
+                                val blockId = java.util.UUID.randomUUID().toString()
+                                val blockTime = baseTime + blockCount * 100L
+                                val isFirstBlock = blockCount == 1
+                                val blockTitle = if (isFirstBlock) "Жабов Давид (Аналитика)" else "Аналитика"
+
+                                repository.insertNotification(
+                                    com.example.data.db.NotificationEntity(
+                                        id = blockId,
+                                        budgetId = bId,
+                                        title = blockTitle,
+                                        description = "||audit_block||$completedBlock",
+                                        icon = "david",
+                                        color = "emerald400",
+                                        timestamp = blockTime,
+                                        isRead = true
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // Emit remaining buffer content as the final SMS block
+                    val finalBlock = currentBlockBuffer.trim()
+                    if (finalBlock.isNotBlank() && finalBlock != "ERROR_NO_CONNECTION") {
+                        blockCount++
+                        val blockId = java.util.UUID.randomUUID().toString()
+                        val blockTime = baseTime + blockCount * 100L
+                        val isFirstBlock = blockCount == 1
+                        val blockTitle = if (isFirstBlock) "Жабов Давид (Аналитика)" else "Аналитика"
+
+                        repository.insertNotification(
+                            com.example.data.db.NotificationEntity(
+                                id = blockId,
+                                budgetId = bId,
+                                title = blockTitle,
+                                description = "||audit_block||$finalBlock",
+                                icon = "david",
+                                color = "emerald400",
+                                timestamp = blockTime,
+                                isRead = true
+                            )
+                        )
                     }
                 } catch (e: Exception) {
                     fullText = "ERROR_NO_CONNECTION"
@@ -1225,35 +1283,6 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                         timestamp = System.currentTimeMillis()
                     )
                     repository.saveAudit(entity)
-
-                    // Human-like streaming & queueing of section messages
-                    val sections = splitAuditIntoSections(fullText)
-                    val baseTime = System.currentTimeMillis()
-
-                    for ((index, section) in sections.withIndex()) {
-                        _aiAuditLoading.value = true // Enables "Давид печатает..." typing status
-
-                        val delayMs = (section.length * 15L).coerceIn(1200L, 3500L)
-                        kotlinx.coroutines.delay(delayMs)
-
-                        val blockId = java.util.UUID.randomUUID().toString()
-                        val blockTime = baseTime + index * 10L
-                        val isFirstBlock = index == 0
-                        val blockTitle = if (isFirstBlock) "Жабов Давид (Аналитика)" else "Аналитика"
-
-                        repository.insertNotification(
-                            com.example.data.db.NotificationEntity(
-                                id = blockId,
-                                budgetId = bId,
-                                title = blockTitle,
-                                description = "||audit_block||$section",
-                                icon = "david",
-                                color = "emerald400",
-                                timestamp = blockTime,
-                                isRead = true
-                            )
-                        )
-                    }
                 }
             } finally {
                 _aiAuditLoading.value = false
