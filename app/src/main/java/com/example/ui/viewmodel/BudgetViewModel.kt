@@ -358,6 +358,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun selectBudget(id: String?) {
+        com.example.utils.GlobalConsoleLogger.i("STATE", "Selected Budget ID changed to: $id")
         _selectedBudgetId.value = id
         if (id != null) {
             prefs.edit()
@@ -393,6 +394,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setPeriodType(type: PeriodType) {
+        com.example.utils.GlobalConsoleLogger.i("STATE", "PeriodType changed to: $type")
         _periodType.value = type
     }
 
@@ -441,6 +443,15 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setActiveTab(index: Int) {
+        val tabName = when(index) {
+            0 -> "Главная (Обзор)"
+            1 -> "Период (Транзакции)"
+            2 -> "Долги"
+            3 -> "Цели"
+            4 -> "Отчет (ИИ Аудит)"
+            else -> "Вкладка $index"
+        }
+        com.example.utils.GlobalConsoleLogger.i("UI", "Active Tab switched to: $tabName")
         _activeTab.value = index
     }
 

@@ -241,6 +241,14 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     var reportDialogTab by remember { mutableStateOf(0) }
     var settingsInitialScreen by remember { mutableStateOf(com.example.ui.components.SettingsScreen.HUB) }
 
+    LaunchedEffect(showSettingsHubModal, showCategoriesModal, showAddGoalModal, showAddTxModal, showReportDialog) {
+        if (showSettingsHubModal) com.example.utils.GlobalConsoleLogger.i("UI", "Dialog: SettingsHub opened")
+        if (showCategoriesModal) com.example.utils.GlobalConsoleLogger.i("UI", "Dialog: Categories opened")
+        if (showAddGoalModal) com.example.utils.GlobalConsoleLogger.i("UI", "Dialog: AddGoal opened")
+        if (showAddTxModal) com.example.utils.GlobalConsoleLogger.i("UI", "Dialog: AddTransaction opened")
+        if (showReportDialog) com.example.utils.GlobalConsoleLogger.i("UI", "Dialog: DavidChat/Report opened")
+    }
+
     val securityManager = remember { com.example.data.SecurityManager(context) }
     var isAppLocked by remember { mutableStateOf(securityManager.isPinEnabled()) }
     var splashStage by remember { mutableStateOf("loading") }

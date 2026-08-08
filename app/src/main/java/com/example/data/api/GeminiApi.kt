@@ -75,7 +75,9 @@ object RetrofitClient {
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
-        .addInterceptor(HttpLoggingInterceptor().apply {
+        .addInterceptor(HttpLoggingInterceptor { message ->
+            com.example.utils.GlobalConsoleLogger.i("NETWORK", message)
+        }.apply {
             level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
         })
         .build()

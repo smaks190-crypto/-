@@ -87,15 +87,15 @@ fun GlobalConsoleOverlay(
     var selectedTagFilter by remember { mutableStateOf("ВСЕ") }
     var autoScrollEnabled by remember { mutableStateOf(true) }
 
-    val tags = listOf("ВСЕ", "VOSK", "GEMINI", "UI", "ROOM", "ERROR")
+    val tags = listOf("ВСЕ", "UI", "STATE", "ROOM", "NETWORK", "VOSK", "GEMINI", "ERROR")
 
     val filteredLogs = remember(logs, selectedTagFilter) {
         if (selectedTagFilter == "ВСЕ") {
             logs
         } else if (selectedTagFilter == "ERROR") {
-            logs.filter { it.level == LogLevel.ERROR || it.tag.contains("ERROR", ignoreCase = true) }
+            logs.filter { it.level == LogLevel.ERROR || it.tag.contains("ERROR", ignoreCase = true) || it.tag.contains("CRASH", ignoreCase = true) }
         } else {
-            logs.filter { it.tag.equals(selectedTagFilter, ignoreCase = true) }
+            logs.filter { it.tag.equals(selectedTagFilter, ignoreCase = true) || it.tag.contains(selectedTagFilter, ignoreCase = true) }
         }
     }
 

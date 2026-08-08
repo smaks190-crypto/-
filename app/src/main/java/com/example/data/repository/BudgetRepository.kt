@@ -614,26 +614,32 @@ class BudgetRepository(
 
 
     suspend fun insertTransaction(transaction: TransactionEntity) {
+        GlobalConsoleLogger.i("ROOM", "Insert Transaction: ${transaction.type.uppercase()} ${transaction.amount} ₽ (${transaction.category} / ${transaction.subcategory})")
         transactionDao.insertTransaction(transaction)
     }
 
     suspend fun deleteTransaction(id: String) {
+        GlobalConsoleLogger.i("ROOM", "Delete Transaction ID: $id")
         transactionDao.deleteTransactionById(id)
     }
 
     suspend fun insertGoal(goal: GoalEntity) {
+        GlobalConsoleLogger.i("ROOM", "Insert Goal: ${goal.name} (${goal.targetAmount} ₽)")
         goalDao.insertGoal(goal)
     }
 
     suspend fun deleteGoal(id: String) {
+        GlobalConsoleLogger.i("ROOM", "Delete Goal ID: $id")
         goalDao.deleteGoalById(id)
     }
 
     suspend fun insertCategory(category: CategoryEntity) {
+        GlobalConsoleLogger.i("ROOM", "Insert Category: ${category.name} (${category.type})")
         categoryDao.insertCategory(category)
     }
 
     suspend fun deleteCategory(id: String) {
+        GlobalConsoleLogger.i("ROOM", "Delete Category ID: $id")
         categoryDao.deleteCategoryById(id)
     }
 
