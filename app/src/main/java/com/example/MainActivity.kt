@@ -271,9 +271,8 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
 
     LaunchedEffect(selectedBudgetId, splashStage) {
         if (splashStage == "done" && selectedBudgetId != null) {
-            kotlinx.coroutines.delay(600)
-            showWelcomeBubble = true
             viewModel.addWelcomeNotification(currentProfile?.name ?: "")
+            showWelcomeBubble = true
             kotlinx.coroutines.delay(4800)
             showWelcomeBubble = false
         }
@@ -579,7 +578,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     val prefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
                                     val hasOpenedChatBefore = remember(showReportDialog, pName) { prefs.getBoolean("has_opened_david_chat_before_$pName", false) }
                                     val hasUnread = unreadNotificationsCount > 0 || !hasOpenedChatBefore
-                                    val shouldShowMessage = hasUnread || showWelcomeBubble
+                                    val shouldShowMessage = showWelcomeBubble || (hasUnread && unreadNotificationsCount > 0)
                                     val iconNeonColor = Indigo500
 
                                     var isExpandedByNeon by remember { mutableStateOf(false) }
@@ -589,6 +588,13 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
 
                                     LaunchedEffect(shouldShowMessage, unreadNotificationsCount) {
                                         if (shouldShowMessage) {
+                                            if (isExpandedByNeon) {
+                                                com.example.utils.GlobalConsoleLogger.i("ANIM", "Плашка уже раскрыта (isExpandedByNeon = true), обновление содержимого без повторного мерцания (непрочитанных: $unreadNotificationsCount)")
+                                                kotlinx.coroutines.delay(4000)
+                                                isExpandedByNeon = false
+                                                return@LaunchedEffect
+                                            }
+
                                             com.example.utils.GlobalConsoleLogger.i("ANIM", "Запуск анимации плашки уведомлений (непрочитанных: $unreadNotificationsCount, приветствие: $showWelcomeBubble)")
                                             // Step 1: Collapse box & start neon flickering first
                                             isExpandedByNeon = false
@@ -657,15 +663,12 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                     dampingRatio = Spring.DampingRatioLowBouncy
                                                 )
                                             )
+                                            
                                             .clickable {
-                                                com.example.utils.GlobalConsoleLogger.i("UI", "Нажатие на плашку уведомлений/чата (непрочитанных: $hasUnread), открытие диалога")
+                                                com.example.utils.GlobalConsoleLogger.i("UI", "Нажатие на плашку уведомлений/чата, открытие диалога")
                                                 showWelcomeBubble = false
                                                 isExpandedByNeon = false
-                                                if (hasUnread) {
-                                                    reportDialogTab = 1
-                                                } else {
-                                                    reportDialogTab = 0
-                                                }
+                                                reportDialogTab = 0
                                                 showReportDialog = true
                                             }
                                             .padding(horizontal = 9.dp, vertical = 6.dp),
@@ -684,15 +687,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                     ),
                                                     modifier = Modifier.size(20.dp)
                                                 )
-                                                if (hasUnread) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(7.dp)
-                                                            .offset(x = 2.dp, y = (-2).dp)
-                                                            .background(Color.Transparent, CircleShape)
-                                                            .border(0.dp, Color.Transparent, CircleShape)
-                                                    )
-                                                }
+
                                             }
 
                                             AnimatedVisibility(
@@ -710,35 +705,32 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                     verticalAlignment = Alignment.CenterVertically,
                                                     modifier = Modifier.padding(start = 8.dp, end = 2.dp)
                                                 ) {
-                                                    if (hasUnread) {
-                                                        Column {
-                                                            Text(
-                                                                text = "У вас есть непрочитанные сообщения",
-                                                                color = Color.White,
-                                                                fontSize = 10.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                maxLines = 1
-                                                            )
-                                                            Text(
-                                                                text = "У вас комментарии ($unreadNotificationsCount)",
-                                                                color = Indigo500,
-                                                                fontSize = 9.sp,
-                                                                fontWeight = FontWeight.Medium,
-                                                                maxLines = 1
-                                                            )
+                                                    val welcomeGreeting = remember(currentProfile?.id, currentProfile?.name) {
+                                                        val prefs = context.getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
+                                                        val profileKey = currentProfile?.id ?: currentProfile?.name ?: "default"
+                                                        val hasOpened = prefs.getBoolean("has_opened_profile_$profileKey", false)
+                                                        val hourNow = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                                                        val timeOfDayGreeting = when (hourNow) {
+                                                            in 5..11 -> "Доброе утро"
+                                                            in 12..16 -> "Добрый день"
+                                                            in 17..22 -> "Добрый вечер"
+                                                            else -> "Доброй ночи"
                                                         }
-                                                    } else if (showWelcomeBubble) {
-                                                        val welcomeGreeting = remember(currentProfile?.id, currentProfile?.name) {
-                                                            val prefs = context.getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-                                                            val profileKey = currentProfile?.id ?: currentProfile?.name ?: "default"
-                                                            val hasOpened = prefs.getBoolean("has_opened_profile_$profileKey", false)
-                                                            if (!hasOpened) {
-                                                                prefs.edit().putBoolean("has_opened_profile_$profileKey", true).apply()
-                                                                "Добро пожаловать"
-                                                            } else {
-                                                                "С возвращением"
-                                                            }
+                                                        if (!hasOpened) {
+                                                            prefs.edit().putBoolean("has_opened_profile_$profileKey", true).apply()
+                                                            "Добро пожаловать"
+                                                        } else {
+                                                            timeOfDayGreeting
                                                         }
+                                                    }
+                                                    if (hasUnread && unreadNotificationsCount > 0) {
+                                                        Text(
+                                                            text = "У вас есть непрочитанные сообщения",
+                                                            color = Color.White,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Medium
+                                                        )
+                                                    } else {
                                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                                             Text(
                                                                 text = "$welcomeGreeting, ",
@@ -747,18 +739,10 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                                 fontWeight = FontWeight.Medium
                                                             )
                                                             Text(
-                                                                text = "${currentProfile?.name ?: "Друг"}",
+                                                                text = "${currentProfile?.name ?: "Друг"}!",
                                                                 color = Emerald400,
                                                                 fontSize = 10.sp,
                                                                 fontWeight = FontWeight.Bold
-                                                            )
-                                                            Spacer(modifier = Modifier.width(3.dp))
-                                                            Text(
-                                                                text = "👋",
-                                                                fontSize = 11.sp,
-                                                                modifier = Modifier.graphicsLayer {
-                                                                    rotationZ = waveRotation
-                                                                }
                                                             )
                                                         }
                                                     }
@@ -770,11 +754,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
 
                             }
 
-
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            // --- NAVIGATION TABS ---
+// --- NAVIGATION TABS ---
                             val currentMainTab = mainPagerState.currentPage
                             BoxWithConstraints(
                                 modifier = Modifier

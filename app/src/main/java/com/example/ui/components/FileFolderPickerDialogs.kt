@@ -5,6 +5,8 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -302,6 +304,27 @@ fun ImportFilePickerDialog(
 ) {
     val context = LocalContext.current
 
+    // SAF System File Picker Launcher
+    val systemFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            try {
+                val json = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    stream.bufferedReader().use { it.readText() }
+                }
+                if (!json.isNullOrBlank()) {
+                    onFileSelected(json)
+                    onDismiss()
+                } else {
+                    Toast.makeText(context, "Выбранный файл пуст", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Ошибка чтения файла: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     val downloadsDir = remember {
         try { Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) } catch (e: Exception) { null }
             ?: context.getExternalFilesDir(null) ?: context.filesDir
@@ -316,19 +339,54 @@ fun ImportFilePickerDialog(
     var selectedFileItem by remember { mutableStateOf<File?>(null) }
     var showFolderSelector by remember { mutableStateOf(false) }
 
-    // List available JSON files in current directory
+    // List available JSON files in current directory + MediaStore + App storage
     val jsonFiles = remember(currentDir) {
         val list = mutableListOf<File>()
-        try {
-            currentDir.listFiles()?.forEach { file ->
-                if (!file.isDirectory && (file.name.endsWith(".json", ignoreCase = true) || file.name.endsWith(".txt", ignoreCase = true))) {
+        val pathSet = mutableSetOf<String>()
+
+        fun addFileIfJson(file: File) {
+            if (file.exists() && file.isFile && (file.name.endsWith(".json", ignoreCase = true) || file.name.endsWith(".txt", ignoreCase = true))) {
+                if (pathSet.add(file.absolutePath)) {
                     list.add(file)
                 }
             }
-            list.sortByDescending { it.lastModified() }
-        } catch (e: Exception) {
-            // Ignore unreadable
         }
+
+        // 1. Direct file search in currentDir
+        try {
+            currentDir.listFiles()?.forEach { addFileIfJson(it) }
+        } catch (_: Exception) {}
+
+        // 2. Also check context.filesDir and context.getExternalFilesDir(null)
+        try {
+            context.filesDir.listFiles()?.forEach { addFileIfJson(it) }
+            context.getExternalFilesDir(null)?.listFiles()?.forEach { addFileIfJson(it) }
+        } catch (_: Exception) {}
+
+        // 3. Query MediaStore for registered json files
+        try {
+            val projection = arrayOf(MediaStore.MediaColumns.DATA, MediaStore.MediaColumns.DISPLAY_NAME)
+            val cursor = context.contentResolver.query(
+                MediaStore.Files.getContentUri("external"),
+                projection,
+                "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.json' OR ${MediaStore.MediaColumns.DISPLAY_NAME} LIKE '%.txt'",
+                null,
+                "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+            )
+            cursor?.use { c ->
+                val dataCol = c.getColumnIndex(MediaStore.MediaColumns.DATA)
+                while (c.moveToNext()) {
+                    if (dataCol != -1) {
+                        val filePath = c.getString(dataCol)
+                        if (!filePath.isNullOrBlank()) {
+                            addFileIfJson(File(filePath))
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        list.sortByDescending { it.lastModified() }
         list
     }
 
@@ -372,7 +430,7 @@ fun ImportFilePickerDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Home,
+                                imageVector = Icons.Default.FolderOpen,
                                 contentDescription = null,
                                 tint = Indigo500,
                                 modifier = Modifier.size(18.dp)
@@ -385,6 +443,46 @@ fun ImportFilePickerDialog(
                             fontWeight = FontWeight.Bold
                         )
                     }
+                }
+
+                // Primary Action Button: Open System File Picker (SAF)
+                Button(
+                    onClick = {
+                        try {
+                            systemFilePickerLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Не удалось открыть системный проводник", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Indigo500
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Выбрать через системный проводник",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = Slate800)
+                    Text("или из списка ниже", color = Slate500, fontSize = 11.sp)
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = Slate800)
                 }
 
                 // Current Folder Path Display
@@ -490,21 +588,21 @@ fun ImportFilePickerDialog(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(140.dp)
+                                .height(130.dp)
                                 .background(DarkBg, RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("📭 В этой папке нет .json файлов", color = Slate400, fontSize = 13.sp)
+                                Text("📭 Не найдено файлов в локальной папке", color = Slate400, fontSize = 13.sp)
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Text("Попробуйте сменить папку выше", color = Slate500, fontSize = 11.sp)
+                                Text("Нажмите «Выбрать через системный проводник» выше", color = Slate500, fontSize = 11.sp)
                             }
                         }
                     } else {
                         LazyColumn(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(160.dp)
+                                .height(140.dp)
                                 .background(DarkBg, RoundedCornerShape(12.dp))
                                 .padding(4.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -559,47 +657,47 @@ fun ImportFilePickerDialog(
                     }
                 }
 
-                // Single Action Button: Импортировать
-                Button(
-                    onClick = {
-                        val file = selectedFileItem
-                        if (file != null) {
-                            try {
-                                val json = file.readText(Charsets.UTF_8)
-                                if (json.isNotBlank()) {
-                                    onFileSelected(json)
-                                    onDismiss()
-                                } else {
-                                    Toast.makeText(context, "Файл пуст", Toast.LENGTH_SHORT).show()
+                // Action Button: Импортировать выбранный файл
+                if (selectedFileItem != null) {
+                    Button(
+                        onClick = {
+                            val file = selectedFileItem
+                            if (file != null) {
+                                try {
+                                    val json = file.readText(Charsets.UTF_8)
+                                    if (json.isNotBlank()) {
+                                        onFileSelected(json)
+                                        onDismiss()
+                                    } else {
+                                        Toast.makeText(context, "Файл пуст", Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Ошибка чтения: ${e.message}", Toast.LENGTH_SHORT).show()
                                 }
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "Ошибка чтения: ${e.message}", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Выберите файл из списка", Toast.LENGTH_SHORT).show()
                             }
-                        } else {
-                            Toast.makeText(context, "Выберите файл из списка", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    enabled = selectedFileItem != null,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Indigo500,
-                        disabledContainerColor = Slate800
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Импортировать",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Emerald400
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            tint = DarkBg,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Загрузить выбранный файл",
+                            color = DarkBg,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }

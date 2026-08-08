@@ -52,6 +52,8 @@ import com.example.data.db.NotificationEntity
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 
 private val Indigo950Bg = Color(0xFF1E1B4B)
 private val Purple950Bg = Color(0xFF2E1065)
@@ -476,7 +478,10 @@ fun ReportDetailsDialog(
 
                 LaunchedEffect(unreadSeparatorIndex, chatItems.size, displayedSections.size) {
                     if (chatItems.isNotEmpty()) {
-                        kotlinx.coroutines.delay(100)
+                        snapshotFlow { listState.layoutInfo.totalItemsCount }
+                            .filter { it >= chatItems.size }
+                            .first()
+
                         if (!hasInitialScrolled) {
                             if (unreadSeparatorIndex != -1) {
                                 listState.scrollToItem(unreadSeparatorIndex)
@@ -576,7 +581,44 @@ fun ReportDetailsDialog(
                                 val timeStr = remember(item.timestamp) {
                                     SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
                                 }
-                                Column(horizontalAlignment = Alignment.Start) {
+                                val (greetingText, introText) = remember(profileName, periodTitle, item.timestamp) {
+                                    val prefsInner = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+                                    val profileKey = profileName.ifBlank { "default" }
+                                    val greetingKey = "chat_welcome_greeting_${profileKey}_${item.timestamp}"
+                                    val savedGreeting = prefsInner.getString(greetingKey, null)
+                                    val nameStr = if (profileName.isNotBlank() && profileName != "Вы") ", $profileName" else ""
+
+                                    val finalGreeting = if (!savedGreeting.isNullOrBlank()) {
+                                        savedGreeting
+                                    } else {
+                                        val hasOpenedChat = prefsInner.getBoolean("has_opened_david_chat_before_$profileKey", false)
+                                        val isFirstEver = !hasOpenedChat
+                                        if (isFirstEver) {
+                                            prefsInner.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
+                                        }
+                                        val cal = java.util.Calendar.getInstance().apply { timeInMillis = item.timestamp }
+                                        val hourNow = cal.get(java.util.Calendar.HOUR_OF_DAY)
+                                        val timeOfDayGreeting = when (hourNow) {
+                                            in 5..11 -> "Доброе утро"
+                                            in 12..16 -> "Добрый день"
+                                            in 17..22 -> "Добрый вечер"
+                                            else -> "Доброй ночи"
+                                        }
+                                        val greetingWord = if (isFirstEver) "Добро пожаловать" else timeOfDayGreeting
+                                        val computed = "$greetingWord$nameStr!"
+                                        prefsInner.edit().putString(greetingKey, computed).apply()
+                                        computed
+                                    }
+
+                                    val msg2 = "Я — Жабов Давид 🐸, твой персональный фин-аналитик. Готов помочь разобрать твои финансы за $periodTitle."
+                                    Pair(finalGreeting, msg2)
+                                }
+
+                                Column(
+                                    horizontalAlignment = Alignment.Start,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    // Первое облачко: Приветствие
                                     Surface(
                                         shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
                                         color = Slate800.copy(alpha = 0.85f),
@@ -602,19 +644,42 @@ fun ReportDetailsDialog(
                                                 )
                                             }
                                             Spacer(modifier = Modifier.height(4.dp))
-                                            val welcomeChatGreeting = remember(profileName) {
-                                                val prefsInner = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
-                                                val profileKey = profileName.ifBlank { "default" }
-                                                val hasOpenedChat = prefsInner.getBoolean("has_opened_david_chat_before_$profileKey", false)
-                                                val isFirstEver = !hasOpenedChat
-                                                if (isFirstEver) {
-                                                    prefsInner.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
-                                                }
-                                                val greetingWord = if (isFirstEver) "Добро пожаловать" else "С возвращением"
-                                                "$greetingWord, $profileName! Я Жабов Давид — твой персональный фин-аналитик 🐸. Готов помочь разобрать расходы за $periodTitle."
-                                            }
                                             Text(
-                                                text = welcomeChatGreeting,
+                                                text = greetingText,
+                                                color = Color.White,
+                                                fontSize = 13.sp
+                                            )
+                                        }
+                                    }
+
+                                    // Второе облачко: Объяснение, кто такой Жабов Давид
+                                    Surface(
+                                        shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+                                        color = Slate800.copy(alpha = 0.85f),
+                                        border = BorderStroke(1.dp, Slate700),
+                                        modifier = Modifier.fillMaxWidth(0.85f)
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Жабов Давид",
+                                                    color = Emerald400,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.sp
+                                                )
+                                                Text(
+                                                    text = timeStr,
+                                                    color = Slate400,
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = introText,
                                                 color = Color.White,
                                                 fontSize = 13.sp
                                             )

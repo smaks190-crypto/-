@@ -355,15 +355,15 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             val isFirstLaunch = prefs.getBoolean("is_first_launch_selection", true)
             val lastId = prefs.getString("last_selected_budget_id", null)
 
-            if (!isFirstLaunch) {
-                if (lastId != null && profilesList.any { it.id == lastId }) {
-                    _selectedBudgetId.value = lastId
-                } else if (profilesList.isNotEmpty()) {
-                    _selectedBudgetId.value = profilesList.first().id
-                }
-            } else {
-                _selectedBudgetId.value = null
+            val targetId = if (!isFirstLaunch) {
+                if (lastId != null && profilesList.any { it.id == lastId }) lastId
+                else profilesList.firstOrNull()?.id
+            } else null
+
+            if (targetId != null) {
+                addWelcomeNotification("", targetId)
             }
+            _selectedBudgetId.value = targetId
         }
     }
 
@@ -396,13 +396,14 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     fun selectBudget(id: String?) {
         com.example.utils.GlobalConsoleLogger.i("STATE", "Selected Budget ID changed to: $id")
-        _selectedBudgetId.value = id
         if (id != null) {
             prefs.edit()
                 .putString("last_selected_budget_id", id)
                 .putBoolean("is_first_launch_selection", false)
                 .apply()
+            addWelcomeNotification("", id)
         }
+        _selectedBudgetId.value = id
     }
 
     fun createNewBudget(name: String) {
@@ -630,8 +631,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun addWelcomeNotification(profileName: String) {
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
+    fun addWelcomeNotification(profileName: String, overrideBudgetId: String? = null) {
+        val currentBudgetId = overrideBudgetId ?: _selectedBudgetId.value ?: "default"
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         val timeGreeting = when (hour) {
             in 5..11 -> "Доброе утро"
@@ -658,12 +659,12 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             if (isFirstLaunch) {
                 prefs.edit().putBoolean("has_welcomed_first_time_$currentProfileKey", true).apply()
                 prefs.edit().putString("last_greeting_date_$currentProfileKey", todayDate).apply()
-                val welcomeText = "Добро пожаловать$nameStr! Я Жабов Давид — твой персональный фин-аналитик 🐸. Буду следить за твоей финансовой дисциплиной!"
+                val greetingMsg = "$timeGreeting$nameStr!"
                 repository.insertNotification(
                     com.example.data.db.NotificationEntity(
                         budgetId = currentBudgetId,
                         title = "Жабов Давид",
-                        description = welcomeText,
+                        description = greetingMsg,
                         icon = "david",
                         color = "emerald400",
                         timestamp = now,
@@ -672,12 +673,12 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 )
             } else if (!hasUnread && lastGreetingDate != todayDate) {
                 prefs.edit().putString("last_greeting_date_$currentProfileKey", todayDate).apply()
-                val greetingText = "С возвращением$nameStr! 🐸"
+                val greetingMsg = "$timeGreeting$nameStr!"
                 repository.insertNotification(
                     com.example.data.db.NotificationEntity(
                         budgetId = currentBudgetId,
                         title = "Жабов Давид",
-                        description = greetingText,
+                        description = greetingMsg,
                         icon = "david",
                         color = "emerald400",
                         timestamp = now,
