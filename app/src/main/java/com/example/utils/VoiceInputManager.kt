@@ -383,6 +383,7 @@ class VoiceInputManager(private val context: Context) {
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                     putExtra("android.speech.extra.DICTATION_MODE", true)
                     putExtra("android.speech.extra.SOUND_OFF", true)
+                    putExtra("android.speech.extras.SPEECH_INPUT_DISABLE_NOTIFICATION_SOUNDS", true)
                 }
 
                 recognizer.startListening(intent)

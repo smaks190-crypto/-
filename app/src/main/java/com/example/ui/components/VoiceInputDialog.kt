@@ -1789,18 +1789,103 @@ val neonColor1 = getGradientColor(progress)
         }
     }
 }
-                    FABContainer(
-                        modifier = Modifier.padding(bottom = fabPaddingBottom, end = fabPaddingEnd),
-                        fabIcon = fabIcon,
-                        fabIconRotation = fabRotationAngle,
-                        fabTint = fabTint,
-                        fabContentDescription = fabContentDescription,
-                        surfaceColor = surfaceColor,
-                        isClickable = isConsentNeeded || isApiKeyNeeded || showManualInput || isEditingOperations || isVoiceActive
-                    )
+                    NeonVoiceGlow(
+                        isRecording = isVoiceActive || isListening,
+                        amplitude = rmsDb
+                    ) {
+                        FABContainer(
+                            modifier = Modifier.padding(bottom = fabPaddingBottom, end = fabPaddingEnd),
+                            fabIcon = fabIcon,
+                            fabIconRotation = fabRotationAngle,
+                            fabTint = fabTint,
+                            fabContentDescription = fabContentDescription,
+                            surfaceColor = surfaceColor,
+                            isClickable = isConsentNeeded || isApiKeyNeeded || showManualInput || isEditingOperations || isVoiceActive
+                        )
+                    }
                 }
             }
         }
+
+@Composable
+fun NeonVoiceGlow(
+    isRecording: Boolean,
+    amplitude: Float, // Громкость голоса от 0.0f до 1.0f
+    content: @Composable () -> Unit
+) {
+    // 1. Анимация непрерывного вращения неонового градиента
+    val infiniteTransition = rememberInfiniteTransition(label = "NeonRotate")
+    val rotationPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "Phase"
+    )
+
+    // 2. Реакция масштаба ореола на громкость голоса (базовый размер + всплеск от амплитуды)
+    val glowScale by animateFloatAsState(
+        targetValue = if (isRecording) 1.2f + (amplitude * 0.6f) else 1.0f,
+        animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing),
+        label = "GlowScale"
+    )
+
+    // 3. Яркость/прозрачность неонового слоя
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (isRecording) 0.85f else 0.25f,
+        animationSpec = tween(durationMillis = 300),
+        label = "GlowAlpha"
+    )
+
+    // Неоновые цвета (Изумрудный -> Бирюзовый -> Фиолетовый -> Неоновый Красный)
+    val neonColors = if (isRecording) {
+        listOf(
+            Color(0xFF10B981),
+            Color(0xFF06B6D4),
+            Color(0xFF8B5CF6),
+            Color(0xFFEF4444),
+            Color(0xFF10B981)
+        )
+    } else {
+        listOf(Color(0xFF10B981), Color(0xFF059669))
+    }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier.padding(16.dp)
+    ) {
+        // Внешнее размытое неоновое свечение (Glow Layer)
+        Box(
+            modifier = Modifier
+                .size(68.dp)
+                .scale(glowScale)
+                .blur(24.dp) // Ключевой эффект мягкого размытия неонового света
+                .background(
+                    brush = Brush.sweepGradient(neonColors),
+                    shape = CircleShape
+                )
+        )
+
+        // Дополнительный внутренний яркий контур свечения
+        if (isRecording) {
+            Box(
+                modifier = Modifier
+                    .size(60.dp)
+                    .scale(glowScale * 0.95f)
+                    .blur(10.dp)
+                    .background(
+                        brush = Brush.linearGradient(neonColors),
+                        shape = CircleShape
+                    )
+            )
+        }
+
+        // Сама твоя кнопка
+        content()
+    }
+}
 
 @Composable
 private fun NeonWaveVisualizer(
