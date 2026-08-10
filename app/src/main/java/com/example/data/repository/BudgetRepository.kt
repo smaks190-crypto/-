@@ -190,7 +190,7 @@ class BudgetRepository(
 
         val modelsToTry = listOf(
             "gemini-3.5-flash-lite",
-            "gemini-3.0-flash-lite"
+            "gemini-3.1-flash-lite"
         )
 
         for (model in modelsToTry) {
@@ -274,7 +274,7 @@ class BudgetRepository(
 
         val modelsToTry = listOf(
             "gemini-3.5-flash-lite",
-            "gemini-3.0-flash-lite"
+            "gemini-3.1-flash-lite"
         )
 
         for (model in modelsToTry) {
@@ -323,7 +323,7 @@ class BudgetRepository(
 
         val modelsToTry = listOf(
             "gemini-3.5-flash-lite",
-            "gemini-3.0-flash-lite"
+            "gemini-3.1-flash-lite"
         )
 
         for (model in modelsToTry) {
@@ -379,7 +379,7 @@ class BudgetRepository(
 
         val modelsToTry = listOf(
             "gemini-3.5-flash-lite",
-            "gemini-3.0-flash-lite"
+            "gemini-3.1-flash-lite"
         )
 
         for (model in modelsToTry) {
@@ -894,7 +894,7 @@ class BudgetRepository(
         val modelsToTry = listOf(
             "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-3.0-flash"
+            "gemini-2.5-flash"
         )
 
         var success = false
@@ -1028,9 +1028,9 @@ class BudgetRepository(
         var lastExceptionMessage = ""
 
         val modelsToTry = listOf(
+            "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-3.1-flash-lite-preview",
-            "gemini-flash-latest"
+            "gemini-2.5-flash"
         )
 
         for (model in modelsToTry) {
@@ -1163,9 +1163,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash",
-            "gemini-3.1-flash-lite-preview",
-            "gemini-flash-latest"
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite"
         )
 
         for (model in modelsToTry) {
@@ -1288,9 +1287,8 @@ class BudgetRepository(
         var lastError: String? = null
 
         val modelsToTry = listOf(
-            "gemini-3.5-flash",
-            "gemini-3.1-flash-lite-preview",
-            "gemini-flash-latest"
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite"
         )
 
         GlobalConsoleLogger.i("GEMINI", "Запрос к Gemini API для разбора голоса: «$trimmedText»")

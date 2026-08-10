@@ -12,14 +12,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.unit.dp
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.Indigo500
@@ -36,22 +40,24 @@ fun MovingNeonGlow(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "neon_orbit")
-    val rotationAngle by infiniteTransition.animateFloat(
+    val infiniteTransition = rememberInfiniteTransition(label = "neon_perimeter_orbit")
+    
+    // Smooth progress 0f..1f travelling around the capsule perimeter
+    val progress by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = 360f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = LinearEasing),
+            animation = tween(durationMillis = 2800, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "rotation_angle"
+        label = "perimeter_progress"
     )
 
     val wavePhase by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 6.28318f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1600, easing = LinearEasing),
+            animation = tween(durationMillis = 1400, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "wave_phase"
@@ -61,6 +67,8 @@ fun MovingNeonGlow(
         (amplitude + (sin(wavePhase.toDouble()).toFloat() * 0.15f + 0.15f)).coerceIn(0.15f, 1f)
     } else 0f
 
+    val pathMeasure = remember { PathMeasure() }
+
     Box(
         modifier = modifier,
         contentAlignment = Alignment.Center
@@ -68,58 +76,114 @@ fun MovingNeonGlow(
         if (isRecording) {
             Canvas(
                 modifier = Modifier
-                    .width((widthDp + (activeAmp * 28f)).dp)
-                    .height((heightDp + (activeAmp * 28f)).dp)
+                    .width((widthDp + 36f).dp)
+                    .height((heightDp + 36f).dp)
             ) {
-                val canvasWidth = size.width
-                val canvasHeight = size.height
-                val center = Offset(canvasWidth / 2f, canvasHeight / 2f)
+                val outerStrokeWidth = 14f + activeAmp * 16f
+                val midStrokeWidth = 6f + activeAmp * 8f
+                val coreStrokeWidth = 2.5f + activeAmp * 2.5f
 
-                val neonBrush = Brush.sweepGradient(
-                    colors = listOf(
-                        Emerald400,
-                        Indigo500,
-                        Rose500,
-                        Emerald400
-                    ),
-                    center = center
-                )
+                val rectLeft = (size.width - widthDp.dp.toPx()) / 2f
+                val rectTop = (size.height - heightDp.dp.toPx()) / 2f
+                val rectRight = rectLeft + widthDp.dp.toPx()
+                val rectBottom = rectTop + heightDp.dp.toPx()
 
-                rotate(degrees = rotationAngle, pivot = center) {
-                    val outerStrokeWidth = (14f + activeAmp * 18f)
-                    
-                    drawRoundRect(
-                        brush = neonBrush,
-                        topLeft = Offset(outerStrokeWidth / 2f, outerStrokeWidth / 2f),
-                        size = Size(canvasWidth - outerStrokeWidth, canvasHeight - outerStrokeWidth),
-                        cornerRadius = CornerRadius(cornerRadiusDp.dp.toPx() + outerStrokeWidth),
-                        style = Stroke(width = outerStrokeWidth),
-                        alpha = 0.22f + activeAmp * 0.35f
+                val capsulePath = Path().apply {
+                    addRoundRect(
+                        RoundRect(
+                            rect = Rect(rectLeft, rectTop, rectRight, rectBottom),
+                            cornerRadius = CornerRadius(cornerRadiusDp.dp.toPx())
+                        )
+                    )
+                }
+
+                pathMeasure.setPath(capsulePath, false)
+                val totalLength = pathMeasure.length
+
+                if (totalLength > 0f) {
+                    // Base subtle outline so the capsule is softly outlined in Indigo
+                    drawPath(
+                        path = capsulePath,
+                        color = Indigo500.copy(alpha = 0.25f + activeAmp * 0.2f),
+                        style = Stroke(width = 2.dp.toPx())
                     )
 
-                    val midStrokeWidth = (7f + activeAmp * 9f)
-                    drawRoundRect(
-                        brush = neonBrush,
-                        topLeft = Offset(outerStrokeWidth - midStrokeWidth / 2f, outerStrokeWidth - midStrokeWidth / 2f),
-                        size = Size(canvasWidth - (outerStrokeWidth * 2 - midStrokeWidth), canvasHeight - (outerStrokeWidth * 2 - midStrokeWidth)),
-                        cornerRadius = CornerRadius(cornerRadiusDp.dp.toPx()),
-                        style = Stroke(width = midStrokeWidth),
-                        alpha = 0.55f + activeAmp * 0.3f
-                    )
+                    // 3 traveling neon light comets along the perimeter (Emerald, Indigo, Rose)
+                    val cometColors = listOf(Emerald400, Indigo500, Rose500)
+                    val cometSegmentLen = totalLength * 0.30f // 30% of perimeter
 
-                    val innerStrokeWidth = (2.5f + activeAmp * 3f)
-                    drawRoundRect(
-                        brush = neonBrush,
-                        topLeft = Offset(outerStrokeWidth, outerStrokeWidth),
-                        size = Size(canvasWidth - outerStrokeWidth * 2, canvasHeight - outerStrokeWidth * 2),
-                        cornerRadius = CornerRadius(cornerRadiusDp.dp.toPx()),
-                        style = Stroke(width = innerStrokeWidth),
-                        alpha = 0.95f
-                    )
+                    cometColors.forEachIndexed { index, color ->
+                        val offsetFraction = (progress + index * 0.333f) % 1f
+                        val startDist = offsetFraction * totalLength
+                        val endDist = startDist + cometSegmentLen
+
+                        // Outer soft glow
+                        drawPerimeterSegment(
+                            pathMeasure = pathMeasure,
+                            totalLength = totalLength,
+                            startDist = startDist,
+                            endDist = endDist,
+                            color = color.copy(alpha = 0.22f + activeAmp * 0.28f),
+                            strokeWidth = outerStrokeWidth
+                        )
+                        // Medium glow
+                        drawPerimeterSegment(
+                            pathMeasure = pathMeasure,
+                            totalLength = totalLength,
+                            startDist = startDist,
+                            endDist = endDist,
+                            color = color.copy(alpha = 0.55f + activeAmp * 0.35f),
+                            strokeWidth = midStrokeWidth
+                        )
+                        // Core bright line
+                        drawPerimeterSegment(
+                            pathMeasure = pathMeasure,
+                            totalLength = totalLength,
+                            startDist = startDist,
+                            endDist = endDist,
+                            color = color.copy(alpha = 0.95f),
+                            strokeWidth = coreStrokeWidth
+                        )
+                    }
                 }
             }
         }
 
         content()
+    }
+}
+
+private fun DrawScope.drawPerimeterSegment(
+    pathMeasure: PathMeasure,
+    totalLength: Float,
+    startDist: Float,
+    endDist: Float,
+    color: Color,
+    strokeWidth: Float
+) {
+    if (endDist <= totalLength) {
+        val segmentPath = Path()
+        pathMeasure.getSegment(startDist, endDist, segmentPath, true)
+        drawPath(
+            path = segmentPath,
+            color = color,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        )
+    } else {
+        // Wrap around path length
+        val segmentPath1 = Path()
+        pathMeasure.getSegment(startDist, totalLength, segmentPath1, true)
+        drawPath(
+            path = segmentPath1,
+            color = color,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        )
+        val segmentPath2 = Path()
+        pathMeasure.getSegment(0f, endDist - totalLength, segmentPath2, true)
+        drawPath(
+            path = segmentPath2,
+            color = color,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        )
     }
 }
