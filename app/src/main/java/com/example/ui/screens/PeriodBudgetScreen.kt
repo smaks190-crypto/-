@@ -145,12 +145,6 @@ import com.example.ui.theme.DarkBg
 import com.example.ui.viewmodel.PeriodType
 import com.example.ui.viewmodel.BudgetViewModel
 import kotlinx.coroutines.launch
-import androidx.compose.material.icons.filled.CardGiftcard
-import androidx.compose.material.icons.filled.Theaters
-import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.Savings
-import androidx.compose.material.icons.filled.MedicalServices
-import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.filled.SouthWest
 import androidx.compose.material.icons.filled.TrendingUp
@@ -196,7 +190,19 @@ fun PeriodBudgetScreen(
     onDeleteTransaction: (String) -> Unit,
     onEditTransaction: ((TransactionEntity) -> Unit)? = null
 ) {
-    // Monthly Calculations (Incomes, Expenses, Carryover, Total Balance always show monthly values)
+    // Исключаем дочерние позиции чека из расчетов и отображения
+    val mainFilteredTransactions = remember(filteredTransactions) {
+        filteredTransactions.filter { it.parentId == null }
+    }
+
+    val mainAllTransactions = remember(allTransactions) {
+        allTransactions.filter { it.parentId == null }
+    }
+
+    // Состояние для открытия диалога просмотра состава чека
+    var selectedReceiptTransaction by remember { mutableStateOf<TransactionEntity?>(null) }
+
+    // Monthly Calculations
     val monthStart = remember(selectedMonthIdx, selectedYear) {
         val monthFormatted = String.format(Locale.US, "%02d", selectedMonthIdx + 1)
         "$selectedYear-$monthFormatted-01"
@@ -211,8 +217,8 @@ fun PeriodBudgetScreen(
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
     }
 
-    val monthTransactions = remember(allTransactions, monthStart, monthEnd) {
-        allTransactions.filter { it.date >= monthStart && it.date <= monthEnd }
+    val monthTransactions = remember(mainAllTransactions, monthStart, monthEnd) {
+        mainAllTransactions.filter { it.date >= monthStart && it.date <= monthEnd }
     }
 
     val monthIncomes = remember(monthTransactions) { monthTransactions.filter { it.type == "income" } }
@@ -222,11 +228,11 @@ fun PeriodBudgetScreen(
     val monthTotalExpense = remember(monthExpenses) { monthExpenses.sumOf { it.amount } }
     val monthNetBalance = monthTotalIncome - monthTotalExpense
 
-    val previousCarryover = remember(allTransactions, monthStart) {
-        val prevIncomes = allTransactions
+    val previousCarryover = remember(mainAllTransactions, monthStart) {
+        val prevIncomes = mainAllTransactions
             .filter { it.type == "income" && it.date < monthStart }
             .sumOf { it.amount }
-        val prevExpenses = allTransactions
+        val prevExpenses = mainAllTransactions
             .filter { it.type == "expense" && it.date < monthStart }
             .sumOf { it.amount }
 
@@ -236,45 +242,21 @@ fun PeriodBudgetScreen(
     val monthTotalAccumulatedBalance = previousCarryover + monthNetBalance
     val monthSavingsRate = if (monthTotalIncome > 0) Math.max(0, Math.round((monthNetBalance / monthTotalIncome) * 100)) else 0
 
-    val incomes = remember(filteredTransactions) { filteredTransactions.filter { it.type == "income" } }
-    val expenses = remember(filteredTransactions) { filteredTransactions.filter { it.type == "expense" } }
+    val incomes = remember(mainFilteredTransactions) { mainFilteredTransactions.filter { it.type == "income" } }
+    val expenses = remember(mainFilteredTransactions) { mainFilteredTransactions.filter { it.type == "expense" } }
 
     val categoryExpenseTotals = remember(expenses) {
         expenses.groupBy { it.category }.mapValues { entry -> entry.value.sumOf { it.amount } }
     }
 
-    var showMonthWheelPicker by remember { mutableStateOf(false) }
-    var showDateRangePicker by remember { mutableStateOf(false) }
-    var showReportDialog by remember { mutableStateOf(false) }
-    var showSharesDialog by remember { mutableStateOf(false) }
     var showCategoryLimitsDialog by remember { mutableStateOf(false) }
-    var showIncomeExpenseSummaryDialog by remember { mutableStateOf(false) }
     var showAllTransactionsDialog by remember { mutableStateOf(false) }
     var initialAllTransactionsFilter by remember { mutableStateOf("all") }
 
     val categoriesListState = viewModel?.categories?.collectAsStateWithLifecycle()
     val categoriesList = categoriesListState?.value ?: remember { emptyList() }
 
-    val activeAuditText = savedAiAudit?.auditText ?: aiAuditResult
-    val isReportReady = !activeAuditText.isNullOrEmpty()
-
-    val periodTitleName = when (periodType) {
-        PeriodType.DAY -> "День ($selectedDateDay)"
-        PeriodType.WEEK -> "Неделя ($selectedDateDay)"
-        PeriodType.MONTH -> "${MonthsRu.getOrElse(selectedMonthIdx) { "Месяц" }}"
-        PeriodType.ALL -> "Период (с $allPeriodStart по $allPeriodEnd)"
-    }
-
-    val context = LocalContext.current
-
-    fun handleAnalyzeClick() {
-        onRequestAiAudit()
-    }
-
     val pagerState = rememberPagerState(initialPage = if (activeSubTab == "expense") 0 else 1, pageCount = { 2 })
-    val coroutineScope = rememberCoroutineScope()
-
-    val isExpenseTab = pagerState.currentPage == 0
 
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }.collect { page ->
@@ -366,7 +348,6 @@ fun PeriodBudgetScreen(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                // Total Balance Amount in Monospace font
                 Text(
                     text = formatFullCurrency(monthTotalAccumulatedBalance),
                     color = Color.White,
@@ -381,7 +362,6 @@ fun PeriodBudgetScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Income SubItem
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -432,7 +412,6 @@ fun PeriodBudgetScreen(
                         }
                     }
 
-                    // Expense SubItem
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -493,7 +472,7 @@ fun PeriodBudgetScreen(
             onClick = null
         )
 
-        // --- STEP 3: CATEGORIES GRID SECTION ("КАТЕГОРИИ" - 3 Column Neon Grid matching HTML mockup) ---
+        // --- CATEGORIES GRID ---
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -586,7 +565,6 @@ fun PeriodBudgetScreen(
                 displayCategories.maxOfOrNull { it.second }?.coerceAtLeast(1.0) ?: 1.0
             }
 
-            // Row 1: First 3 items
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -646,7 +624,6 @@ fun PeriodBudgetScreen(
                                 maxLines = 1
                             )
 
-                            // Indicator bar
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -667,7 +644,6 @@ fun PeriodBudgetScreen(
                 }
             }
 
-            // Row 2: Remaining items (Items 4, 5 and "+ Добавить" item)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -727,7 +703,6 @@ fun PeriodBudgetScreen(
                                 maxLines = 1
                             )
 
-                            // Indicator bar
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -747,7 +722,6 @@ fun PeriodBudgetScreen(
                     }
                 }
 
-                // 6th Card: "+ Добавить" tile
                 Card(
                     onClick = { showCategoryLimitsDialog = true },
                     colors = CardDefaults.cardColors(containerColor = Indigo500.copy(alpha = 0.08f)),
@@ -802,43 +776,10 @@ fun PeriodBudgetScreen(
             )
         }
 
-        if (showSharesDialog && !isAppLocked) {
-            ExpenseSharesDialog(
-                filteredTransactions = filteredTransactions,
-                allTransactions = allTransactions,
-                onDeleteTransaction = onDeleteTransaction,
-                onEditTransaction = onEditTransaction,
-                selectedDateDay = selectedDateDay,
-                onDateSelected = onChangeSelectedDay,
-                aiAuditResult = aiAuditResult,
-                aiAuditLoading = aiAuditLoading,
-                savedAiAudit = savedAiAudit?.auditText,
-                onRequestAiAudit = onRequestAiAudit,
-                periodType = periodType,
-                onSetPeriodType = onSetPeriodType,
-                selectedMonthIdx = selectedMonthIdx,
-                onChangeSelectedMonthIdx = onChangeSelectedMonthIdx,
-                allPeriodStart = allPeriodStart,
-                allPeriodEnd = allPeriodEnd,
-                onChangeAllPeriodStart = onChangeAllPeriodStart,
-                onChangeAllPeriodEnd = onChangeAllPeriodEnd,
-                monthsRu = MonthsRu,
-                viewModel = viewModel,
-                onDismiss = { showSharesDialog = false }
-            )
-        }
-
-        if (showIncomeExpenseSummaryDialog && !isAppLocked) {
-            IncomeExpenseSummaryDialog(
-                transactions = filteredTransactions,
-                onDismiss = { showIncomeExpenseSummaryDialog = false }
-            )
-        }
-
         if (showAllTransactionsDialog && !isAppLocked) {
             val currentPeriodInitialDate = if (periodType == PeriodType.DAY || periodType == PeriodType.WEEK) selectedDateDay else monthStart
             AllTransactionsDialog(
-                transactions = if (allTransactions.isNotEmpty()) allTransactions else filteredTransactions,
+                transactions = if (mainAllTransactions.isNotEmpty()) mainAllTransactions else mainFilteredTransactions,
                 onDeleteTransaction = onDeleteTransaction,
                 onEditTransaction = onEditTransaction,
                 initialFilterType = initialAllTransactionsFilter,
@@ -847,11 +788,9 @@ fun PeriodBudgetScreen(
             )
         }
 
-
-
-        // --- STEP 4: RECENT TRANSACTIONS SECTION ("ПОСЛЕДНИЕ ОПЕРАЦИИ") ---
-        val recentTxList = remember(filteredTransactions) {
-            filteredTransactions.take(10)
+        // --- RECENT TRANSACTIONS SECTION ---
+        val recentTxList = remember(mainFilteredTransactions) {
+            mainFilteredTransactions.take(10)
         }
 
         Card(
@@ -878,13 +817,13 @@ fun PeriodBudgetScreen(
                             letterSpacing = 1.sp
                         )
                         Text(
-                            text = "Всего ${filteredTransactions.size} транзакций",
+                            text = "Всего ${mainFilteredTransactions.size} транзакций",
                             color = Slate500,
                             fontSize = 10.sp
                         )
                     }
 
-                    if (filteredTransactions.isNotEmpty()) {
+                    if (mainFilteredTransactions.isNotEmpty()) {
                         Text(
                             text = "Все ›",
                             color = Indigo500,
@@ -920,10 +859,21 @@ fun PeriodBudgetScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         recentTxList.forEach { tx ->
+                            // Находим дочерние товары чека, если они есть
+                            val receiptItems = remember(allTransactions, tx.id) {
+                                allTransactions.filter { it.parentId == tx.id }
+                            }
+
                             TransactionRowItem(
                                 item = tx,
                                 onDelete = onDeleteTransaction,
-                                onClick = null,
+                                onClick = {
+                                    if (receiptItems.isNotEmpty()) {
+                                        selectedReceiptTransaction = tx
+                                    } else if (onEditTransaction != null) {
+                                        onEditTransaction(tx)
+                                    }
+                                },
                                 canDelete = false
                             )
                         }
@@ -933,6 +883,18 @@ fun PeriodBudgetScreen(
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+
+    // Всплывающее окно состава чека при нажатии на карточку чека
+    selectedReceiptTransaction?.let { parentTx ->
+        val childItems = remember(allTransactions, parentTx.id) {
+            allTransactions.filter { it.parentId == parentTx.id }
+        }
+        ReceiptDetailsDialog(
+            parentTransaction = parentTx,
+            items = childItems,
+            onDismiss = { selectedReceiptTransaction = null }
+        )
     }
 }
 
@@ -982,7 +944,7 @@ fun getCategoryColorAndIcon(category: String, subcategory: String): Pair<android
         text.contains("кредит") || text.contains("займ") || text.contains("ипотек") || text.contains("долг") || text.contains("банк") -> Pair(Rose500, Icons.Default.AccountBalance)
         text.contains("аптек") || text.contains("лекарст") || text.contains("здоровье") || text.contains("больниц") || text.contains("врач") || text.contains("медицин") -> Pair(Rose500, Icons.Default.MedicalServices)
         text.contains("сбережен") || text.contains("копилк") || text.contains("накоплен") || text.contains("вклад") || text.contains("инвест") || text.contains("фонд") || text.contains("цель") -> Pair(Indigo500, Icons.Default.Savings)
-        text.contains("яндекс") || text.contains("yandex") -> Pair(androidx.compose.ui.graphics.Color(0xFFFC3F1D), Icons.Default.ShoppingBag)
+        text.contains("янндекс") || text.contains("yandex") -> Pair(androidx.compose.ui.graphics.Color(0xFFFC3F1D), Icons.Default.ShoppingBag)
         text.contains("сбер") || text.contains("перевод") || text.contains("тинькофф") || text.contains("карта") || text.contains("спб") -> Pair(Emerald400, Icons.Default.Refresh)
         text.contains("продукт") || text.contains("супермаркет") || text.contains("еда") || text.contains("магнит") || text.contains("пятерочк") || text.contains("ашан") || text.contains("магазин") -> Pair(androidx.compose.ui.graphics.Color(0xFFF59E0B), Icons.Default.ShoppingBag)
         text.contains("кафе") || text.contains("ресторан") || text.contains("фастфуд") || text.contains("доставк") || text.contains("кофе") || text.contains("столовая") -> Pair(androidx.compose.ui.graphics.Color(0xFFEC4899), Icons.Default.ShoppingBag)
