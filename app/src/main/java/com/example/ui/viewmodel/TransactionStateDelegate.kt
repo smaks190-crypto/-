@@ -402,10 +402,17 @@ class TransactionStateDelegate(
                 }
 
                 try {
-                    val userPhrase = repository.generateUserPhraseMulti(
-                        apiKey = apiKey.value,
-                        operations = processedOps
-                    )
+                    val userPhrase = if (processedOps.size == 1 && processedOps[0].items.isNotEmpty()) {
+                        val singleOp = processedOps[0]
+                        val itemsSummary = singleOp.items.joinToString(", ") { "${it.title} (${it.amount.toInt()} ₽)" }
+                        "Заскочил в ${singleOp.subcategory}, затарился: $itemsSummary. Итого: ${singleOp.amount.toInt()} ₽"
+                    } else {
+                        repository.generateUserPhraseMulti(
+                            apiKey = apiKey.value,
+                            operations = processedOps
+                        )
+                    }
+
                     val comment = repository.generateDavidCommentMulti(
                         apiKey = apiKey.value,
                         operations = processedOps,
