@@ -6,6 +6,7 @@ import com.example.data.db.CategoryEntity
 import com.example.data.db.GoalEntity
 import com.example.data.db.TransactionEntity
 import com.example.data.repository.BudgetRepository
+import com.example.data.repository.ParsedReceiptItem
 import com.example.data.repository.ParsedVoiceOperation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -307,8 +308,8 @@ class TransactionStateDelegate(
             if (operations.size == 1) {
                 val op = operations[0]
                 val finalDate = if (op.date.isNotBlank() && op.date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) op.date else dateStr
-                val finalCategory = if (op.category.isNotBlank() && !op.category.equals("null", true)) op.category else "Прочее"
-                val finalSubcategory = if (op.subcategory.isNotBlank() && !op.subcategory.equals("null", true)) op.subcategory else op.title
+                val finalCategory = if (op.category.isNotBlank() && !op.category.equals("null", ignoreCase = true)) op.category else "Прочее"
+                val finalSubcategory = if (op.subcategory.isNotBlank() && !op.subcategory.equals("null", ignoreCase = true)) op.subcategory else op.title
 
                 ensureCategoryExists(finalCategory, op.type)
 
@@ -370,8 +371,8 @@ class TransactionStateDelegate(
                 val processedOps = mutableListOf<ParsedVoiceOperation>()
                 for (op in operations) {
                     val finalDate = if (op.date.isNotBlank() && op.date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) op.date else dateStr
-                    val finalCategory = if (op.category.isNotBlank() && !op.category.equals("null", true)) op.category else "Прочее"
-                    val finalSubcategory = if (op.subcategory.isNotBlank() && !op.subcategory.equals("null", true)) op.subcategory else op.title
+                    val finalCategory = if (op.category.isNotBlank() && !op.category.equals("null", ignoreCase = true)) op.category else "Прочее"
+                    val finalSubcategory = if (op.subcategory.isNotBlank() && !op.subcategory.equals("null", ignoreCase = true)) op.subcategory else op.title
 
                     ensureCategoryExists(finalCategory, op.type)
 
@@ -450,7 +451,6 @@ class TransactionStateDelegate(
 
             val updatedCurrent = goal.currentAmount + amount
 
-            // Automatically log contribution as expense under "Сбережения"
             val tx = TransactionEntity(
                 budgetId = currentBudgetId,
                 type = "expense",
@@ -501,7 +501,6 @@ class TransactionStateDelegate(
             } catch (e: Exception) { e.printStackTrace() }
 
             if (updatedCurrent >= goal.targetAmount) {
-                // Goal reached! Delete goal automatically and emit congratulation event
                 repository.deleteGoal(goal.id)
                 completedGoalEvent.value = goal.name
             } else {
@@ -528,7 +527,6 @@ class TransactionStateDelegate(
             }
 
             if (target > 0 && current >= target) {
-                // Goal created already at or above 100% target
                 completedGoalEvent.value = name
             } else {
                 val goal = GoalEntity(
@@ -707,7 +705,6 @@ class TransactionStateDelegate(
 
         val allTxs = transactions.value
 
-        // Compute previous period transactions for comparative analysis
         val previousTransactions = when (periodType) {
             PeriodType.MONTH -> {
                 val prevMonthIdx = if (selectedMonthIdx > 0) selectedMonthIdx - 1 else 11
@@ -739,7 +736,6 @@ class TransactionStateDelegate(
                     PeriodType.ALL -> "Весь $year год"
                 }
 
-                // Save user audit request to chat history DB with unique UUID
                 val reqTime = System.currentTimeMillis()
                 val reqId = UUID.randomUUID().toString()
                 repository.insertNotification(
@@ -777,7 +773,6 @@ class TransactionStateDelegate(
                         currentBlockBuffer += chunk
                         aiAuditResult.value = fullText
 
-                        // Streaming Chunk Accumulator: Slice blocks when paragraph separator (\n\n) appears
                         while (currentBlockBuffer.contains("\n\n")) {
                             val parts = currentBlockBuffer.split("\n\n", limit = 2)
                             val completedBlock = parts[0].trim()
@@ -806,7 +801,6 @@ class TransactionStateDelegate(
                         }
                     }
 
-                    // Emit remaining buffer content as the final SMS block
                     val finalBlock = currentBlockBuffer.trim()
                     if (finalBlock.isNotBlank() && finalBlock != "ERROR_NO_CONNECTION") {
                         blockCount++
