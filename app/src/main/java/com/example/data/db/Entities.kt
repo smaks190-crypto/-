@@ -42,7 +42,8 @@ data class TransactionEntity(
     val date: String, // "YYYY-MM-DD"
     val category: String,
     val subcategory: String,
-    val amount: Double
+    val amount: Double,
+    val parentId: String? = null
 )
 
 @Entity(tableName = "goals")
