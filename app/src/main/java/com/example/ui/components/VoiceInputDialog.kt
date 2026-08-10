@@ -634,7 +634,7 @@ fun VoiceRecordingOverlay(
             .padding(bottom = boxBottomPadding, end = boxEndPadding),
         contentAlignment = Alignment.BottomEnd
     ) {
-        FullCapsuleNeonGlow(
+        MovingNeonGlow(
             isRecording = isVoiceActive || isListening,
             amplitude = normalizedAmplitude,
             widthDp = cardWidthAnim.value,
@@ -824,3 +824,4 @@ fun VoiceRecordingOverlay(
         }
     }
 }
+
