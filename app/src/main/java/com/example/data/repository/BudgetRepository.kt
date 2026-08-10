@@ -1,5 +1,5 @@
 package com.example.data.repository
-import com.example.data.repository.ParsedVoiceOperation
+
 import com.example.utils.GlobalConsoleLogger
 import com.example.data.api.GeminiApiService
 import com.example.data.api.GeminiContent
@@ -154,7 +154,6 @@ class BudgetRepository(
         }
         val fullExtra = if (extraContext.isNotBlank()) "\nДетали:\n$extraContext\n" else ""
 
-
         val userQuery = "Пользователь добавил финансовую операцию:\n" +
                 "Тип: $typeText\n" +
                 "Категория: '$category' (подкатегория: '$subcategory')\n" +
@@ -208,9 +207,7 @@ class BudgetRepository(
                         return responseText
                     }
                 }
-            } catch (_: Exception) {
-                // Try next model or fallback
-            }
+            } catch (_: Exception) {}
         }
 
         return generateLocalDavidComment(type, category, amount)
@@ -397,9 +394,7 @@ class BudgetRepository(
                         return responseText
                     }
                 }
-            } catch (_: Exception) {
-                // Try next model or fallback
-            }
+            } catch (_: Exception) {}
         }
 
         return generateLocalUserPhrase(type, category, subcategory, amount, isFirstToday)
@@ -448,7 +443,7 @@ class BudgetRepository(
                         "взял вредной еды на ${amountInt}₽, каюсь"
                     ).random()
                 }
-                lowerCat.contains("цыган") || lowerSub.contains("цыган") || lowerCat.contains("благотворительность") || lowerSub.contains("цыганка") || lowerSub.contains("детям") || lowerCat.contains("добро") || lowerCat.contains("добро") -> {
+                lowerCat.contains("цыган") || lowerSub.contains("цыган") || lowerCat.contains("благотворительность") || lowerSub.contains("цыганка") || lowerSub.contains("детям") || lowerCat.contains("добро") -> {
                     "я дал цыганке ${amountInt}₽ на еду детям. Потому что я хороший человек"
                 }
                 lowerCat.contains("продукты") || lowerSub.contains("продукты") || lowerSub.contains("супермаркет") -> {
@@ -648,7 +643,6 @@ class BudgetRepository(
         return existing.first()
     }
 
-
     suspend fun insertTransaction(transaction: TransactionEntity) {
         GlobalConsoleLogger.i("ROOM", "Insert Transaction: ${transaction.type.uppercase()} ${transaction.amount} ₽ (${transaction.category} / ${transaction.subcategory})")
         transactionDao.insertTransaction(transaction)
@@ -729,7 +723,6 @@ class BudgetRepository(
             e.printStackTrace()
         }
     }
-
 
     suspend fun exportJson(): String {
         val txs = allTransactions.first()
@@ -950,7 +943,7 @@ class BudgetRepository(
                                             success = true
                                         }
                                     } catch (e: Exception) {
-                                        // Ignore JSON parsing exceptions for non-json lines or incomplete data
+                                        // Ignore JSON parsing exceptions
                                     }
                                 }
                             }
@@ -1213,9 +1206,7 @@ class BudgetRepository(
                         return responseText
                     }
                 }
-            } catch (_: Exception) {
-                // Try next model or fallback
-            }
+            } catch (_: Exception) {}
         }
 
         return localCategorySuggestion(transactionName, type, categories)
@@ -1240,7 +1231,7 @@ class BudgetRepository(
                 lower.contains("вкусвилл") || lower.contains("хлеб") || lower.contains("молоко") || lower.contains("супермаркет")) {
                 return categories.firstOrNull { it.contains("Продукт", ignoreCase = true) } ?: "Продукты"
             }
-            if (lower.contains("такси") || lower.contains("яндекс") || lower.contains("метро") || lower.contains("автобус") ||
+            if (lower.contains("такси") || lower.contains("янндекс") || lower.contains("метро") || lower.contains("автобус") ||
                 lower.contains("бензин") || lower.contains("заправк") || lower.contains("каршеринг") || lower.contains("проезд")) {
                 return categories.firstOrNull { it.contains("Транспорт", ignoreCase = true) || it.contains("Обязательн", ignoreCase = true) } ?: "Транспорт"
             }
@@ -1264,141 +1255,6 @@ class BudgetRepository(
     }
 
     suspend fun parseVoiceOperations(
-        voiceText: String,
-        apiKey: String,
-        expenseCategories: List<String>,
-        incomeCategories: List<String>
-    ): List<ParsedVoiceOperation> {
-        val trimmedText = voiceText.trim()
-        if (trimmedText.isEmpty()) return emptyList()
-
-        if (apiKey.isBlank()) {
-            throw IllegalArgumentException("Для анализа речи с помощью ИИ укажите API ключ Gemini в настройках приложения.")
-        }
-
-        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-        val todayStr = dateFormat.format(java.util.Date())
-        val dayOfWeekStr = java.text.SimpleDateFormat("EEEE", java.util.Locale("ru")).format(java.util.Date())
-
-        val systemPrompt = "Вы — экспертный финансовый ассистент. Анализируйте сказанный пользователем текст и извлекайте из него ВСЕ финансовые операции (доходы и расходы).\n" +
-                "Разделите сказанное на отдельные операции и для каждой выделите название, тип (income или expense), сумму (число), категорию, подкатегорию (если есть) и дату (если упомянута).\n" +
-                "Текущая дата сегодня: $todayStr (день недели: $dayOfWeekStr).\n" +
-                "ПРАВИЛА ДЛЯ ДАТЫ ('date'):\n" +
-                "- Если пользователь говорит 'вчера', вычисли дату за день до сегодняшней ($todayStr).\n" +
-                "- Если пользователь говорит 'позавчера', вычисли дату за 2 дня до сегодняшней ($todayStr).\n" +
-                "- Если пользователь указывает день недели или число (например 'в прошлый вторник', '15 июля'), вычисли соответствующую дату в формате YYYY-MM-DD.\n" +
-                "- Если дата не упомянута, укажи текущую дату '$todayStr'.\n" +
-                "ОСОБОЕ ПРАВИЛО ДЛЯ ДЕТАЛИЗАЦИИ:\n" +
-                "- Если пользователь перечисляет несколько конкретных покупок в рамках одной общей категории (например, 'в фастфуде бургер за 300 рублей и кола за 150' или 'потратил в супермаркете: молоко 100 и хлеб 50'), обязательно раздели это на ОТДЕЛЬНЫЕ операции.\n" +
-                "- Каждой операции присвой одну и ту же общую подходящую категорию (например, 'Кафе/Рестораны', 'Фастфуд' или 'Продукты'), а в качестве 'title' и 'subcategory' укажи конкретную покупку ('Бургер', 'Кола', 'Молоко', 'Хлеб').\n" +
-                "ПРАВИЛО КАТЕГОРИЗАЦИИ (КРИТИЧЕСКИ ВАЖНО):\n" +
-                "- Категории должны максимально точно отражать суть операции и контент! Не ограничивайтесь только списком предоставленных категорий, если суть операции специфическая.\n" +
-                "- Если операция касается долгов, займов, кредитов, возвратов денег, подарков, конкретных людей или других особых случаев (например: 'Занял брату', 'Взял в долг у Олега', 'Подарок маме', 'Кредит Сбербанк'), то СТРОГО создайте новую, емкую и максимально точную контекстную категорию (например, 'Занял брату', 'Взял у Олега', 'Кредит Сбербанк' или 'Долг: Брат') в поле 'category'. Не используйте общие категории типа 'Прочее', 'Обязательные' или 'Занял займ'!\n" +
-                "- Если в тексте есть явное указание на человека или специфическое действие ('Занял брату', 'Вернул долг другу', 'Подарок маме'), сформируйте емкую, понятную категорию на основе этого контекста, а не просто скидывайте в 'Прочее'.\n" +
-                "- Название операции ('title') и подкатегория ('subcategory') также должны быть максимально детальными, отражая контент полностью (например, в 'title' запишите 'Занял брату', а в 'subcategory' - 'Брат' или конкретную деталь).\n" +
-                "Подбирайте наиболее подходящие категории из предоставленных списков для обычных покупок (продукты, такси, развлечения и т.д.). Избегайте значений 'null' или пустых названий.\n" +
-                "Верните СТРОГО JSON-массив объектов без какого-либо разметочного текста или комментариев."
-
-        val userQuery = """
-            Категории расходов: ${expenseCategories.joinToString(", ")}
-            Категории доходов: ${incomeCategories.joinToString(", ")}
-
-            Разбери фразу и верни JSON массив объектов формата:
-            [
-              {
-                "title": "Такси",
-                "type": "expense",
-                "amount": 450.0,
-                "category": "Транспорт",
-                "subcategory": "Яндекс Такси",
-                "date": "$todayStr"
-              }
-            ]
-
-            Текст пользователя:
-            \"\"\"
-            $trimmedText
-            \"\"\"
-        """.trimIndent()
-
-        val request = GeminiRequest(
-            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = userQuery)))),
-            systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
-        )
-
-        var lastError: String? = null
-
-        val modelsToTry = listOf(
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
-        )
-
-        GlobalConsoleLogger.i("GEMINI", "Запрос к Gemini API для разбора голоса: «$trimmedText»")
-
-        for (model in modelsToTry) {
-            try {
-                GlobalConsoleLogger.d("GEMINI", "Пробуем модель: $model")
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                    if (!responseText.isNullOrEmpty()) {
-                        val jsonString = extractJsonArray(responseText)
-                        if (jsonString.isNotBlank()) {
-                            val parsed = parseJsonOperations(jsonString, todayStr)
-                            if (parsed.isNotEmpty()) {
-                                GlobalConsoleLogger.i("GEMINI", "Успешный ответ Gemini ($model): распознано ${parsed.size} операций")
-                                return parsed
-                            }
-                        }
-                    }
-                } else {
-                    lastError = response.error.message
-                    GlobalConsoleLogger.w("GEMINI", "Ошибка от Gemini ($model): ${response.error.message}")
-                }
-            } catch (e: Exception) {
-                lastError = e.message
-                GlobalConsoleLogger.e("GEMINI", "Исключение при обращении к $model: ${e.localizedMessage}", e)
-            }
-        }
-
-        GlobalConsoleLogger.e("GEMINI", "Все Gemini модели завершились ошибкой: $lastError")
-        throw IllegalStateException(lastError ?: "Не удалось разбрать операции из текста. Попробуйте сформулировать точнее.")
-    }
-
-    private fun extractJsonArray(rawText: String): String {
-        val clean = rawText.replace("```json", "").replace("```", "").trim()
-        val startIdx = clean.indexOf('[')
-        val endIdx = clean.lastIndexOf(']')
-        return if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
-            clean.substring(startIdx, endIdx + 1)
-        } else ""
-    }
-
-    private fun sanitizeJsonStr(s: String?): String {
-        if (s == null) return ""
-        val trimmed = s.trim()
-        if (trimmed.equals("null", ignoreCase = true) || trimmed.equals("undefined", ignoreCase = true)) return ""
-        return trimmed
-    }
-
-    private fun parseJsonOperations(jsonString: String, defaultDate: String): List<ParsedVoiceOperation> {
-        val results = mutableListOf<ParsedVoiceOperation>()
-        try {
-            val array = JSONArray(jsonString)
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                val rawTitle = sanitizeJsonStr(obj.optString("title", ""))
-                val rawType = if (obj.optString("type", "expense").lowercase().contains("inc")) "income" else "expense"
-                val amount = obj.optDouble("amount", 0.0)
-                val rawCategory = sanitizeJsonStr(obj.optString("category", ""))
-                val rawSubcategory = sanitizeJsonStr(obj.optString("subcategory", ""))
-                val rawDate = sanitizeJsonStr(obj.optString("date", ""))
-
-                val finalTitle = if (rawTitle.isNotBlank()) rawTitle else if (rawCategory.isNotBlank()) rawCategory else if (rawType == "income") "Доход" else "Расход"
-                val finalCategory = if (rawCategory.isNotBlank()) rawCategory else "Прочее"
-                val finalDate = if (rawDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) rawDate else defaultDate
-
-                    suspend fun parseVoiceOperations(
         voiceText: String,
         apiKey: String,
         expenseCategories: List<String>,
@@ -1527,7 +1383,6 @@ class BudgetRepository(
                 val rawSubcategory = sanitizeJsonStr(obj.optString("subcategory", ""))
                 val rawDate = sanitizeJsonStr(obj.optString("date", ""))
 
-                // Парсинг вложенного массива покупок чека
                 val rawItems = obj.optJSONArray("items")
                 val parsedItems = mutableListOf<ParsedReceiptItem>()
                 if (rawItems != null) {
@@ -1580,30 +1435,5 @@ data class ParsedReceiptItem(
     val title: String,
     val amount: Double
 )
-
-                        )
-                    )
-                }
-            }
-        } catch (_: Exception) {}
-        return results
-    }
-}
-
-data class ParsedVoiceOperation(
-    val title: String,
-    val type: String,
-    val amount: Double,
-    val category: String,
-    val subcategory: String = "",
-    val date: String = "",
-    val items: List<ParsedReceiptItem> = emptyList()
-)
-
-data class ParsedReceiptItem(
-    val title: String,
-    val amount: Double
-)
-
 
 private fun String?.isNull_or_Empty(): Boolean = this == null || this.isEmpty()
