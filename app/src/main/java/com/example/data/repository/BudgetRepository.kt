@@ -448,7 +448,7 @@ class BudgetRepository(
                         "взял вредной еды на ${amountInt}₽, каюсь"
                     ).random()
                 }
-                lowerCat.contains("цыган") || lowerSub.contains("цыган") || lowerCat.contains("благотворительность") || lowerSub.contains("цыганка") || lowerSub.contains("детям") || lowerCat.contains("добро") || lowerSub.contains("добро") -> {
+                lowerCat.contains("цыган") || lowerSub.contains("цыган") || lowerCat.contains("благотворительность") || lowerSub.contains("цыганка") || lowerSub.contains("детям") || lowerCat.contains("добро") || lowerCat.contains("добро") -> {
                     "я дал цыганке ${amountInt}₽ на еду детям. Потому что я хороший человек"
                 }
                 lowerCat.contains("продукты") || lowerSub.contains("продукты") || lowerSub.contains("супермаркет") -> {
@@ -591,33 +591,30 @@ class BudgetRepository(
         if (storageFile.exists()) {
             try { storageFile.delete() } catch (_: Exception) {}
         }
-    
-        suspend fun insertReceiptTransaction(
-    parentTransaction: TransactionEntity,
-    items: List<ParsedReceiptItem>
-) {
-    db.withTransaction {
-        // 1. Сохраняем общий чек
-        transactionDao.insertTransaction(parentTransaction)
+    }
 
-        // 2. Сохраняем вложенные позиций со ссылкой на родительский чек
-        items.forEach { item ->
-            val childTx = TransactionEntity(
-                budgetId = parentTransaction.budgetId,
-                accountId = parentTransaction.accountId,
-                type = parentTransaction.type,
-                date = parentTransaction.date,
-                category = parentTransaction.category,
-                subcategory = item.title,
-                amount = item.amount,
-                parentId = parentTransaction.id
-            )
-            transactionDao.insertTransaction(childTx)
+    suspend fun insertReceiptTransaction(
+        parentTransaction: TransactionEntity,
+        items: List<ParsedReceiptItem>
+    ) {
+        db.withTransaction {
+            transactionDao.insertTransaction(parentTransaction)
+            items.forEach { item ->
+                val childTx = TransactionEntity(
+                    budgetId = parentTransaction.budgetId,
+                    accountId = parentTransaction.accountId,
+                    type = parentTransaction.type,
+                    date = parentTransaction.date,
+                    category = parentTransaction.category,
+                    subcategory = item.title,
+                    amount = item.amount,
+                    parentId = parentTransaction.id
+                )
+                transactionDao.insertTransaction(childTx)
+            }
         }
     }
-}
 
-    // budget_storage.json больше не поддерживается в актуальном состоянии на каждую запись и используется только для миграции легаси-данных
     suspend fun ensureDefaultProfileExists(): BudgetProfileEntity {
         val existing = allProfiles.first()
         if (existing.isEmpty()) {
@@ -774,7 +771,6 @@ class BudgetRepository(
             val rawCats = backup.categories ?: emptyList()
             val rawAccs = backup.accounts ?: emptyList()
 
-            // Map old account IDs to new UUIDs to prevent collision and preserve foreign key relationships in transactions
             val accountIdMap = mutableMapOf<String, String>()
             val accs = rawAccs.map { oldAcc ->
                 val newId = java.util.UUID.randomUUID().toString()
@@ -1085,7 +1081,6 @@ class BudgetRepository(
             }
         }
 
-        // Fallback
         return Result.failure(Exception("ERROR_NO_CONNECTION"))
     }
 
@@ -1412,7 +1407,7 @@ class BudgetRepository(
                             category = finalCategory,
                             subcategory = rawSubcategory,
                             date = finalDate,
-                            items = itemsList
+                            items = emptyList()
                         )
                     )
                 }
