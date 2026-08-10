@@ -888,16 +888,11 @@ fun PeriodBudgetScreen(
     // Всплывающее окно состава чека при нажатии на карточку чека
     selectedReceiptTransaction?.let { parentTx ->
         val childItems = remember(allTransactions, parentTx.id) {
-            allTransactions.filter { it.parentId == parentTx.id }.map { childTx ->
-                com.example.data.repository.ParsedReceiptItem(
-                    title = childTx.subcategory.ifBlank { childTx.category },
-                    amount = childTx.amount
-                )
-            }
+            allTransactions.filter { it.parentId == parentTx.id }
         }
         ReceiptDetailsDialog(
             parentTransaction = parentTx,
-            receiptItems = childItems,
+            transactions = childItems,
             onDismiss = { selectedReceiptTransaction = null }
         )
     }
