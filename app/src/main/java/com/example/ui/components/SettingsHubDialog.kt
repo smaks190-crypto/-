@@ -1,5 +1,9 @@
 package com.example.ui.components
 
+import com.example.ui.components.settings.GeneralSettingsTab
+import com.example.ui.components.settings.VoiceAndAISettingsTab
+import com.example.ui.components.settings.SecuritySettingsTab
+import com.example.ui.components.settings.BackupRestoreSettingsTab
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -49,6 +53,9 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -152,10 +159,13 @@ fun Modifier.settingsSharedBounds(screenKey: SettingsScreen?): Modifier {
 
 enum class SettingsScreen {
     HUB,
+    GENERAL,
+    VOICE_AI,
     SECURITY,
     REMINDERS,
     API_KEY,
-    PRIVACY
+    PRIVACY,
+    BACKUP
 }
 
 private const val REQUEST_CODE_POST_NOTIFICATIONS = 101
@@ -252,6 +262,12 @@ fun SettingsHubDialog(
                                             onRenameProfile = onRenameProfile,
                                             onResetAllData = onResetAllData,
                                             onDismiss = onDismiss,
+                                            onNavigateToGeneral = {
+                                                currentScreen = SettingsScreen.GENERAL
+                                            },
+                                            onNavigateToVoiceAI = {
+                                                currentScreen = SettingsScreen.VOICE_AI
+                                            },
                                             onNavigateToSecurity = {
                                                 currentScreen = SettingsScreen.SECURITY
                                             },
@@ -259,10 +275,13 @@ fun SettingsHubDialog(
                                                 currentScreen = SettingsScreen.REMINDERS
                                             },
                                             onNavigateToApiKey = {
-                                                currentScreen = SettingsScreen.API_KEY
+                                                currentScreen = SettingsScreen.VOICE_AI
                                             },
                                             onNavigateToPrivacy = {
                                                 currentScreen = SettingsScreen.PRIVACY
+                                            },
+                                            onNavigateToBackup = {
+                                                currentScreen = SettingsScreen.BACKUP
                                             },
                                             onNavigateToCategories = {
                                                 onOpenCategories?.invoke()
@@ -270,12 +289,42 @@ fun SettingsHubDialog(
                                             onExitBudget = onExitBudget
                                         )
                                     }
+                                    SettingsScreen.GENERAL -> {
+                                        GeneralSettingsTab(
+                                            onOpenCategories = { onOpenCategories?.invoke() },
+                                            onResetData = onResetAllData,
+                                            onBack = { currentScreen = SettingsScreen.HUB },
+                                            onClose = onDismiss
+                                        )
+                                    }
+                                    SettingsScreen.VOICE_AI, SettingsScreen.API_KEY -> {
+                                        VoiceAndAISettingsTab(
+                                            initialKey = apiKey,
+                                            onSaveApiKey = { newKey ->
+                                                onSaveApiKey?.invoke(newKey)
+                                                currentScreen = SettingsScreen.HUB
+                                            },
+                                            onBack = { currentScreen = SettingsScreen.HUB },
+                                            onClose = onDismiss
+                                        )
+                                    }
                                     SettingsScreen.SECURITY -> {
-                                        SecuritySettingsContent(
+                                        SecuritySettingsTab(
                                             securityManager = securityManager,
                                             onBack = { currentScreen = SettingsScreen.HUB },
                                             onClose = onDismiss,
                                             onSecurityUpdated = { onSecurityUpdated?.invoke() }
+                                        )
+                                    }
+                                    SettingsScreen.BACKUP -> {
+                                        BackupRestoreSettingsTab(
+                                            onExportJson = { onOpenExportImport?.invoke() },
+                                            onExportCsv = { onOpenExportImport?.invoke() },
+                                            onImportJson = { onOpenExportImport?.invoke() },
+                                            onImportCsv = { onOpenExportImport?.invoke() },
+                                            onResetData = onResetAllData,
+                                            onBack = { currentScreen = SettingsScreen.HUB },
+                                            onClose = onDismiss
                                         )
                                     }
                                     SettingsScreen.REMINDERS -> {
@@ -321,7 +370,10 @@ private fun SettingsHubMainContent(
     onRenameProfile: (String) -> Unit,
     onResetAllData: () -> Unit,
     onDismiss: () -> Unit,
+    onNavigateToGeneral: () -> Unit,
+    onNavigateToVoiceAI: () -> Unit,
     onNavigateToSecurity: () -> Unit,
+    onNavigateToBackup: () -> Unit,
     onNavigateToReminders: () -> Unit,
     onNavigateToApiKey: () -> Unit,
     onNavigateToPrivacy: () -> Unit,
@@ -624,6 +676,17 @@ private fun SettingsHubMainContent(
             SettingsCategoryHeader(text = "ОСНОВНЫЕ")
 
             SettingsItemCard(
+                icon = Icons.Default.Tune,
+                iconTint = Emerald400,
+                title = "Основные настройки",
+                subtitle = "Валюта, язык и оформление",
+                badgeText = null,
+                badgeColor = Emerald400,
+                testTag = "settings_general_item",
+                onClick = onNavigateToGeneral
+            )
+
+            SettingsItemCard(
                 icon = Icons.Default.List,
                 iconTint = Emerald400,
                 title = "Категории операций",
@@ -635,7 +698,7 @@ private fun SettingsHubMainContent(
             )
 
             // Section 1: Security
-            SettingsCategoryHeader(text = "БЕЗОПАСНОСТЬ")
+            SettingsCategoryHeader(text = "БЕЗОПАСНОСТЬ И БЭКАП")
 
             SettingsItemCard(
                 icon = Icons.Default.Lock,
@@ -648,6 +711,17 @@ private fun SettingsHubMainContent(
                 badgeColor = if (securityManager.isPinEnabled()) Emerald400 else Slate600,
                 testTag = "settings_security_item",
                 onClick = onNavigateToSecurity
+            )
+
+            SettingsItemCard(
+                icon = Icons.Default.Storage,
+                iconTint = Indigo500,
+                title = "Бэкап и Восстановление",
+                subtitle = "Экспорт/импорт и резервные копии",
+                badgeText = null,
+                badgeColor = Indigo500,
+                testTag = "settings_backup_item",
+                onClick = onNavigateToBackup
             )
 
             // Section 2: Notifications
@@ -668,14 +742,14 @@ private fun SettingsHubMainContent(
             SettingsCategoryHeader(text = "ИНТЕЛЛЕКТУАЛЬНЫЕ ФУНКЦИИ")
 
             SettingsItemCard(
-                icon = Icons.Default.Star,
+                icon = Icons.Default.Mic,
                 iconTint = Indigo500,
-                title = "ИИ-Помощник (Gemini Key)",
-                subtitle = if (apiKey.isNotBlank()) "Ключ задан • Умный аудит готов" else "Ключ не установлен",
+                title = "Голос и ИИ-Ассистент",
+                subtitle = if (apiKey.isNotBlank()) "Gemini API • Голосовой ввод и промпты" else "Настройка голоса, ключей и промптов",
                 badgeText = if (apiKey.isNotBlank()) "Активен" else "Не задан",
                 badgeColor = if (apiKey.isNotBlank()) Indigo500 else Slate600,
-                testTag = "settings_api_key_item",
-                onClick = onNavigateToApiKey
+                testTag = "settings_voice_ai_item",
+                onClick = onNavigateToVoiceAI
             )
 
             // Section 3.5: Privacy

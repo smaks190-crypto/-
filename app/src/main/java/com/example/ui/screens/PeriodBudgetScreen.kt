@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.ui.components.dialogs.*
+
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import com.example.ui.components.ReportDetailsDialog
@@ -116,11 +118,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.TransactionEntity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.ui.components.CategoryLimitsDialog
+import com.example.ui.components.dialogs.CategoryLimitsDialog
 import com.example.ui.components.SwipeDirection
 import com.example.ui.components.SwipeToRevealBox
 import com.example.ui.components.IncomeExpenseSummaryDialog
-import com.example.ui.components.AllTransactionsDialog
+import com.example.ui.components.dialogs.AllTransactionsDialog
 import com.example.ui.components.DatePickerField
 import com.example.ui.components.MarkdownFormattedText
 import com.example.ui.components.formatFullCurrency
@@ -485,9 +487,8 @@ fun PeriodBudgetScreen(
         }
         
 
-        com.example.ui.components.ExpenseDynamicsAreaChartCard(
-            transactions = if (allTransactions.isNotEmpty()) allTransactions else monthTransactions,
-            selectedDateDay = selectedDateDay,
+        com.example.ui.components.charts.ExpenseDynamicsAreaChartCard(
+            transactions = monthTransactions,
             title = "ДИНАМИКА РАСХОДОВ",
             onClick = null
         )

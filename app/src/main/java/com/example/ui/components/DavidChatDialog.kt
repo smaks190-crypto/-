@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.NotificationEntity
+import com.example.ui.components.charts.renderChartMessage
 import com.example.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -950,9 +951,13 @@ private fun RenderAuditBlockItem(item: ChatAuditBlockItem) {
         val timeStr = remember(item.timestamp) {
             SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
         }
-        val isChartBlock = remember(item.text) {
-            item.text.contains("||chart||") || item.text.contains("Динамика трат") || item.text.contains("График трат")
+        val chartData = remember(item.text) {
+            parseChartDataFromText(item.text)
         }
+        val cleanText = remember(item.text) {
+            cleanChartTagsFromText(item.text)
+        }
+
         AnimatedVisibility(
             visible = true,
             enter = slideInVertically(
@@ -966,66 +971,113 @@ private fun RenderAuditBlockItem(item: ChatAuditBlockItem) {
                     .animateContentSize(),
                 horizontalAlignment = Alignment.Start
             ) {
-                if (isChartBlock) {
-                    val cleanText = remember(item.text) { item.text.replace("||chart||", "").trim() }
-                    if (cleanText.isNotBlank()) {
-                        Surface(
-                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                            color = Slate800.copy(alpha = 0.85f),
-                            border = BorderStroke(1.dp, Slate700),
-                            modifier = Modifier.fillMaxWidth(0.92f)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                MarkdownFormattedText(
-                                    markdownText = cleanText,
-                                    fontSize = 13.sp
-                                )
-                            }
+                Surface(
+                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+                    color = Slate800.copy(alpha = 0.85f),
+                    border = BorderStroke(1.dp, Slate700),
+                    modifier = Modifier.fillMaxWidth(0.92f)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        if (item.isFirst) {
+                            Text(
+                                text = "Жабов Давид (Аналитика)",
+                                color = Emerald400,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                    }
-                    renderChartMessage(
-                        title = "Динамика трат по дням",
-                        time = timeStr
-                    )
-                } else {
-                    Surface(
-                        shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                        color = Slate800.copy(alpha = 0.85f),
-                        border = BorderStroke(1.dp, Slate700),
-                        modifier = Modifier.fillMaxWidth(0.92f)
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            if (item.isFirst) {
-                                Text(
-                                    text = "Жабов Давид (Аналитика)",
-                                    color = Emerald400,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                            }
+
+                        if (cleanText.isNotBlank()) {
                             MarkdownFormattedText(
-                                markdownText = item.text,
+                                markdownText = cleanText,
                                 fontSize = 13.sp
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                Text(
-                                    text = timeStr,
-                                    color = Slate400,
-                                    fontSize = 10.sp
-                                )
-                            }
+                        }
+
+                        if (chartData != null && chartData.points.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            renderChartMessage(
+                                dataPoints = chartData.points,
+                                labels = chartData.labels,
+                                title = chartData.title,
+                                totalAmount = chartData.total
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Text(
+                                text = timeStr,
+                                color = Slate400,
+                                fontSize = 10.sp
+                            )
                         }
                     }
                 }
             }
         }
     }
+}
+
+data class ParsedChartMessageData(
+    val points: List<Double>,
+    val labels: List<String> = emptyList(),
+    val title: String = "Динамика трат",
+    val total: Double? = null
+)
+
+fun parseChartDataFromText(text: String): ParsedChartMessageData? {
+    val regex = Regex("""\|\|chart:(.*?)\|\|""", RegexOption.DOT_MATCHES_ALL)
+    val match = regex.find(text)
+    if (match != null) {
+        val raw = match.groupValues[1].trim()
+        val parts = raw.split("|")
+        var title = "Динамика трат"
+        var points = listOf<Double>()
+        var labels = listOf<String>()
+        var total: Double? = null
+
+        for (part in parts) {
+            val trimmed = part.trim()
+            when {
+                trimmed.startsWith("title=") -> title = trimmed.substringAfter("title=")
+                trimmed.startsWith("labels=") -> labels = trimmed.substringAfter("labels=").split(",").map { it.trim() }
+                trimmed.startsWith("total=") -> total = trimmed.substringAfter("total=").toDoubleOrNull()
+                trimmed.startsWith("data=") -> points = trimmed.substringAfter("data=").split(",").mapNotNull { it.trim().toDoubleOrNull() }
+                else -> {
+                    if (points.isEmpty()) {
+                        points = trimmed.split(",").mapNotNull { it.trim().toDoubleOrNull() }
+                    }
+                }
+            }
+        }
+        if (points.isNotEmpty()) {
+            return ParsedChartMessageData(points, labels, title, total)
+        }
+    }
+
+    if (text.contains("динамика трат", ignoreCase = true) || text.contains("график трат", ignoreCase = true) || text.contains("расходы по дням", ignoreCase = true)) {
+        val numberRegex = Regex("""(\d+[\d\s]*[.,]?\d*)\s*(?:₽|руб|rub)""", RegexOption.IGNORE_CASE)
+        val extractedNums = numberRegex.findAll(text).mapNotNull {
+            it.groupValues[1].replace(" ", "").replace(",", ".").toDoubleOrNull()
+        }.toList()
+        if (extractedNums.size >= 3) {
+            return ParsedChartMessageData(
+                points = extractedNums,
+                title = "Динамика трат"
+            )
+        }
+    }
+
+    return null
+}
+
+fun cleanChartTagsFromText(text: String): String {
+    return text.replace(Regex("""\|\|chart:(.*?)\|\|""", RegexOption.DOT_MATCHES_ALL), "").trim()
 }
 
 @Composable

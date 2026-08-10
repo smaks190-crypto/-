@@ -35,7 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.TransactionEntity
-import com.example.ui.components.MonthlyBarChart
+import com.example.ui.components.charts.MonthlyBarChart
 import com.example.ui.components.formatFullCurrency
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.Rose500

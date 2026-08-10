@@ -133,96 +133,35 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     private val _isVoiceActive = MutableStateFlow(false)
     val isVoiceActive: StateFlow<Boolean> = _isVoiceActive.asStateFlow()
 
-    private var _voiceStartTime = 0L
-    val voiceStartTime: Long get() = _voiceStartTime
-
     private val _manualText = MutableStateFlow("")
     val manualText: StateFlow<String> = _manualText.asStateFlow()
 
-    private var voiceCollectionJob: kotlinx.coroutines.Job? = null
+    private lateinit var stateDelegate: TransactionStateDelegate
+
+    val voiceStartTime: Long get() = if (::stateDelegate.isInitialized) stateDelegate.voiceStartTime else 0L
 
     fun startVoiceRecording(context: Context) {
-        _voiceStartTime = System.currentTimeMillis()
-        _isVoiceActive.value = true
-        _manualText.value = ""
-        _voiceErrorMessage.value = null
-        voiceInputManager.onErrorCallback = { cancelVoiceRecording() }
-        voiceInputManager.onChunkRecognized = { chunkText ->
-            processContinuousVoiceChunk(chunkText)
-        }
-        voiceInputManager.startListening(context)
+        stateDelegate.startVoiceRecording(context)
     }
 
     fun processContinuousVoiceChunk(chunkText: String) {
-        val trimmed = chunkText.trim()
-        if (trimmed.isBlank() || !_isVoiceActive.value) return
-
-        viewModelScope.launch {
-            _isAnalyzingVoice.value = true
-            _voiceErrorMessage.value = null
-            try {
-                val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
-                val incCats = categories.value.filter { it.type == "income" }.map { it.name }
-
-                val result = repository.parseVoiceOperations(
-                    voiceText = trimmed,
-                    apiKey = _apiKey.value,
-                    expenseCategories = expCats,
-                    incomeCategories = incCats
-                )
-
-                if (result.isNotEmpty()) {
-                    val currentList = _parsedVoiceOperations.value ?: emptyList()
-                    val updatedList = currentList + result
-                    _parsedVoiceOperations.value = updatedList
-                    com.example.utils.GlobalConsoleLogger.i("UI", "Добавлены новые операции (${result.size} шт.). Всего: ${updatedList.size} шт.")
-                } else {
-                    com.example.utils.GlobalConsoleLogger.d("GEMINI", "В фрагменте «$trimmed» операции не найдены")
-                }
-            } catch (e: Exception) {
-                com.example.utils.GlobalConsoleLogger.e("GEMINI", "Ошибка при обработке фрагмента «$trimmed»: ${e.localizedMessage}", e)
-            } finally {
-                _isAnalyzingVoice.value = false
-            }
-        }
+        stateDelegate.processContinuousVoiceChunk(chunkText)
     }
 
     fun stopVoiceRecordingAndProcess() {
-        voiceCollectionJob?.cancel()
-        voiceCollectionJob = null
-        voiceInputManager.stopListening()
-        _isVoiceActive.value = false
-        val textToProcess = when {
-            _manualText.value.isNotBlank() -> _manualText.value
-            voiceInputManager.recognizedText.value.isNotBlank() -> voiceInputManager.recognizedText.value
-            voiceInputManager.partialText.value.isNotBlank() -> voiceInputManager.partialText.value
-            else -> ""
-        }
-        if (textToProcess.isNotBlank()) {
-            processVoiceText(textToProcess)
-        } else {
-            cancelVoiceRecording()
-        }
+        stateDelegate.stopVoiceRecordingAndProcess()
     }
 
     fun cancelVoiceRecording() {
-        voiceCollectionJob?.cancel()
-        voiceCollectionJob = null
-        voiceInputManager.stopListening()
-        _isVoiceActive.value = false
-        _voiceErrorMessage.value = null
-        clearParsedVoiceOperations()
+        stateDelegate.cancelVoiceRecording()
     }
 
     fun setVoiceActive(active: Boolean) {
-        if (active) {
-            _voiceStartTime = System.currentTimeMillis()
-        }
-        _isVoiceActive.value = active
+        stateDelegate.setVoiceActive(active)
     }
 
     fun setManualText(text: String) {
-        _manualText.value = text
+        stateDelegate.setManualText(text)
     }
 
     override fun onCleared() {
@@ -347,6 +286,30 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             viewModelScope,
             SharingStarted.WhileSubscribed(5000),
             emptyList()
+        )
+
+        stateDelegate = TransactionStateDelegate(
+            repository = repository,
+            scope = viewModelScope,
+            selectedBudgetId = _selectedBudgetId.asStateFlow(),
+            apiKey = _apiKey.asStateFlow(),
+            selectedDateDay = _selectedDateDay.asStateFlow(),
+            toastMessage = _toastMessage,
+            isGeneratingReaction = _isGeneratingReaction,
+            isAnalyzingVoice = _isAnalyzingVoice,
+            voiceErrorMessage = _voiceErrorMessage,
+            parsedVoiceOperations = _parsedVoiceOperations,
+            completedGoalEvent = _completedGoalEvent,
+            transactions = transactions,
+            accounts = accounts,
+            goals = goals,
+            categories = categories,
+            voiceInputManager = voiceInputManager,
+            isVoiceActive = _isVoiceActive,
+            manualText = _manualText,
+            aiAuditResult = _aiAuditResult,
+            aiAuditLoading = _aiAuditLoading,
+            getSavedApiKey = { getSavedApiKey() }
         )
 
         viewModelScope.launch {
@@ -538,105 +501,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private suspend fun ensureCategoryExists(categoryName: String, type: String = "expense") {
-        if (categoryName.isBlank() || categoryName.equals("null", ignoreCase = true)) return
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
-        val trimmed = categoryName.trim()
-        val existing = categories.value.find { it.name.equals(trimmed, ignoreCase = true) }
-        if (existing == null) {
-            val cat = CategoryEntity(
-                budgetId = currentBudgetId,
-                type = type,
-                name = trimmed
-            )
-            repository.insertCategory(cat)
-        }
-    }
-
     fun addTransaction(type: String, date: String, category: String, subcategory: String, amount: Double, accountId: String? = null) {
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
-        com.example.utils.GlobalConsoleLogger.i("UI", "Добавление транзакции [$type]: $amount ₽ ($category / $subcategory), дата=$date")
-        viewModelScope.launch {
-            ensureCategoryExists(category, type)
-            val tx = TransactionEntity(
-                budgetId = currentBudgetId,
-                accountId = accountId,
-                type = type,
-                date = date,
-                category = category,
-                subcategory = subcategory,
-                amount = amount
-            )
-            repository.insertTransaction(tx)
-            _toastMessage.emit("Операция добавлена!")
-            _isGeneratingReaction.value = true
-
-            try {
-                val isFirstToday = transactions.value.none { it.date == date && it.id != tx.id }
-                val userPhrase = repository.generateUserPhrase(
-                    apiKey = _apiKey.value,
-                    type = type,
-                    category = category,
-                    subcategory = subcategory,
-                    amount = amount,
-                    isFirstToday = isFirstToday
-                )
-                var extraCtx = ""
-                if (accountId != null) {
-                    val debt = accounts.value.find { it.id == accountId }
-                    if (debt != null && (debt.type == "we_owe" || debt.type == "owes_us")) {
-                        val txs = transactions.value.filter { it.accountId == debt.id }
-                        val income = txs.filter { it.type == "income" }.sumOf { it.amount }
-                        val expense = txs.filter { it.type == "expense" }.sumOf { it.amount }
-                        
-                        val isWeOwe = debt.type != "owes_us"
-                        val remaining = if (isWeOwe) {
-                            debt.balance + income - expense - (if (type == "expense") amount else -amount)
-                        } else {
-                            debt.balance + expense - income - (if (type == "income") amount else -amount)
-                        }
-                        val debtTotal = debt.balance.coerceAtLeast(1.0)
-                        val ratioPercent = (amount / debtTotal) * 100.0
-
-                        extraCtx = if (remaining <= 0) {
-                            "Операция относится к долгу '${debt.name}' (общая сумма долга была: ${debtTotal.toInt()} руб.). ПОЛЬЗОВАТЕЛЬ ТОЛЬКО ЧТО ПОЛНОСТЬЮ ЗАКРЫЛ/ПОГАСИЛ ЭТОТ ДОЛГ! Прокомментируй это радостное событие."
-                        } else if (ratioPercent < 5.0 && debtTotal >= 1000.0) {
-                            "Операция относится к долгу '${debt.name}'. ОБЩАЯ СУММА ДОЛГА: ${debtTotal.toInt()} руб., а внесено/возвращено ВСЕГО ${amount.toInt()} руб. (это лишь ${String.format(java.util.Locale.US, "%.1f", ratioPercent)}% от общей суммы долга!). Это смехотворные копейки на фоне долга в ${debtTotal.toInt()} руб.! ОБЯЗАТЕЛЬНО отреагируй на этот абсурд и смешной мизерный взнос/возврат по сравнению с огромным долгом!"
-                        } else {
-                            "Операция относится к долгу '${debt.name}'. Общая целевая сумма долга: ${debtTotal.toInt()} руб. Текущий внесенный взнос: ${amount.toInt()} руб. Остаток долга: ${remaining.toInt()} руб."
-                        }
-                    }
-                }
-                
-                val comment = repository.generateDavidComment(
-                    apiKey = _apiKey.value,
-                    type = type,
-                    category = category,
-                    subcategory = subcategory,
-                    amount = amount,
-                    recentTransactions = transactions.value.take(5),
-                    activeDebts = accounts.value,
-                    activeGoals = goals.value,
-                    extraContext = extraCtx,
-                    allTransactions = transactions.value
-                )
-                repository.insertNotification(
-                    com.example.data.db.NotificationEntity(
-                        budgetId = currentBudgetId,
-                        title = if (type == "income") "Реакция Давида на доход" else "Прожарка от Давида",
-                        description = "||$type|$category|$subcategory|$amount|$userPhrase||$comment",
-                        icon = "david",
-                        color = if (type == "income") "emerald400" else "rose500",
-                        timestamp = System.currentTimeMillis(),
-                        isRead = false
-                    )
-                )
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
-                _isGeneratingReaction.value = false
-            }
-        }
+        stateDelegate.addTransaction(type, date, category, subcategory, amount, accountId)
     }
 
     fun addWelcomeNotification(profileName: String, overrideBudgetId: String? = null) {
@@ -705,351 +571,38 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updateTransaction(id: String, type: String, date: String, category: String, subcategory: String, amount: Double) {
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
-        viewModelScope.launch {
-            ensureCategoryExists(category, type)
-            val existingTx = transactions.value.find { it.id == id }
-            val tx = TransactionEntity(
-                id = id,
-                budgetId = currentBudgetId,
-                accountId = existingTx?.accountId,
-                type = type,
-                date = date,
-                category = category,
-                subcategory = subcategory,
-                amount = amount,
-                createdAt = existingTx?.createdAt ?: System.currentTimeMillis()
-            )
-            repository.insertTransaction(tx)
-            _toastMessage.emit("Операция обновлена!")
-        }
+        stateDelegate.updateTransaction(id, type, date, category, subcategory, amount)
     }
 
     fun processVoiceText(voiceText: String) {
-        if (voiceText.isBlank()) return
-        viewModelScope.launch {
-            _isAnalyzingVoice.value = true
-            _voiceErrorMessage.value = null
-            try {
-                val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
-                val incCats = categories.value.filter { it.type == "income" }.map { it.name }
-
-                val result = repository.parseVoiceOperations(
-                    voiceText = voiceText,
-                    apiKey = _apiKey.value,
-                    expenseCategories = expCats,
-                    incomeCategories = incCats
-                )
-
-                if (result.isEmpty()) {
-                    _voiceErrorMessage.value = "Не удалось распознать операции из текста. Укажите суммы и название, например: «Потратил 500 рублей на такси»"
-                    _parsedVoiceOperations.value = null
-                } else {
-                    _parsedVoiceOperations.value = result
-                    val finalDate = _selectedDateDay.value.ifBlank {
-                        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
-                    }
-                    confirmVoiceOperations(result, finalDate)
-                }
-            } catch (e: Exception) {
-                _voiceErrorMessage.value = "Ошибка при анализе: ${e.message}"
-                _parsedVoiceOperations.value = null
-            } finally {
-                _isAnalyzingVoice.value = false
-            }
-        }
+        stateDelegate.processVoiceText(voiceText)
     }
 
     fun clearParsedVoiceOperations() {
-        _parsedVoiceOperations.value = null
-        _voiceErrorMessage.value = null
-        _isAnalyzingVoice.value = false
-        _isVoiceActive.value = false
-        _manualText.value = ""
-        voiceInputManager.clear()
+        stateDelegate.clearParsedVoiceOperations()
     }
 
     fun confirmVoiceOperations(
         operations: List<com.example.data.repository.ParsedVoiceOperation>,
         dateStr: String
     ) {
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
-        com.example.utils.GlobalConsoleLogger.i("UI", "Подтверждение операций (${operations.size} шт.), дата: $dateStr")
-        viewModelScope.launch {
-            if (operations.isEmpty()) return@launch
-            
-            _isGeneratingReaction.value = true
-            
-            if (operations.size == 1) {
-                val op = operations[0]
-                val finalDate = if (op.date.isNotBlank() && op.date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) op.date else dateStr
-                val finalCategory = if (op.category.isNotBlank() && !op.category.equals("null", true)) op.category else "Прочее"
-                val finalSubcategory = if (op.subcategory.isNotBlank() && !op.subcategory.equals("null", true)) op.subcategory else op.title
-
-                ensureCategoryExists(finalCategory, op.type)
-
-                val tx = TransactionEntity(
-                    budgetId = currentBudgetId,
-                    type = op.type,
-                    date = finalDate,
-                    category = finalCategory,
-                    subcategory = finalSubcategory,
-                    amount = op.amount
-                )
-                repository.insertTransaction(tx)
-                com.example.utils.GlobalConsoleLogger.i("ROOM", "Сохранена транзакция в DB: ${tx.category} / ${tx.subcategory} (${tx.amount} ₽)")
-
-                try {
-                    val isFirstToday = transactions.value.none { it.date == finalDate && it.id != tx.id }
-                    val userPhrase = repository.generateUserPhrase(
-                        apiKey = _apiKey.value,
-                        type = op.type,
-                        category = finalCategory,
-                        subcategory = finalSubcategory,
-                        amount = op.amount,
-                        isFirstToday = isFirstToday
-                    )
-                    val comment = repository.generateDavidComment(
-                        apiKey = _apiKey.value,
-                        type = op.type,
-                        category = finalCategory,
-                        subcategory = finalSubcategory,
-                        amount = op.amount,
-                        recentTransactions = transactions.value.take(5),
-                        activeDebts = accounts.value,
-                        activeGoals = goals.value,
-                        allTransactions = transactions.value
-                    )
-                    repository.insertNotification(
-                        com.example.data.db.NotificationEntity(
-                            budgetId = currentBudgetId,
-                            title = if (op.type == "income") "Реакция Давида на доход" else "Прожарка от Давида",
-                            description = "||${op.type}|$finalCategory|$finalSubcategory|${op.amount}|$userPhrase||$comment",
-                            icon = "david",
-                            color = if (op.type == "income") "emerald400" else "rose500",
-                            timestamp = System.currentTimeMillis(),
-                            isRead = false
-                        )
-                    )
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                } finally {
-                    _isGeneratingReaction.value = false
-                }
-            } else {
-                val processedOps = mutableListOf<com.example.data.repository.ParsedVoiceOperation>()
-                for (op in operations) {
-                    val finalDate = if (op.date.isNotBlank() && op.date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) op.date else dateStr
-                    val finalCategory = if (op.category.isNotBlank() && !op.category.equals("null", true)) op.category else "Прочее"
-                    val finalSubcategory = if (op.subcategory.isNotBlank() && !op.subcategory.equals("null", true)) op.subcategory else op.title
-
-                    ensureCategoryExists(finalCategory, op.type)
-
-                    val tx = TransactionEntity(
-                        budgetId = currentBudgetId,
-                        type = op.type,
-                        date = finalDate,
-                        category = finalCategory,
-                        subcategory = finalSubcategory,
-                        amount = op.amount
-                    )
-                    repository.insertTransaction(tx)
-                    
-                    processedOps.add(op.copy(date = finalDate, category = finalCategory, subcategory = finalSubcategory))
-                }
-
-                try {
-                    val userPhrase = repository.generateUserPhraseMulti(
-                        apiKey = _apiKey.value,
-                        operations = processedOps
-                    )
-                    val comment = repository.generateDavidCommentMulti(
-                        apiKey = _apiKey.value,
-                        operations = processedOps,
-                        recentTransactions = transactions.value.take(5),
-                        activeDebts = accounts.value,
-                        activeGoals = goals.value,
-                        allTransactions = transactions.value
-                    )
-                    
-                    val opsString = processedOps.joinToString(";") { "${it.type}|${it.category}|${it.subcategory}|${it.amount}" }
-                    val dominantType = if (processedOps.all { it.type == "income" }) "income" else "expense"
-                    
-                    repository.insertNotification(
-                        com.example.data.db.NotificationEntity(
-                            budgetId = currentBudgetId,
-                            title = if (dominantType == "income") "Реакция Давида на доходы" else "Групповая прожарка от Давида",
-                            description = "||MULTI||$opsString||$userPhrase||$comment",
-                            icon = "david",
-                            color = if (dominantType == "income") "emerald400" else "rose500",
-                            timestamp = System.currentTimeMillis(),
-                            isRead = false
-                        )
-                    )
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                } finally {
-                    _isGeneratingReaction.value = false
-                }
-            }
-            
-            _parsedVoiceOperations.value = null
-            _toastMessage.emit("🔥 Успешно добавлено ${operations.size} операций!")
-        }
+        stateDelegate.confirmVoiceOperations(operations, dateStr)
     }
 
     fun deleteTransaction(id: String) {
-        com.example.utils.GlobalConsoleLogger.i("UI", "Удаление транзакции ID: $id")
-        viewModelScope.launch {
-            repository.deleteTransaction(id)
-            _toastMessage.emit("Операция удалена")
-        }
+        stateDelegate.deleteTransaction(id)
     }
 
     fun addGoalProgress(goalId: String, amount: Double) {
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
-        com.example.utils.GlobalConsoleLogger.i("UI", "Взнос в финансовую цель ID=$goalId на сумму $amount ₽")
-        viewModelScope.launch {
-            val currentGoals = goals.value
-            val goal = currentGoals.find { it.id == goalId } ?: return@launch
-
-            val updatedCurrent = goal.currentAmount + amount
-
-            // Automatically log contribution as expense under "Сбережения"
-            val tx = TransactionEntity(
-                budgetId = currentBudgetId,
-                type = "expense",
-                date = todayIso,
-                category = "Сбережения",
-                subcategory = "Взнос в цель: ${goal.name}",
-                amount = amount
-            )
-            repository.insertTransaction(tx)
-            
-            try {
-                val extraCtx = if (updatedCurrent >= goal.targetAmount) {
-                    "Это взнос в цель '${goal.name}'. ПОЛЬЗОВАТЕЛЬ ТОЛЬКО ЧТО ПОЛНОСТЬЮ НАКОПИЛ И ДОСТИГ ЭТОЙ ЦЕЛИ! Прокомментируй это достижение."
-                } else {
-                    "Это взнос в цель '${goal.name}'. Собрано $updatedCurrent из ${goal.targetAmount} руб. Осталось: ${goal.targetAmount - updatedCurrent} руб."
-                }
-                val comment = repository.generateDavidComment(
-                    apiKey = _apiKey.value,
-                    type = "expense",
-                    category = "Сбережения",
-                    subcategory = "Взнос в цель: ${goal.name}",
-                    amount = amount,
-                    recentTransactions = transactions.value.take(5),
-                    activeDebts = accounts.value,
-                    activeGoals = goals.value,
-                    extraContext = extraCtx,
-                    allTransactions = transactions.value
-                )
-                val userPhrase = repository.generateUserPhrase(
-                    apiKey = _apiKey.value,
-                    type = "expense",
-                    category = "Сбережения",
-                    subcategory = "Взнос в цель: ${goal.name}",
-                    amount = amount,
-                    isFirstToday = transactions.value.none { it.date == todayIso && it.id != tx.id }
-                )
-                repository.insertNotification(
-                    com.example.data.db.NotificationEntity(
-                        budgetId = currentBudgetId,
-                        title = "Взнос в цель",
-                        description = "||expense|Сбережения|Взнос в цель: ${goal.name}|$amount|$userPhrase||$comment",
-                        icon = "david",
-                        color = "emerald400",
-                        timestamp = System.currentTimeMillis(),
-                        isRead = false
-                    )
-                )
-            } catch (e: Exception) { e.printStackTrace() }
-
-            if (updatedCurrent >= goal.targetAmount) {
-                // Goal reached! Delete goal automatically and emit congratulation event
-                repository.deleteGoal(goal.id)
-                _completedGoalEvent.value = goal.name
-            } else {
-                repository.insertGoal(goal.copy(currentAmount = updatedCurrent))
-                _toastMessage.emit("Взнос сохранен и учтен в расходах!")
-            }
-        }
+        stateDelegate.addGoalProgress(goalId, amount, todayIso)
     }
 
     fun saveNewGoal(name: String, target: Double, current: Double) {
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
-        com.example.utils.GlobalConsoleLogger.i("UI", "Создание финансовой цели: «$name» (цель: $target ₽, начально: $current ₽)")
-        viewModelScope.launch {
-            if (current > 0) {
-                val tx = TransactionEntity(
-                    budgetId = currentBudgetId,
-                    type = "expense",
-                    date = todayIso,
-                    category = "Сбережения",
-                    subcategory = "Взнос в цель: $name",
-                    amount = current
-                )
-                repository.insertTransaction(tx)
-            }
-
-            if (target > 0 && current >= target) {
-                // Goal created already at or above 100% target
-                _completedGoalEvent.value = name
-            } else {
-                val goal = GoalEntity(
-                    budgetId = currentBudgetId,
-                    name = name,
-                    targetAmount = target,
-                    currentAmount = current
-                )
-                repository.insertGoal(goal)
-                _toastMessage.emit("Финансовая цель добавлена!")
-                
-                try {
-                    val goalSubcategory = "Цель: $name (Целевая сумма: ${target.toInt()} ₽, Внесено: ${current.toInt()} ₽)"
-                    val userPhrase = repository.generateUserPhrase(
-                        apiKey = _apiKey.value,
-                        type = "expense",
-                        category = "Цели",
-                        subcategory = goalSubcategory,
-                        amount = if (current > 0) current else target,
-                        isFirstToday = false
-                    )
-                    val extraCtx = "Создана новая финансовая цель '$name'. Целевая сумма: ${target.toInt()} руб. Первоначальный взнос: ${current.toInt()} руб. (Осталось собрать: ${(target - current).toInt()} руб.). В комментарии ОБЯЗАТЕЛЬНО раздели и учти общую сумму цели (${target.toInt()} ₽) и сколько из неё было внесено первым взносом (${current.toInt()} ₽)!"
-                    val comment = repository.generateDavidComment(
-                        apiKey = _apiKey.value,
-                        type = "expense",
-                        category = "Новая цель",
-                        subcategory = goalSubcategory,
-                        amount = target,
-                        recentTransactions = transactions.value.take(5),
-                        activeDebts = accounts.value,
-                        activeGoals = goals.value,
-                        extraContext = extraCtx,
-                        allTransactions = transactions.value
-                    )
-                    repository.insertNotification(
-                        com.example.data.db.NotificationEntity(
-                            budgetId = currentBudgetId,
-                            title = "Новая цель!",
-                            description = "||expense|Цели|$name (Цель: ${target.toInt()} ₽, Внесено: ${current.toInt()} ₽)|${if (current > 0) current else target}|$userPhrase||$comment",
-                            icon = "david",
-                            color = "emerald400",
-                            timestamp = System.currentTimeMillis(),
-                            isRead = false
-                        )
-                    )
-                } catch (e: Exception) { e.printStackTrace() }
-            }
-        }
+        stateDelegate.saveNewGoal(name, target, current, todayIso)
     }
 
     fun deleteGoal(id: String) {
-        com.example.utils.GlobalConsoleLogger.i("UI", "Удаление финансовой цели ID: $id")
-        viewModelScope.launch {
-            repository.deleteGoal(id)
-            _toastMessage.emit("Цель удалена")
-        }
+        stateDelegate.deleteGoal(id)
     }
 
     fun addCategory(type: String, name: String) {
@@ -1125,188 +678,15 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun requestAiAudit(currentFilteredTransactions: List<TransactionEntity>) {
-        if (!_isGeminiConsentGiven.value) {
-            _aiAuditResult.value = "⚠️ **Ошибка доступа:** Для формирования ИИ-разбора требуется согласие на обработку данных. Пожалуйста, включите разрешение в Настройках приложения."
-            return
-        }
-        val key = _apiKey.value.ifBlank { getSavedApiKey() }
-        if (key.isBlank()) {
-            _aiAuditResult.value = "ERROR_NO_CONNECTION"
-            return
-        }
-        val bId = _selectedBudgetId.value ?: "default"
-        val dateDay = _selectedDateDay.value
-        val year = when (_periodType.value) {
-            PeriodType.DAY, PeriodType.WEEK -> dateDay.take(4).toIntOrNull() ?: _selectedAnnualYear.value
-            else -> _selectedAnnualYear.value
-        }
-        val month = if (_periodType.value == PeriodType.MONTH) _selectedMonthIdx.value + 1 else 0
-        val pKey = currentPeriodKey.value
-
-        val allTxs = transactions.value
-
-        // Compute previous period transactions for comparative analysis
-        val previousTransactions = when (_periodType.value) {
-            PeriodType.MONTH -> {
-                val prevMonthIdx = if (_selectedMonthIdx.value > 0) _selectedMonthIdx.value - 1 else 11
-                val prevYear = if (_selectedMonthIdx.value > 0) _selectedAnnualYear.value else _selectedAnnualYear.value - 1
-                val prevPrefix = String.format(java.util.Locale.US, "%04d-%02d", prevYear, prevMonthIdx + 1)
-                allTxs.filter { it.date.startsWith(prevPrefix) }
-            }
-            PeriodType.ALL -> {
-                val prevYearPrefix = String.format(java.util.Locale.US, "%04d", _selectedAnnualYear.value - 1)
-                allTxs.filter { it.date.startsWith(prevYearPrefix) }
-            }
-            else -> emptyList()
-        }
-
-        viewModelScope.launch {
-            if (_aiAuditLoading.value) {
-                return@launch
-            }
-
-            _aiAuditLoading.value = true
-            _aiAuditResult.value = ""
-
-            try {
-                val monthNames = listOf("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
-                val periodName = when (_periodType.value) {
-                    PeriodType.DAY -> "День ($dateDay)"
-                    PeriodType.WEEK -> "Неделя ($dateDay)"
-                    PeriodType.MONTH -> "${monthNames.getOrElse(month - 1) { "Месяц" }} $year года"
-                    PeriodType.ALL -> "Весь $year год"
-                }
-
-                // Save user audit request to chat history DB with unique UUID
-                val reqTime = System.currentTimeMillis()
-                val reqId = java.util.UUID.randomUUID().toString()
-                repository.insertNotification(
-                    com.example.data.db.NotificationEntity(
-                        id = reqId,
-                        budgetId = bId,
-                        title = "Запрос аналитики",
-                        description = "||audit_req||Давид, проведи аудит за $periodName",
-                        icon = "david",
-                        color = "indigo500",
-                        timestamp = reqTime,
-                        isRead = true
-                    )
-                )
-
-                var fullText = ""
-                var currentBlockBuffer = ""
-                val baseTime = System.currentTimeMillis()
-                var blockCount = 0
-
-                _aiAuditLoading.value = true
-
-                try {
-                    repository.requestAiAuditStream(
-                        apiKey = key,
-                        periodName = periodName,
-                        year = year,
-                        filteredTransactions = currentFilteredTransactions,
-                        previousTransactions = previousTransactions,
-                        activeDebts = accounts.value,
-                        activeGoals = goals.value,
-                        allTransactions = transactions.value
-                    ).collect { chunk ->
-                        fullText += chunk
-                        currentBlockBuffer += chunk
-                        _aiAuditResult.value = fullText
-
-                        // Streaming Chunk Accumulator: Slice blocks when paragraph separator (\n\n) appears
-                        while (currentBlockBuffer.contains("\n\n")) {
-                            val parts = currentBlockBuffer.split("\n\n", limit = 2)
-                            val completedBlock = parts[0].trim()
-                            currentBlockBuffer = parts.getOrElse(1) { "" }
-
-                            if (completedBlock.isNotBlank() && completedBlock != "ERROR_NO_CONNECTION") {
-                                blockCount++
-                                val blockId = java.util.UUID.randomUUID().toString()
-                                val blockTime = baseTime + blockCount * 100L
-                                val isFirstBlock = blockCount == 1
-                                val blockTitle = if (isFirstBlock) "Жабов Давид (Аналитика)" else "Аналитика"
-
-                                repository.insertNotification(
-                                    com.example.data.db.NotificationEntity(
-                                        id = blockId,
-                                        budgetId = bId,
-                                        title = blockTitle,
-                                        description = "||audit_block||$completedBlock",
-                                        icon = "david",
-                                        color = "emerald400",
-                                        timestamp = blockTime,
-                                        isRead = true
-                                    )
-                                )
-                            }
-                        }
-                    }
-
-                    // Emit remaining buffer content as the final SMS block
-                    val finalBlock = currentBlockBuffer.trim()
-                    if (finalBlock.isNotBlank() && finalBlock != "ERROR_NO_CONNECTION") {
-                        blockCount++
-                        val blockId = java.util.UUID.randomUUID().toString()
-                        val blockTime = baseTime + blockCount * 100L
-                        val isFirstBlock = blockCount == 1
-                        val blockTitle = if (isFirstBlock) "Жабов Давид (Аналитика)" else "Аналитика"
-
-                        repository.insertNotification(
-                            com.example.data.db.NotificationEntity(
-                                id = blockId,
-                                budgetId = bId,
-                                title = blockTitle,
-                                description = "||audit_block||$finalBlock",
-                                icon = "david",
-                                color = "emerald400",
-                                timestamp = blockTime,
-                                isRead = true
-                            )
-                        )
-                    }
-                } catch (e: Exception) {
-                    fullText = "ERROR_NO_CONNECTION"
-                    _aiAuditResult.value = fullText
-                }
-
-                if (fullText.isNotEmpty() && !fullText.contains("🏆 **Достижение: Сбой Сети**") && fullText != "ERROR_NO_CONNECTION") {
-                    val currentMeme = currentFilteredTransactions.filter { tx ->
-                        tx.type == "expense" && (
-                            tx.category.contains("Развлечения", ignoreCase = true) ||
-                            tx.category.contains("Прочее", ignoreCase = true) ||
-                            tx.subcategory.lowercase(Locale.getDefault()).contains("мошеннич") ||
-                            tx.subcategory.lowercase(Locale.getDefault()).contains("крипт") ||
-                            tx.subcategory.lowercase(Locale.getDefault()).contains("казик") ||
-                            tx.subcategory.lowercase(Locale.getDefault()).contains("тарелоч") ||
-                            tx.subcategory.lowercase(Locale.getDefault()).contains("альтуш")
-                        )
-                    }
-                    val sillySummaryText = if (currentMeme.isNotEmpty()) {
-                        currentMeme.take(3).joinToString("; ") { "${it.subcategory} (${it.amount.toInt()} ₽)" }
-                    } else {
-                        val topExpense = currentFilteredTransactions.filter { it.type == "expense" }.maxByOrNull { it.amount }
-                        if (topExpense != null) "Крупный расход: ${topExpense.category} (${topExpense.amount.toInt()} ₽)" else "Равномерные расходы"
-                    }
-
-                    val entity = com.example.data.db.AiAuditEntity(
-                        id = java.util.UUID.randomUUID().toString(),
-                        budgetId = bId,
-                        periodType = _periodType.value.name,
-                        periodKey = pKey,
-                        year = year,
-                        month = month,
-                        auditText = fullText,
-                        sillyExpensesSummary = sillySummaryText,
-                        timestamp = System.currentTimeMillis()
-                    )
-                    repository.saveAudit(entity)
-                }
-            } finally {
-                _aiAuditLoading.value = false
-            }
-        }
+        stateDelegate.requestAiAudit(
+            currentFilteredTransactions = currentFilteredTransactions,
+            isGeminiConsentGiven = _isGeminiConsentGiven.value,
+            periodType = _periodType.value,
+            selectedDateDay = _selectedDateDay.value,
+            selectedAnnualYear = _selectedAnnualYear.value,
+            selectedMonthIdx = _selectedMonthIdx.value,
+            currentPeriodKey = currentPeriodKey.value
+        )
     }
 
     private fun splitAuditIntoSections(auditText: String): List<String> {
@@ -1329,73 +709,11 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun addAccount(name: String, initialBalance: Double, type: String = "card", accountNumber: String = "**** 0000") {
-        com.example.utils.GlobalConsoleLogger.i("UI", "Добавление счета/долга: «$name» (тип=$type, сумма=$initialBalance ₽)")
-        viewModelScope.launch {
-            val bId = _selectedBudgetId.value ?: "default"
-            repository.insertAccount(
-                AccountEntity(
-                    budgetId = bId,
-                    name = name,
-                    balance = initialBalance,
-                    type = type,
-                    accountNumber = accountNumber
-                )
-            )
-            
-            if (type == "we_owe" || type == "owes_us") {
-                try {
-                    val debtType = if (type == "we_owe") "Взял долг/кредит" else "Дал в долг"
-                    val existingActiveDebts = accounts.value.filter { (it.type == "we_owe" || it.type == "owes_us") && it.balance > 0 }
-                    val existingTotalSum = existingActiveDebts.sumOf { it.balance }
-
-                    val debtExtraCtx = if (existingActiveDebts.isNotEmpty()) {
-                        "ВНИМАНИЕ! Пользователь только что ${if (type == "we_owe") "взял НОВЫЙ долг/кредит" else "дал НОВЫЙ долг"} '$name' на сумму ${initialBalance.toInt()} руб., ПРИ ТОМ ЧТО У НЕГО УЖЕ ЕСТЬ НЕПОГАШЕННЫЕ ДОЛГИ на общую сумму ${existingTotalSum.toInt()} руб.! (Существующие активные долги: ${existingActiveDebts.joinToString { "${it.name}: ${it.balance.toInt()} ₽" }}). ОБЯЗАТЕЛЬНО жестко отреагируй на это решение брать/давать новые долги при не закрытых старых!"
-                    } else {
-                        "Пользователь создал новый долг '$name' на сумму ${initialBalance.toInt()} руб."
-                    }
-
-                    val userPhrase = repository.generateUserPhrase(
-                        apiKey = _apiKey.value,
-                        type = if (type == "we_owe") "income" else "expense",
-                        category = "Долги/Кредиты",
-                        subcategory = "$debtType: $name",
-                        amount = initialBalance,
-                        isFirstToday = false
-                    )
-                    val comment = repository.generateDavidComment(
-                        apiKey = _apiKey.value,
-                        type = if (type == "we_owe") "expense" else "income",
-                        category = "Долги/Кредиты",
-                        subcategory = "$debtType: $name",
-                        amount = initialBalance,
-                        recentTransactions = transactions.value.take(5),
-                        activeDebts = accounts.value,
-                        activeGoals = goals.value,
-                        extraContext = debtExtraCtx,
-                        allTransactions = transactions.value
-                    )
-                    val displayType = if (type == "we_owe") "expense" else "income"
-                    repository.insertNotification(
-                        com.example.data.db.NotificationEntity(
-                            budgetId = bId,
-                            title = if (type == "we_owe") "Взяли долг!" else "Дали в долг!",
-                            description = "||$displayType|Долги|$name|$initialBalance|$userPhrase||$comment",
-                            icon = "david",
-                            color = if (type == "owes_us") "emerald400" else "rose500",
-                            timestamp = System.currentTimeMillis(),
-                            isRead = false
-                        )
-                    )
-                } catch (e: Exception) { e.printStackTrace() }
-            }
-        }
+        stateDelegate.addAccount(name, initialBalance, type, accountNumber)
     }
 
     fun deleteAccount(accountId: String) {
-        com.example.utils.GlobalConsoleLogger.i("UI", "Удаление счета/долга ID: $accountId")
-        viewModelScope.launch {
-            repository.deleteAccountById(accountId)
-        }
+        stateDelegate.deleteAccount(accountId)
     }
 
     fun transferBetweenAccounts(
@@ -1405,18 +723,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         fromName: String,
         toName: String
     ) {
-        com.example.utils.GlobalConsoleLogger.i("UI", "Перевод $amount ₽ с «$fromName» на «$toName»")
-        viewModelScope.launch {
-            val bId = _selectedBudgetId.value ?: "default"
-            repository.transferBetweenAccounts(
-                budgetId = bId,
-                fromAccountId = fromAccountId,
-                toAccountId = toAccountId,
-                amount = amount,
-                fromName = fromName,
-                toName = toName
-            )
-        }
+        stateDelegate.transferBetweenAccounts(fromAccountId, toAccountId, amount, fromName, toName)
     }
 
 }

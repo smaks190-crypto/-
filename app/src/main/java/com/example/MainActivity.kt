@@ -1,5 +1,7 @@
 package com.example
 
+import com.example.ui.components.dialogs.*
+
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -109,10 +111,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.TransactionEntity
 import com.example.ui.components.AddGoalDialog
-import com.example.ui.components.AddTransactionDialog
+import com.example.ui.components.dialogs.AddTransactionDialog
 import com.example.ui.components.GeminiConsentDialog
 import com.example.ui.components.ApiKeyDialog
-import com.example.ui.components.CategoriesDialog
+import com.example.ui.components.dialogs.CategoriesDialog
 import com.example.ui.components.GrowthChartSplashScreen
 import com.example.ui.screens.DebtsScreen
 import com.example.ui.screens.AnnualReportScreen
@@ -917,7 +919,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         }
                         editingTransaction = null
                     },
-                    onSuggestCategory = { txName: String, type: String, catList: List<String> ->
+                    onSuggestCategory = { txName, type, catList ->
                         viewModel.suggestCategory(txName, type, catList)
                     },
                     editingTransaction = editingTransaction
