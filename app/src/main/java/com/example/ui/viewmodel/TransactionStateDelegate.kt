@@ -332,14 +332,21 @@ class TransactionStateDelegate(
 
                 try {
                     val isFirstToday = transactions.value.none { it.date == finalDate && it.id != tx.id }
-                    val userPhrase = repository.generateUserPhrase(
-                        apiKey = apiKey.value,
-                        type = op.type,
-                        category = finalCategory,
-                        subcategory = finalSubcategory,
-                        amount = op.amount,
-                        isFirstToday = isFirstToday
-                    )
+
+                    val userPhrase = if (op.items.isNotEmpty()) {
+                        val itemsSummary = op.items.joinToString(", ") { "${it.title} (${it.amount.toInt()} ₽)" }
+                        "Заскочил в $finalSubcategory, затарился: $itemsSummary. Итого: ${op.amount.toInt()} ₽"
+                    } else {
+                        repository.generateUserPhrase(
+                            apiKey = apiKey.value,
+                            type = op.type,
+                            category = finalCategory,
+                            subcategory = finalSubcategory,
+                            amount = op.amount,
+                            isFirstToday = isFirstToday
+                        )
+                    }
+
                     val comment = repository.generateDavidComment(
                         apiKey = apiKey.value,
                         type = op.type,
