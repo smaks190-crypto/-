@@ -591,7 +591,31 @@ class BudgetRepository(
         if (storageFile.exists()) {
             try { storageFile.delete() } catch (_: Exception) {}
         }
+    
+        suspend fun insertReceiptTransaction(
+    parentTransaction: TransactionEntity,
+    items: List<ParsedReceiptItem>
+) {
+    db.withTransaction {
+        // 1. Сохраняем общий чек
+        transactionDao.insertTransaction(parentTransaction)
+
+        // 2. Сохраняем вложенные позиций со ссылкой на родительский чек
+        items.forEach { item ->
+            val childTx = TransactionEntity(
+                budgetId = parentTransaction.budgetId,
+                accountId = parentTransaction.accountId,
+                type = parentTransaction.type,
+                date = parentTransaction.date,
+                category = parentTransaction.category,
+                subcategory = item.title,
+                amount = item.amount,
+                parentId = parentTransaction.id
+            )
+            transactionDao.insertTransaction(childTx)
+        }
     }
+}
 
     // budget_storage.json больше не поддерживается в актуальном состоянии на каждую запись и используется только для миграции легаси-данных
     suspend fun ensureDefaultProfileExists(): BudgetProfileEntity {
