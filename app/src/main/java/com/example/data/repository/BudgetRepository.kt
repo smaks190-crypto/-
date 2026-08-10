@@ -1387,7 +1387,8 @@ class BudgetRepository(
                             amount = amount,
                             category = finalCategory,
                             subcategory = rawSubcategory,
-                            date = finalDate
+                            date = finalDate,
+                            items = itemsList
                         )
                     )
                 }
@@ -1403,7 +1404,14 @@ data class ParsedVoiceOperation(
     val amount: Double,
     val category: String,
     val subcategory: String = "",
-    val date: String = ""
+    val date: String = "",
+    val items: List<ParsedReceiptItem> = emptyList()
 )
+
+data class ParsedReceiptItem(
+    val title: String,
+    val amount: Double
+)
+
 
 private fun String?.isNull_or_Empty(): Boolean = this == null || this.isEmpty()
