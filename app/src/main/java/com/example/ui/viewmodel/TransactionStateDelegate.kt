@@ -308,8 +308,8 @@ class TransactionStateDelegate(
             if (operations.size == 1) {
                 val op = operations[0]
                 val finalDate = if (op.date.isNotBlank() && op.date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) op.date else dateStr
-                val finalCategory = if (op.category.isNotBlank() && !op.category.equals("null", ignoreCase = true)) op.category else "Прочее"
-                val finalSubcategory = if (op.subcategory.isNotBlank() && !op.subcategory.equals("null", ignoreCase = true)) op.subcategory else op.title
+                val finalCategory = if (op.category.isNotBlank() && !op.category.equals("null", true)) op.category else "Прочее"
+                val finalSubcategory = if (op.subcategory.isNotBlank() && !op.subcategory.equals("null", true)) op.subcategory else op.title
 
                 ensureCategoryExists(finalCategory, op.type)
 
@@ -371,8 +371,8 @@ class TransactionStateDelegate(
                 val processedOps = mutableListOf<ParsedVoiceOperation>()
                 for (op in operations) {
                     val finalDate = if (op.date.isNotBlank() && op.date.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) op.date else dateStr
-                    val finalCategory = if (op.category.isNotBlank() && !op.category.equals("null", ignoreCase = true)) op.category else "Прочее"
-                    val finalSubcategory = if (op.subcategory.isNotBlank() && !op.subcategory.equals("null", ignoreCase = true)) op.subcategory else op.title
+                    val finalCategory = if (op.category.isNotBlank() && !op.category.equals("null", true)) op.category else "Прочее"
+                    val finalSubcategory = if (op.subcategory.isNotBlank() && !op.subcategory.equals("null", true)) op.subcategory else op.title
 
                     ensureCategoryExists(finalCategory, op.type)
 
