@@ -368,7 +368,15 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun getSavedApiKey(): String {
-        return securePrefs.getString("gemini_api_key", "") ?: ""
+        val saved = securePrefs.getString("gemini_api_key", "") ?: ""
+        if (saved.isNotBlank() && saved != "your_api_key_here") {
+            return saved
+        }
+        val defaultKey = com.example.BuildConfig.GEMINI_API_KEY
+        if (defaultKey.isNotBlank() && defaultKey != "your_api_key_here") {
+            return defaultKey
+        }
+        return ""
     }
 
     fun saveApiKey(key: String) {

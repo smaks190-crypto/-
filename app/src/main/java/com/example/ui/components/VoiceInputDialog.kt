@@ -1,7 +1,5 @@
 package com.example.ui.components
 
-import android.app.Activity
-import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -90,15 +88,6 @@ import com.example.ui.theme.Slate400
 import com.example.ui.viewmodel.BudgetViewModel
 import kotlinx.coroutines.launch
 
-private fun findActivity(context: android.content.Context): Activity? {
-    var curr = context
-    while (curr is ContextWrapper) {
-        if (curr is Activity) return curr
-        curr = curr.baseContext
-    }
-    return null
-}
-
 enum class OverlayState { CONSENT, API_KEY, MANUAL_INPUT, VOICE_OPERATIONS, COLLAPSED }
 
 @Composable
@@ -110,7 +99,6 @@ fun VoiceRecordingOverlay(
     onOpenManualInput: () -> Unit = {},
     initialType: String = "expense",
     modifier: Modifier = Modifier,
-    onRequireConsent: ((String) -> Unit)? = null,
     onOverlayActiveChanged: ((Boolean) -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -143,12 +131,10 @@ fun VoiceRecordingOverlay(
     val normalizedAmplitude = remember(rmsDb) {
         (rmsDb / 12f).coerceIn(0f, 1f)
     }
-    val voiceErrorState by voiceManager.errorState.collectAsState()
     val voskStatus by voiceManager.voskStatus.collectAsState()
     val voskProgress by voiceManager.voskProgress.collectAsState()
 
     val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
-    val voiceErrorMessage by viewModel.voiceErrorMessage.collectAsState()
     val manualText by viewModel.manualText.collectAsState()
 
     val parsedVoiceOperations by viewModel.parsedVoiceOperations.collectAsState()

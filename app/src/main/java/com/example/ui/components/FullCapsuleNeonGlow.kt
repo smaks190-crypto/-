@@ -70,6 +70,8 @@ fun FullCapsuleNeonGlow(
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
+            .width(widthDp.dp)
+            .height(heightDp.dp)
     ) {
         if (isRecording) {
             // Внешняя мягкая размытая аура

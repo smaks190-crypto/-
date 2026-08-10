@@ -1073,10 +1073,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         onDismissManualInput = { showAddTxModal = false },
                         onOpenManualInput = { showAddTxModal = true },
                         initialType = if (activeSubTab == "income") "income" else "expense",
-                        onRequireConsent = { msg ->
-                            consentDialogMessage = msg
-                            showConsentDialog = true
-                        },
                         onOverlayActiveChanged = { active ->
                             isVoiceOverlayActive = active
                         }
