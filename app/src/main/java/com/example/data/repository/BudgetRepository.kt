@@ -427,6 +427,10 @@ class BudgetRepository(
                         "прилетели деньги за работу, целых ${amountInt}₽"
                     ).random()
                 }
+                lowerCat.contains("занял") || lowerSub.contains("занял") || lowerCat.contains("долг") || lowerSub.contains("долг") || lowerCat.contains("кредит") || lowerSub.contains("кредит") || lowerCat.contains("займ") || lowerSub.contains("займ") || lowerCat.contains("вернул") || lowerSub.contains("вернул") -> {
+                    val desc = if (subcategory.isNotBlank()) subcategory else category
+                    "мне вернули долг/заняли: $desc на сумму ${amountInt}₽"
+                }
                 else -> {
                     listOf(
                         "получил ${amountInt}₽ за $category",
@@ -453,6 +457,14 @@ class BudgetRepository(
                         "потратил в супермаркете ${amountInt}₽",
                         "купил еды домой на ${amountInt}₽"
                     ).random()
+                }
+                lowerCat.contains("занял") || lowerSub.contains("занял") || lowerCat.contains("долг") || lowerSub.contains("долг") || lowerCat.contains("кредит") || lowerSub.contains("кредит") || lowerCat.contains("займ") || lowerSub.contains("займ") || lowerCat.contains("вернул") || lowerSub.contains("вернул") -> {
+                    val desc = if (subcategory.isNotBlank()) subcategory else category
+                    if (desc.lowercase().contains("занял") || desc.lowercase().contains("отдал") || desc.lowercase().contains("вернул")) {
+                        "$desc на сумму ${amountInt}₽"
+                    } else {
+                        "занял/отдал долг: $desc на сумму ${amountInt}₽"
+                    }
                 }
                 else -> {
                     listOf(
@@ -1199,6 +1211,9 @@ class BudgetRepository(
             if (lower.contains("подработ") || lower.contains("фриланс") || lower.contains("заказ") || lower.contains("халтура")) {
                 return categories.firstOrNull { it.contains("Подработка", ignoreCase = true) } ?: "Подработка"
             }
+            if (lower.contains("занял") || lower.contains("долг") || lower.contains("кредит") || lower.contains("займ") || lower.contains("взял") || lower.contains("отда") || lower.contains("верн")) {
+                return name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+            }
             return categories.firstOrNull { it.contains("Доход", ignoreCase = true) } ?: categories.firstOrNull() ?: "Случайные доходы"
         } else {
             if (lower.contains("пятёр") || lower.contains("пятероч") || lower.contains("магнит") || lower.contains("перекрест") ||
@@ -1216,8 +1231,11 @@ class BudgetRepository(
                 return categories.firstOrNull { it.contains("Развлечен", ignoreCase = true) } ?: "Развлечения"
             }
             if (lower.contains("квартплат") || lower.contains("жкх") || lower.contains("аренда") || lower.contains("свет") ||
-                lower.contains("газ") || lower.contains("интернет") || lower.contains("связь") || lower.contains("кредит")) {
+                lower.contains("газ") || lower.contains("интернет") || lower.contains("связь")) {
                 return categories.firstOrNull { it.contains("Обязательн", ignoreCase = true) } ?: "Обязательные"
+            }
+            if (lower.contains("занял") || lower.contains("долг") || lower.contains("кредит") || lower.contains("займ") || lower.contains("взял") || lower.contains("отда") || lower.contains("верн")) {
+                return name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
             }
             if (lower.contains("копилк") || lower.contains("вклад") || lower.contains("цель") || lower.contains("инвест") || lower.contains("сбережен")) {
                 return categories.firstOrNull { it.contains("Сбережен", ignoreCase = true) } ?: "Сбережения"
@@ -1254,7 +1272,12 @@ class BudgetRepository(
                 "ОСОБОЕ ПРАВИЛО ДЛЯ ДЕТАЛИЗАЦИИ:\n" +
                 "- Если пользователь перечисляет несколько конкретных покупок в рамках одной общей категории (например, 'в фастфуде бургер за 300 рублей и кола за 150' или 'потратил в супермаркете: молоко 100 и хлеб 50'), обязательно раздели это на ОТДЕЛЬНЫЕ операции.\n" +
                 "- Каждой операции присвой одну и ту же общую подходящую категорию (например, 'Кафе/Рестораны', 'Фастфуд' или 'Продукты'), а в качестве 'title' и 'subcategory' укажи конкретную покупку ('Бургер', 'Кола', 'Молоко', 'Хлеб').\n" +
-                "Подбирайте наиболее подходящие категории из предоставленных списков. Избегайте значений 'null' или пустых названий.\n" +
+                "ПРАВИЛО КАТЕГОРИЗАЦИИ (КРИТИЧЕСКИ ВАЖНО):\n" +
+                "- Категории должны максимально точно отражать суть операции и контент! Не ограничивайтесь только списком предоставленных категорий, если суть операции специфическая.\n" +
+                "- Если операция касается долгов, займов, кредитов, возвратов денег, подарков, конкретных людей или других особых случаев (например: 'Занял брату', 'Взял в долг у Олега', 'Подарок маме', 'Кредит Сбербанк'), то СТРОГО создайте новую, емкую и максимально точную контекстную категорию (например, 'Занял брату', 'Взял у Олега', 'Кредит Сбербанк' или 'Долг: Брат') в поле 'category'. Не используйте общие категории типа 'Прочее', 'Обязательные' или 'Занял займ'!\n" +
+                "- Если в тексте есть явное указание на человека или специфическое действие ('Занял брату', 'Вернул долг другу', 'Подарок маме'), сформируйте емкую, понятную категорию на основе этого контекста, а не просто скидывайте в 'Прочее'.\n" +
+                "- Название операции ('title') и подкатегория ('subcategory') также должны быть максимально детальными, отражая контент полностью (например, в 'title' запишите 'Занял брату', а в 'subcategory' - 'Брат' или конкретную деталь).\n" +
+                "Подбирайте наиболее подходящие категории из предоставленных списков для обычных покупок (продукты, такси, развлечения и т.д.). Избегайте значений 'null' или пустых названий.\n" +
                 "Верните СТРОГО JSON-массив объектов без какого-либо разметочного текста или комментариев."
 
         val userQuery = """
