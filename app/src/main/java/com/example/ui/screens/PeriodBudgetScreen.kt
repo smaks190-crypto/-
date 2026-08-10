@@ -464,7 +464,6 @@ fun PeriodBudgetScreen(
                 }
             }
         }
-        
 
         com.example.ui.components.charts.ExpenseDynamicsAreaChartCard(
             transactions = monthTransactions,
@@ -499,11 +498,11 @@ fun PeriodBudgetScreen(
             }
 
             val defaultCategories = listOf(
-                Triple("Гейминг и Аниме", 22000.0, Emerald400 to Icons.Default.SportsEsports),
-                Triple("Бары и Тусовки", 4800.0, Indigo500 to Icons.Default.LocalBar),
-                Triple("Такси и Транспорт", 1420.0, Rose500 to Icons.Default.DirectionsCar),
-                Triple("Продукты и Еда", 1150.0, Emerald400 to Icons.Default.Restaurant),
-                Triple("Форс-мажоры", 300.0, Indigo500 to Icons.Default.Warning)
+                Triple("Гейминг", 22000.0, Emerald400 to Icons.Default.SportsEsports),
+                Triple("Бары", 4800.0, Indigo500 to Icons.Default.LocalBar),
+                Triple("Транспорт", 1420.0, Rose500 to Icons.Default.DirectionsCar),
+                Triple("Продукты", 1150.0, Emerald400 to Icons.Default.Restaurant),
+                Triple("Форс-мажор", 300.0, Indigo500 to Icons.Default.Warning)
             )
 
             val displayCategories = remember(categoryExpenseTotals, categoriesList) {
@@ -859,24 +858,24 @@ fun PeriodBudgetScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         recentTxList.forEach { tx ->
-    val receiptItems = remember(allTransactions, tx.id) {
-        allTransactions.filter { it.parentId == tx.id }
-    }
+                            // Находим дочерние товары чека, если они есть
+                            val receiptItems = remember(allTransactions, tx.id) {
+                                allTransactions.filter { it.parentId == tx.id }
+                            }
 
-    TransactionRowItem(
-        item = tx,
-        onDelete = onDeleteTransaction,
-        onClick = {
-            if (receiptItems.isNotEmpty()) {
-                selectedReceiptTransaction = tx
-            } else if (onEditTransaction != null) {
-                onEditTransaction(tx)
-            }
-        },
-        canDelete = false
-    )
-}
-
+                            TransactionRowItem(
+                                item = tx,
+                                onDelete = onDeleteTransaction,
+                                onClick = {
+                                    if (receiptItems.isNotEmpty()) {
+                                        selectedReceiptTransaction = tx
+                                    } else if (onEditTransaction != null) {
+                                        onEditTransaction(tx)
+                                    }
+                                },
+                                canDelete = false
+                            )
+                        }
                     }
                 }
             }
@@ -885,7 +884,7 @@ fun PeriodBudgetScreen(
         Spacer(modifier = Modifier.height(24.dp))
     }
 
-        // Всплывающее окно состава чека при нажатии на карточку чека
+    // Всплывающее окно состава чека при нажатии на карточку чека
     selectedReceiptTransaction?.let { parentTx ->
         val childItems = remember(allTransactions, parentTx.id) {
             allTransactions.filter { it.parentId == parentTx.id }.map { childTx ->
@@ -901,6 +900,7 @@ fun PeriodBudgetScreen(
             onDismiss = { selectedReceiptTransaction = null }
         )
     }
+}
 
 @Composable
 fun PeriodButton(
