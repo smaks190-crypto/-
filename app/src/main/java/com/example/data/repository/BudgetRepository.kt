@@ -1398,16 +1398,189 @@ class BudgetRepository(
                 val finalCategory = if (rawCategory.isNotBlank()) rawCategory else "Прочее"
                 val finalDate = if (rawDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) rawDate else defaultDate
 
-                if (amount > 0.0 || finalTitle.isNotBlank()) {
+                    suspend fun parseVoiceOperations(
+        voiceText: String,
+        apiKey: String,
+        expenseCategories: List<String>,
+        incomeCategories: List<String>
+    ): List<ParsedVoiceOperation> {
+        val trimmedText = voiceText.trim()
+        if (trimmedText.isEmpty()) return emptyList()
+
+        if (apiKey.isBlank()) {
+            throw IllegalArgumentException("Для анализа речи с помощью ИИ укажите API ключ Gemini в настройках приложения.")
+        }
+
+        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        val todayStr = dateFormat.format(java.util.Date())
+        val dayOfWeekStr = java.text.SimpleDateFormat("EEEE", java.util.Locale("ru")).format(java.util.Date())
+
+        val systemPrompt = "Вы — экспертный финансовый ассистент. Анализируйте сказанный пользователем текст.\n" +
+                "Текущая дата сегодня: $todayStr (день недели: $dayOfWeekStr).\n\n" +
+                "ПРАВИЛО ДЛЯ ЧЕКОВ И ПОКУПОК (КРИТИЧЕСКИ ВАЖНО):\n" +
+                "- ЕСЛИ ПОЛЬЗОВАТЕЛЬ ПЕРЕЧИСЛЯЕТ ПОКУПКИ ИЗ ОДНОГО МАГАЗИНА / ЧЕКА (например: 'вкусвилл кофе за 500 и сэндвич за 500' или 'в Пятерочке молоко 100 и хлеб 50'):\n" +
+                "  1. Верни JSON-массив из ОДНОГО объекта (родительская операция-чек).\n" +
+                "  2. В 'title' и 'subcategory' укажи название магазина или место (например, 'ВкусВилл' или 'Продукты').\n" +
+                "  3. В 'amount' укажи ОБЩУЮ СУММУ всех покупок (например, 1000.0).\n" +
+                "  4. В 'items' добавь список всех позиций: [{\"title\": \"Кофе\", \"amount\": 500.0}, {\"title\": \"Сэндвич\", \"amount\": 500.0}].\n\n" +
+                "- ЕСЛИ ЭТО РАЗНЫЕ НЕСВЯЗАННЫЕ ОПЕРАЦИИ (например: 'такси 300 и зарплата 50000'):\n" +
+                "  1. Верни массив из отдельных объектов.\n" +
+                "  2. У каждого в 'items' передай пустой массив [].\n\n" +
+                "Подбирайте подходящую категорию. Верните СТРОГО JSON-массив объектов без разметки."
+
+        val userQuery = """
+            Категории расходов: ${expenseCategories.joinToString(", ")}
+            Категории доходов: ${incomeCategories.joinToString(", ")}
+
+            Формат ответа при чеке со списком покупок:
+            [
+              {
+                "title": "ВкусВилл",
+                "type": "expense",
+                "amount": 1000.0,
+                "category": "Продукты",
+                "subcategory": "ВкусВилл",
+                "date": "$todayStr",
+                "items": [
+                  { "title": "Кофе", "amount": 500.0 },
+                  { "title": "Сэндвич", "amount": 500.0 }
+                ]
+              }
+            ]
+
+            Текст пользователя:
+            \"\"\"
+            $trimmedText
+            \"\"\"
+        """.trimIndent()
+
+        val request = GeminiRequest(
+            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = userQuery)))),
+            systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
+        )
+
+        var lastError: String? = null
+
+        val modelsToTry = listOf(
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite"
+        )
+
+        GlobalConsoleLogger.i("GEMINI", "Запрос к Gemini API для разбора голоса: «$trimmedText»")
+
+        for (model in modelsToTry) {
+            try {
+                GlobalConsoleLogger.d("GEMINI", "Пробуем модель: $model")
+                val response = apiService.generateContent(model, apiKey, request)
+                if (response.error == null) {
+                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                    if (!responseText.isNullOrEmpty()) {
+                        val jsonString = extractJsonArray(responseText)
+                        if (jsonString.isNotBlank()) {
+                            val parsed = parseJsonOperations(jsonString, todayStr)
+                            if (parsed.isNotEmpty()) {
+                                GlobalConsoleLogger.i("GEMINI", "Успешный ответ Gemini ($model): распознано ${parsed.size} операций")
+                                return parsed
+                            }
+                        }
+                    }
+                } else {
+                    lastError = response.error.message
+                    GlobalConsoleLogger.w("GEMINI", "Ошибка от Gemini ($model): ${response.error.message}")
+                }
+            } catch (e: Exception) {
+                lastError = e.message
+                GlobalConsoleLogger.e("GEMINI", "Исключение при обращении к $model: ${e.localizedMessage}", e)
+            }
+        }
+
+        GlobalConsoleLogger.e("GEMINI", "Все Gemini модели завершились ошибкой: $lastError")
+        throw IllegalStateException(lastError ?: "Не удалось разбрать операции из текста. Попробуйте сформулировать точнее.")
+    }
+
+    private fun extractJsonArray(rawText: String): String {
+        val clean = rawText.replace("```json", "").replace("```", "").trim()
+        val startIdx = clean.indexOf('[')
+        val endIdx = clean.lastIndexOf(']')
+        return if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+            clean.substring(startIdx, endIdx + 1)
+        } else ""
+    }
+
+    private fun sanitizeJsonStr(s: String?): String {
+        if (s == null) return ""
+        val trimmed = s.trim()
+        if (trimmed.equals("null", ignoreCase = true) || trimmed.equals("undefined", ignoreCase = true)) return ""
+        return trimmed
+    }
+
+    private fun parseJsonOperations(jsonString: String, defaultDate: String): List<ParsedVoiceOperation> {
+        val results = mutableListOf<ParsedVoiceOperation>()
+        try {
+            val array = JSONArray(jsonString)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val rawTitle = sanitizeJsonStr(obj.optString("title", ""))
+                val rawType = if (obj.optString("type", "expense").lowercase().contains("inc")) "income" else "expense"
+                val amount = obj.optDouble("amount", 0.0)
+                val rawCategory = sanitizeJsonStr(obj.optString("category", ""))
+                val rawSubcategory = sanitizeJsonStr(obj.optString("subcategory", ""))
+                val rawDate = sanitizeJsonStr(obj.optString("date", ""))
+
+                // Парсинг вложенного массива покупок чека
+                val rawItems = obj.optJSONArray("items")
+                val parsedItems = mutableListOf<ParsedReceiptItem>()
+                if (rawItems != null) {
+                    for (j in 0 until rawItems.length()) {
+                        val itemObj = rawItems.getJSONObject(j)
+                        val itemTitle = sanitizeJsonStr(itemObj.optString("title", ""))
+                        val itemAmount = itemObj.optDouble("amount", 0.0)
+                        if (itemTitle.isNotBlank() && itemAmount > 0.0) {
+                            parsedItems.add(ParsedReceiptItem(title = itemTitle, amount = itemAmount))
+                        }
+                    }
+                }
+
+                val finalTitle = if (rawTitle.isNotBlank()) rawTitle else if (rawCategory.isNotBlank()) rawCategory else if (rawType == "income") "Доход" else "Расход"
+                val finalCategory = if (rawCategory.isNotBlank()) rawCategory else "Прочее"
+                val finalDate = if (rawDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) rawDate else defaultDate
+
+                val finalAmount = if (amount > 0.0) amount else parsedItems.sumOf { it.amount }
+
+                if (finalAmount > 0.0 || finalTitle.isNotBlank()) {
                     results.add(
                         ParsedVoiceOperation(
                             title = finalTitle,
                             type = rawType,
-                            amount = amount,
+                            amount = finalAmount,
                             category = finalCategory,
                             subcategory = rawSubcategory,
                             date = finalDate,
-                            items = emptyList()
+                            items = parsedItems
+                        )
+                    )
+                }
+            }
+        } catch (_: Exception) {}
+        return results
+    }
+}
+
+data class ParsedVoiceOperation(
+    val title: String,
+    val type: String,
+    val amount: Double,
+    val category: String,
+    val subcategory: String = "",
+    val date: String = "",
+    val items: List<ParsedReceiptItem> = emptyList()
+)
+
+data class ParsedReceiptItem(
+    val title: String,
+    val amount: Double
+)
+
                         )
                     )
                 }
