@@ -917,7 +917,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         }
                         editingTransaction = null
                     },
-                    onSuggestCategory = { txName, type, catList ->
+                    onSuggestCategory = { txName: String, type: String, catList: List<String> ->
                         viewModel.suggestCategory(txName, type, catList)
                     },
                     editingTransaction = editingTransaction

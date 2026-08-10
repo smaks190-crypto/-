@@ -94,17 +94,9 @@ fun ReportDetailsDialog(
     }
 
     val initialUnreadIds = remember { notifications.filter { !it.isRead }.map { it.id }.toSet() }
-    var auditOfferTimestamp by remember { mutableStateOf<Long?>(null) }
+    
     LaunchedEffect(Unit) {
         onMarkAllRead()
-        val savedOfferTime = prefs.getLong("audit_offer_timestamp", 0L)
-        if (savedOfferTime != 0L) {
-            auditOfferTimestamp = savedOfferTime
-        } else {
-            val newTime = System.currentTimeMillis()
-            prefs.edit().putLong("audit_offer_timestamp", newTime).apply()
-            auditOfferTimestamp = newTime
-        }
     }
     var requestTimestamp by remember { mutableStateOf<Long?>(null) }
 
@@ -183,6 +175,17 @@ fun ReportDetailsDialog(
         val saved = prefs.getLong(key, 0L)
         if (saved != 0L) saved else {
             val now = welcomeTimestamp + 500L
+            prefs.edit().putLong(key, now).apply()
+            now
+        }
+    }
+
+    val auditOfferTimestamp = remember(profileName, welcomeTimestamp) {
+        val profileKey = profileName.ifBlank { "default" }
+        val key = "audit_offer_timestamp_$profileKey"
+        val saved = prefs.getLong(key, 0L)
+        if (saved != 0L) saved else {
+            val now = welcomeTimestamp + 1000L
             prefs.edit().putLong(key, now).apply()
             now
         }
@@ -286,7 +289,7 @@ fun ReportDetailsDialog(
             // Unified Chat Feed
             val listState = rememberLazyListState()
 
-            val chatItems = remember(notifications, displayedSections.toList(), isLoading, isGeneratingReaction, isSimulatingTyping, hasSentRequest, auditTimestamp, auditText, requestTimestamp, showConnectingNeon, isConnectionRestored, welcomeTimestamp, changelogTimestamp) {
+            val chatItems = remember(notifications, displayedSections.toList(), isLoading, isGeneratingReaction, isSimulatingTyping, hasSentRequest, auditTimestamp, auditText, requestTimestamp, showConnectingNeon, isConnectionRestored, welcomeTimestamp, changelogTimestamp, auditOfferTimestamp) {
                 val items = mutableListOf<ChatItem>()
                 
                 items.add(ChatWelcomeItem(welcomeTimestamp))
@@ -299,7 +302,7 @@ fun ReportDetailsDialog(
                 }
 
                 val notificationsToProcess = mutableListOf<NotificationEntity>()
-                val validAuditOfferTime = auditOfferTimestamp ?: System.currentTimeMillis()
+                val validAuditOfferTime = auditOfferTimestamp
                 
                 for (notif in filteredNotifications) {
                     if (notif.timestamp < validAuditOfferTime) {
@@ -947,6 +950,9 @@ private fun RenderAuditBlockItem(item: ChatAuditBlockItem) {
         val timeStr = remember(item.timestamp) {
             SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
         }
+        val isChartBlock = remember(item.text) {
+            item.text.contains("||chart||") || item.text.contains("Динамика трат") || item.text.contains("График трат")
+        }
         AnimatedVisibility(
             visible = true,
             enter = slideInVertically(
@@ -960,36 +966,60 @@ private fun RenderAuditBlockItem(item: ChatAuditBlockItem) {
                     .animateContentSize(),
                 horizontalAlignment = Alignment.Start
             ) {
-                Surface(
-                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                    color = Slate800.copy(alpha = 0.85f),
-                    border = BorderStroke(1.dp, Slate700),
-                    modifier = Modifier.fillMaxWidth(0.92f)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        if (item.isFirst) {
-                            Text(
-                                text = "Жабов Давид (Аналитика)",
-                                color = Emerald400,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                        }
-                        MarkdownFormattedText(
-                            markdownText = item.text,
-                            fontSize = 13.sp
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
+                if (isChartBlock) {
+                    val cleanText = remember(item.text) { item.text.replace("||chart||", "").trim() }
+                    if (cleanText.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+                            color = Slate800.copy(alpha = 0.85f),
+                            border = BorderStroke(1.dp, Slate700),
+                            modifier = Modifier.fillMaxWidth(0.92f)
                         ) {
-                            Text(
-                                text = timeStr,
-                                color = Slate400,
-                                fontSize = 10.sp
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                MarkdownFormattedText(
+                                    markdownText = cleanText,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                    renderChartMessage(
+                        title = "Динамика трат по дням",
+                        time = timeStr
+                    )
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+                        color = Slate800.copy(alpha = 0.85f),
+                        border = BorderStroke(1.dp, Slate700),
+                        modifier = Modifier.fillMaxWidth(0.92f)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            if (item.isFirst) {
+                                Text(
+                                    text = "Жабов Давид (Аналитика)",
+                                    color = Emerald400,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                            MarkdownFormattedText(
+                                markdownText = item.text,
+                                fontSize = 13.sp
                             )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                Text(
+                                    text = timeStr,
+                                    color = Slate400,
+                                    fontSize = 10.sp
+                                )
+                            }
                         }
                     }
                 }

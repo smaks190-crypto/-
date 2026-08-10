@@ -708,14 +708,17 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         val currentBudgetId = _selectedBudgetId.value ?: "default"
         viewModelScope.launch {
             ensureCategoryExists(category, type)
+            val existingTx = transactions.value.find { it.id == id }
             val tx = TransactionEntity(
                 id = id,
                 budgetId = currentBudgetId,
+                accountId = existingTx?.accountId,
                 type = type,
                 date = date,
                 category = category,
                 subcategory = subcategory,
-                amount = amount
+                amount = amount,
+                createdAt = existingTx?.createdAt ?: System.currentTimeMillis()
             )
             repository.insertTransaction(tx)
             _toastMessage.emit("Операция обновлена!")

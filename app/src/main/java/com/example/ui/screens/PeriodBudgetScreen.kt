@@ -486,7 +486,8 @@ fun PeriodBudgetScreen(
         
 
         com.example.ui.components.ExpenseDynamicsAreaChartCard(
-            transactions = monthTransactions,
+            transactions = if (allTransactions.isNotEmpty()) allTransactions else monthTransactions,
+            selectedDateDay = selectedDateDay,
             title = "ДИНАМИКА РАСХОДОВ",
             onClick = null
         )

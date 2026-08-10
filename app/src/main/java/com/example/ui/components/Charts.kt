@@ -62,9 +62,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.ui.graphics.PathEffect
 import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Emerald400
+import com.example.ui.theme.Indigo400
 import com.example.ui.theme.Indigo500
-import com.example.ui.theme.Rose500
 import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
@@ -72,6 +71,8 @@ import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.DarkBg
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -478,6 +479,7 @@ fun ExpenseDynamicsAreaChartCard(
     transactions: List<TransactionEntity>,
     modifier: Modifier = Modifier,
     title: String = "Динамика расходов",
+    selectedDateDay: String = "",
     onClick: (() -> Unit)? = null
 ) {
     var selectedPeriod by remember { mutableStateOf("Неделя") } // "Неделя" or "Месяц"
@@ -490,18 +492,54 @@ fun ExpenseDynamicsAreaChartCard(
     val weekDays = listOf("ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС")
 
     // Filter/Group data depending on selected tab
-    val (dataPoints, xLabels) = remember(expenseTx, selectedPeriod) {
+    val (dataPoints, xLabels) = remember(expenseTx, transactions, selectedPeriod, selectedDateDay) {
         val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
 
         if (selectedPeriod == "Неделя") {
             val map = DoubleArray(7) { 0.0 }
-            expenseTx.forEach { tx ->
+
+            val refDate = try {
+                if (selectedDateDay.isNotBlank()) sdf.parse(selectedDateDay) else java.util.Date()
+            } catch (e: Exception) {
+                java.util.Date()
+            }
+
+            val mondayCal = java.util.Calendar.getInstance().apply {
+                firstDayOfWeek = java.util.Calendar.MONDAY
+                time = refDate ?: java.util.Date()
+                set(java.util.Calendar.DAY_OF_WEEK, java.util.Calendar.MONDAY)
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+
+            val sundayCal = (mondayCal.clone() as java.util.Calendar).apply {
+                add(java.util.Calendar.DAY_OF_YEAR, 6)
+                set(java.util.Calendar.HOUR_OF_DAY, 23)
+                set(java.util.Calendar.MINUTE, 59)
+                set(java.util.Calendar.SECOND, 59)
+            }
+
+            val mondayStr = sdf.format(mondayCal.time)
+            val sundayStr = sdf.format(sundayCal.time)
+
+            val sourceTxs = if (transactions.isNotEmpty()) transactions else expenseTx
+            val weekExpenses = sourceTxs.filter { it.type == "expense" && it.date >= mondayStr && it.date <= sundayStr }
+
+            weekExpenses.forEach { tx ->
                 try {
                     val txDate = sdf.parse(tx.date)
                     if (txDate != null) {
-                        val cal = java.util.Calendar.getInstance().apply { time = txDate }
-                        val dayOfWeek = (cal.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7 // 0=Mon .. 6=Sun
-                        map[dayOfWeek] += tx.amount
+                        val cal = java.util.Calendar.getInstance().apply {
+                            firstDayOfWeek = java.util.Calendar.MONDAY
+                            time = txDate
+                        }
+                        val dow = cal.get(java.util.Calendar.DAY_OF_WEEK)
+                        val dayOfWeek = if (dow == java.util.Calendar.SUNDAY) 6 else dow - 2
+                        if (dayOfWeek in 0..6) {
+                            map[dayOfWeek] += tx.amount
+                        }
                     }
                 } catch (e: Exception) {
                     val day = tx.date.split("-").lastOrNull()?.toIntOrNull() ?: 1
@@ -511,15 +549,35 @@ fun ExpenseDynamicsAreaChartCard(
             }
             Pair(map.toList(), weekDays)
         } else {
-            // Group by day of month for the transactions passed (1..maxDay)
-            val map = mutableMapOf<Int, Double>()
-            var maxDayInTx = 28
-            expenseTx.forEach { tx ->
-                val day = tx.date.split("-").lastOrNull()?.toIntOrNull() ?: 1
-                map[day] = (map[day] ?: 0.0) + tx.amount
-                if (day > maxDayInTx) maxDayInTx = day
+            // Group by day of month for the month in selectedDateDay (1..totalDays)
+            val targetYearMonth = if (selectedDateDay.length >= 7) {
+                selectedDateDay.take(7)
+            } else {
+                sdf.format(java.util.Date()).take(7)
             }
-            val totalDays = maxOf(maxDayInTx, 30)
+
+            val sourceTxs = if (transactions.isNotEmpty()) transactions else expenseTx
+            val monthExpenses = sourceTxs.filter { it.type == "expense" && it.date.startsWith(targetYearMonth) }
+
+            val totalDays = try {
+                val year = targetYearMonth.take(4).toInt()
+                val month = targetYearMonth.substring(5, 7).toInt()
+                val cal = java.util.Calendar.getInstance()
+                cal.set(year, month - 1, 1)
+                cal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+            } catch (e: Exception) {
+                30
+            }
+
+            val map = mutableMapOf<Int, Double>()
+            monthExpenses.forEach { tx ->
+                val parts = tx.date.split("-")
+                if (parts.size >= 3) {
+                    val day = parts[2].toIntOrNull() ?: 1
+                    map[day] = (map[day] ?: 0.0) + tx.amount
+                }
+            }
+
             val points = (1..totalDays).map { day -> map[day] ?: 0.0 }
             val labels = listOf("1", "5", "10", "15", "20", "25", "$totalDays")
             Pair(points, labels)
@@ -733,21 +791,31 @@ fun ExpenseDynamicsAreaChartCard(
                 if (n > 1) {
                     val stepX = w / (n - 1)
                     val morphProgress = morphAnim.value
+                    val sameSize = oldPoints.size == n
 
-                    // Compute interpolated points for smooth vector morphing
+                    // Compute interpolated points for smooth transition
                     val points = currentTarget.mapIndexed { index, targetValue ->
                         val x = index * stepX
                         
-                        val oldValInterpolated = if (oldPoints.size > 1) {
-                            val normPos = index.toFloat() / (n - 1)
-                            val oldIndexExact = normPos * (oldPoints.size - 1)
-                            val i0 = oldIndexExact.toInt().coerceIn(0, oldPoints.size - 1)
-                            val i1 = (i0 + 1).coerceIn(0, oldPoints.size - 1)
-                            val frac = oldIndexExact - i0
-                            oldPoints[i0] + frac * (oldPoints[i1] - oldPoints[i0])
-                        } else 0.0
+                        val morphedValue = if (oldPoints.isNotEmpty()) {
+                            if (sameSize) {
+                                val oldVal = oldPoints[index]
+                                oldVal + morphProgress * (targetValue - oldVal)
+                            } else if (oldPoints.size > 1) {
+                                val normPos = index.toFloat() / (n - 1)
+                                val oldIndexExact = normPos * (oldPoints.size - 1)
+                                val i0 = oldIndexExact.toInt().coerceIn(0, oldPoints.size - 1)
+                                val i1 = (i0 + 1).coerceIn(0, oldPoints.size - 1)
+                                val frac = oldIndexExact - i0
+                                val oldValInterpolated = oldPoints[i0] + frac * (oldPoints[i1] - oldPoints[i0])
+                                oldValInterpolated + morphProgress * (targetValue - oldValInterpolated)
+                            } else {
+                                targetValue * morphProgress
+                            }
+                        } else {
+                            targetValue * morphProgress
+                        }
 
-                        val morphedValue = oldValInterpolated + morphProgress * (targetValue - oldValInterpolated)
                         val rawNormalizedY = ((morphedValue / maxVal) * (h - 28.dp.toPx())).toFloat()
                         val normalizedY = if (morphedValue > 0.0) maxOf(rawNormalizedY, 4.dp.toPx()) else 0f
                         val y = h - 8.dp.toPx() - normalizedY
@@ -1157,6 +1225,401 @@ fun ComparativeMetricRow(
                     radius = 2.dp.toPx() * animatedProgress,
                     center = p2
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Clean rendering function for dynamic expense line charts in AI assistant messages (Dark Neon Style).
+ */
+@Composable
+fun renderChartMessage(
+    title: String = "Динамика трат по дням",
+    dataPoints: List<Pair<String, Double>> = listOf(
+        "Пн" to 1150.0,
+        "Вт" to 420.0,
+        "Ср" to 2800.0,
+        "Чт" to 950.0,
+        "Пт" to 3400.0,
+        "Сб" to 4900.0,
+        "Вс" to 1650.0
+    ),
+    authorName: String = "Давид Жабов (Аналитика)",
+    time: String = "Только что",
+    lineColor: Color = Rose500,
+    accentColor: Color = Emerald400,
+    onSpeakText: ((String) -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val totalAmount = remember(dataPoints) { dataPoints.sumOf { it.second } }
+    val maxPoint = remember(dataPoints) { dataPoints.maxByOrNull { it.second } }
+    val avgAmount = remember(dataPoints) { if (dataPoints.isNotEmpty()) totalAmount / dataPoints.size else 0.0 }
+
+    val symbols = remember {
+        DecimalFormatSymbols(Locale("ru", "RU")).apply {
+            groupingSeparator = ' '
+            decimalSeparator = ','
+        }
+    }
+    val df = remember { DecimalFormat("#,##0", symbols) }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.Start,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        // Author header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = authorName,
+                color = accentColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+            if (onSpeakText != null) {
+                val speechStr = "$title. Всего потрачено ${df.format(totalAmount)} рублей. Пик расходов: ${maxPoint?.first ?: ""} - ${df.format(maxPoint?.second ?: 0.0)} рублей."
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { onSpeakText(speechStr) }
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(text = "🔊 Озвучить", color = Slate400, fontSize = 9.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+
+        // Main Glassmorphic Neon Card
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = Slate900.copy(alpha = 0.95f),
+            border = BorderStroke(1.dp, lineColor.copy(alpha = 0.35f))
+        ) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // Header Info Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(lineColor.copy(alpha = 0.15f))
+                                .border(1.dp, lineColor.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("📈", fontSize = 16.sp)
+                        }
+                        Column {
+                            Text(
+                                text = title,
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Интерактивный график расходов",
+                                color = Slate400,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+
+                    // Total Badge
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = lineColor.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, lineColor.copy(alpha = 0.4f))
+                    ) {
+                        Text(
+                            text = "- ${df.format(totalAmount)} ₽",
+                            color = lineColor,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                // Dynamic Line Chart Canvas
+                DynamicExpenseLineChart(
+                    dataPoints = dataPoints,
+                    lineColor = lineColor,
+                    accentColor = accentColor,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(150.dp)
+                )
+
+                // Stats Summary Strip
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DarkBg.copy(alpha = 0.8f))
+                        .border(1.dp, Slate800, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceAround,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Пик (Макс)", color = Slate400, fontSize = 9.sp)
+                        Text(
+                            text = "${maxPoint?.first ?: "-"} (${df.format(maxPoint?.second ?: 0.0)} ₽)",
+                            color = lineColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Box(modifier = Modifier.width(1.dp).height(20.dp).background(Slate800))
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("В среднем/день", color = Slate400, fontSize = 9.sp)
+                        Text(
+                            text = "${df.format(avgAmount)} ₽",
+                            color = Indigo400,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Timestamp footer
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    Text(
+                        text = time,
+                        color = Slate500,
+                        fontSize = 9.sp
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Smooth Bezier Dynamic Expense Line Chart with gradient fill, neon glow, and touch tooltips.
+ */
+@Composable
+fun DynamicExpenseLineChart(
+    dataPoints: List<Pair<String, Double>>,
+    lineColor: Color = Rose500,
+    accentColor: Color = Emerald400,
+    modifier: Modifier = Modifier
+) {
+    if (dataPoints.isEmpty()) return
+
+    var selectedIndex by remember { mutableStateOf<Int?>(null) }
+
+    val animProgress = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(dataPoints) {
+        animProgress.snapTo(0f)
+        animProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing)
+        )
+    }
+    val animatedProgress = animProgress.value
+
+    val values = remember(dataPoints) { dataPoints.map { it.second } }
+    val maxVal = remember(values) { (values.maxOrNull() ?: 1.0).coerceAtLeast(1.0) }
+
+    val symbols = remember {
+        DecimalFormatSymbols(Locale("ru", "RU")).apply {
+            groupingSeparator = ' '
+            decimalSeparator = ','
+        }
+    }
+    val df = remember { DecimalFormat("#,##0", symbols) }
+
+    BoxWithConstraints(modifier = modifier) {
+        val densityVal = LocalDensity.current.density
+        val widthPx = constraints.maxWidth.toFloat()
+        val heightPx = constraints.maxHeight.toFloat()
+
+        val bottomPadding = 24.dp.value * densityVal
+        val topPadding = 20.dp.value * densityVal
+        val horizontalPadding = 16.dp.value * densityVal
+
+        val chartWidth = (widthPx - horizontalPadding * 2).coerceAtLeast(10f)
+        val chartHeight = (heightPx - topPadding - bottomPadding).coerceAtLeast(10f)
+
+        val stepX = if (dataPoints.size > 1) chartWidth / (dataPoints.size - 1) else chartWidth
+
+        // Compute screen coordinates for each point
+        val pointOffsets = remember(dataPoints, chartWidth, chartHeight, animatedProgress, maxVal) {
+            dataPoints.mapIndexed { i, pair ->
+                val x = horizontalPadding + i * stepX
+                val normalizedVal = if (maxVal > 0) (pair.second / maxVal) else 0.0
+                val y = topPadding + chartHeight * (1f - (normalizedVal.toFloat() * animatedProgress))
+                Offset(x, y)
+            }
+        }
+
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(dataPoints) {
+                    detectTapGestures { tapOffset ->
+                        val closestIdx = pointOffsets.indices.minByOrNull { idx ->
+                            Math.abs(pointOffsets[idx].x - tapOffset.x)
+                        }
+                        if (closestIdx != null && Math.abs(pointOffsets[closestIdx].x - tapOffset.x) < 40.dp.toPx()) {
+                            selectedIndex = if (selectedIndex == closestIdx) null else closestIdx
+                        } else {
+                            selectedIndex = null
+                        }
+                    }
+                }
+        ) {
+            // Horizontal background grid lines
+            val gridCount = 3
+            for (i in 0..gridCount) {
+                val gridY = topPadding + chartHeight * (i.toFloat() / gridCount)
+                drawLine(
+                    color = Slate800.copy(alpha = 0.6f),
+                    start = Offset(horizontalPadding, gridY),
+                    end = Offset(widthPx - horizontalPadding, gridY),
+                    strokeWidth = 1.dp.toPx(),
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f), 0f)
+                )
+            }
+
+            if (pointOffsets.isNotEmpty()) {
+                // Build Smooth Bezier Path
+                val strokePath = Path()
+                val fillPath = Path()
+
+                strokePath.moveTo(pointOffsets.first().x, pointOffsets.first().y)
+                fillPath.moveTo(pointOffsets.first().x, topPadding + chartHeight)
+                fillPath.lineTo(pointOffsets.first().x, pointOffsets.first().y)
+
+                for (i in 0 until pointOffsets.size - 1) {
+                    val p1 = pointOffsets[i]
+                    val p2 = pointOffsets[i + 1]
+                    val controlX1 = p1.x + (p2.x - p1.x) / 2f
+                    val controlY1 = p1.y
+                    val controlX2 = p1.x + (p2.x - p1.x) / 2f
+                    val controlY2 = p2.y
+
+                    strokePath.cubicTo(controlX1, controlY1, controlX2, controlY2, p2.x, p2.y)
+                    fillPath.cubicTo(controlX1, controlY1, controlX2, controlY2, p2.x, p2.y)
+                }
+
+                fillPath.lineTo(pointOffsets.last().x, topPadding + chartHeight)
+                fillPath.close()
+
+                // Draw Gradient Fill under line
+                drawPath(
+                    path = fillPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            lineColor.copy(alpha = 0.35f),
+                            lineColor.copy(alpha = 0.05f),
+                            Color.Transparent
+                        ),
+                        startY = topPadding,
+                        endY = topPadding + chartHeight
+                    )
+                )
+
+                // Draw Outer Soft Glow Line
+                drawPath(
+                    path = strokePath,
+                    color = lineColor.copy(alpha = 0.3f),
+                    style = Stroke(width = 8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                )
+
+                // Draw Sharp Neon Main Line
+                drawPath(
+                    path = strokePath,
+                    color = lineColor,
+                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                )
+
+                // Draw Control Points & X-Axis Labels
+                pointOffsets.forEachIndexed { i, pt ->
+                    val isSelected = selectedIndex == i
+
+                    // Point Glow Ring
+                    drawCircle(
+                        color = if (isSelected) accentColor.copy(alpha = 0.4f) else lineColor.copy(alpha = 0.25f),
+                        radius = (if (isSelected) 10.dp else 6.dp).toPx(),
+                        center = pt
+                    )
+                    drawCircle(
+                        color = if (isSelected) accentColor else lineColor,
+                        radius = (if (isSelected) 5.dp else 3.5.dp).toPx(),
+                        center = pt
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = 1.5.dp.toPx(),
+                        center = pt
+                    )
+
+                    // Draw X Label
+                    val label = dataPoints[i].first
+                    val labelY = heightPx - 4.dp.toPx()
+                    drawContext.canvas.nativeCanvas.apply {
+                        val paint = android.graphics.Paint().apply {
+                            color = if (isSelected) android.graphics.Color.WHITE else android.graphics.Color.parseColor("#94A3B8")
+                            textSize = 10.dp.toPx()
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            isFakeBoldText = isSelected
+                        }
+                        drawText(label, pt.x, labelY, paint)
+                    }
+                }
+            }
+        }
+
+        // Selected Tooltip Bubble Overlay
+        selectedIndex?.let { idx ->
+            val pt = pointOffsets.getOrNull(idx)
+            val data = dataPoints.getOrNull(idx)
+            if (pt != null && data != null) {
+                val tooltipX = (pt.x / densityVal).dp - 40.dp
+                val tooltipY = ((pt.y / densityVal).dp - 36.dp).coerceAtLeast(0.dp)
+
+                Box(
+                    modifier = Modifier
+                        .offset(x = tooltipX, y = tooltipY)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Slate800)
+                        .border(1.dp, accentColor, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "${data.first}: ${df.format(data.second)} ₽",
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
     }
