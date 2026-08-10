@@ -885,7 +885,7 @@ fun PeriodBudgetScreen(
         Spacer(modifier = Modifier.height(24.dp))
     }
 
-    // Всплывающее окно состава чека при нажатии на карточку чека
+        // Всплывающее окно состава чека при нажатии на карточку чека
     selectedReceiptTransaction?.let { parentTx ->
         val childItems = remember(allTransactions, parentTx.id) {
             allTransactions.filter { it.parentId == parentTx.id }.map { childTx ->
