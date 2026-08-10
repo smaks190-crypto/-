@@ -1,5 +1,5 @@
 package com.example.data.repository
-
+import com.example.data.repository.ParsedVoiceOperation
 import com.example.utils.GlobalConsoleLogger
 import com.example.data.api.GeminiApiService
 import com.example.data.api.GeminiContent
