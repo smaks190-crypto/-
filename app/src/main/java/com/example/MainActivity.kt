@@ -124,7 +124,6 @@ import com.example.ui.screens.PeriodBudgetScreen
 import com.example.ui.components.ReportDetailsDialog
 import com.example.ui.theme.BudgetTheme
 import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Emerald400
 import com.example.ui.theme.Indigo500
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate800
@@ -1185,20 +1184,21 @@ private fun filterTransactionsForPeriod(
     allStart: String,
     allEnd: String
 ): List<TransactionEntity> {
+    val parentOnlyList = list.filter { it.parentId == null }
     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
     return when (type) {
-        PeriodType.DAY -> list.filter { it.date == selectedDay }
+        PeriodType.DAY -> parentOnlyList.filter { it.date == selectedDay }
         PeriodType.MONTH -> {
             val monthFormatted = String.format(Locale.getDefault(), "%02d", monthIdx + 1)
             val prefix = "$year-$monthFormatted"
-            list.filter { it.date.startsWith(prefix) }
+            parentOnlyList.filter { it.date.startsWith(prefix) }
         }
         PeriodType.WEEK -> {
             val now = Calendar.getInstance()
             val weekAgo = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }
 
-            list.filter {
+            parentOnlyList.filter {
                 try {
                     val d = sdf.parse(it.date) ?: return@filter false
                     d.after(weekAgo.time) && d.before(now.time) || it.date == sdf.format(now.time)
@@ -1208,7 +1208,7 @@ private fun filterTransactionsForPeriod(
             }
         }
         PeriodType.ALL -> {
-            list.filter { it.date >= allStart && it.date <= allEnd }
+            parentOnlyList.filter { it.date >= allStart && it.date <= allEnd }
         }
     }
 }
