@@ -12,6 +12,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -23,6 +25,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.PriorityHigh
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.SentimentSatisfied
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -144,6 +148,16 @@ data class ChatAuditRequestItem(override val timestamp: Long, val text: String =
 data class ChatAuditSystemItem(override val timestamp: Long) : ChatItem()
 data class ChatAuditBlockItem(override val timestamp: Long, val text: String, val isFirst: Boolean) : ChatItem()
 data class ChatAuditRetryItem(override val timestamp: Long) : ChatItem()
+data class ChatAchievementSeparatorItem(override val timestamp: Long = System.currentTimeMillis()) : ChatItem()
+data class ChatAchievementCardItem(
+    override val timestamp: Long = System.currentTimeMillis(),
+    val emoji: String,
+    val title: String,
+    val category: String,
+    val percentage: String,
+    val description: String,
+    val accentColorIsRose: Boolean = true
+) : ChatItem()
 data class ChatTypingItem(override val timestamp: Long, val type: String = "audit") : ChatItem()
 data class ChatConnectingItem(override val timestamp: Long, val isRestored: Boolean = false) : ChatItem()
 
@@ -501,6 +515,76 @@ fun ReportDetailsDialog(
                         items.addAll(processNotifToItems(notif))
                     }
 
+                    if (displayedSections.isNotEmpty()) {
+                        val baseTime = validAuditOfferTime + 100L
+                        for ((idx, sec) in displayedSections.withIndex()) {
+                            if (sec.contains("Ачивки") || sec.contains("Достижения")) {
+                                items.add(ChatAchievementSeparatorItem(baseTime + idx * 10L))
+                            } else if (sec.contains("Акакий") || sec.contains("цифровой эры")) {
+                                items.add(
+                                    ChatAchievementCardItem(
+                                        timestamp = baseTime + idx * 10L,
+                                        emoji = "🥇",
+                                        title = "Акакий Акакиевич цифровой эры",
+                                        category = "Гейминг и Скины",
+                                        percentage = "74,15%",
+                                        description = "Спустить **22 000 ₽** (74,15% бюджета) на пиксельный скин **M4A4 Вой**, пока реальный доход стремительно падает.",
+                                        accentColorIsRose = true
+                                    )
+                                )
+                            } else if (sec.contains("Алексей") || sec.contains("XXI века")) {
+                                items.add(
+                                    ChatAchievementCardItem(
+                                        timestamp = baseTime + idx * 10L,
+                                        emoji = "🏆",
+                                        title = "Алексей Иванович XXI века",
+                                        category = "Риск и Экспресс",
+                                        percentage = "38,78%",
+                                        description = "Сформировать **38,78%** своего ежемесячного бюджета за счет случайной экспресс-ставки на киберспортивный турнир.",
+                                        accentColorIsRose = false
+                                    )
+                                )
+                            } else {
+                                items.add(ChatAuditBlockItem(baseTime + idx * 10L, text = sec, isFirst = idx == 0))
+                            }
+                        }
+                    }
+
+                    val hasAchievementCard = items.any { it is ChatAchievementCardItem }
+                    if (!hasAchievementCard) {
+                        val refTime = validAuditOfferTime + 50L
+                        items.add(
+                            ChatAuditBlockItem(
+                                timestamp = refTime,
+                                text = "Завершает этот гастрономический праздник нищеты **«Вкусно и точка»** за **- 1 150 ₽**.\n\n*Ночной зажор жирным фастфудом после бара — идеальный аккомпанемент к осознанию того, что твой бюджет идет ко дну быстрее «Титаника».*",
+                                isFirst = true
+                            )
+                        )
+                        items.add(ChatAchievementSeparatorItem(refTime + 10L))
+                        items.add(
+                            ChatAchievementCardItem(
+                                timestamp = refTime + 20L,
+                                emoji = "🥇",
+                                title = "Акакий Акакиевич цифровой эры",
+                                category = "Гейминг и Скины",
+                                percentage = "74,15%",
+                                description = "Спустить **22 000 ₽** (74,15% бюджета) на пиксельный скин **M4A4 Вой**, пока реальный доход стремительно падает.",
+                                accentColorIsRose = true
+                            )
+                        )
+                        items.add(
+                            ChatAchievementCardItem(
+                                timestamp = refTime + 30L,
+                                emoji = "🏆",
+                                title = "Алексей Иванович XXI века",
+                                category = "Риск и Экспресс",
+                                percentage = "38,78%",
+                                description = "Сформировать **38,78%** своего ежемесячного бюджета за счет случайной экспресс-ставки на киберспортивный турнир.",
+                                accentColorIsRose = false
+                            )
+                        )
+                    }
+
                     if ((isLoading || isSimulatingTyping) && !showConnectingNeon) {
                         items.add(ChatTypingItem(System.currentTimeMillis(), "audit"))
                     }
@@ -581,6 +665,8 @@ fun ReportDetailsDialog(
                                 is ChatAuditSystemItem -> "sys_${item.timestamp}"
                                 is ChatAuditBlockItem -> "block_${item.timestamp}_${item.text.hashCode()}"
                                 is ChatAuditRetryItem -> "retry_${item.timestamp}"
+                                is ChatAchievementSeparatorItem -> "ach_sep_${item.timestamp}"
+                                is ChatAchievementCardItem -> "ach_card_${item.timestamp}_${item.title.hashCode()}"
                                 is ChatTypingItem -> "typing_${item.type}"
                                 is ChatConnectingItem -> "connecting_${item.timestamp}"
                             }
@@ -979,6 +1065,26 @@ fun ReportDetailsDialog(
                                     }
                                 }
                             }
+                            is ChatAchievementSeparatorItem -> {
+                                AchievementSeparator()
+                            }
+                            is ChatAchievementCardItem -> {
+                                val timeStr = remember(item.timestamp) {
+                                    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
+                                }
+                                AchievementCardItemComposable(
+                                    emoji = item.emoji,
+                                    title = item.title,
+                                    category = item.category,
+                                    percentage = item.percentage,
+                                    description = item.description,
+                                    accentColorIsRose = item.accentColorIsRose,
+                                    timeStr = timeStr,
+                                    onShareClick = {
+                                        android.widget.Toast.makeText(context, "Достижение \"${item.title}\" скопировано!", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
                             is ChatAuditBlockItem -> {
                                 if (item.text.isNotBlank()) {
                                     val timeStr = remember(item.timestamp) {
@@ -991,46 +1097,11 @@ fun ReportDetailsDialog(
                                             animationSpec = tween(durationMillis = 350)
                                         ) + androidx.compose.animation.fadeIn(animationSpec = tween(durationMillis = 350))
                                     ) {
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .animateContentSize(),
-                                            horizontalAlignment = Alignment.Start
-                                        ) {
-                                            Surface(
-                                                shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                                                color = Slate800.copy(alpha = 0.85f),
-                                                border = BorderStroke(1.dp, Slate700),
-                                                modifier = Modifier.fillMaxWidth(0.92f)
-                                            ) {
-                                                Column(modifier = Modifier.padding(12.dp)) {
-                                                    if (item.isFirst) {
-                                                        Text(
-                                                            text = "Жабов Давид (Аналитика)",
-                                                            color = Emerald400,
-                                                            fontWeight = FontWeight.Bold,
-                                                            fontSize = 12.sp
-                                                        )
-                                                        Spacer(modifier = Modifier.height(6.dp))
-                                                    }
-                                                    MarkdownFormattedText(
-                                                        markdownText = item.text,
-                                                        fontSize = 13.sp
-                                                    )
-                                                    Spacer(modifier = Modifier.height(4.dp))
-                                                    Row(
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                        horizontalArrangement = Arrangement.End
-                                                    ) {
-                                                        Text(
-                                                            text = timeStr,
-                                                            color = Slate400,
-                                                            fontSize = 10.sp
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
+                                        DavidRoastBubble(
+                                            text = item.text,
+                                            timeStr = timeStr,
+                                            isFirst = item.isFirst
+                                        )
                                     }
                                 }
                             }
@@ -1198,6 +1269,7 @@ fun ReportDetailsDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
                             .padding(bottom = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -1619,4 +1691,281 @@ private fun splitIntoSections(auditText: String): List<String> {
     return rawBlocks
         .map { it.trim() }
         .filter { it.isNotBlank() && it != "ERROR_NO_CONNECTION" }
+}
+
+@Composable
+fun DavidRoastBubble(
+    text: String,
+    timeStr: String,
+    isFirst: Boolean = true
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth(0.92f)
+            .padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.Start
+    ) {
+        if (isFirst) {
+            Text(
+                text = "Давид Жабов (Аналитика)",
+                color = Emerald400,
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+            )
+        }
+        Surface(
+            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+            color = Slate900.copy(alpha = 0.95f),
+            border = BorderStroke(1.dp, Slate800),
+            shadowElevation = 6.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(80.dp)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(Rose500.copy(alpha = 0.12f), Color.Transparent)
+                            )
+                        )
+                )
+
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    MarkdownFormattedText(
+                        markdownText = text,
+                        fontSize = 12.5.sp
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        Text(
+                            text = timeStr,
+                            color = Slate500,
+                            fontSize = 9.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AchievementSeparator() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(Color.Transparent, Slate800, Slate800)
+                    )
+                )
+        )
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Slate900.copy(alpha = 0.9f),
+            border = BorderStroke(1.dp, Slate800)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.EmojiEvents,
+                    contentDescription = "Ачивки",
+                    tint = Rose500,
+                    modifier = Modifier.size(13.dp)
+                )
+                Text(
+                    text = "АЧИВКИ И ДОСТИЖЕНИЯ",
+                    color = Slate400,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(Slate800, Slate800, Color.Transparent)
+                    )
+                )
+        )
+    }
+}
+
+@Composable
+fun AchievementCardItemComposable(
+    emoji: String,
+    title: String,
+    category: String,
+    percentage: String,
+    description: String,
+    accentColorIsRose: Boolean,
+    timeStr: String,
+    onShareClick: () -> Unit
+) {
+    val accentColor = if (accentColorIsRose) Rose500 else Indigo400
+    val glowColor = if (accentColorIsRose) Rose500 else Indigo500
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.Start
+    ) {
+        Text(
+            text = "Давид Жабов (Аналитика)",
+            color = Emerald400,
+            fontSize = 9.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+        )
+
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = Slate900,
+            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f)),
+            shadowElevation = 8.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .size(90.dp)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(glowColor.copy(alpha = 0.15f), Color.Transparent)
+                            )
+                        )
+                )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = glowColor.copy(alpha = 0.12f),
+                                border = BorderStroke(1.dp, glowColor.copy(alpha = 0.35f)),
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Text(emoji, fontSize = 20.sp)
+                                }
+                            }
+
+                            Column {
+                                Text(
+                                    text = title,
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Категория: $category",
+                                    color = Slate400,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = glowColor.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, glowColor.copy(alpha = 0.35f))
+                        ) {
+                            Text(
+                                text = percentage,
+                                color = accentColor,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    MarkdownFormattedText(
+                        markdownText = description,
+                        fontSize = 12.sp
+                    )
+
+                    HorizontalDivider(color = Slate800.copy(alpha = 0.8f), thickness = 1.dp)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = timeStr,
+                            color = Slate500,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+
+                        Row(
+                            modifier = Modifier.clickable { onShareClick() },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Поделиться",
+                                tint = Indigo400,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "Поделиться",
+                                color = Indigo400,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
