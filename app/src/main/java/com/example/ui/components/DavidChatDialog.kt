@@ -11,6 +11,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -894,26 +896,30 @@ fun ReportDetailsDialog(
                             }
                             is ChatTypingItem -> {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
                                     horizontalArrangement = Arrangement.Start
                                 ) {
                                     Surface(
                                         shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                                        color = Slate800.copy(alpha = 0.85f),
-                                        border = BorderStroke(1.dp, Slate700)
+                                        color = Slate800.copy(alpha = 0.9f),
+                                        border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.5f))
                                     ) {
                                         Row(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("🐸", fontSize = 14.sp)
-                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("🐸", fontSize = 16.sp)
+                                            Spacer(modifier = Modifier.width(8.dp))
                                             Text(
-                                                text = if (item.type == "audit") "Давид анализирует ваш бюджет..." else "Давид печатает...",
+                                                text = if (item.type == "audit") "Давид анализирует ваш бюджет" else "Давид печатает",
                                                 color = Emerald400,
                                                 fontSize = 12.sp,
-                                                fontWeight = FontWeight.Medium
+                                                fontWeight = FontWeight.SemiBold
                                             )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            AnimatedTypingDots()
                                         }
                                     }
                                 }
@@ -1133,6 +1139,41 @@ fun ReportDetailsDialog(
                         .imePadding()
                         .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "🐸 Проведи аудит за $periodTitle",
+                            "🔥 Прожарь мои траты",
+                            "📊 Главные выводы",
+                            "💡 Дай фин-совет"
+                        ).forEach { prompt ->
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = Slate800.copy(alpha = 0.9f),
+                                border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.5f)),
+                                modifier = Modifier.clickable {
+                                    userMessageText = prompt
+                                    if (prompt.contains("аудит")) {
+                                        isFileAttached = true
+                                    }
+                                }
+                            ) {
+                                Text(
+                                    text = prompt,
+                                    color = Emerald400,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+
                     AnimatedVisibility(visible = isFileAttached) {
                         Row(
                             modifier = Modifier
@@ -1481,4 +1522,60 @@ private fun splitIntoSections(auditText: String): List<String> {
     return rawBlocks
         .map { it.trim() }
         .filter { it.isNotBlank() && it != "ERROR_NO_CONNECTION" }
+}
+
+@Composable
+fun AnimatedTypingDots() {
+    val infiniteTransition = rememberInfiniteTransition(label = "typing_dots")
+    val alpha1 by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = tween(500, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "dot1"
+    )
+    val alpha2 by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = tween(500, delayMillis = 180, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "dot2"
+    )
+    val alpha3 by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = tween(500, delayMillis = 360, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "dot3"
+    )
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .graphicsLayer { alpha = alpha1 }
+                .background(Emerald400, CircleShape)
+        )
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .graphicsLayer { alpha = alpha2 }
+                .background(Emerald400, CircleShape)
+        )
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .graphicsLayer { alpha = alpha3 }
+                .background(Emerald400, CircleShape)
+        )
+    }
 }
