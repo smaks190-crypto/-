@@ -859,24 +859,24 @@ fun PeriodBudgetScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         recentTxList.forEach { tx ->
-                            // Находим дочерние товары чека, если они есть
-                            val receiptItems = remember(allTransactions, tx.id) {
-                                allTransactions.filter { it.parentId == tx.id }
-                            }
+    val receiptItems = remember(allTransactions, tx.id) {
+        allTransactions.filter { it.parentId == tx.id }
+    }
 
-                            TransactionRowItem(
-                                item = tx,
-                                onDelete = onDeleteTransaction,
-                                onClick = {
-                                    if (receiptItems.isNotEmpty()) {
-                                        selectedReceiptTransaction = tx
-                                    } else if (onEditTransaction != null) {
-                                        onEditTransaction(tx)
-                                    }
-                                },
-                                canDelete = false
-                            )
-                        }
+    TransactionRowItem(
+        item = tx,
+        onDelete = onDeleteTransaction,
+        onClick = {
+            if (receiptItems.isNotEmpty()) {
+                selectedReceiptTransaction = tx
+            } else if (onEditTransaction != null) {
+                onEditTransaction(tx)
+            }
+        },
+        canDelete = false
+    )
+}
+
                     }
                 }
             }
@@ -901,7 +901,6 @@ fun PeriodBudgetScreen(
             onDismiss = { selectedReceiptTransaction = null }
         )
     }
-}
 
 @Composable
 fun PeriodButton(
