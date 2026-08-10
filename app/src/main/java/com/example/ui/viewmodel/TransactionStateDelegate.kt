@@ -320,7 +320,13 @@ class TransactionStateDelegate(
                     subcategory = finalSubcategory,
                     amount = op.amount
                 )
-                repository.insertTransaction(tx)
+                
+                if (op.items.isNotEmpty()) {
+                    repository.insertReceiptTransaction(tx, op.items)
+                } else {
+                    repository.insertTransaction(tx)
+                }
+                
                 com.example.utils.GlobalConsoleLogger.i("ROOM", "Сохранена транзакция в DB: ${tx.category} / ${tx.subcategory} (${tx.amount} ₽)")
 
                 try {
@@ -377,7 +383,12 @@ class TransactionStateDelegate(
                         subcategory = finalSubcategory,
                         amount = op.amount
                     )
-                    repository.insertTransaction(tx)
+                    
+                    if (op.items.isNotEmpty()) {
+                        repository.insertReceiptTransaction(tx, op.items)
+                    } else {
+                        repository.insertTransaction(tx)
+                    }
                     
                     processedOps.add(op.copy(date = finalDate, category = finalCategory, subcategory = finalSubcategory))
                 }
