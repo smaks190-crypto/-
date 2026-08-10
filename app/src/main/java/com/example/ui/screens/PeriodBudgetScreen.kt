@@ -892,7 +892,7 @@ fun PeriodBudgetScreen(
         }
         ReceiptDetailsDialog(
             parentTransaction = parentTx,
-            transactions = childItems,
+            childTransactions = childItems,
             onDismiss = { selectedReceiptTransaction = null }
         )
     }
