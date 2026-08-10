@@ -11,8 +11,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -326,13 +324,13 @@ fun ReportDetailsDialog(
                 .fillMaxSize()
                 .background(Slate950)
         ) {
-                // Header (Telegram Style Top Bar)
+                // Header (David Zhabov Cyberpunk / Neon Top Bar)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Slate900)
                         .statusBarsPadding()
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -340,43 +338,104 @@ fun ReportDetailsDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.weight(1f)
                     ) {
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = Color.White)
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = Slate300)
                         }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        
+                        // Avatar with Neon Ring & Online Dot
                         Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .background(
-                                    Brush.linearGradient(listOf(Indigo500, Emerald400)),
-                                    shape = CircleShape
-                                )
-                                .border(1.5.dp, if (isLoading) Emerald400 else Indigo500, shape = CircleShape),
+                            modifier = Modifier.size(42.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("🐸", fontSize = 22.sp)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.sweepGradient(listOf(Emerald400, Indigo500, Rose500, Emerald400)),
+                                        shape = CircleShape
+                                    )
+                                    .padding(2.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Slate950, shape = CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("🐸", fontSize = 20.sp)
+                                }
+                            }
+                            // Online Indicator Dot
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(10.dp)
+                                    .background(Emerald400, shape = CircleShape)
+                                    .border(2.dp, Slate900, shape = CircleShape)
+                            )
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
+                        
+                        Spacer(modifier = Modifier.width(10.dp))
+                        
                         Column {
-                            Text(
-                                text = "Давид Жабов",
-                                color = Color.White,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = if (isLoading) "печатает$dots" else "в сети",
-                                color = if (isLoading) Emerald400 else Indigo500.copy(alpha = 0.85f),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Normal
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "Давид Жабов",
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                // AI 2.0 Badge
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Emerald400.copy(alpha = 0.12f),
+                                    border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.35f))
+                                ) {
+                                    Text(
+                                        text = "AI 2.0",
+                                        color = Emerald400,
+                                        fontSize = 9.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(5.dp)
+                                        .background(Emerald400, CircleShape)
+                                )
+                                Text(
+                                    text = if (isLoading) "печатает$dots" else "Финансовый критик • в сети",
+                                    color = Emerald400,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Normal
+                                )
+                            }
                         }
                     }
+                    
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { }) {
-                            Icon(Icons.Default.Call, contentDescription = "Звонок", tint = Slate300)
+                        IconButton(
+                            onClick = {
+                                prefs.edit().remove("audit_offer_timestamp").apply()
+                                onRequestAudit()
+                            },
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Сброс", tint = Slate400)
                         }
-                        IconButton(onClick = { }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "Меню", tint = Slate300)
+                        IconButton(onClick = { }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Меню", tint = Slate400)
                         }
                     }
                 }
@@ -896,30 +955,26 @@ fun ReportDetailsDialog(
                             }
                             is ChatTypingItem -> {
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
+                                    modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.Start
                                 ) {
                                     Surface(
                                         shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
-                                        color = Slate800.copy(alpha = 0.9f),
-                                        border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.5f))
+                                        color = Slate800.copy(alpha = 0.85f),
+                                        border = BorderStroke(1.dp, Slate700)
                                     ) {
                                         Row(
-                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Text("🐸", fontSize = 16.sp)
-                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("🐸", fontSize = 14.sp)
+                                            Spacer(modifier = Modifier.width(6.dp))
                                             Text(
-                                                text = if (item.type == "audit") "Давид анализирует ваш бюджет" else "Давид печатает",
+                                                text = if (item.type == "audit") "Давид анализирует ваш бюджет..." else "Давид печатает...",
                                                 color = Emerald400,
                                                 fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold
+                                                fontWeight = FontWeight.Medium
                                             )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            AnimatedTypingDots()
                                         }
                                     }
                                 }
@@ -1130,7 +1185,7 @@ fun ReportDetailsDialog(
                         .background(Slate800)
                 )
 
-                // Footer (Telegram style input bar with prefilled text & attached file)
+                // Footer (Cyberpunk Neon Input Bar + Quick Prompts)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1139,38 +1194,73 @@ fun ReportDetailsDialog(
                         .imePadding()
                         .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
+                    // Quick Prompts Chips Row
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
                             .padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        listOf(
-                            "🐸 Проведи аудит за $periodTitle",
-                            "🔥 Прожарь мои траты",
-                            "📊 Главные выводы",
-                            "💡 Дай фин-совет"
-                        ).forEach { prompt ->
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = Slate800.copy(alpha = 0.9f),
-                                border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.5f)),
-                                modifier = Modifier.clickable {
-                                    userMessageText = prompt
-                                    if (prompt.contains("аудит")) {
-                                        isFileAttached = true
-                                    }
-                                }
-                            ) {
-                                Text(
-                                    text = prompt,
-                                    color = Emerald400,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                                )
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Emerald400.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.4f)),
+                            modifier = Modifier.clickable {
+                                userMessageText = "Давид, проведи аудит за $periodTitle"
+                                isFileAttached = true
+                                requestTimestamp = System.currentTimeMillis()
+                                hasSentRequest = true
+                                onRequestAudit()
                             }
+                        ) {
+                            Text(
+                                text = "🐸 Проведи аудит за $periodTitle",
+                                color = Emerald400,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Rose500.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, Rose500.copy(alpha = 0.5f)),
+                            modifier = Modifier.clickable {
+                                userMessageText = "🔥 Прожарь мои траты"
+                                requestTimestamp = System.currentTimeMillis()
+                                hasSentRequest = true
+                                onRequestAudit()
+                            }
+                        ) {
+                            Text(
+                                text = "🔥 Прожарь мои траты",
+                                color = Rose400,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Indigo500.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.4f)),
+                            modifier = Modifier.clickable {
+                                userMessageText = "Дай советы по экономии"
+                                requestTimestamp = System.currentTimeMillis()
+                                hasSentRequest = true
+                                onRequestAudit()
+                            }
+                        ) {
+                            Text(
+                                text = "💡 Советы недели",
+                                color = Indigo400,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
                         }
                     }
 
@@ -1221,19 +1311,19 @@ fun ReportDetailsDialog(
                     ) {
                         Surface(
                             modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(24.dp),
-                            color = Slate800,
-                            border = BorderStroke(1.dp, if (userMessageText.isNotEmpty() || isFileAttached) Indigo500 else Slate700)
+                            shape = RoundedCornerShape(20.dp),
+                            color = Slate900,
+                            border = BorderStroke(1.dp, if (userMessageText.isNotEmpty() || isFileAttached) Indigo500 else Slate800)
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.SentimentSatisfied,
                                     contentDescription = "Смайлы",
                                     tint = Slate400,
-                                    modifier = Modifier.size(22.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 BasicTextField(
@@ -1243,15 +1333,15 @@ fun ReportDetailsDialog(
                                     modifier = Modifier.weight(1f),
                                     textStyle = TextStyle(
                                         color = Color.White,
-                                        fontSize = 14.sp
+                                        fontSize = 13.sp
                                     ),
                                     cursorBrush = SolidColor(Emerald400),
                                     decorationBox = { innerTextField ->
                                         if (userMessageText.isEmpty()) {
                                             Text(
-                                                text = "Сообщение",
-                                                color = Slate400,
-                                                fontSize = 14.sp
+                                                text = "Спроси Давида про траты...",
+                                                color = Slate500,
+                                                fontSize = 13.sp
                                             )
                                         }
                                         innerTextField()
@@ -1263,7 +1353,7 @@ fun ReportDetailsDialog(
                                     contentDescription = "Прикрепить",
                                     tint = if (isFileAttached) Emerald400 else Slate400,
                                     modifier = Modifier
-                                        .size(22.dp)
+                                        .size(20.dp)
                                         .clickable {
                                             isFileAttached = !isFileAttached
                                             if (isFileAttached && attachedFileName.isEmpty()) {
@@ -1277,12 +1367,12 @@ fun ReportDetailsDialog(
                         val canSend = userMessageText.isNotBlank() || isFileAttached
                         Box(
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(40.dp)
                                 .background(
-                                    if (canSend) Brush.linearGradient(listOf(Indigo500, Color(0xFF3B82F6)))
-                                    else Brush.linearGradient(listOf(Indigo500.copy(alpha = 0.5f), Slate700)),
+                                    Brush.linearGradient(listOf(Emerald400, Indigo500, Rose500)),
                                     CircleShape
                                 )
+                                .padding(1.dp)
                                 .clip(CircleShape)
                                 .clickable(enabled = !isLoading && !isSimulatingTyping) {
                                     if (canSend) {
@@ -1295,12 +1385,19 @@ fun ReportDetailsDialog(
                                 },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = if (canSend) Icons.Default.Send else Icons.Default.Mic,
-                                contentDescription = if (canSend) "Отправить" else "Голос",
-                                tint = Color.White,
-                                modifier = Modifier.size(22.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Slate900, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (canSend) Icons.Default.Send else Icons.Default.Mic,
+                                    contentDescription = if (canSend) "Отправить" else "Голос",
+                                    tint = Emerald400,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1522,60 +1619,4 @@ private fun splitIntoSections(auditText: String): List<String> {
     return rawBlocks
         .map { it.trim() }
         .filter { it.isNotBlank() && it != "ERROR_NO_CONNECTION" }
-}
-
-@Composable
-fun AnimatedTypingDots() {
-    val infiniteTransition = rememberInfiniteTransition(label = "typing_dots")
-    val alpha1 by infiniteTransition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 1f,
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = tween(500, easing = androidx.compose.animation.core.LinearEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-        ),
-        label = "dot1"
-    )
-    val alpha2 by infiniteTransition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 1f,
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = tween(500, delayMillis = 180, easing = androidx.compose.animation.core.LinearEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-        ),
-        label = "dot2"
-    )
-    val alpha3 by infiniteTransition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 1f,
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = tween(500, delayMillis = 360, easing = androidx.compose.animation.core.LinearEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-        ),
-        label = "dot3"
-    )
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .graphicsLayer { alpha = alpha1 }
-                .background(Emerald400, CircleShape)
-        )
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .graphicsLayer { alpha = alpha2 }
-                .background(Emerald400, CircleShape)
-        )
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .graphicsLayer { alpha = alpha3 }
-                .background(Emerald400, CircleShape)
-        )
-    }
 }
