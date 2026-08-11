@@ -190,13 +190,9 @@ fun PeriodBudgetScreen(
     onDeleteTransaction: (String) -> Unit,
     onEditTransaction: ((TransactionEntity) -> Unit)? = null
 ) {
-    // Исключаем дочерние позиции чека из расчетов и отображения
+    // Исключаем дочерние позиции чека из отображения в списке
     val mainFilteredTransactions = remember(filteredTransactions) {
         filteredTransactions.filter { it.parentId == null }
-    }
-
-    val mainAllTransactions = remember(allTransactions) {
-        allTransactions.filter { it.parentId == null }
     }
 
     // Состояние для открытия диалога просмотра состава чека
@@ -215,6 +211,11 @@ fun PeriodBudgetScreen(
             set(Calendar.DAY_OF_MONTH, getActualMaximum(Calendar.DAY_OF_MONTH))
         }
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
+    }
+
+    // Расчеты делаем только по главным транзакциям (parentId == null)
+    val mainAllTransactions = remember(allTransactions) {
+        allTransactions.filter { it.parentId == null }
     }
 
     val monthTransactions = remember(mainAllTransactions, monthStart, monthEnd) {
@@ -778,7 +779,7 @@ fun PeriodBudgetScreen(
         if (showAllTransactionsDialog && !isAppLocked) {
             val currentPeriodInitialDate = if (periodType == PeriodType.DAY || periodType == PeriodType.WEEK) selectedDateDay else monthStart
             AllTransactionsDialog(
-                transactions = if (mainAllTransactions.isNotEmpty()) mainAllTransactions else mainFilteredTransactions,
+                transactions = if (allTransactions.isNotEmpty()) allTransactions.filter { it.parentId == null } else mainFilteredTransactions,
                 onDeleteTransaction = onDeleteTransaction,
                 onEditTransaction = onEditTransaction,
                 initialFilterType = initialAllTransactionsFilter,
@@ -858,7 +859,7 @@ fun PeriodBudgetScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         recentTxList.forEach { tx ->
-                            // Находим дочерние товары чека, если они есть
+                            // Находим дочерние товары чека напрямую из неурезанного allTransactions
                             val receiptItems = remember(allTransactions, tx.id) {
                                 allTransactions.filter { it.parentId == tx.id }
                             }
@@ -884,7 +885,7 @@ fun PeriodBudgetScreen(
         Spacer(modifier = Modifier.height(24.dp))
     }
 
-        // Всплывающее окно состава чека при нажатии на карточку чека
+    // Всплывающее окно состава чека при нажатии на карточку чека
     selectedReceiptTransaction?.let { parentTx ->
         val childItems = remember(allTransactions, parentTx.id) {
             allTransactions.filter { it.parentId == parentTx.id }
