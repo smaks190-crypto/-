@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import com.example.ui.components.VoiceWaveCapsule
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -721,39 +722,23 @@ fun VoiceRecordingOverlay(
                                     contentAlignment = Alignment.CenterEnd
                                 ) {
                                     AnimatedVisibility(
-                                        visible = isVoiceActive,
-                                        enter = fadeIn(animationSpec = tween(250, easing = FastOutSlowInEasing)) + slideInHorizontally(animationSpec = tween(250)) { -it / 4 },
-                                        exit = fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing)) + slideOutHorizontally(animationSpec = tween(150)) { -it / 4 },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(start = 56.dp, end = 56.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(56.dp)
-                                                .clickable { viewModel.stopVoiceRecordingAndProcess() },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (isAnalyzingVoice) {
-                                                Row(
-                                                    horizontalArrangement = Arrangement.Center,
-                                                    verticalAlignment = Alignment.CenterVertically
-                                                ) {
-                                                    CircularProgressIndicator(
-                                                        color = Indigo500,
-                                                        strokeWidth = 2.dp,
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Text(
-                                                        text = "Анализ ИИ...",
-                                                        color = Indigo500,
-                                                        fontSize = 12.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                }
-                                            } else {
+    visible = isVoiceActive || isListening,
+    enter = fadeIn(),
+    exit = fadeOut()
+) {
+    VoiceWaveCapsule(
+        isVisible = isVoiceActive || isListening,
+        statusTextCustom = when {
+            isAnalyzingVoice -> "АНАЛИЗИРУЮ ГОЛОС..."
+            isListening -> "СЛУШАЮ РЕЧЬ..."
+            else -> "СЛУШАЮ..."
+        },
+        onClose = {
+            voiceManager.stopListening()
+        }
+    )
+
+                                    } else {
                                                 Column(
                                                     horizontalAlignment = Alignment.CenterHorizontally,
                                                     verticalArrangement = Arrangement.Center
