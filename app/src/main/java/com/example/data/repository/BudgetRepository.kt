@@ -101,6 +101,11 @@ class BudgetRepository(
         notificationDao.markAllAsRead(budgetId)
     }
 
+    suspend fun deleteNotificationsByBudgetId(budgetId: String) {
+        GlobalConsoleLogger.i("NOTIFICATION", "Удаление всех уведомлений (бюджет: $budgetId)")
+        notificationDao.deleteNotificationsByBudgetId(budgetId)
+    }
+
     suspend fun generateDavidComment(
         apiKey: String,
         type: String,
@@ -153,6 +158,7 @@ class BudgetRepository(
             "\nУчитывай контекст текущих долгов и целей, если они есть.\n"
         }
         val fullExtra = if (extraContext.isNotBlank()) "\nДетали:\n$extraContext\n" else ""
+
 
         val userQuery = "Пользователь добавил финансовую операцию:\n" +
                 "Тип: $typeText\n" +
@@ -207,7 +213,9 @@ class BudgetRepository(
                         return responseText
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                // Try next model or fallback
+            }
         }
 
         return generateLocalDavidComment(type, category, amount)
@@ -346,6 +354,92 @@ class BudgetRepository(
         return "Добавил ${operations.size} операций на сумму ${operations.sumOf { it.amount }} ₽"
     }
 
+    suspend fun askDavidQuestion(
+        apiKey: String,
+        question: String,
+        allTransactions: List<TransactionEntity>,
+        activeDebts: List<AccountEntity> = emptyList(),
+        activeGoals: List<GoalEntity> = emptyList()
+    ): String {
+        if (apiKey.isBlank()) {
+            return "Жабов Давид на связи! Для полноценного ИИ-анализа укажите API-ключ Gemini в Настройках. Главный совет: тратьте меньше, чем зарабатываете! 🐸"
+        }
+
+        val totalIncome = allTransactions.filter { it.type == "income" }.sumOf { it.amount }
+        val totalExpense = allTransactions.filter { it.type == "expense" }.sumOf { it.amount }
+        val net = totalIncome - totalExpense
+
+        val expensesByCategory = allTransactions.filter { it.type == "expense" }
+            .groupBy { it.category }
+            .mapValues { it.value.sumOf { tx -> tx.amount } }
+            .toList()
+            .sortedByDescending { it.second }
+            .take(8)
+            .joinToString(", ") { "${it.first}: ${it.second.toInt()} ₽" }
+
+        val recentTxs = allTransactions.takeLast(12).joinToString("\n") { tx ->
+            "- ${tx.date}: ${if (tx.type == "income") "Доход" else "Расход"} ${tx.category} / ${tx.subcategory} = ${tx.amount.toInt()} ₽"
+        }
+
+        val debtsSummary = if (activeDebts.isNotEmpty()) {
+            activeDebts.joinToString("\n") { d ->
+                "- ${d.name} (${d.type}): баланс ${d.balance} ₽"
+            }
+        } else "Нет открытых долгов"
+
+        val goalsSummary = if (activeGoals.isNotEmpty()) {
+            activeGoals.joinToString("\n") { g ->
+                "- Цель '${g.name}': собрано ${g.currentAmount} из ${g.targetAmount} ₽"
+            }
+        } else "Нет активных целей"
+
+        val userQuery = """
+Пользователь задал вопрос финансовому аудитору Жабову Давиду:
+"$question"
+
+ФАКТИЧЕСКИЕ ДАННЫЕ БЮДЖЕТА:
+- Сумма всех доходов: $totalIncome ₽
+- Сумма всех расходов: $totalExpense ₽
+- Текущее сальдо/баланс: $net ₽
+- Крупнейшие категории трат: $expensesByCategory
+- Долги/Обязательства: $debtsSummary
+- Финансовые цели: $goalsSummary
+- Последние транзакции:
+$recentTxs
+
+Дай четкий, емкий ответ с конкретными цифрами и расчетами пользователя. Отвечай в фирменном стиле циничного, высокоэрудированного жабы-аудитора Давида 🐸 (сарказм, ирония, литературные или мемные аналогии, но со строгой математической пользой). Длина ответа: до 60-80 слов на русском языке.
+""".trimIndent()
+
+        val systemPrompt = "Ты — Жабов Давид, саркастичный и безжалостный финансовый аудитор с циничным чувством юмора и глубоким интеллектом. Отвечай по существу на вопрос пользователя, используя реальные цифры его бюджета."
+
+        val request = GeminiRequest(
+            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = userQuery)))),
+            systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
+        )
+
+        val modelsToTry = listOf(
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash"
+        )
+
+        for (model in modelsToTry) {
+            try {
+                val response = apiService.generateContent(model, apiKey, request)
+                if (response.error == null) {
+                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                    if (!responseText.isNullOrEmpty()) {
+                        return responseText.trim()
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        return "Связь с сервером Gemini прервалась, но мой вердикт ясен: проверяйте свои расходы почаще! 🐸"
+    }
+
     suspend fun generateUserPhrase(
         apiKey: String,
         type: String,
@@ -394,7 +488,9 @@ class BudgetRepository(
                         return responseText
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                // Try next model or fallback
+            }
         }
 
         return generateLocalUserPhrase(type, category, subcategory, amount, isFirstToday)
@@ -422,10 +518,6 @@ class BudgetRepository(
                         "прилетели деньги за работу, целых ${amountInt}₽"
                     ).random()
                 }
-                lowerCat.contains("занял") || lowerSub.contains("занял") || lowerCat.contains("долг") || lowerSub.contains("долг") || lowerCat.contains("кредит") || lowerSub.contains("кредит") || lowerCat.contains("займ") || lowerSub.contains("займ") || lowerCat.contains("вернул") || lowerSub.contains("вернул") -> {
-                    val desc = if (subcategory.isNotBlank()) subcategory else category
-                    "мне вернули долг/заняли: $desc на сумму ${amountInt}₽"
-                }
                 else -> {
                     listOf(
                         "получил ${amountInt}₽ за $category",
@@ -443,7 +535,7 @@ class BudgetRepository(
                         "взял вредной еды на ${amountInt}₽, каюсь"
                     ).random()
                 }
-                lowerCat.contains("цыган") || lowerSub.contains("цыган") || lowerCat.contains("благотворительность") || lowerSub.contains("цыганка") || lowerSub.contains("детям") || lowerCat.contains("добро") -> {
+                lowerCat.contains("цыган") || lowerSub.contains("цыган") || lowerCat.contains("благотворительность") || lowerSub.contains("цыганка") || lowerSub.contains("детям") || lowerCat.contains("добро") || lowerSub.contains("добро") -> {
                     "я дал цыганке ${amountInt}₽ на еду детям. Потому что я хороший человек"
                 }
                 lowerCat.contains("продукты") || lowerSub.contains("продукты") || lowerSub.contains("супермаркет") -> {
@@ -452,14 +544,6 @@ class BudgetRepository(
                         "потратил в супермаркете ${amountInt}₽",
                         "купил еды домой на ${amountInt}₽"
                     ).random()
-                }
-                lowerCat.contains("занял") || lowerSub.contains("занял") || lowerCat.contains("долг") || lowerSub.contains("долг") || lowerCat.contains("кредит") || lowerSub.contains("кредит") || lowerCat.contains("займ") || lowerSub.contains("займ") || lowerCat.contains("вернул") || lowerSub.contains("вернул") -> {
-                    val desc = if (subcategory.isNotBlank()) subcategory else category
-                    if (desc.lowercase().contains("занял") || desc.lowercase().contains("отдал") || desc.lowercase().contains("вернул")) {
-                        "$desc на сумму ${amountInt}₽"
-                    } else {
-                        "занял/отдал долг: $desc на сумму ${amountInt}₽"
-                    }
                 }
                 else -> {
                     listOf(
@@ -588,28 +672,7 @@ class BudgetRepository(
         }
     }
 
-    suspend fun insertReceiptTransaction(
-        parentTransaction: TransactionEntity,
-        items: List<ParsedReceiptItem>
-    ) {
-        db.withTransaction {
-            transactionDao.insertTransaction(parentTransaction)
-            items.forEach { item ->
-                val childTx = TransactionEntity(
-                    budgetId = parentTransaction.budgetId,
-                    accountId = parentTransaction.accountId,
-                    type = parentTransaction.type,
-                    date = parentTransaction.date,
-                    category = parentTransaction.category,
-                    subcategory = item.title,
-                    amount = item.amount,
-                    parentId = parentTransaction.id
-                )
-                transactionDao.insertTransaction(childTx)
-            }
-        }
-    }
-
+    // budget_storage.json больше не поддерживается в актуальном состоянии на каждую запись и используется только для миграции легаси-данных
     suspend fun ensureDefaultProfileExists(): BudgetProfileEntity {
         val existing = allProfiles.first()
         if (existing.isEmpty()) {
@@ -642,6 +705,7 @@ class BudgetRepository(
         }
         return existing.first()
     }
+
 
     suspend fun insertTransaction(transaction: TransactionEntity) {
         GlobalConsoleLogger.i("ROOM", "Insert Transaction: ${transaction.type.uppercase()} ${transaction.amount} ₽ (${transaction.category} / ${transaction.subcategory})")
@@ -724,6 +788,7 @@ class BudgetRepository(
         }
     }
 
+
     suspend fun exportJson(): String {
         val txs = allTransactions.first()
         val goals = allGoals.first()
@@ -764,6 +829,7 @@ class BudgetRepository(
             val rawCats = backup.categories ?: emptyList()
             val rawAccs = backup.accounts ?: emptyList()
 
+            // Map old account IDs to new UUIDs to prevent collision and preserve foreign key relationships in transactions
             val accountIdMap = mutableMapOf<String, String>()
             val accs = rawAccs.map { oldAcc ->
                 val newId = java.util.UUID.randomUUID().toString()
@@ -943,7 +1009,7 @@ class BudgetRepository(
                                             success = true
                                         }
                                     } catch (e: Exception) {
-                                        // Ignore JSON parsing exceptions
+                                        // Ignore JSON parsing exceptions for non-json lines or incomplete data
                                     }
                                 }
                             }
@@ -1074,6 +1140,7 @@ class BudgetRepository(
             }
         }
 
+        // Fallback
         return Result.failure(Exception("ERROR_NO_CONNECTION"))
     }
 
@@ -1206,7 +1273,9 @@ class BudgetRepository(
                         return responseText
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                // Try next model or fallback
+            }
         }
 
         return localCategorySuggestion(transactionName, type, categories)
@@ -1221,9 +1290,6 @@ class BudgetRepository(
             if (lower.contains("подработ") || lower.contains("фриланс") || lower.contains("заказ") || lower.contains("халтура")) {
                 return categories.firstOrNull { it.contains("Подработка", ignoreCase = true) } ?: "Подработка"
             }
-            if (lower.contains("занял") || lower.contains("долг") || lower.contains("кредит") || lower.contains("займ") || lower.contains("взял") || lower.contains("отда") || lower.contains("верн")) {
-                return name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
-            }
             return categories.firstOrNull { it.contains("Доход", ignoreCase = true) } ?: categories.firstOrNull() ?: "Случайные доходы"
         } else {
             if (lower.contains("пятёр") || lower.contains("пятероч") || lower.contains("магнит") || lower.contains("перекрест") ||
@@ -1231,7 +1297,7 @@ class BudgetRepository(
                 lower.contains("вкусвилл") || lower.contains("хлеб") || lower.contains("молоко") || lower.contains("супермаркет")) {
                 return categories.firstOrNull { it.contains("Продукт", ignoreCase = true) } ?: "Продукты"
             }
-            if (lower.contains("такси") || lower.contains("янндекс") || lower.contains("метро") || lower.contains("автобус") ||
+            if (lower.contains("такси") || lower.contains("яндекс") || lower.contains("метро") || lower.contains("автобус") ||
                 lower.contains("бензин") || lower.contains("заправк") || lower.contains("каршеринг") || lower.contains("проезд")) {
                 return categories.firstOrNull { it.contains("Транспорт", ignoreCase = true) || it.contains("Обязательн", ignoreCase = true) } ?: "Транспорт"
             }
@@ -1241,11 +1307,8 @@ class BudgetRepository(
                 return categories.firstOrNull { it.contains("Развлечен", ignoreCase = true) } ?: "Развлечения"
             }
             if (lower.contains("квартплат") || lower.contains("жкх") || lower.contains("аренда") || lower.contains("свет") ||
-                lower.contains("газ") || lower.contains("интернет") || lower.contains("связь")) {
+                lower.contains("газ") || lower.contains("интернет") || lower.contains("связь") || lower.contains("кредит")) {
                 return categories.firstOrNull { it.contains("Обязательн", ignoreCase = true) } ?: "Обязательные"
-            }
-            if (lower.contains("занял") || lower.contains("долг") || lower.contains("кредит") || lower.contains("займ") || lower.contains("взял") || lower.contains("отда") || lower.contains("верн")) {
-                return name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
             }
             if (lower.contains("копилк") || lower.contains("вклад") || lower.contains("цель") || lower.contains("инвест") || lower.contains("сбережен")) {
                 return categories.firstOrNull { it.contains("Сбережен", ignoreCase = true) } ?: "Сбережения"
@@ -1271,36 +1334,33 @@ class BudgetRepository(
         val todayStr = dateFormat.format(java.util.Date())
         val dayOfWeekStr = java.text.SimpleDateFormat("EEEE", java.util.Locale("ru")).format(java.util.Date())
 
-        val systemPrompt = "Вы — экспертный финансовый ассистент. Анализируйте сказанный пользователем текст.\n" +
-                "Текущая дата сегодня: $todayStr (день недели: $dayOfWeekStr).\n\n" +
-                "ПРАВИЛО ДЛЯ ЧЕКОВ И ПОКУПОК (КРИТИЧЕСКИ ВАЖНО):\n" +
-                "- ЕСЛИ ПОЛЬЗОВАТЕЛЬ ПЕРЕЧИСЛЯЕТ ПОКУПКИ ИЗ ОДНОГО МАГАЗИНА / ЧЕКА (например: 'вкусвилл кофе за 500 и сэндвич за 500' или 'в Пятерочке молоко 100 и хлеб 50'):\n" +
-                "  1. Верни JSON-массив из ОДНОГО объекта (родительская операция-чек).\n" +
-                "  2. В 'title' и 'subcategory' укажи название магазина или место (например, 'ВкусВилл' или 'Продукты').\n" +
-                "  3. В 'amount' укажи ОБЩУЮ СУММУ всех покупок (например, 1000.0).\n" +
-                "  4. В 'items' добавь список всех позиций: [{\"title\": \"Кофе\", \"amount\": 500.0}, {\"title\": \"Сэндвич\", \"amount\": 500.0}].\n\n" +
-                "- ЕСЛИ ЭТО РАЗНЫЕ НЕСВЯЗАННЫЕ ОПЕРАЦИИ (например: 'такси 300 и зарплата 50000'):\n" +
-                "  1. Верни массив из отдельных объектов.\n" +
-                "  2. У каждого в 'items' передай пустой массив [].\n\n" +
-                "Подбирайте подходящую категорию. Верните СТРОГО JSON-массив объектов без разметки."
+        val systemPrompt = "Вы — экспертный финансовый ассистент. Анализируйте сказанный пользователем текст и извлекайте из него ВСЕ финансовые операции (доходы и расходы).\n" +
+                "Разделите сказанное на отдельные операции и для каждой выделите название, тип (income или expense), сумму (число), категорию, подкатегорию (если есть) и дату (если упомянута).\n" +
+                "Текущая дата сегодня: $todayStr (день недели: $dayOfWeekStr).\n" +
+                "ПРАВИЛА ДЛЯ ДАТЫ ('date'):\n" +
+                "- Если пользователь говорит 'вчера', вычисли дату за день до сегодняшней ($todayStr).\n" +
+                "- Если пользователь говорит 'позавчера', вычисли дату за 2 дня до сегодняшней ($todayStr).\n" +
+                "- Если пользователь указывает день недели или число (например 'в прошлый вторник', '15 июля'), вычисли соответствующую дату в формате YYYY-MM-DD.\n" +
+                "- Если дата не упомянута, укажи текущую дату '$todayStr'.\n" +
+                "ОСОБОЕ ПРАВИЛО ДЛЯ ДЕТАЛИЗАЦИИ:\n" +
+                "- Если пользователь перечисляет несколько конкретных покупок в рамках одной общей категории (например, 'в фастфуде бургер за 300 рублей и кола за 150' или 'потратил в супермаркете: молоко 100 и хлеб 50'), обязательно раздели это на ОТДЕЛЬНЫЕ операции.\n" +
+                "- Каждой операции присвой одну и ту же общую подходящую категорию (например, 'Кафе/Рестораны', 'Фастфуд' или 'Продукты'), а в качестве 'title' и 'subcategory' укажи конкретную покупку ('Бургер', 'Кола', 'Молоко', 'Хлеб').\n" +
+                "Подбирайте наиболее подходящие категории из предоставленных списков. Избегайте значений 'null' или пустых названий.\n" +
+                "Верните СТРОГО JSON-массив объектов без какого-либо разметочного текста или комментариев."
 
         val userQuery = """
             Категории расходов: ${expenseCategories.joinToString(", ")}
             Категории доходов: ${incomeCategories.joinToString(", ")}
 
-            Формат ответа при чеке со списком покупок:
+            Разбери фразу и верни JSON массив объектов формата:
             [
               {
-                "title": "ВкусВилл",
+                "title": "Такси",
                 "type": "expense",
-                "amount": 1000.0,
-                "category": "Продукты",
-                "subcategory": "ВкусВилл",
-                "date": "$todayStr",
-                "items": [
-                  { "title": "Кофе", "amount": 500.0 },
-                  { "title": "Сэндвич", "amount": 500.0 }
-                ]
+                "amount": 450.0,
+                "category": "Транспорт",
+                "subcategory": "Яндекс Такси",
+                "date": "$todayStr"
               }
             ]
 
@@ -1383,35 +1443,19 @@ class BudgetRepository(
                 val rawSubcategory = sanitizeJsonStr(obj.optString("subcategory", ""))
                 val rawDate = sanitizeJsonStr(obj.optString("date", ""))
 
-                val rawItems = obj.optJSONArray("items")
-                val parsedItems = mutableListOf<ParsedReceiptItem>()
-                if (rawItems != null) {
-                    for (j in 0 until rawItems.length()) {
-                        val itemObj = rawItems.getJSONObject(j)
-                        val itemTitle = sanitizeJsonStr(itemObj.optString("title", ""))
-                        val itemAmount = itemObj.optDouble("amount", 0.0)
-                        if (itemTitle.isNotBlank() && itemAmount > 0.0) {
-                            parsedItems.add(ParsedReceiptItem(title = itemTitle, amount = itemAmount))
-                        }
-                    }
-                }
-
                 val finalTitle = if (rawTitle.isNotBlank()) rawTitle else if (rawCategory.isNotBlank()) rawCategory else if (rawType == "income") "Доход" else "Расход"
                 val finalCategory = if (rawCategory.isNotBlank()) rawCategory else "Прочее"
                 val finalDate = if (rawDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) rawDate else defaultDate
 
-                val finalAmount = if (amount > 0.0) amount else parsedItems.sumOf { it.amount }
-
-                if (finalAmount > 0.0 || finalTitle.isNotBlank()) {
+                if (amount > 0.0 || finalTitle.isNotBlank()) {
                     results.add(
                         ParsedVoiceOperation(
                             title = finalTitle,
                             type = rawType,
-                            amount = finalAmount,
+                            amount = amount,
                             category = finalCategory,
                             subcategory = rawSubcategory,
-                            date = finalDate,
-                            items = parsedItems
+                            date = finalDate
                         )
                     )
                 }
@@ -1427,13 +1471,7 @@ data class ParsedVoiceOperation(
     val amount: Double,
     val category: String,
     val subcategory: String = "",
-    val date: String = "",
-    val items: List<ParsedReceiptItem> = emptyList()
-)
-
-data class ParsedReceiptItem(
-    val title: String,
-    val amount: Double
+    val date: String = ""
 )
 
 private fun String?.isNull_or_Empty(): Boolean = this == null || this.isEmpty()

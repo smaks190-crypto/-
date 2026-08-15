@@ -6,7 +6,6 @@ import com.example.data.db.CategoryEntity
 import com.example.data.db.GoalEntity
 import com.example.data.db.TransactionEntity
 import com.example.data.repository.BudgetRepository
-import com.example.data.repository.ParsedReceiptItem
 import com.example.data.repository.ParsedVoiceOperation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -14,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
@@ -321,32 +321,19 @@ class TransactionStateDelegate(
                     subcategory = finalSubcategory,
                     amount = op.amount
                 )
-                
-                if (op.items.isNotEmpty()) {
-                    repository.insertReceiptTransaction(tx, op.items)
-                } else {
-                    repository.insertTransaction(tx)
-                }
-                
+                repository.insertTransaction(tx)
                 com.example.utils.GlobalConsoleLogger.i("ROOM", "Сохранена транзакция в DB: ${tx.category} / ${tx.subcategory} (${tx.amount} ₽)")
 
                 try {
                     val isFirstToday = transactions.value.none { it.date == finalDate && it.id != tx.id }
-
-                    val userPhrase = if (op.items.isNotEmpty()) {
-                        val itemsSummary = op.items.joinToString(", ") { "${it.title} (${it.amount.toInt()} ₽)" }
-                        "Заскочил в $finalSubcategory, затарился: $itemsSummary. Итого: ${op.amount.toInt()} ₽"
-                    } else {
-                        repository.generateUserPhrase(
-                            apiKey = apiKey.value,
-                            type = op.type,
-                            category = finalCategory,
-                            subcategory = finalSubcategory,
-                            amount = op.amount,
-                            isFirstToday = isFirstToday
-                        )
-                    }
-
+                    val userPhrase = repository.generateUserPhrase(
+                        apiKey = apiKey.value,
+                        type = op.type,
+                        category = finalCategory,
+                        subcategory = finalSubcategory,
+                        amount = op.amount,
+                        isFirstToday = isFirstToday
+                    )
                     val comment = repository.generateDavidComment(
                         apiKey = apiKey.value,
                         type = op.type,
@@ -391,28 +378,16 @@ class TransactionStateDelegate(
                         subcategory = finalSubcategory,
                         amount = op.amount
                     )
-                    
-                    if (op.items.isNotEmpty()) {
-                        repository.insertReceiptTransaction(tx, op.items)
-                    } else {
-                        repository.insertTransaction(tx)
-                    }
+                    repository.insertTransaction(tx)
                     
                     processedOps.add(op.copy(date = finalDate, category = finalCategory, subcategory = finalSubcategory))
                 }
 
                 try {
-                    val userPhrase = if (processedOps.size == 1 && processedOps[0].items.isNotEmpty()) {
-                        val singleOp = processedOps[0]
-                        val itemsSummary = singleOp.items.joinToString(", ") { "${it.title} (${it.amount.toInt()} ₽)" }
-                        "Заскочил в ${singleOp.subcategory}, затарился: $itemsSummary. Итого: ${singleOp.amount.toInt()} ₽"
-                    } else {
-                        repository.generateUserPhraseMulti(
-                            apiKey = apiKey.value,
-                            operations = processedOps
-                        )
-                    }
-
+                    val userPhrase = repository.generateUserPhraseMulti(
+                        apiKey = apiKey.value,
+                        operations = processedOps
+                    )
                     val comment = repository.generateDavidCommentMulti(
                         apiKey = apiKey.value,
                         operations = processedOps,
@@ -465,6 +440,7 @@ class TransactionStateDelegate(
 
             val updatedCurrent = goal.currentAmount + amount
 
+            // Automatically log contribution as expense under "Сбережения"
             val tx = TransactionEntity(
                 budgetId = currentBudgetId,
                 type = "expense",
@@ -515,6 +491,7 @@ class TransactionStateDelegate(
             } catch (e: Exception) { e.printStackTrace() }
 
             if (updatedCurrent >= goal.targetAmount) {
+                // Goal reached! Delete goal automatically and emit congratulation event
                 repository.deleteGoal(goal.id)
                 completedGoalEvent.value = goal.name
             } else {
@@ -541,6 +518,7 @@ class TransactionStateDelegate(
             }
 
             if (target > 0 && current >= target) {
+                // Goal created already at or above 100% target
                 completedGoalEvent.value = name
             } else {
                 val goal = GoalEntity(
@@ -719,6 +697,7 @@ class TransactionStateDelegate(
 
         val allTxs = transactions.value
 
+        // Compute previous period transactions for comparative analysis
         val previousTransactions = when (periodType) {
             PeriodType.MONTH -> {
                 val prevMonthIdx = if (selectedMonthIdx > 0) selectedMonthIdx - 1 else 11
@@ -750,6 +729,7 @@ class TransactionStateDelegate(
                     PeriodType.ALL -> "Весь $year год"
                 }
 
+                // Save user audit request to chat history DB with unique UUID
                 val reqTime = System.currentTimeMillis()
                 val reqId = UUID.randomUUID().toString()
                 repository.insertNotification(
@@ -778,6 +758,204 @@ class TransactionStateDelegate(
                         periodName = periodName,
                         year = year,
                         filteredTransactions = currentFilteredTransactions,
+                        previousTransactions = previousTransactions,
+                        activeDebts = accounts.value,
+                        activeGoals = goals.value,
+                        allTransactions = transactions.value
+                    ).collect { chunk ->
+                        fullText += chunk
+                        currentBlockBuffer += chunk
+                        aiAuditResult.value = fullText
+
+                        // Streaming Chunk Accumulator: Slice blocks when paragraph separator (\n\n) appears
+                        while (currentBlockBuffer.contains("\n\n")) {
+                            val parts = currentBlockBuffer.split("\n\n", limit = 2)
+                            val completedBlock = parts[0].trim()
+                            currentBlockBuffer = parts.getOrElse(1) { "" }
+
+                            if (completedBlock.isNotBlank() && completedBlock != "ERROR_NO_CONNECTION") {
+                                blockCount++
+                                val blockId = UUID.randomUUID().toString()
+                                val blockTime = baseTime + blockCount * 100L
+                                val isFirstBlock = blockCount == 1
+                                val blockTitle = if (isFirstBlock) "Жабов Давид (Аналитика)" else "Аналитика"
+
+                                repository.insertNotification(
+                                    com.example.data.db.NotificationEntity(
+                                        id = blockId,
+                                        budgetId = bId,
+                                        title = blockTitle,
+                                        description = "||audit_block||$completedBlock",
+                                        icon = "david",
+                                        color = "emerald400",
+                                        timestamp = blockTime,
+                                        isRead = true
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // Emit remaining buffer content as the final SMS block
+                    val finalBlock = currentBlockBuffer.trim()
+                    if (finalBlock.isNotBlank() && finalBlock != "ERROR_NO_CONNECTION") {
+                        blockCount++
+                        val blockId = UUID.randomUUID().toString()
+                        val blockTime = baseTime + blockCount * 100L
+                        val isFirstBlock = blockCount == 1
+                        val blockTitle = if (isFirstBlock) "Жабов Давид (Аналитика)" else "Аналитика"
+
+                        repository.insertNotification(
+                            com.example.data.db.NotificationEntity(
+                                id = blockId,
+                                budgetId = bId,
+                                title = blockTitle,
+                                description = "||audit_block||$finalBlock",
+                                icon = "david",
+                                color = "emerald400",
+                                timestamp = blockTime,
+                                isRead = true
+                            )
+                        )
+                    }
+                } catch (e: Exception) {
+                    fullText = "ERROR_NO_CONNECTION"
+                    aiAuditResult.value = fullText
+                }
+
+                if (fullText.isNotEmpty() && !fullText.contains("🏆 **Достижение: Сбой Сети**") && fullText != "ERROR_NO_CONNECTION") {
+                    val currentMeme = currentFilteredTransactions.filter { tx ->
+                        tx.type == "expense" && (
+                            tx.category.contains("Развлечения", ignoreCase = true) ||
+                            tx.category.contains("Прочее", ignoreCase = true) ||
+                            tx.subcategory.lowercase(Locale.getDefault()).contains("мошеннич") ||
+                            tx.subcategory.lowercase(Locale.getDefault()).contains("крипт") ||
+                            tx.subcategory.lowercase(Locale.getDefault()).contains("казик") ||
+                            tx.subcategory.lowercase(Locale.getDefault()).contains("тарелоч") ||
+                            tx.subcategory.lowercase(Locale.getDefault()).contains("альтуш")
+                        )
+                    }
+                    val sillySummaryText = if (currentMeme.isNotEmpty()) {
+                        currentMeme.take(3).joinToString("; ") { "${it.subcategory} (${it.amount.toInt()} ₽)" }
+                    } else {
+                        val topExpense = currentFilteredTransactions.filter { it.type == "expense" }.maxByOrNull { it.amount }
+                        if (topExpense != null) "Крупный расход: ${topExpense.category} (${topExpense.amount.toInt()} ₽)" else "Равномерные расходы"
+                    }
+
+                    val entity = com.example.data.db.AiAuditEntity(
+                        id = UUID.randomUUID().toString(),
+                        budgetId = bId,
+                        periodType = periodType.name,
+                        periodKey = pKey,
+                        year = year,
+                        month = month,
+                        auditText = fullText,
+                        sillyExpensesSummary = sillySummaryText,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    repository.saveAudit(entity)
+                }
+            } finally {
+                aiAuditLoading.value = false
+            }
+        }
+    }
+
+    fun requestAiAuditForPeriod(
+        periodType: PeriodType,
+        customPeriodName: String? = null,
+        isGeminiConsentGiven: Boolean = true
+    ) {
+        val allTxs = transactions.value
+        val nowCal = Calendar.getInstance()
+        val currentYear = nowCal.get(Calendar.YEAR)
+        val currentMonthIdx = nowCal.get(Calendar.MONTH)
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+        val (filtered, periodName, fileName, pKey) = when (periodType) {
+            PeriodType.DAY -> {
+                val txs = allTxs.filter { it.date == todayStr }
+                Quad(txs, customPeriodName ?: "День ($todayStr)", "Отчет_за_день.pdf", todayStr)
+            }
+            PeriodType.WEEK -> {
+                val sevenDaysAgoCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -6) }
+                val sevenDaysAgoStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(sevenDaysAgoCal.time)
+                val txs = allTxs.filter { it.date >= sevenDaysAgoStr && it.date <= todayStr }
+                Quad(txs, customPeriodName ?: "Неделя ($sevenDaysAgoStr — $todayStr)", "Отчет_за_неделю.pdf", "week_$todayStr")
+            }
+            PeriodType.MONTH -> {
+                val monthPrefix = String.format(Locale.US, "%04d-%02d", currentYear, currentMonthIdx + 1)
+                val txs = allTxs.filter { it.date.startsWith(monthPrefix) }
+                val monthNames = listOf("Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь")
+                Quad(txs, customPeriodName ?: "${monthNames[currentMonthIdx]} $currentYear", "Отчет_за_месяц.pdf", monthPrefix)
+            }
+            PeriodType.ALL -> {
+                val yearPrefix = String.format(Locale.US, "%04d", currentYear)
+                val txs = allTxs.filter { it.date.startsWith(yearPrefix) }
+                Quad(txs, customPeriodName ?: "Весь $currentYear год", "Отчет_за_год.pdf", "year_$currentYear")
+            }
+        }
+
+        if (!isGeminiConsentGiven) {
+            aiAuditResult.value = "⚠️ **Ошибка доступа:** Для формирования ИИ-разбора требуется согласие на обработку данных. Пожалуйста, включите разрешение в Настройках приложения."
+            return
+        }
+        val key = apiKey.value.ifBlank { getSavedApiKey() }
+        if (key.isBlank()) {
+            aiAuditResult.value = "ERROR_NO_CONNECTION"
+            return
+        }
+        val bId = selectedBudgetId.value ?: "default"
+        val year = currentYear
+        val month = currentMonthIdx + 1
+
+        val previousTransactions = when (periodType) {
+            PeriodType.MONTH -> {
+                val prevMonthIdx = if (currentMonthIdx > 0) currentMonthIdx - 1 else 11
+                val prevYear = if (currentMonthIdx > 0) currentYear else currentYear - 1
+                val prevPrefix = String.format(Locale.US, "%04d-%02d", prevYear, prevMonthIdx + 1)
+                allTxs.filter { it.date.startsWith(prevPrefix) }
+            }
+            PeriodType.ALL -> {
+                val prevYearPrefix = String.format(Locale.US, "%04d", currentYear - 1)
+                allTxs.filter { it.date.startsWith(prevYearPrefix) }
+            }
+            else -> emptyList()
+        }
+
+        if (aiAuditLoading.value) return
+
+        aiAuditLoading.value = true
+        aiAuditResult.value = ""
+
+        scope.launch {
+            try {
+                val reqTime = System.currentTimeMillis()
+                val reqId = UUID.randomUUID().toString()
+                repository.insertNotification(
+                    com.example.data.db.NotificationEntity(
+                        id = reqId,
+                        budgetId = bId,
+                        title = "Запрос аналитики",
+                        description = "||audit_req|$fileName||Давид, проведи аудит за $periodName",
+                        icon = "david",
+                        color = "indigo500",
+                        timestamp = reqTime,
+                        isRead = true
+                    )
+                )
+
+                var fullText = ""
+                var currentBlockBuffer = ""
+                val baseTime = System.currentTimeMillis()
+                var blockCount = 0
+
+                try {
+                    repository.requestAiAuditStream(
+                        apiKey = key,
+                        periodName = periodName,
+                        year = year,
+                        filteredTransactions = filtered,
                         previousTransactions = previousTransactions,
                         activeDebts = accounts.value,
                         activeGoals = goals.value,
@@ -842,7 +1020,7 @@ class TransactionStateDelegate(
                 }
 
                 if (fullText.isNotEmpty() && !fullText.contains("🏆 **Достижение: Сбой Сети**") && fullText != "ERROR_NO_CONNECTION") {
-                    val currentMeme = currentFilteredTransactions.filter { tx ->
+                    val currentMeme = filtered.filter { tx ->
                         tx.type == "expense" && (
                             tx.category.contains("Развлечения", ignoreCase = true) ||
                             tx.category.contains("Прочее", ignoreCase = true) ||
@@ -856,7 +1034,7 @@ class TransactionStateDelegate(
                     val sillySummaryText = if (currentMeme.isNotEmpty()) {
                         currentMeme.take(3).joinToString("; ") { "${it.subcategory} (${it.amount.toInt()} ₽)" }
                     } else {
-                        val topExpense = currentFilteredTransactions.filter { it.type == "expense" }.maxByOrNull { it.amount }
+                        val topExpense = filtered.filter { it.type == "expense" }.maxByOrNull { it.amount }
                         if (topExpense != null) "Крупный расход: ${topExpense.category} (${topExpense.amount.toInt()} ₽)" else "Равномерные расходы"
                     }
 
@@ -878,4 +1056,74 @@ class TransactionStateDelegate(
             }
         }
     }
+
+    fun sendChatMessageToDavid(
+        userMessage: String,
+        isGeminiConsentGiven: Boolean = true
+    ) {
+        val trimmed = userMessage.trim()
+        if (trimmed.isBlank()) return
+
+        val bId = selectedBudgetId.value ?: "default"
+        val reqTime = System.currentTimeMillis()
+        val reqId = UUID.randomUUID().toString()
+
+        scope.launch {
+            // 1. Insert user message into notifications DB
+            repository.insertNotification(
+                com.example.data.db.NotificationEntity(
+                    id = reqId,
+                    budgetId = bId,
+                    title = "Вы",
+                    description = "||user_msg||$trimmed",
+                    icon = "user",
+                    color = "indigo500",
+                    timestamp = reqTime,
+                    isRead = true
+                )
+            )
+
+            // 2. Query Gemini
+            aiAuditLoading.value = true
+            try {
+                val key = apiKey.value.ifBlank { getSavedApiKey() }
+                val davidReply = repository.askDavidQuestion(
+                    apiKey = key,
+                    question = trimmed,
+                    allTransactions = transactions.value,
+                    activeDebts = accounts.value,
+                    activeGoals = goals.value
+                )
+
+                val replyTime = System.currentTimeMillis()
+                val replyId = UUID.randomUUID().toString()
+                repository.insertNotification(
+                    com.example.data.db.NotificationEntity(
+                        id = replyId,
+                        budgetId = bId,
+                        title = "Жабов Давид",
+                        description = "||david_msg||$davidReply",
+                        icon = "david",
+                        color = "emerald400",
+                        timestamp = replyTime,
+                        isRead = true
+                    )
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                aiAuditLoading.value = false
+            }
+        }
+    }
+
+    fun clearDavidChat() {
+        val bId = selectedBudgetId.value ?: "default"
+        scope.launch {
+            repository.deleteNotificationsByBudgetId(bId)
+            aiAuditResult.value = null
+        }
+    }
 }
+
+private data class Quad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)

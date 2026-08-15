@@ -160,3 +160,20 @@ data class ChatConnectingItem(
     override val timestamp: Long,
     val isRestored: Boolean = false
 ) : ChatItem()
+
+data class ChatUserCustomMessageItem(
+    override val timestamp: Long,
+    val text: String
+) : ChatItem() {
+    override val isFromUser: Boolean get() = true
+    override val isRead: Boolean get() = true
+}
+
+data class ChatDavidCustomMessageItem(
+    override val timestamp: Long,
+    val text: String
+) : ChatItem() {
+    override val isFromUser: Boolean get() = false
+    override val isRead: Boolean get() = true
+}
+

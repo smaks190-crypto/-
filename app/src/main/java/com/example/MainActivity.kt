@@ -124,6 +124,7 @@ import com.example.ui.screens.PeriodBudgetScreen
 import com.example.ui.components.ReportDetailsDialog
 import com.example.ui.theme.BudgetTheme
 import com.example.ui.theme.Emerald400
+import com.example.ui.theme.Emerald400
 import com.example.ui.theme.Indigo500
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate800
@@ -865,7 +866,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             viewModel.requestAiAudit(filteredTransactions)
                                         },
                                         onDeleteTransaction = { viewModel.deleteTransaction(it) },
-                                        onEditTransaction = null
+                                        onEditTransaction = { editingTransaction = it }
                                     )
 
                                     1 -> DebtsScreen(
@@ -1029,10 +1030,23 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                     auditTimestamp = savedAiAudit?.timestamp,
                     profileName = currentProfile?.name ?: "Вы",
                     notifications = notifications,
+                    transactions = transactions,
+                    categories = categories,
+                    accounts = accounts,
+                    goals = goals,
                     initialTab = reportDialogTab,
                     onRequestAudit = {
                         viewModel.requestAiAudit(filteredTransactions)
                         true
+                    },
+                    onRequestAuditForPeriod = { pType ->
+                        viewModel.requestAiAuditForPeriod(pType)
+                    },
+                    onSendCustomMessage = { msg ->
+                        viewModel.sendChatMessageToDavid(msg)
+                    },
+                    onClearChat = {
+                        viewModel.clearDavidChat()
                     },
                     onMarkAllRead = {
                         appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
@@ -1184,21 +1198,20 @@ private fun filterTransactionsForPeriod(
     allStart: String,
     allEnd: String
 ): List<TransactionEntity> {
-    val parentOnlyList = list.filter { it.parentId == null }
     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
     return when (type) {
-        PeriodType.DAY -> parentOnlyList.filter { it.date == selectedDay }
+        PeriodType.DAY -> list.filter { it.date == selectedDay }
         PeriodType.MONTH -> {
             val monthFormatted = String.format(Locale.getDefault(), "%02d", monthIdx + 1)
             val prefix = "$year-$monthFormatted"
-            parentOnlyList.filter { it.date.startsWith(prefix) }
+            list.filter { it.date.startsWith(prefix) }
         }
         PeriodType.WEEK -> {
             val now = Calendar.getInstance()
             val weekAgo = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }
 
-            parentOnlyList.filter {
+            list.filter {
                 try {
                     val d = sdf.parse(it.date) ?: return@filter false
                     d.after(weekAgo.time) && d.before(now.time) || it.date == sdf.format(now.time)
@@ -1208,7 +1221,7 @@ private fun filterTransactionsForPeriod(
             }
         }
         PeriodType.ALL -> {
-            parentOnlyList.filter { it.date >= allStart && it.date <= allEnd }
+            list.filter { it.date >= allStart && it.date <= allEnd }
         }
     }
 }
