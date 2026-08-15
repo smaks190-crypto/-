@@ -101,11 +101,6 @@ class BudgetRepository(
         notificationDao.markAllAsRead(budgetId)
     }
 
-    suspend fun deleteNotificationsByBudgetId(budgetId: String) {
-        GlobalConsoleLogger.i("NOTIFICATION", "Удаление всех уведомлений (бюджет: $budgetId)")
-        notificationDao.deleteNotificationsByBudgetId(budgetId)
-    }
-
     suspend fun generateDavidComment(
         apiKey: String,
         type: String,
@@ -352,92 +347,6 @@ class BudgetRepository(
         }
 
         return "Добавил ${operations.size} операций на сумму ${operations.sumOf { it.amount }} ₽"
-    }
-
-    suspend fun askDavidQuestion(
-        apiKey: String,
-        question: String,
-        allTransactions: List<TransactionEntity>,
-        activeDebts: List<AccountEntity> = emptyList(),
-        activeGoals: List<GoalEntity> = emptyList()
-    ): String {
-        if (apiKey.isBlank()) {
-            return "Жабов Давид на связи! Для полноценного ИИ-анализа укажите API-ключ Gemini в Настройках. Главный совет: тратьте меньше, чем зарабатываете! 🐸"
-        }
-
-        val totalIncome = allTransactions.filter { it.type == "income" }.sumOf { it.amount }
-        val totalExpense = allTransactions.filter { it.type == "expense" }.sumOf { it.amount }
-        val net = totalIncome - totalExpense
-
-        val expensesByCategory = allTransactions.filter { it.type == "expense" }
-            .groupBy { it.category }
-            .mapValues { it.value.sumOf { tx -> tx.amount } }
-            .toList()
-            .sortedByDescending { it.second }
-            .take(8)
-            .joinToString(", ") { "${it.first}: ${it.second.toInt()} ₽" }
-
-        val recentTxs = allTransactions.takeLast(12).joinToString("\n") { tx ->
-            "- ${tx.date}: ${if (tx.type == "income") "Доход" else "Расход"} ${tx.category} / ${tx.subcategory} = ${tx.amount.toInt()} ₽"
-        }
-
-        val debtsSummary = if (activeDebts.isNotEmpty()) {
-            activeDebts.joinToString("\n") { d ->
-                "- ${d.name} (${d.type}): баланс ${d.balance} ₽"
-            }
-        } else "Нет открытых долгов"
-
-        val goalsSummary = if (activeGoals.isNotEmpty()) {
-            activeGoals.joinToString("\n") { g ->
-                "- Цель '${g.name}': собрано ${g.currentAmount} из ${g.targetAmount} ₽"
-            }
-        } else "Нет активных целей"
-
-        val userQuery = """
-Пользователь задал вопрос финансовому аудитору Жабову Давиду:
-"$question"
-
-ФАКТИЧЕСКИЕ ДАННЫЕ БЮДЖЕТА:
-- Сумма всех доходов: $totalIncome ₽
-- Сумма всех расходов: $totalExpense ₽
-- Текущее сальдо/баланс: $net ₽
-- Крупнейшие категории трат: $expensesByCategory
-- Долги/Обязательства: $debtsSummary
-- Финансовые цели: $goalsSummary
-- Последние транзакции:
-$recentTxs
-
-Дай четкий, емкий ответ с конкретными цифрами и расчетами пользователя. Отвечай в фирменном стиле циничного, высокоэрудированного жабы-аудитора Давида 🐸 (сарказм, ирония, литературные или мемные аналогии, но со строгой математической пользой). Длина ответа: до 60-80 слов на русском языке.
-""".trimIndent()
-
-        val systemPrompt = "Ты — Жабов Давид, саркастичный и безжалостный финансовый аудитор с циничным чувством юмора и глубоким интеллектом. Отвечай по существу на вопрос пользователя, используя реальные цифры его бюджета."
-
-        val request = GeminiRequest(
-            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = userQuery)))),
-            systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
-        )
-
-        val modelsToTry = listOf(
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite",
-            "gemini-2.5-flash"
-        )
-
-        for (model in modelsToTry) {
-            try {
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                    if (!responseText.isNullOrEmpty()) {
-                        return responseText.trim()
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
-        return "Связь с сервером Gemini прервалась, но мой вердикт ясен: проверяйте свои расходы почаще! 🐸"
     }
 
     suspend fun generateUserPhrase(

@@ -1030,23 +1030,10 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                     auditTimestamp = savedAiAudit?.timestamp,
                     profileName = currentProfile?.name ?: "Вы",
                     notifications = notifications,
-                    transactions = transactions,
-                    categories = categories,
-                    accounts = accounts,
-                    goals = goals,
                     initialTab = reportDialogTab,
                     onRequestAudit = {
                         viewModel.requestAiAudit(filteredTransactions)
                         true
-                    },
-                    onRequestAuditForPeriod = { pType ->
-                        viewModel.requestAiAuditForPeriod(pType)
-                    },
-                    onSendCustomMessage = { msg ->
-                        viewModel.sendChatMessageToDavid(msg)
-                    },
-                    onClearChat = {
-                        viewModel.clearDavidChat()
                     },
                     onMarkAllRead = {
                         appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()

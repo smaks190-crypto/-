@@ -689,25 +689,6 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    fun requestAiAuditForPeriod(periodType: PeriodType, customPeriodName: String? = null) {
-        stateDelegate.requestAiAuditForPeriod(
-            periodType = periodType,
-            customPeriodName = customPeriodName,
-            isGeminiConsentGiven = _isGeminiConsentGiven.value
-        )
-    }
-
-    fun sendChatMessageToDavid(message: String) {
-        stateDelegate.sendChatMessageToDavid(
-            userMessage = message,
-            isGeminiConsentGiven = _isGeminiConsentGiven.value
-        )
-    }
-
-    fun clearDavidChat() {
-        stateDelegate.clearDavidChat()
-    }
-
     private fun splitAuditIntoSections(auditText: String): List<String> {
         if (auditText.isBlank() || auditText == "ERROR_NO_CONNECTION") return emptyList()
         val headerRegex = Regex("(?m)^(?=#{1,6}\\s+|(?i)(?:Главный Вердикт|Цифры и Динамика|Прожарка|Ачивки|Выводы))")

@@ -2,58 +2,57 @@ package com.example.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PriorityHigh
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.SentimentSatisfied
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.db.AccountEntity
-import com.example.data.db.CategoryEntity
-import com.example.data.db.GoalEntity
 import com.example.data.db.NotificationEntity
-import com.example.data.db.TransactionEntity
 import com.example.ui.components.charts.renderChartMessage
-import com.example.ui.viewmodel.PeriodType
 import com.example.ui.theme.*
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 @Composable
 fun ReportDetailsDialog(
@@ -66,17 +65,10 @@ fun ReportDetailsDialog(
     isLoading: Boolean = false,
     isGeneratingReaction: Boolean = false,
     auditTimestamp: Long? = null,
-    profileName: String = "Вы",
+    profileName: String = "Максим",
     notifications: List<NotificationEntity> = emptyList(),
-    transactions: List<TransactionEntity> = emptyList(),
-    categories: List<CategoryEntity> = emptyList(),
-    accounts: List<AccountEntity> = emptyList(),
-    goals: List<GoalEntity> = emptyList(),
     initialTab: Int = 0,
     onRequestAudit: () -> Any = {},
-    onRequestAuditForPeriod: (PeriodType) -> Unit = {},
-    onSendCustomMessage: (String) -> Unit = {},
-    onClearChat: () -> Unit = {},
     onDeleteNotification: (Long) -> Unit = {},
     onMarkAllRead: () -> Unit = {},
     onDismiss: () -> Unit
@@ -89,125 +81,157 @@ fun ReportDetailsDialog(
         if (isLoading) {
             while (true) {
                 dots = ""
-                delay(350)
+                delay(400)
                 dots = "."
-                delay(350)
+                delay(400)
                 dots = ".."
-                delay(350)
+                delay(400)
                 dots = "..."
-                delay(350)
+                delay(400)
             }
         } else {
             dots = ""
         }
     }
 
+    val initialUnreadIds = remember { notifications.filter { !it.isRead }.map { it.id }.toSet() }
+    
     LaunchedEffect(Unit) {
         onMarkAllRead()
     }
+    var requestTimestamp by remember { mutableStateOf<Long?>(null) }
 
-    var showClearConfirmDialog by remember { mutableStateOf(false) }
-    var showPeriodCarousel by remember { mutableStateOf(true) }
-    var userMessageInput by remember { mutableStateOf("") }
+    var hadNoConnection by remember { mutableStateOf(false) }
+    var isConnectionRestored by remember { mutableStateOf(false) }
+    var showConnectingNeon by remember { mutableStateOf(false) }
 
-    val initialUnreadIds = remember { notifications.filter { !it.isRead }.map { it.id }.toSet() }
-
-    // Parse items for the unified feed
-    val chatItems = remember(notifications, isLoading, isGeneratingReaction) {
-        val items = mutableListOf<ChatItem>()
-
-        val filteredNotifications = notifications.filterNot {
-            it.title == "Жабов Давид" && (
-                it.description.contains("персональный фин-аналитик") ||
-                it.description.contains("Я Жабов Давид")
-            )
+    LaunchedEffect(auditText, isLoading) {
+        if (auditText == "ERROR_NO_CONNECTION") {
+            showConnectingNeon = true
+            hadNoConnection = true
+            isConnectionRestored = false
+        } else if (hadNoConnection && (isLoading || (auditText.isNotEmpty() && auditText != "ERROR_NO_CONNECTION"))) {
+            isConnectionRestored = true
+            hadNoConnection = false
+            delay(1500)
+            showConnectingNeon = false
+            isConnectionRestored = false
         }
-
-        for (notif in filteredNotifications) {
-            when {
-                notif.description.startsWith("||audit_req|") -> {
-                    val raw = notif.description.removePrefix("||audit_req|")
-                    val parts = raw.split("||", limit = 2)
-                    val fName = parts.getOrNull(0)?.ifBlank { "Отчет_за_период.pdf" } ?: "Отчет_за_период.pdf"
-                    val reqText = parts.getOrNull(1)?.ifBlank { "Давид, проведи аудит" } ?: "Давид, проведи аудит"
-                    items.add(ChatAuditRequestItem(notif.timestamp, text = reqText, fileName = fName))
-                }
-                notif.description.startsWith("||audit_req||") -> {
-                    val reqText = notif.description.removePrefix("||audit_req||")
-                    items.add(ChatAuditRequestItem(notif.timestamp, text = reqText, fileName = "Отчет_за_период.pdf"))
-                }
-                notif.description.startsWith("||audit_block||") -> {
-                    val blockText = notif.description.removePrefix("||audit_block||")
-                    val isFirst = notif.title.contains("Главный Вердикт") || notif.title.contains("Аналитика")
-                    items.add(ChatAuditBlockItem(notif.timestamp, text = blockText, isFirst = isFirst))
-                }
-                notif.description.startsWith("||user_msg||") -> {
-                    val text = notif.description.removePrefix("||user_msg||")
-                    items.add(ChatUserCustomMessageItem(notif.timestamp, text))
-                }
-                notif.description.startsWith("||david_msg||") -> {
-                    val text = notif.description.removePrefix("||david_msg||")
-                    items.add(ChatDavidCustomMessageItem(notif.timestamp, text))
-                }
-                else -> {
-                    val (ops, _, _) = extractOpsAndComment(notif)
-                    if (ops.isNotEmpty()) {
-                        items.add(ChatNotificationUserItem(notif))
-                    }
-                    items.add(ChatNotificationDavidItem(notif))
-                }
-            }
-        }
-
-        if (isLoading) {
-            items.add(ChatTypingItem(System.currentTimeMillis(), "audit"))
-        } else if (isGeneratingReaction) {
-            items.add(ChatTypingItem(System.currentTimeMillis(), "reaction"))
-        }
-
-        val sorted = items.sortedBy { it.timestamp }.toMutableList()
-        val unreadIdsSet = initialUnreadIds.toMutableSet()
-
-        val firstUnreadNotifIndex = sorted.indexOfFirst { item ->
-            !item.isFromUser && (
-                (item is ChatNotificationDavidItem && (unreadIdsSet.contains(item.notification.id) || !item.notification.isRead)) ||
-                !item.isRead
-            )
-        }
-
-        if (firstUnreadNotifIndex != -1) {
-            val unreadItem = sorted[firstUnreadNotifIndex]
-            sorted.add(firstUnreadNotifIndex, ChatUnreadSeparatorItem(unreadItem.timestamp - 1))
-        }
-
-        sorted
     }
 
-    val listState = rememberLazyListState()
+    val parsedSections by produceState(initialValue = emptyList<String>(), key1 = auditText) {
+        value = withContext(kotlinx.coroutines.Dispatchers.Default) {
+            splitIntoSections(auditText)
+        }
+    }
 
-    LaunchedEffect(chatItems.size, isLoading) {
-        if (chatItems.isNotEmpty()) {
-            delay(50)
-            listState.animateScrollToItem(chatItems.size - 1)
+    val hasAuditInHistory = remember(notifications, auditText) {
+        notifications.any { it.description.startsWith("||audit_req||") || it.description.startsWith("||audit_block||") } ||
+        (auditText.isNotEmpty() && auditText != "ERROR_NO_CONNECTION")
+    }
+
+    val displayedSections = remember { mutableStateListOf<String>() }
+    var isSimulatingTyping by remember { mutableStateOf(false) }
+    var hasSentRequest by remember { mutableStateOf(false) }
+
+    var userMessageText by remember(hasAuditInHistory) {
+        mutableStateOf(if (!hasAuditInHistory && !isLoading) "Давид, проведи аудит за $periodTitle" else "")
+    }
+    var attachedFileName by remember { mutableStateOf("Выписка_$periodTitle.csv") }
+    var isFileAttached by remember(hasAuditInHistory) {
+        mutableStateOf(!hasAuditInHistory && !isLoading)
+    }
+
+    LaunchedEffect(periodTitle, auditText, notifications.size, isLoading, hasSentRequest) {
+        val isErr = auditText == "ERROR_NO_CONNECTION" || auditText.contains("⚠️") || auditText.lowercase().contains("ошибка") || auditText.contains("Сбой")
+        if (isErr) {
+            hasSentRequest = false
+            if (userMessageText.isEmpty()) {
+                userMessageText = "Давид, проведи аудит за $periodTitle"
+                isFileAttached = true
+            }
+        } else if (hasSentRequest || hasAuditInHistory || isLoading) {
+            userMessageText = ""
+            isFileAttached = false
+        } else if (userMessageText.isEmpty() && !hasSentRequest && !hasAuditInHistory && !isLoading) {
+            userMessageText = "Давид, проведи аудит за $periodTitle"
+            isFileAttached = true
+        }
+    }
+
+    val welcomeTimestamp = remember(profileName) {
+        val profileKey = profileName.ifBlank { "default" }
+        val key = "chat_welcome_timestamp_$profileKey"
+        val saved = prefs.getLong(key, 0L)
+        if (saved != 0L) saved else {
+            val now = System.currentTimeMillis()
+            prefs.edit().putLong(key, now).apply()
+            now
+        }
+    }
+
+    val changelogTimestamp = remember(profileName, welcomeTimestamp) {
+        val profileKey = profileName.ifBlank { "default" }
+        val key = "chat_changelog_timestamp_$profileKey"
+        val saved = prefs.getLong(key, 0L)
+        if (saved != 0L) saved else {
+            val now = welcomeTimestamp + 500L
+            prefs.edit().putLong(key, now).apply()
+            now
+        }
+    }
+
+    val auditOfferTimestamp = remember(profileName, welcomeTimestamp) {
+        val profileKey = profileName.ifBlank { "default" }
+        val key = "audit_offer_timestamp_$profileKey"
+        val saved = prefs.getLong(key, 0L)
+        if (saved != 0L) saved else {
+            val now = welcomeTimestamp + 1000L
+            prefs.edit().putLong(key, now).apply()
+            now
+        }
+    }
+
+    LaunchedEffect(auditText, hasSentRequest) {
+        if (hasSentRequest && auditText.isNotEmpty() && auditText != "ERROR_NO_CONNECTION") {
+            prefs.edit().putLong("audit_last_success_timestamp", System.currentTimeMillis()).apply()
+        }
+    }
+
+    LaunchedEffect(parsedSections) {
+        if (parsedSections.isNotEmpty()) {
+            displayedSections.clear()
+            if (hasSentRequest) {
+                isSimulatingTyping = true
+                for (section in parsedSections) {
+                    displayedSections.add(section)
+                    delay(600)
+                }
+                isSimulatingTyping = false
+            } else {
+                displayedSections.addAll(parsedSections)
+            }
+        } else {
+            displayedSections.clear()
         }
     }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = Color(0xFF070A0E)
+        color = Slate950
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF070A0E))
+                .background(Slate950)
         ) {
-            // --- TOP APP BAR / HEADER ---
+            // Header (Telegram Style Top Bar)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF0F172A))
+                    .background(Slate900)
                     .statusBarsPadding()
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -216,71 +240,42 @@ fun ReportDetailsDialog(
                     modifier = Modifier.weight(1f)
                 ) {
                     IconButton(onClick = onDismiss) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Назад",
-                            tint = Color.White
-                        )
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = Color.White)
                     }
-
                     Box(
                         modifier = Modifier
                             .size(42.dp)
-                            .clip(CircleShape)
                             .background(
-                                Brush.linearGradient(
-                                    listOf(Color(0xFF0F172A), Color(0xFF1E293B))
-                                )
-                            )
-                            .border(
-                                width = 1.5.dp,
-                                brush = Brush.linearGradient(
-                                    listOf(Emerald400, Indigo500, Rose500)
-                                ),
+                                Brush.linearGradient(listOf(Indigo500, Emerald400)),
                                 shape = CircleShape
-                            ),
+                            )
+                            .border(1.5.dp, if (isLoading) Emerald400 else Indigo500, shape = CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Text("🐸", fontSize = 22.sp)
                     }
-
                     Spacer(modifier = Modifier.width(12.dp))
-
                     Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = "Давид Жабов",
-                                color = Color.White,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isLoading) Emerald400 else Emerald400.copy(alpha = 0.85f))
-                            )
-                        }
                         Text(
-                            text = if (isLoading) "Давид Жабов печатает$dots" else "В сети",
-                            color = if (isLoading) Emerald400 else Indigo500.copy(alpha = 0.9f),
+                            text = "Давид Жабов",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (isLoading) "печатает$dots" else "в сети",
+                            color = if (isLoading) Emerald400 else Indigo500.copy(alpha = 0.85f),
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Normal
                         )
                     }
                 }
-
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = { showClearConfirmDialog = true },
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = "Очистить чат",
-                            tint = Slate400
-                        )
+                    IconButton(onClick = { }) {
+                        Icon(Icons.Default.Call, contentDescription = "Звонок", tint = Slate300)
+                    }
+                    IconButton(onClick = { }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Меню", tint = Slate300)
                     }
                 }
             }
@@ -292,7 +287,116 @@ fun ReportDetailsDialog(
                     .background(Slate800)
             )
 
-            // --- CHAT MESSAGE FEED ---
+            // Unified Chat Feed
+            val listState = rememberLazyListState()
+
+            val chatItems = remember(notifications, displayedSections.toList(), isLoading, isGeneratingReaction, isSimulatingTyping, hasSentRequest, auditTimestamp, auditText, requestTimestamp, showConnectingNeon, isConnectionRestored, welcomeTimestamp, changelogTimestamp, auditOfferTimestamp) {
+                val items = mutableListOf<ChatItem>()
+                
+                items.add(ChatWelcomeItem(welcomeTimestamp))
+                items.add(ChatChangelogItem(changelogTimestamp))
+
+                val filteredNotifications = notifications.filterNot {
+                    it.title == "Жабов Давид" ||
+                    it.description.contains("персональный фин-аналитик") ||
+                    it.description.contains("Я Жабов Давид")
+                }
+
+                val notificationsToProcess = mutableListOf<NotificationEntity>()
+                val validAuditOfferTime = auditOfferTimestamp
+                
+                for (notif in filteredNotifications) {
+                    if (notif.timestamp < validAuditOfferTime) {
+                        notificationsToProcess.add(notif)
+                    }
+                }
+                
+                val processNotifToItems: (NotificationEntity) -> List<ChatItem> = { notif ->
+                    val res = mutableListOf<ChatItem>()
+                    if (notif.description.startsWith("||audit_req||")) {
+                        val reqText = notif.description.removePrefix("||audit_req||")
+                        res.add(ChatAuditRequestItem(notif.timestamp, text = reqText, fileName = "Выписка_.csv"))
+                    } else if (notif.description.startsWith("||audit_block||")) {
+                        val blockText = notif.description.removePrefix("||audit_block||")
+                        val isFirst = notif.title.contains("Главный Вердикт") || notif.title.contains("Аналитика")
+                        res.add(ChatAuditBlockItem(notif.timestamp, text = blockText, isFirst = isFirst))
+                    } else {
+                        val (ops, _, _) = extractOpsAndComment(notif)
+                        if (ops.isNotEmpty()) {
+                            res.add(ChatNotificationUserItem(notif))
+                        }
+                        res.add(ChatNotificationDavidItem(notif))
+                    }
+                    res
+                }
+
+                for (notif in notificationsToProcess) {
+                    items.addAll(processNotifToItems(notif))
+                }
+
+                items.add(ChatAuditOfferItem(validAuditOfferTime))
+
+                val notifsAfterOffer = filteredNotifications.filter { it.timestamp >= validAuditOfferTime }
+                for (notif in notifsAfterOffer) {
+                    items.addAll(processNotifToItems(notif))
+                }
+
+                if ((isLoading || isSimulatingTyping) && !showConnectingNeon) {
+                    items.add(ChatTypingItem(System.currentTimeMillis(), "audit"))
+                }
+
+                if (showConnectingNeon) {
+                    items.add(ChatConnectingItem(Long.MAX_VALUE - 100L, isConnectionRestored))
+                }
+
+                if (isGeneratingReaction) {
+                    items.add(ChatTypingItem(System.currentTimeMillis(), "reaction"))
+                }
+
+                val sorted = items.sortedBy { it.timestamp }.toMutableList()
+                val unreadIdsSet = initialUnreadIds.toMutableSet()
+
+                val firstUnreadNotifIndex = sorted.indexOfFirst { item ->
+                    !item.isFromUser && (
+                        (item is ChatNotificationDavidItem && (unreadIdsSet.contains(item.notification.id) || !item.notification.isRead)) ||
+                        !item.isRead
+                    )
+                }
+
+                if (firstUnreadNotifIndex != -1) {
+                    val unreadItem = sorted[firstUnreadNotifIndex]
+                    sorted.add(firstUnreadNotifIndex, ChatUnreadSeparatorItem(unreadItem.timestamp - 1))
+                }
+                sorted
+            }
+
+            val unreadSeparatorIndex = remember(chatItems) {
+                chatItems.indexOfFirst { it is ChatUnreadSeparatorItem }
+            }
+
+            var hasInitialScrolled by remember { mutableStateOf(false) }
+
+            LaunchedEffect(unreadSeparatorIndex, chatItems.size, displayedSections.size) {
+                if (chatItems.isNotEmpty()) {
+                    snapshotFlow { listState.layoutInfo.totalItemsCount }
+                        .filter { it >= chatItems.size }
+                        .first()
+
+                    if (!hasInitialScrolled) {
+                        if (unreadSeparatorIndex != -1) {
+                            listState.scrollToItem(unreadSeparatorIndex)
+                        } else {
+                            listState.scrollToItem(chatItems.size - 1)
+                        }
+                        hasInitialScrolled = true
+                    } else if (hasSentRequest || isLoading || isSimulatingTyping) {
+                        listState.animateScrollToItem(chatItems.size - 1)
+                    } else {
+                        listState.scrollToItem(chatItems.size - 1)
+                    }
+                }
+            }
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -302,31 +406,22 @@ fun ReportDetailsDialog(
                 contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Static Welcoming messages if feed is empty or initial
-                if (chatItems.isEmpty()) {
-                    item {
-                        RenderInitialWelcomeBubble()
-                    }
-                }
-
                 itemsIndexed(
                     items = chatItems,
-                    key = { idx, item ->
+                    key = { _, item ->
                         when (item) {
-                            is ChatWelcomeItem -> "welcome_${item.timestamp}_$idx"
-                            is ChatChangelogItem -> "changelog_${item.timestamp}_$idx"
-                            is ChatAuditOfferItem -> "offer_${item.timestamp}_$idx"
-                            is ChatUnreadSeparatorItem -> "unread_sep_${item.timestamp}_$idx"
-                            is ChatNotificationUserItem -> "notif_user_${item.notification.id}_$idx"
-                            is ChatNotificationDavidItem -> "notif_david_${item.notification.id}_$idx"
-                            is ChatAuditRequestItem -> "req_${item.timestamp}_$idx"
-                            is ChatAuditSystemItem -> "sys_${item.timestamp}_$idx"
-                            is ChatAuditBlockItem -> "block_${item.timestamp}_${item.text.hashCode()}_$idx"
-                            is ChatAuditRetryItem -> "retry_${item.timestamp}_$idx"
-                            is ChatTypingItem -> "typing_${item.type}_$idx"
-                            is ChatConnectingItem -> "connecting_${item.timestamp}_$idx"
-                            is ChatUserCustomMessageItem -> "user_custom_${item.timestamp}_$idx"
-                            is ChatDavidCustomMessageItem -> "david_custom_${item.timestamp}_$idx"
+                            is ChatWelcomeItem -> "welcome_${item.timestamp}"
+                            is ChatChangelogItem -> "changelog_${item.timestamp}"
+                            is ChatAuditOfferItem -> "offer_${item.timestamp}"
+                            is ChatUnreadSeparatorItem -> "unread_sep_${item.timestamp}"
+                            is ChatNotificationUserItem -> "notif_user_${item.notification.id}"
+                            is ChatNotificationDavidItem -> "notif_david_${item.notification.id}"
+                            is ChatAuditRequestItem -> "req_${item.timestamp}"
+                            is ChatAuditSystemItem -> "sys_${item.timestamp}"
+                            is ChatAuditBlockItem -> "block_${item.timestamp}_${item.text.hashCode()}"
+                            is ChatAuditRetryItem -> "retry_${item.timestamp}"
+                            is ChatTypingItem -> "typing_${item.type}"
+                            is ChatConnectingItem -> "connecting_${item.timestamp}"
                         }
                     }
                 ) { _, item ->
@@ -339,13 +434,15 @@ fun ReportDetailsDialog(
                         is ChatNotificationDavidItem -> ChatNotificationDavid(item.notification)
                         is ChatAuditRequestItem -> RenderAuditRequestItem(item)
                         is ChatAuditSystemItem -> RenderAuditSystemItem(item)
-                        is ChatTypingItem -> RenderModernTypingIndicator()
-                        is ChatAuditBlockItem -> RenderAuditBlockItem(item, transactions)
-                        is ChatUserCustomMessageItem -> RenderUserCustomBubble(item.text, item.timestamp)
-                        is ChatDavidCustomMessageItem -> RenderDavidCustomBubble(item.text, item.timestamp)
+                        is ChatTypingItem -> RenderTypingItem(item)
+                        is ChatAuditBlockItem -> RenderAuditBlockItem(item)
                         is ChatAuditRetryItem -> RenderAuditRetryItem(
                             item = item,
-                            onRequestAudit = { onRequestAudit() }
+                            onRequestAudit = {
+                                requestTimestamp = System.currentTimeMillis()
+                                hasSentRequest = true
+                                onRequestAudit()
+                            }
                         )
                         is ChatConnectingItem -> ChatConnectingIndicator(item.isRestored)
                     }
@@ -359,67 +456,55 @@ fun ReportDetailsDialog(
                     .background(Slate800)
             )
 
-            // --- BOTTOM CONTROLS & CAROUSEL ---
+            // Footer (Telegram style input bar with attached file)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF0F172A))
+                    .background(Slate900)
                     .navigationBarsPadding()
                     .imePadding()
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
             ) {
-                // Quick Period Selection Carousel
-                AnimatedVisibility(
-                    visible = showPeriodCarousel,
-                    enter = fadeIn() + slideInVertically { it / 2 }
-                ) {
+                AnimatedVisibility(visible = isFileAttached) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(bottom = 6.dp, start = 4.dp, end = 4.dp)
+                            .background(Slate800, RoundedCornerShape(12.dp))
+                            .border(1.dp, Indigo500.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        QuickPeriodChip(
-                            icon = "📄",
-                            label = "Отчет за день",
-                            fileName = "Отчет_за_день.pdf",
-                            onClick = {
-                                onRequestAuditForPeriod(PeriodType.DAY)
-                            }
-                        )
-
-                        QuickPeriodChip(
-                            icon = "📄",
-                            label = "Отчет за неделю",
-                            fileName = "Отчет_за_неделю.pdf",
-                            onClick = {
-                                onRequestAuditForPeriod(PeriodType.WEEK)
-                            }
-                        )
-
-                        QuickPeriodChip(
-                            icon = "📄",
-                            label = "Отчет за месяц",
-                            fileName = "Отчет_за_месяц.pdf",
-                            onClick = {
-                                onRequestAuditForPeriod(PeriodType.MONTH)
-                            }
-                        )
-
-                        QuickPeriodChip(
-                            icon = "📄",
-                            label = "Отчет за год",
-                            fileName = "Отчет_за_год.pdf",
-                            onClick = {
-                                onRequestAuditForPeriod(PeriodType.ALL)
-                            }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AttachFile,
+                                contentDescription = "Файл",
+                                tint = Emerald400,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = attachedFileName,
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Удалить файл",
+                            tint = Slate400,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable { isFileAttached = false }
                         )
                     }
                 }
 
-                // Text Input Bar with Sparkle CTA & Send Button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -428,18 +513,24 @@ fun ReportDetailsDialog(
                     Surface(
                         modifier = Modifier.weight(1f),
                         shape = RoundedCornerShape(24.dp),
-                        color = Color(0xFF1E293B),
-                        border = BorderStroke(1.dp, if (userMessageInput.isNotBlank()) Indigo500 else Slate700)
+                        color = Slate800,
+                        border = BorderStroke(1.dp, if (userMessageText.isNotEmpty() || isFileAttached) Indigo500 else Slate700)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("🐸", fontSize = 16.sp)
+                            Icon(
+                                imageVector = Icons.Default.SentimentSatisfied,
+                                contentDescription = "Смайлы",
+                                tint = Slate400,
+                                modifier = Modifier.size(22.dp)
+                            )
                             Spacer(modifier = Modifier.width(8.dp))
                             BasicTextField(
-                                value = userMessageInput,
-                                onValueChange = { userMessageInput = it },
+                                value = userMessageText,
+                                onValueChange = { userMessageText = it },
+                                readOnly = false,
                                 modifier = Modifier.weight(1f),
                                 textStyle = TextStyle(
                                     color = Color.White,
@@ -447,208 +538,211 @@ fun ReportDetailsDialog(
                                 ),
                                 cursorBrush = SolidColor(Emerald400),
                                 decorationBox = { innerTextField ->
-                                    if (userMessageInput.isEmpty()) {
+                                    if (userMessageText.isEmpty()) {
                                         Text(
-                                            text = "Спросить Давида или дать команду...",
+                                            text = "Сообщение",
                                             color = Slate400,
-                                            fontSize = 13.sp
+                                            fontSize = 14.sp
                                         )
                                     }
                                     innerTextField()
                                 }
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Icon(
+                                imageVector = Icons.Default.AttachFile,
+                                contentDescription = "Прикрепить",
+                                tint = if (isFileAttached) Emerald400 else Slate400,
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clickable {
+                                        isFileAttached = !isFileAttached
+                                        if (isFileAttached && attachedFileName.isEmpty()) {
+                                            attachedFileName = "Выписка_$periodTitle.csv"
+                                        }
+                                    }
+                            )
                         }
                     }
 
-                    // Send Button
-                    val canSend = userMessageInput.isNotBlank()
+                    val canSend = userMessageText.isNotBlank() || isFileAttached
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .clip(CircleShape)
                             .background(
-                                if (canSend) Brush.linearGradient(listOf(Indigo500, Emerald400))
-                                else Brush.linearGradient(listOf(Indigo500.copy(alpha = 0.5f), Slate700))
+                                if (canSend) Brush.linearGradient(listOf(Indigo500, Color(0xFF3B82F6)))
+                                else Brush.linearGradient(listOf(Indigo500.copy(alpha = 0.5f), Slate700)),
+                                CircleShape
                             )
-                            .clickable(enabled = canSend && !isLoading) {
+                            .clip(CircleShape)
+                            .clickable(enabled = !isLoading && !isSimulatingTyping) {
                                 if (canSend) {
-                                    val msg = userMessageInput
-                                    userMessageInput = ""
-                                    onSendCustomMessage(msg)
+                                    requestTimestamp = System.currentTimeMillis()
+                                    hasSentRequest = true
+                                    onRequestAudit()
+                                    userMessageText = ""
+                                    isFileAttached = false
                                 }
                             },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Send,
-                            contentDescription = "Отправить",
+                            imageVector = if (canSend) Icons.Default.Send else Icons.Default.Mic,
+                            contentDescription = if (canSend) "Отправить" else "Голос",
                             tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(22.dp)
                         )
                     }
                 }
             }
         }
     }
-
-    // Confirmation dialog for clearing chat
-    if (showClearConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearConfirmDialog = false },
-            title = {
-                Text("Очистить чат с Давидом?", color = Color.White, fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Text(
-                    "Вся история сообщений и отчетов будет удалена из базы данных.",
-                    color = Slate300,
-                    fontSize = 14.sp
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showClearConfirmDialog = false
-                        onClearChat()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Rose500)
-                ) {
-                    Text("Очистить", color = Color.White)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearConfirmDialog = false }) {
-                    Text("Отмена", color = Slate400)
-                }
-            },
-            containerColor = Color(0xFF1E293B),
-            shape = RoundedCornerShape(16.dp)
-        )
-    }
 }
 
 @Composable
-private fun QuickPeriodChip(
-    icon: String,
-    label: String,
-    fileName: String,
-    onClick: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = Color(0xFF1E293B),
-        border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.5f)),
-        modifier = Modifier.clickable { onClick() }
+private fun RenderWelcomeItem(item: ChatWelcomeItem, profileName: String, periodTitle: String) {
+    val context = LocalContext.current
+    val timeStr = remember(item.timestamp) {
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
+    }
+    val (greetingText, introText) = remember(profileName, periodTitle, item.timestamp) {
+        val prefsInner = context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE)
+        val profileKey = profileName.ifBlank { "default" }
+        val greetingKey = "chat_welcome_greeting_${profileKey}_${item.timestamp}"
+        val savedGreeting = prefsInner.getString(greetingKey, null)
+        val nameStr = if (profileName.isNotBlank() && profileName != "Вы") ", $profileName" else ""
+
+        val finalGreeting = if (!savedGreeting.isNullOrBlank()) {
+            savedGreeting
+        } else {
+            val hasOpenedChat = prefsInner.getBoolean("has_opened_david_chat_before_$profileKey", false)
+            val isFirstEver = !hasOpenedChat
+            if (isFirstEver) {
+                prefsInner.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
+            }
+            val cal = Calendar.getInstance().apply { timeInMillis = item.timestamp }
+            val hourNow = cal.get(Calendar.HOUR_OF_DAY)
+            val timeOfDayGreeting = when (hourNow) {
+                in 5..11 -> "Доброе утро"
+                in 12..16 -> "Добрый день"
+                in 17..22 -> "Добрый вечер"
+                else -> "Доброй ночи"
+            }
+            val greetingWord = if (isFirstEver) "Добро пожаловать" else timeOfDayGreeting
+            val computed = "$greetingWord$nameStr!"
+            prefsInner.edit().putString(greetingKey, computed).apply()
+            computed
+        }
+
+        val msg2 = "Я — Жабов Давид 🐸, твой персональный фин-аналитик. Готов помочь разобрать твои финансы за $periodTitle."
+        Pair(finalGreeting, msg2)
+    }
+
+    Column(
+        horizontalAlignment = Alignment.Start,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        Surface(
+            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+            color = Slate800.copy(alpha = 0.85f),
+            border = BorderStroke(1.dp, Slate700),
+            modifier = Modifier.fillMaxWidth(0.85f)
         ) {
-            Text(icon, fontSize = 14.sp)
-            Text(
-                text = label,
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
-            )
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Жабов Давид",
+                        color = Emerald400,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        text = timeStr,
+                        color = Slate400,
+                        fontSize = 10.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = greetingText,
+                    color = Color.White,
+                    fontSize = 13.sp
+                )
+            }
+        }
+
+        Surface(
+            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+            color = Slate800.copy(alpha = 0.85f),
+            border = BorderStroke(1.dp, Slate700),
+            modifier = Modifier.fillMaxWidth(0.85f)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Жабов Давид",
+                        color = Emerald400,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                    Text(
+                        text = timeStr,
+                        color = Slate400,
+                        fontSize = 10.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = introText,
+                    color = Color.White,
+                    fontSize = 13.sp
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun RenderInitialWelcomeBubble() {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        // Welcome 1
+private fun RenderChangelogItem(item: ChatChangelogItem) {
+    val timeStr = remember(item.timestamp) {
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
+    }
+    Column(horizontalAlignment = Alignment.Start) {
         Surface(
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
-            color = Color(0xFF182533),
+            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+            color = Slate800.copy(alpha = 0.85f),
             border = BorderStroke(1.dp, Slate700),
             modifier = Modifier.fillMaxWidth(0.85f)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    text = "Давид Жабов 🐸",
-                    color = Emerald400,
+                    text = "Система",
+                    color = Indigo400,
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Привет! 🐸",
-                    color = Color.White,
-                    fontSize = 14.sp
-                )
-            }
-        }
-
-        // Welcome 2
-        Surface(
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
-            color = Color(0xFF182533),
-            border = BorderStroke(1.dp, Slate700),
-            modifier = Modifier.fillMaxWidth(0.88f)
-        ) {
-            Column(modifier = Modifier.padding(12.dp)) {
-                Text(
-                    text = "Давид Жабов 🐸",
-                    color = Emerald400,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Я Давид Жабов, твой аналитический ассистент. Нажми кнопку ниже, чтобы отправить отчет — я разберу доходы, структуру расходов и построю графики! Мяу! 🐸🐾",
-                    color = Color.White,
-                    fontSize = 13.5.sp,
-                    lineHeight = 19.sp
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RenderUserCustomBubble(text: String, timestamp: Long) {
-    val timeStr = remember(timestamp) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End
-    ) {
-        Surface(
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp),
-            color = Color(0xFF2B5278),
-            border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.6f)),
-            modifier = Modifier.widthIn(max = 280.dp)
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                Text(
-                    text = text,
-                    color = Color.White,
-                    fontSize = 13.5.sp,
-                    lineHeight = 18.sp
+                MarkdownFormattedText(
+                    markdownText = "### 🚀 Что нового в версии 1.2\n- **Обновленный чат с Давидом**: полный стиль и комфорт мессенджера Telegram.\n- **Группировка операций**: повторные транзакции автоматически объединяются.\n- **Умная аналитика**: рекомендации и фин-советы прямо в диалоге.",
+                    fontSize = 12.5.sp
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(
-                    modifier = Modifier.align(Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
                 ) {
                     Text(
                         text = timeStr,
-                        color = Color.White.copy(alpha = 0.7f),
+                        color = Slate400,
                         fontSize = 10.sp
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.Default.DoneAll,
-                        contentDescription = "Доставлено",
-                        tint = Emerald400,
-                        modifier = Modifier.size(13.dp)
                     )
                 }
             }
@@ -657,30 +751,28 @@ private fun RenderUserCustomBubble(text: String, timestamp: Long) {
 }
 
 @Composable
-private fun RenderDavidCustomBubble(text: String, timestamp: Long) {
-    val timeStr = remember(timestamp) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
+private fun RenderAuditOfferItem(item: ChatAuditOfferItem, periodTitle: String) {
+    val timeStr = remember(item.timestamp) {
+        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
     }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Start
-    ) {
+    Column(horizontalAlignment = Alignment.Start) {
         Surface(
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
-            color = Color(0xFF182533),
+            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+            color = Slate800.copy(alpha = 0.85f),
             border = BorderStroke(1.dp, Slate700),
-            modifier = Modifier.fillMaxWidth(0.88f)
+            modifier = Modifier.fillMaxWidth(0.85f)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    text = "Давид Жабов 🐸",
+                    text = "Жабов Давид",
                     color = Emerald400,
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp
                 )
-                Spacer(modifier = Modifier.height(6.dp))
-                MarkdownFormattedText(
-                    markdownText = text,
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Проанализировать твой бюджет за $periodTitle?",
+                    color = Color.White,
                     fontSize = 13.sp
                 )
                 Spacer(modifier = Modifier.height(4.dp))
@@ -700,118 +792,48 @@ private fun RenderDavidCustomBubble(text: String, timestamp: Long) {
 }
 
 @Composable
-private fun RenderModernTypingIndicator() {
-    val infiniteTransition = rememberInfiniteTransition(label = "dots")
-    val dot1Alpha by infiniteTransition.animateFloat(
-        initialValue = 0.2f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "dot1"
-    )
-    val dot2Alpha by infiniteTransition.animateFloat(
-        initialValue = 0.2f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600, delayMillis = 200, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "dot2"
-    )
-    val dot3Alpha by infiniteTransition.animateFloat(
-        initialValue = 0.2f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600, delayMillis = 400, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "dot3"
-    )
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Start
-    ) {
-        Surface(
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
-            color = Color(0xFF182533),
-            border = BorderStroke(1.dp, Slate700)
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text("🐸", fontSize = 14.sp)
-                Spacer(modifier = Modifier.width(4.dp))
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Emerald400.copy(alpha = dot1Alpha))
-                )
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Emerald400.copy(alpha = dot2Alpha))
-                )
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(Emerald400.copy(alpha = dot3Alpha))
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun RenderAuditRequestItem(item: ChatAuditRequestItem) {
     val timeStr = remember(item.timestamp) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
     }
-    val fileName = item.fileName ?: "Отчет_за_период.pdf"
-    val reqText = item.text.ifBlank { "Давид, сделай отчет" }
+    val fileName = item.fileName ?: "Выписка_.csv"
+    val reqText = item.text.ifBlank { "Давид, проведи аудит за " }
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End
     ) {
         Surface(
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp),
-            color = Color(0xFF2B5278),
-            border = BorderStroke(1.dp, if (item.hasError) Rose500 else Indigo500.copy(alpha = 0.7f)),
-            modifier = Modifier.widthIn(max = 290.dp)
+            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+            color = Indigo500.copy(alpha = 0.9f),
+            border = BorderStroke(1.dp, if (item.hasError) Rose500 else Indigo400)
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
             ) {
-                // PDF Attachment Card
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF0F172A).copy(alpha = 0.85f),
-                    border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.4f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                if (fileName.isNotBlank()) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                        modifier = Modifier
+                            .background(Slate900.copy(alpha = 0.65f), RoundedCornerShape(10.dp))
+                            .border(1.dp, Emerald400.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Rose500.copy(alpha = 0.2f)),
+                                .size(28.dp)
+                                .background(Emerald400.copy(alpha = 0.15f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("📄", fontSize = 16.sp)
+                            Icon(
+                                imageVector = Icons.Default.AttachFile,
+                                contentDescription = "Прикрепленный файл",
+                                tint = Emerald400,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column {
                             Text(
                                 text = fileName,
                                 color = Color.White,
@@ -819,305 +841,53 @@ private fun RenderAuditRequestItem(item: ChatAuditRequestItem) {
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "PDF документ аналитики",
-                                color = Emerald400,
+                                text = "CSV • Прикреплен",
+                                color = Emerald400.copy(alpha = 0.9f),
                                 fontSize = 10.sp
                             )
                         }
                     }
+                    Spacer(modifier = Modifier.height(6.dp))
                 }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = reqText,
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
                 Row(
-                    modifier = Modifier.align(Alignment.End),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.widthIn(min = 120.dp)
                 ) {
                     Text(
-                        text = timeStr,
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 10.sp
+                        text = reqText,
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    if (item.hasError) {
-                        Icon(
-                            imageVector = Icons.Default.PriorityHigh,
-                            contentDescription = "Ошибка",
-                            tint = Rose500,
-                            modifier = Modifier.size(13.dp)
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.DoneAll,
-                            contentDescription = "Доставлено",
-                            tint = Emerald400,
-                            modifier = Modifier.size(13.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RenderAuditBlockItem(
-    item: ChatAuditBlockItem,
-    allTransactions: List<TransactionEntity> = emptyList()
-) {
-    if (item.text.isNotBlank()) {
-        val timeStr = remember(item.timestamp) {
-            SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
-        }
-        val chartData = remember(item.text) {
-            parseChartDataFromText(item.text)
-        }
-        val cleanText = remember(item.text) {
-            cleanChartTagsFromText(item.text)
-        }
-
-        val categoryBreakdown = remember(allTransactions) {
-            val expenses = allTransactions.filter { it.type == "expense" }
-            expenses.groupBy { it.category }
-                .mapValues { it.value.sumOf { tx -> tx.amount } }
-                .toList()
-                .sortedByDescending { it.second }
-                .take(5)
-        }
-
-        AnimatedVisibility(
-            visible = true,
-            enter = slideInVertically(
-                initialOffsetY = { it / 2 },
-                animationSpec = tween(durationMillis = 350)
-            ) + fadeIn(animationSpec = tween(durationMillis = 350))
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .animateContentSize(),
-                horizontalAlignment = Alignment.Start
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
-                    color = Color(0xFF182533),
-                    border = BorderStroke(1.dp, Slate700),
-                    modifier = Modifier.fillMaxWidth(0.92f)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        if (item.isFirst) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "Давид Жабов 🐸 (Аналитика)",
-                                    color = Emerald400,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(6.dp))
-                        }
-
-                        if (cleanText.isNotBlank()) {
-                            MarkdownFormattedText(
-                                markdownText = cleanText,
-                                fontSize = 13.sp
-                            )
-                        }
-
-                        // Embedded Dynamic Line/Bar Chart if present
-                        if (chartData != null && chartData.points.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            renderChartMessage(
-                                dataPoints = chartData.points,
-                                labels = chartData.labels,
-                                title = chartData.title,
-                                totalAmount = chartData.total
-                            )
-                        }
-
-                        // Embedded Category Breakdown Cards if it's the final verdict block
-                        if (item.isFirst && categoryBreakdown.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            ChatCategoryBreakdownCard(categoryBreakdown)
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            Text(
-                                text = timeStr,
-                                color = Slate400,
-                                fontSize = 10.sp
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ChatCategoryBreakdownCard(categories: List<Pair<String, Double>>) {
-    val total = remember(categories) { categories.sumOf { it.second }.coerceAtLeast(1.0) }
-    val colors = listOf(Emerald400, Indigo500, Rose500, Color(0xFFFBBF24), Color(0xFF38BDF8))
-
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = Color(0xFF0F172A),
-        border = BorderStroke(1.dp, Slate800),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Text(
-                text = "📊 Топ расходов по категориям:",
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            categories.forEachIndexed { idx, (cat, amount) ->
-                val pct = ((amount / total) * 100).toInt()
-                val color = colors[idx % colors.size]
-
-                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                    Spacer(modifier = Modifier.width(8.dp))
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.align(Alignment.Bottom)
                     ) {
-                        Text(cat, color = Slate300, fontSize = 11.sp)
                         Text(
-                            text = "${amount.toInt()} ₽ ($pct%)",
-                            color = color,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
+                            text = timeStr,
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontSize = 10.sp
                         )
-                    }
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(Slate800)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth((amount / total).toFloat().coerceIn(0.02f, 1f))
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(color)
-                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        if (item.hasError) {
+                            Icon(
+                                imageVector = Icons.Default.PriorityHigh,
+                                contentDescription = "Ошибка отправки",
+                                tint = Rose500,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        } else {
+                            Icon(
+                                imageVector = if (item.isRead) Icons.Default.DoneAll else Icons.Default.Check,
+                                contentDescription = if (item.isRead) "Прочитано" else "Отправлено",
+                                tint = if (item.isRead) Emerald400 else Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RenderWelcomeItem(item: ChatWelcomeItem, profileName: String, periodTitle: String) {
-    val timeStr = remember(item.timestamp) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
-    }
-    Surface(
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
-        color = Color(0xFF182533),
-        border = BorderStroke(1.dp, Slate700),
-        modifier = Modifier.fillMaxWidth(0.85f)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = "Давид Жабов 🐸",
-                color = Emerald400,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Привет, $profileName! Я готов провести полный аудит твоего бюджета за $periodTitle. Мяу! 🐸🐾",
-                color = Color.White,
-                fontSize = 13.sp
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Text(text = timeStr, color = Slate400, fontSize = 10.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun RenderChangelogItem(item: ChatChangelogItem) {
-    val timeStr = remember(item.timestamp) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
-    }
-    Surface(
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
-        color = Color(0xFF182533),
-        border = BorderStroke(1.dp, Slate700),
-        modifier = Modifier.fillMaxWidth(0.85f)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = "Система ⚡",
-                color = Indigo400,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            MarkdownFormattedText(
-                markdownText = "### 🚀 Чат с Давидом Жабовым обновлен\n- Мгновенные отчеты с интерактивными графиками.\n- Задавай любые вопросы по своим тратам и доходам напрямую.",
-                fontSize = 12.5.sp
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Text(text = timeStr, color = Slate400, fontSize = 10.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun RenderAuditOfferItem(item: ChatAuditOfferItem, periodTitle: String) {
-    val timeStr = remember(item.timestamp) {
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
-    }
-    Surface(
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
-        color = Color(0xFF182533),
-        border = BorderStroke(1.dp, Slate700),
-        modifier = Modifier.fillMaxWidth(0.85f)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = "Давид Жабов 🐸",
-                color = Emerald400,
-                fontWeight = FontWeight.Bold,
-                fontSize = 12.sp
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Проанализировать твой бюджет за $periodTitle?",
-                color = Color.White,
-                fontSize = 13.sp
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Text(text = timeStr, color = Slate400, fontSize = 10.sp)
             }
         }
     }
@@ -1148,32 +918,106 @@ private fun RenderAuditSystemItem(item: ChatAuditSystemItem) {
 }
 
 @Composable
-private fun RenderAuditRetryItem(item: ChatAuditRetryItem, onRequestAudit: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp),
-        color = Rose500.copy(alpha = 0.15f),
-        border = BorderStroke(1.dp, Rose500.copy(alpha = 0.4f)),
-        modifier = Modifier.fillMaxWidth(0.85f)
+private fun RenderTypingItem(item: ChatTypingItem) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                text = "⚠️ Не удалось сгенерировать отчет. Проверьте интернет или API-ключ Gemini.",
-                color = Rose400,
-                fontSize = 12.sp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = onRequestAudit,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Rose500,
-                    contentColor = Color.White
-                ),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth()
+        Surface(
+            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+            color = Slate800.copy(alpha = 0.85f),
+            border = BorderStroke(1.dp, Slate700)
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Refresh, contentDescription = "Повторить", modifier = Modifier.size(14.dp))
+                Text("🐸", fontSize = 14.sp)
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Попробовать снова", fontSize = 12.sp)
+                Text(
+                    text = if (item.type == "audit") "Давид анализирует ваш бюджет..." else "Давид печатает...",
+                    color = Emerald400,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RenderAuditBlockItem(item: ChatAuditBlockItem) {
+    if (item.text.isNotBlank()) {
+        val timeStr = remember(item.timestamp) {
+            SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(item.timestamp))
+        }
+        val chartData = remember(item.text) {
+            parseChartDataFromText(item.text)
+        }
+        val cleanText = remember(item.text) {
+            cleanChartTagsFromText(item.text)
+        }
+
+        AnimatedVisibility(
+            visible = true,
+            enter = slideInVertically(
+                initialOffsetY = { it / 2 },
+                animationSpec = tween(durationMillis = 350)
+            ) + fadeIn(animationSpec = tween(durationMillis = 350))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize(),
+                horizontalAlignment = Alignment.Start
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+                    color = Slate800.copy(alpha = 0.85f),
+                    border = BorderStroke(1.dp, Slate700),
+                    modifier = Modifier.fillMaxWidth(0.92f)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        if (item.isFirst) {
+                            Text(
+                                text = "Жабов Давид (Аналитика)",
+                                color = Emerald400,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                        }
+
+                        if (cleanText.isNotBlank()) {
+                            MarkdownFormattedText(
+                                markdownText = cleanText,
+                                fontSize = 13.sp
+                            )
+                        }
+
+                        if (chartData != null && chartData.points.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            renderChartMessage(
+                                dataPoints = chartData.points,
+                                labels = chartData.labels,
+                                title = chartData.title,
+                                totalAmount = chartData.total
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Text(
+                                text = timeStr,
+                                color = Slate400,
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1234,4 +1078,38 @@ fun parseChartDataFromText(text: String): ParsedChartMessageData? {
 
 fun cleanChartTagsFromText(text: String): String {
     return text.replace(Regex("""\|\|chart:(.*?)\|\|""", RegexOption.DOT_MATCHES_ALL), "").trim()
+}
+
+@Composable
+private fun RenderAuditRetryItem(item: ChatAuditRetryItem, onRequestAudit: () -> Unit) {
+    Column(horizontalAlignment = Alignment.Start) {
+        Surface(
+            shape = RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+            color = Rose500.copy(alpha = 0.15f),
+            border = BorderStroke(1.dp, Rose500.copy(alpha = 0.4f)),
+            modifier = Modifier.fillMaxWidth(0.85f)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = "⚠️ Не удалось сгенерировать полный отчет. Проверьте подключение к интернету.",
+                    color = Rose400,
+                    fontSize = 12.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = onRequestAudit,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Rose500,
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Повторить", modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Попробовать снова", fontSize = 12.sp)
+                }
+            }
+        }
+    }
 }
