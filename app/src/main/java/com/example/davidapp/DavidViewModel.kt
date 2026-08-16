@@ -114,6 +114,11 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
             val (ops, userPhrase, comment) = extractOpsAndComment(notif)
             val notifTime = timeFormat.format(Date(notif.timestamp))
 
+            // Пропускаем простые системные уведомления-приветствия, чтобы не дублировать стартовое приветствие Давида
+            if (ops.isEmpty() && userPhrase.isBlank() && (comment.startsWith("Добр") || comment.startsWith("Салют"))) {
+                continue
+            }
+
             // Сообщение пользователя (добавленная операция или фраза)
             if (userPhrase.isNotBlank() || ops.isNotEmpty()) {
                 val firstOp = ops.firstOrNull()

@@ -66,7 +66,7 @@ fun extractOpsAndComment(notification: NotificationEntity): NotifParsedInfo {
                 }
             }
         } else {
-            ops.add(ExtractedOp("expense", "Прочее", notification.title, 0.0))
+            // Обычное текстовое системное уведомление или приветствие (без операций)
             comment = notification.description
         }
     } catch (e: Exception) {

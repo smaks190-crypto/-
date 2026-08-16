@@ -323,9 +323,6 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 else profilesList.firstOrNull()?.id
             } else null
 
-            if (targetId != null) {
-                addWelcomeNotification("", targetId)
-            }
             _selectedBudgetId.value = targetId
         }
     }
@@ -372,7 +369,6 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 .putString("last_selected_budget_id", id)
                 .putBoolean("is_first_launch_selection", false)
                 .apply()
-            addWelcomeNotification("", id)
         }
         _selectedBudgetId.value = id
     }
@@ -528,6 +524,17 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             } catch (e: Exception) {
                 emptyList()
             }
+            
+            // Проверяем, не было ли уже создано приветствие сегодня в базе данных
+            val alreadyHasGreetingToday = currentNotifs.any {
+                it.title == "Жабов Давид" && 
+                (it.description.startsWith("Добр") || it.description.startsWith("Салют")) &&
+                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(it.timestamp)) == todayDate
+            }
+            if (alreadyHasGreetingToday) {
+                return@launch
+            }
+
             val hasUnread = currentNotifs.any { !it.isRead }
 
             if (isFirstLaunch) {
