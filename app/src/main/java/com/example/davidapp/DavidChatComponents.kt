@@ -42,6 +42,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -99,6 +100,7 @@ val CyberpunkGradient = Brush.linearGradient(
 fun DavidChatTopBar(
     onBack: (() -> Unit)? = null,
     onReset: () -> Unit,
+    isTyping: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -210,8 +212,8 @@ fun DavidChatTopBar(
                     }
                 }
                 Text(
-                    text = "Кибер-ассистент по личным финансам",
-                    color = NeonEmerald,
+                    text = if (isTyping) "печатает..." else "в сети",
+                    color = if (isTyping) NeonIndigo else NeonEmerald,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -465,14 +467,14 @@ fun DavidFileBubble(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.CheckCircle,
-                        contentDescription = "Загружено",
+                        imageVector = if (isUser) Icons.Default.DoneAll else Icons.Default.CheckCircle,
+                        contentDescription = "Доставлено",
                         tint = NeonEmerald,
-                        modifier = Modifier.size(13.dp)
+                        modifier = Modifier.size(14.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "Готово к аудиту",
+                        text = if (isUser) "Отправлено Давиду" else "Готово к аудиту",
                         color = NeonEmerald,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Medium
@@ -850,22 +852,16 @@ fun DavidQuickActionsBar(
         ) {
             when (stage) {
                 DavidStage.INITIAL -> {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center
                     ) {
                         CyberpunkActionChip(
                             text = "🐸 Давид, сделай отчет",
                             gradient = CyberpunkGradient,
                             onClick = { onActionClick("START") },
+                            modifier = Modifier.fillMaxWidth(),
                             tag = "action_start_report"
-                        )
-                        CyberpunkActionChip(
-                            text = "⚡ Экспресс-аудит",
-                            gradient = Brush.horizontalGradient(listOf(NeonIndigo, NeonRose)),
-                            onClick = { onActionClick("AUDIT") },
-                            tag = "action_audit"
                         )
                     }
                 }
@@ -873,7 +869,7 @@ fun DavidQuickActionsBar(
                 DavidStage.FILE_SELECTION -> {
                     Column {
                         Text(
-                            text = "Выберите временной интервал:",
+                            text = "Выберите временной интервал для PDF-выписки:",
                             color = TextMuted,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
@@ -902,21 +898,22 @@ fun DavidQuickActionsBar(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         CyberpunkActionChip(
+                            text = "🔄 Новый запрос",
+                            gradient = Brush.horizontalGradient(listOf(DarkCard, Color(0xFF283548))),
+                            borderColor = SlateBorder,
+                            textColor = TextLight,
+                            onClick = { onActionClick("START") },
+                            modifier = Modifier.weight(1f),
+                            icon = Icons.Default.Refresh,
+                            tag = "action_new_report"
+                        )
+                        CyberpunkActionChip(
                             text = "📄 Скачать PDF",
                             gradient = Brush.horizontalGradient(listOf(NeonIndigo, NeonEmerald)),
                             onClick = onExportPdf,
                             modifier = Modifier.weight(1f),
                             icon = Icons.Default.Download,
                             tag = "action_download_pdf"
-                        )
-                        CyberpunkActionChip(
-                            text = "🔄 Новый отчет",
-                            gradient = Brush.horizontalGradient(listOf(DarkCard, Color(0xFF283548))),
-                            borderColor = SlateBorder,
-                            textColor = TextLight,
-                            onClick = { onActionClick("START") },
-                            modifier = Modifier.weight(1f),
-                            tag = "action_new_report"
                         )
                     }
                 }
@@ -982,7 +979,7 @@ fun CyberpunkActionChip(
 }
 
 /**
- * Кнопка выбора периода
+ * Кнопка выбора периода с иконкой PDF
  */
 @Composable
 fun CyberpunkPeriodChip(
@@ -1001,12 +998,20 @@ fun CyberpunkPeriodChip(
             .testTag(tag)
             .clickable(onClick = onClick)
     ) {
-        Box(
-            contentAlignment = Alignment.Center,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
             modifier = Modifier
                 .background(DarkCard)
-                .padding(vertical = 10.dp)
+                .padding(vertical = 10.dp, horizontal = 4.dp)
         ) {
+            Icon(
+                imageVector = Icons.Default.PictureAsPdf,
+                contentDescription = "PDF",
+                tint = NeonRose,
+                modifier = Modifier.size(13.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = text,
                 color = TextLight,

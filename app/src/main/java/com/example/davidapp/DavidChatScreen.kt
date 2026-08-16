@@ -77,6 +77,7 @@ fun DavidChatScreen(
             DavidChatTopBar(
                 onBack = onBack,
                 onReset = { viewModel.resetSession(effectiveSoundManager) },
+                isTyping = isTyping,
                 modifier = Modifier.statusBarsPadding()
             )
         },

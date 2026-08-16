@@ -26,22 +26,33 @@ class DavidViewModel : ViewModel() {
     private val _isDavidTyping = MutableStateFlow(false)
     val isDavidTyping: StateFlow<Boolean> = _isDavidTyping.asStateFlow()
 
+    private var currentProfileName: String = "Максим"
+
     init {
         initInitialGreeting()
+    }
+
+    fun setProfileName(name: String) {
+        if (name.isNotBlank() && name != currentProfileName) {
+            currentProfileName = name
+            if (_messages.value.size <= 1 && _stage.value == DavidStage.INITIAL) {
+                initInitialGreeting()
+            }
+        }
     }
 
     private fun currentTime(): String =
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
 
     /**
-     * Начальное приветствие от Давида
+     * Начальное приветствие от Давида с персонализацией по имени профиля
      */
     private fun initInitialGreeting() {
         _messages.value = listOf(
             ChatMessage(
                 sender = "Давид Жабов 🐸",
                 type = ChatMessageType.Text(
-                    "Салют! Я **Давид Жабов** — твой персональный финансовый аудитор и безжалостный критик транжирства.\n\n" +
+                    "Салют, $currentProfileName! Я **Давид Жабов** — твой персональный финансовый аудитор и безжалостный критик транжирства.\n\n" +
                     "Готов провести жесткий разбор трат, прожарить нелепые расходы и выдать сочные ачивки. Выбери период или нажми **«🐸 Давид, сделай отчет»**!"
                 ),
                 timestamp = currentTime(),

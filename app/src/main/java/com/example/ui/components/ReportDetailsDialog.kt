@@ -4,12 +4,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.db.NotificationEntity
 import com.example.davidapp.DavidChatScreen
+import com.example.davidapp.DavidViewModel
+import com.example.davidapp.SoundManager
 
 /**
- * Диалог отчетов и чата с Давидом Жабовым.
- * Делегирует отображение в отрефакторенный модуль DavidChatScreen.
+ * Диалог финансового аудита и интеллектуального чата с Давидом Жабовым.
+ *
+ * Выполнен в палитре Dark Neon / Slate950 / Emerald / Indigo.
+ * Архитектура:
+ * 1. Модели данных: ChatMessageType, ChatMessage, DavidStage
+ * 2. Звуковой движок: SoundManager (SoundPool + ToneGenerator)
+ * 3. Бизнес-логика: DavidViewModel
+ * 4. UI-слой: DavidChatComponents (TopBar, MessageItem, Bézier Chart, QuickActions, Dynamic Input)
  */
 @Composable
 fun ReportDetailsDialog(
@@ -34,6 +43,13 @@ fun ReportDetailsDialog(
         onMarkAllRead()
     }
 
+    val davidViewModel: DavidViewModel = viewModel()
+    LaunchedEffect(profileName) {
+        if (profileName.isNotBlank()) {
+            davidViewModel.setProfileName(profileName)
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
@@ -42,6 +58,7 @@ fun ReportDetailsDialog(
         )
     ) {
         DavidChatScreen(
+            viewModel = davidViewModel,
             onBack = onDismiss
         )
     }
