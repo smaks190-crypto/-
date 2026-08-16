@@ -31,6 +31,18 @@ sealed class ChatMessageType {
         val deltaPercent: Double = 14.8,
         val dataPoints: List<Float> = listOf(28f, 42f, 35f, 60f, 52f, 85f, 74f, 92f)
     ) : ChatMessageType()
+
+    /**
+     * Карточка операции (добавленный расход / доход) с фразой пользователя
+     */
+    data class Operation(
+        val type: String, // "expense" or "income"
+        val category: String,
+        val subcategory: String,
+        val amount: Double,
+        val userPhrase: String = "",
+        val isRead: Boolean = true
+    ) : ChatMessageType()
 }
 
 /**

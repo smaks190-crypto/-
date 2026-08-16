@@ -22,6 +22,8 @@ import com.example.davidapp.SoundManager
  */
 @Composable
 fun ReportDetailsDialog(
+    budgetId: String = "default",
+    apiKey: String = "",
     periodTitle: String = "",
     auditText: String = "",
     income: Double? = null,
@@ -44,10 +46,8 @@ fun ReportDetailsDialog(
     }
 
     val davidViewModel: DavidViewModel = viewModel()
-    LaunchedEffect(profileName) {
-        if (profileName.isNotBlank()) {
-            davidViewModel.setProfileName(profileName)
-        }
+    LaunchedEffect(budgetId, profileName, apiKey) {
+        davidViewModel.bindProfile(budgetId, profileName, apiKey)
     }
 
     Dialog(
@@ -58,6 +58,9 @@ fun ReportDetailsDialog(
         )
     ) {
         DavidChatScreen(
+            budgetId = budgetId,
+            profileName = profileName,
+            apiKey = apiKey,
             viewModel = davidViewModel,
             onBack = onDismiss
         )

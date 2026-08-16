@@ -88,6 +88,14 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE transactions ADD COLUMN createdAt INTEGER NOT NULL DEFAULT 0")
+        // Initialize existing rows createdAt with a fallback estimate from rowid/time
+        db.execSQL("UPDATE transactions SET createdAt = strftime('%s', 'now') * 1000 WHERE createdAt = 0")
+    }
+}
+
 @Database(
     entities = [
         BudgetProfileEntity::class,
@@ -98,7 +106,7 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         CategoryEntity::class,
         AiAuditEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -122,7 +130,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "budget_database"
                 )
-                .addMigrations(MIGRATION_3_4)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 INSTANCE = instance
                 instance

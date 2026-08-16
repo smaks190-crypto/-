@@ -1216,7 +1216,9 @@ fun AllTransactionsDialog(
             "asc" -> searchFilteredList.sortedBy { kotlin.math.abs(it.amount) }
             "name" -> searchFilteredList.sortedBy { it.category.ifBlank { it.subcategory } }
             "name_desc" -> searchFilteredList.sortedByDescending { it.category.ifBlank { it.subcategory } }
-            else -> searchFilteredList.sortedByDescending { it.date }
+            else -> searchFilteredList.sortedWith(
+                compareByDescending<TransactionEntity> { it.date }.thenByDescending { it.createdAt }
+            )
         }
     }
 

@@ -1023,6 +1023,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                     )
                 ) {
                     com.example.davidapp.DavidChatScreen(
+                        budgetId = currentProfile?.id ?: "default",
+                        profileName = currentProfile?.name ?: "Максим",
+                        apiKey = apiKey,
                         onBack = {
                             showReportDialog = false
                             appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()

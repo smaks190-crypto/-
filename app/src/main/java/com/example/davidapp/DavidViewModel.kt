@@ -1,21 +1,48 @@
 package com.example.davidapp
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.db.AppDatabase
+import com.example.data.db.NotificationEntity
+import com.example.data.db.TransactionEntity
+import com.example.data.repository.BudgetRepository
+import com.example.ui.components.extractOpsAndComment
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
 /**
- * ViewModel для управления состоянием чата с Давидом Жабовым.
- * Обеспечивает объединение неонового интерактивного графика и текстового саркастического аудита.
+ * ViewModel для управления состоянием чата и аудита с Давидом Жабовым.
+ *
+ * Полная интеграция:
+ * 1. Привязка к активному профилю бюджета (budgetId, profileName).
+ * 2. Синхронизация и отображение реакций Давида на добавленные транзакции (из NotificationEntity).
+ * 3. Расчёт реальных финансовых показателей и генерация персонального аудита (День, Неделя, Месяц, Год).
+ * 4. Интерактивная диаграмма динамики баланса на основе фактических транзакций.
  */
-class DavidViewModel : ViewModel() {
+class DavidViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val database = AppDatabase.getDatabase(application)
+    private val repository = BudgetRepository(
+        application,
+        database.budgetProfileDao(),
+        database.transactionDao(),
+        database.goalDao(),
+        database.categoryDao(),
+        database.aiAuditDao(),
+        database.accountDao(),
+        database.notificationDao(),
+        database
+    )
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -26,123 +53,216 @@ class DavidViewModel : ViewModel() {
     private val _isDavidTyping = MutableStateFlow(false)
     val isDavidTyping: StateFlow<Boolean> = _isDavidTyping.asStateFlow()
 
+    private var currentBudgetId: String = "default"
     private var currentProfileName: String = "Максим"
+    private var currentApiKey: String = ""
 
-    init {
-        initInitialGreeting()
+    private var notificationsJob: Job? = null
+    private val sessionMessages = mutableListOf<ChatMessage>()
+
+    private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    private val isoFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+    fun bindProfile(budgetId: String, profileName: String, apiKey: String) {
+        val isDifferentBudget = budgetId != currentBudgetId || profileName != currentProfileName
+        currentBudgetId = budgetId
+        currentProfileName = if (profileName.isNotBlank()) profileName else "Пользователь"
+        currentApiKey = apiKey
+
+        if (isDifferentBudget || notificationsJob == null) {
+            sessionMessages.clear()
+            _stage.value = DavidStage.INITIAL
+            observeNotifications()
+        }
     }
 
     fun setProfileName(name: String) {
         if (name.isNotBlank() && name != currentProfileName) {
             currentProfileName = name
-            if (_messages.value.size <= 1 && _stage.value == DavidStage.INITIAL) {
-                initInitialGreeting()
+            rebuildMessages(emptyList())
+        }
+    }
+
+    private fun observeNotifications() {
+        notificationsJob?.cancel()
+        notificationsJob = viewModelScope.launch {
+            repository.getNotificationsForBudget(currentBudgetId).collect { notifs ->
+                rebuildMessages(notifs)
             }
         }
     }
 
-    private fun currentTime(): String =
-        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+    private fun rebuildMessages(notifications: List<NotificationEntity>) {
+        val result = mutableListOf<ChatMessage>()
 
-    /**
-     * Начальное приветствие от Давида с персонализацией по имени профиля
-     */
-    private fun initInitialGreeting() {
-        _messages.value = listOf(
+        // 1. Начальное приветствие от Давида
+        result.add(
             ChatMessage(
+                id = "greeting_${currentBudgetId}",
                 sender = "Давид Жабов 🐸",
                 type = ChatMessageType.Text(
                     "Салют, $currentProfileName! Я **Давид Жабов** — твой персональный финансовый аудитор и безжалостный критик транжирства.\n\n" +
                     "Готов провести жесткий разбор трат, прожарить нелепые расходы и выдать сочные ачивки. Выбери период или нажми **«🐸 Давид, сделай отчет»**!"
                 ),
-                timestamp = currentTime(),
+                timestamp = "09:00",
                 isUser = false
             )
         )
+
+        // 2. Добавление реакций на транзакции и действия из базы данных
+        for (notif in notifications) {
+            val (ops, userPhrase, comment) = extractOpsAndComment(notif)
+            val notifTime = timeFormat.format(Date(notif.timestamp))
+
+            // Сообщение пользователя (добавленная операция или фраза)
+            if (userPhrase.isNotBlank() || ops.isNotEmpty()) {
+                val firstOp = ops.firstOrNull()
+                val opType = firstOp?.type ?: "expense"
+                val opCategory = firstOp?.category ?: "Операция"
+                val opSub = firstOp?.subcategory ?: ""
+                val opAmount = if (ops.size > 1) ops.sumOf { it.amount } else (firstOp?.amount ?: 0.0)
+
+                val phraseText = if (userPhrase.isNotBlank()) {
+                    userPhrase
+                } else if (ops.size > 1) {
+                    "Добавлено ${ops.size} операций на сумму ${opAmount.toInt()} ₽"
+                } else {
+                    "$opCategory ($opSub) — ${opAmount.toInt()} ₽"
+                }
+
+                result.add(
+                    ChatMessage(
+                        id = "user_notif_${notif.id}",
+                        sender = currentProfileName,
+                        type = ChatMessageType.Operation(
+                            type = opType,
+                            category = opCategory,
+                            subcategory = opSub,
+                            amount = opAmount,
+                            userPhrase = phraseText,
+                            isRead = notif.isRead
+                        ),
+                        timestamp = notifTime,
+                        isUser = true
+                    )
+                )
+            }
+
+            // Ответ Давида (реакция / прожарка)
+            if (comment.isNotBlank()) {
+                result.add(
+                    ChatMessage(
+                        id = "david_notif_${notif.id}",
+                        sender = "Давид Жабов 🐸",
+                        type = ChatMessageType.Text(comment),
+                        timestamp = notifTime,
+                        isUser = false
+                    )
+                )
+            }
+        }
+
+        // 3. Добавление сообщений текущей интерактивной сессии (запросы аудита, графики, ответы)
+        result.addAll(sessionMessages)
+
+        _messages.value = result
     }
+
+    private fun currentTime(): String = timeFormat.format(Date())
 
     /**
      * Обработка быстрых действий
      */
     fun handleAction(action: String, soundManager: SoundManager? = null) {
         viewModelScope.launch {
-            soundManager?.playSend()
-
+            soundManager?.playClick()
             when (action) {
-                "START", "MAKE_REPORT" -> {
-                    _messages.value = _messages.value + ChatMessage(
-                        sender = "Вы",
-                        type = ChatMessageType.Text("Давид, сделай полный финансовый отчет"),
+                "START" -> {
+                    val userMsg = ChatMessage(
+                        sender = currentProfileName,
+                        type = ChatMessageType.Text("🐸 Давид, сделай отчет"),
                         timestamp = currentTime(),
                         isUser = true
                     )
+                    sessionMessages.add(userMsg)
+                    _messages.value = _messages.value + userMsg
 
                     _stage.value = DavidStage.PROCESSING
                     _isDavidTyping.value = true
-                    delay(1000)
-
+                    delay(500)
                     _isDavidTyping.value = false
-                    _stage.value = DavidStage.FILE_SELECTION
                     soundManager?.playReceive()
+                    _stage.value = DavidStage.FILE_SELECTION
 
-                    _messages.value = _messages.value + ChatMessage(
+                    val botMsg = ChatMessage(
                         sender = "Давид Жабов 🐸",
                         type = ChatMessageType.Text(
-                            "Отличная идея. За какой временной период сформировать выписку, график и саркастический разбор?"
+                            "Отлично, $currentProfileName! Выбери временной интервал для выписки. Я соберу все твои фактические траты и выдам сочный финансовый вердикт."
                         ),
                         timestamp = currentTime(),
                         isUser = false
                     )
+                    sessionMessages.add(botMsg)
+                    _messages.value = _messages.value + botMsg
                 }
                 "AUDIT" -> {
-                    // Мгновенный экспресс-аудит
-                    _messages.value = _messages.value + ChatMessage(
-                        sender = "Вы",
-                        type = ChatMessageType.Text("⚡ Проведи экспресс-аудит расходов"),
+                    val userMsg = ChatMessage(
+                        sender = currentProfileName,
+                        type = ChatMessageType.Text("⚡ Провести экспресс-аудит за текущий месяц"),
                         timestamp = currentTime(),
                         isUser = true
                     )
+                    sessionMessages.add(userMsg)
+                    _messages.value = _messages.value + userMsg
                     processFile("Месяц", soundManager)
                 }
                 "GOALS" -> {
-                    _messages.value = _messages.value + ChatMessage(
-                        sender = "Вы",
-                        type = ChatMessageType.Text("Как продвигаются финансовые цели?"),
+                    val userMsg = ChatMessage(
+                        sender = currentProfileName,
+                        type = ChatMessageType.Text("🎯 Покажи статус моих финансовых целей"),
                         timestamp = currentTime(),
                         isUser = true
                     )
+                    sessionMessages.add(userMsg)
+                    _messages.value = _messages.value + userMsg
+
                     _isDavidTyping.value = true
-                    delay(1200)
+                    delay(600)
                     _isDavidTyping.value = false
                     soundManager?.playReceive()
 
-                    _messages.value = _messages.value + ChatMessage(
+                    val goalsList = try {
+                        repository.getGoalsForBudget(currentBudgetId).first()
+                    } catch (_: Exception) { emptyList() }
+
+                    val goalsText = if (goalsList.isNotEmpty()) {
+                        "🎯 **Прогресс по финансовым целям ($currentProfileName):**\n\n" +
+                        goalsList.joinToString("\n") { g ->
+                            val percent = if (g.targetAmount > 0) ((g.currentAmount / g.targetAmount) * 100).toInt() else 0
+                            "- 📌 **${g.name}:** $percent% (собрано ${g.currentAmount.toInt()} ₽ из ${g.targetAmount.toInt()} ₽)"
+                        } + "\n\n💡 *Совет Жабова:* Регулярные автопополнения приближают цель в 2.5 раза быстрее спонтанных взносов!"
+                    } else {
+                        "🎯 У тебя пока нет активных целей в профиле **$currentProfileName**. Создай цель на главный экран, чтобы мне было за что тебя хвалить!"
+                    }
+
+                    val botMsg = ChatMessage(
                         sender = "Давид Жабов 🐸",
-                        type = ChatMessageType.Text(
-                            "🎯 **Прогресс по целям:**\n\n" +
-                            "- 🛡️ **Подушка безопасности:** 78% (накоплено 156 000 ₽ из 200 000 ₽)\n" +
-                            "- 🏖️ **Отпуск мечты:** 45% (накоплено 45 000 ₽ из 100 000 ₽)\n\n" +
-                            "💡 *Совет Жабова:* Если перестанешь заказывать кофе навынос дважды в день, подушка безопасности закроется на 3 недели раньше!"
-                        ),
+                        type = ChatMessageType.Text(goalsText),
                         timestamp = currentTime(),
                         isUser = false
                     )
+                    sessionMessages.add(botMsg)
+                    _messages.value = _messages.value + botMsg
                 }
                 else -> {
-                    _messages.value = _messages.value + ChatMessage(
-                        sender = "Вы",
-                        type = ChatMessageType.Text("Давид, сформируй финансовую сводку"),
-                        timestamp = currentTime(),
-                        isUser = true
-                    )
-                    processFile("Неделя", soundManager)
+                    processFile("Месяц", soundManager)
                 }
             }
         }
     }
 
     /**
-     * Обработка выбора периода: объединяет интерактивный график И текстовый саркастический отчет
+     * Обработка выбора периода: рассчитывает реальные данные профиля, формирует отчет и интерактивный график
      */
     fun processFile(period: String, soundManager: SoundManager? = null) {
         viewModelScope.launch {
@@ -156,7 +276,7 @@ class DavidViewModel : ViewModel() {
                 else -> period.replaceFirstChar { it.uppercase() }
             }
 
-            val fileName = "Выписка_Финансы_${periodFormatted}.pdf"
+            val fileName = "Выписка_${currentProfileName}_${periodFormatted}.pdf"
             val fileSize = when (periodFormatted) {
                 "День" -> "1.2 MB"
                 "Неделя" -> "2.4 MB"
@@ -166,8 +286,8 @@ class DavidViewModel : ViewModel() {
             }
 
             // Добавляем сообщение-запрос с файлом от пользователя
-            _messages.value = _messages.value + ChatMessage(
-                sender = "Вы",
+            val fileMsg = ChatMessage(
+                sender = currentProfileName,
                 type = ChatMessageType.File(
                     name = fileName,
                     size = fileSize,
@@ -176,35 +296,46 @@ class DavidViewModel : ViewModel() {
                 timestamp = currentTime(),
                 isUser = true
             )
+            sessionMessages.add(fileMsg)
+            _messages.value = _messages.value + fileMsg
 
             _stage.value = DavidStage.PROCESSING
 
-            val auditData = getAuditDataForPeriod(periodFormatted)
+            // Получаем реальные транзакции для этого профиля
+            val allTxs = try {
+                repository.getTransactionsForBudget(currentBudgetId).first()
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            val auditData = calculateRealAuditData(periodFormatted, allTxs)
             val sections = splitReportIntoSections(auditData.sarcasticReport)
 
-            // 1. Отправляем каждую секцию отчета (заголовок + содержание) отдельным баблом
+            // 1. Отправляем каждую секцию отчета отдельным баблом с эффектом печати
             for (section in sections) {
                 _isDavidTyping.value = true
-                delay(650)
+                delay(600)
                 _isDavidTyping.value = false
                 soundManager?.playReceive()
 
-                _messages.value = _messages.value + ChatMessage(
+                val textMsg = ChatMessage(
                     sender = "Давид Жабов 🐸",
                     type = ChatMessageType.Text(section),
                     timestamp = currentTime(),
                     isUser = false
                 )
-                delay(200)
+                sessionMessages.add(textMsg)
+                _messages.value = _messages.value + textMsg
+                delay(150)
             }
 
-            // 2. В конце отправляем карточку интерактивного графика как визуальное подтверждение
+            // 2. В конце отправляем карточку интерактивного графика
             _isDavidTyping.value = true
-            delay(800)
+            delay(700)
             _isDavidTyping.value = false
             soundManager?.playReceive()
 
-            _messages.value = _messages.value + ChatMessage(
+            val chartMsg = ChatMessage(
                 sender = "Давид Жабов 🐸",
                 type = ChatMessageType.Chart(
                     title = "Динамика баланса: $periodFormatted",
@@ -217,9 +348,202 @@ class DavidViewModel : ViewModel() {
                 timestamp = currentTime(),
                 isUser = false
             )
+            sessionMessages.add(chartMsg)
+            _messages.value = _messages.value + chartMsg
 
             _stage.value = DavidStage.FOLLOW_UP
         }
+    }
+
+    /**
+     * Расчет реальных показателей транзакций для выбранного периода
+     */
+    private suspend fun calculateRealAuditData(
+        period: String,
+        allTxs: List<TransactionEntity>
+    ): AuditPeriodData {
+        val cal = Calendar.getInstance()
+        val todayStr = isoFormat.format(cal.time)
+
+        val (currentTxs, prevTxs, periodTitle) = when (period) {
+            "День" -> {
+                cal.add(Calendar.DAY_OF_YEAR, -1)
+                val yesterdayStr = isoFormat.format(cal.time)
+                Triple(
+                    allTxs.filter { it.date == todayStr },
+                    allTxs.filter { it.date == yesterdayStr },
+                    "за сегодня ($todayStr)"
+                )
+            }
+            "Неделя" -> {
+                val weekDates = (0..6).map { offset ->
+                    val c = Calendar.getInstance()
+                    c.add(Calendar.DAY_OF_YEAR, -offset)
+                    isoFormat.format(c.time)
+                }.toSet()
+                val prevWeekDates = (7..13).map { offset ->
+                    val c = Calendar.getInstance()
+                    c.add(Calendar.DAY_OF_YEAR, -offset)
+                    isoFormat.format(c.time)
+                }.toSet()
+                Triple(
+                    allTxs.filter { it.date in weekDates },
+                    allTxs.filter { it.date in prevWeekDates },
+                    "за последние 7 дней"
+                )
+            }
+            "Месяц" -> {
+                val curMonthPrefix = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date())
+                cal.add(Calendar.MONTH, -1)
+                val prevMonthPrefix = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(cal.time)
+                Triple(
+                    allTxs.filter { it.date.startsWith(curMonthPrefix) },
+                    allTxs.filter { it.date.startsWith(prevMonthPrefix) },
+                    "за текущий месяц"
+                )
+            }
+            "Год" -> {
+                val curYearPrefix = SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())
+                val prevYearPrefix = (Calendar.getInstance().get(Calendar.YEAR) - 1).toString()
+                Triple(
+                    allTxs.filter { it.date.startsWith(curYearPrefix) },
+                    allTxs.filter { it.date.startsWith(prevYearPrefix) },
+                    "за текущий год"
+                )
+            }
+            else -> Triple(allTxs, emptyList(), "за все время")
+        }
+
+        val totalIncome = currentTxs.filter { it.type == "income" }.sumOf { it.amount }
+        val totalExpense = currentTxs.filter { it.type == "expense" }.sumOf { it.amount }
+        val net = totalIncome - totalExpense
+
+        val prevIncome = prevTxs.filter { it.type == "income" }.sumOf { it.amount }
+        val prevExpense = prevTxs.filter { it.type == "expense" }.sumOf { it.amount }
+        val prevNet = prevIncome - prevExpense
+
+        val deltaPercent = if (prevIncome + prevExpense > 0) {
+            val rawDelta = ((net - prevNet) / (prevIncome + prevExpense).coerceAtLeast(1.0)) * 100.0
+            String.format(Locale.US, "%.1f", rawDelta).toDoubleOrNull() ?: 0.0
+        } else {
+            if (net >= 0) 15.0 else -15.0
+        }
+
+        // Построение точек диаграммы на основе фактических транзакций
+        val dataPoints = generateRealDataPoints(period, currentTxs, totalIncome, totalExpense)
+
+        // Генерация отчета через репозиторий с учетом реальных данных и имени профиля
+        val debts = try { repository.getAccountsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
+        val goals = try { repository.getGoalsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
+
+        val reportResult = repository.requestAiAudit(
+            apiKey = currentApiKey,
+            periodName = periodTitle,
+            year = cal.get(Calendar.YEAR),
+            filteredTransactions = currentTxs,
+            previousTransactions = prevTxs,
+            activeDebts = debts,
+            activeGoals = goals,
+            allTransactions = allTxs
+        )
+
+        val reportText = reportResult.getOrNull() ?: buildDefaultSarcasticReport(
+            period = period,
+            income = totalIncome,
+            expense = totalExpense,
+            net = net,
+            transactions = currentTxs
+        )
+
+        val chartSummary = when {
+            net >= 0 -> "Профицит периода ($period): +${net.toInt()} ₽. Доходы превышают расходы на ${if (totalIncome > 0) ((net / totalIncome) * 100).toInt() else 100}%."
+            else -> "Дефицит периода ($period): ${net.toInt()} ₽. Превышение расходов над доходами!"
+        }
+
+        return AuditPeriodData(
+            income = totalIncome,
+            expense = totalExpense,
+            deltaPercent = deltaPercent,
+            dataPoints = dataPoints,
+            chartSummary = chartSummary,
+            sarcasticReport = reportText
+        )
+    }
+
+    /**
+     * Построение точек для диаграммы Безье на основе фактических транзакций
+     */
+    private fun generateRealDataPoints(
+        period: String,
+        txs: List<TransactionEntity>,
+        income: Double,
+        expense: Double
+    ): List<Float> {
+        if (txs.isEmpty()) {
+            return listOf(20f, 25f, 30f, 40f, 50f, 65f, 75f)
+        }
+
+        val sorted = txs.sortedBy { it.date }
+        val expenses = sorted.filter { it.type == "expense" }
+
+        val points = mutableListOf<Float>()
+        var runningExpense = 0.0
+        val maxTarget = (income + expense).coerceAtLeast(1000.0)
+
+        points.add(20f)
+        for (tx in expenses.take(8)) {
+            runningExpense += tx.amount
+            val norm = (20f + (runningExpense / maxTarget * 75f).toFloat()).coerceIn(10f, 95f)
+            points.add(norm)
+        }
+
+        while (points.size < 6) {
+            points.add(points.last() + 5f)
+        }
+
+        return points.take(10)
+    }
+
+    /**
+     * Генератор саркастического отчета по умолчанию на основе фактических цифр профиля
+     */
+    private fun buildDefaultSarcasticReport(
+        period: String,
+        income: Double,
+        expense: Double,
+        net: Double,
+        transactions: List<TransactionEntity>
+    ): String {
+        val expenses = transactions.filter { it.type == "expense" }
+        val topCategory = expenses.groupBy { it.category }
+            .mapValues { entry -> entry.value.sumOf { it.amount } }
+            .maxByOrNull { it.value }
+
+        val topCatName = topCategory?.key ?: "Спонтанные покупки"
+        val topCatAmount = topCategory?.value?.toInt() ?: 0
+
+        val verdictTitle = if (net >= 0) "📈 УМЕРЕННЫЙ ПРОФИЦИТ" else "🚨 КАССОВЫЙ РАЗРЫВ"
+
+        return """
+# Главный Вердикт: $verdictTitle
+$currentProfileName, финансовый аудит за период **$period** сформирован! Доходы составили **+${income.toInt()} ₽**, расходы — **-${expense.toInt()} ₽**. Чистый итог: **${if (net >= 0) "+" else ""}${net.toInt()} ₽**.
+
+## Цифры и Динамика
+- Совокупный доход: **+${income.toInt()} ₽**
+- Совокупный расход: **-${expense.toInt()} ₽**
+- Чистый остаток: **${if (net >= 0) "+" else ""}${net.toInt()} ₽**
+- Главная статья трат: **$topCatName** ($topCatAmount ₽)
+
+## Прожарка Транжиры 🔥
+${if (expenses.isNotEmpty()) "Твоя главная финансовая слабость — это категория «$topCatName», куда улетело аж $topCatAmount ₽! Даже Скупой рыцарь Пушкина прослезился бы от такой щедрости к торговцам. Если продолжить в том же духе, инвестиционный портфель придется собирать из скидочных купонов." else "В этом периоде подозрительно мало расходов. Либо режим жесткой аскезы, либо ты забыл внести чек за вчерашний пир!"}
+
+## Ачивки и Достижения 🏆
+🏆 **Спонсор категории «$topCatName»** — инвестировал $topCatAmount ₽ в чужой бизнес
+🥇 **${if (net >= 0) "Мастер финансового баланса" else "Герой кредитного лимита"}** — ${if (net >= 0) "удержал бюджет в зеленой зоне!" else "умудрился выйти за рамки доходов!"}
+
+## Рекомендации Жабова 💡
+Поставь строгий лимит на категорию «$topCatName» и направь как минимум 20% свободного остатка на пополнение финансовой подушки безопасности!
+""".trimIndent()
     }
 
     /**
@@ -248,67 +572,102 @@ class DavidViewModel : ViewModel() {
     }
 
     /**
-     * Отправка произвольного текстового сообщения
+     * Отправка произвольного сообщения от пользователя
      */
-    fun sendTextMessage(text: String, soundManager: SoundManager? = null) {
+    fun sendUserMessage(text: String, soundManager: SoundManager? = null) {
         if (text.isBlank()) return
 
         viewModelScope.launch {
             soundManager?.playSend()
 
-            _messages.value = _messages.value + ChatMessage(
-                sender = "Вы",
+            val userMsg = ChatMessage(
+                sender = currentProfileName,
                 type = ChatMessageType.Text(text.trim()),
                 timestamp = currentTime(),
                 isUser = true
             )
+            sessionMessages.add(userMsg)
+            _messages.value = _messages.value + userMsg
 
-            _isDavidTyping.value = true
             val prevStage = _stage.value
+            _isDavidTyping.value = true
             _stage.value = DavidStage.PROCESSING
 
-            delay(1300)
+            val reply = if (currentApiKey.isNotBlank()) {
+                generateGeminiReply(text.trim())
+            } else {
+                generateSmartDavidReply(text.trim())
+            }
 
+            delay(650)
             _isDavidTyping.value = false
             soundManager?.playReceive()
 
-            val reply = generateSmartDavidReply(text.trim())
-
-            _messages.value = _messages.value + ChatMessage(
+            val botMsg = ChatMessage(
                 sender = "Давид Жабов 🐸",
                 type = ChatMessageType.Text(reply),
                 timestamp = currentTime(),
                 isUser = false
             )
+            sessionMessages.add(botMsg)
+            _messages.value = _messages.value + botMsg
 
             _stage.value = if (prevStage == DavidStage.INITIAL) DavidStage.FILE_SELECTION else prevStage
         }
     }
 
-    /**
-     * Генерация саркастических и информативных ответов Давида на свободный ввод
-     */
+    private suspend fun generateGeminiReply(query: String): String {
+        return try {
+            val recentTxs = repository.getTransactionsForBudget(currentBudgetId).first()
+            val debts = repository.getAccountsForBudget(currentBudgetId).first()
+            val goals = repository.getGoalsForBudget(currentBudgetId).first()
+
+            val comment = repository.generateDavidComment(
+                apiKey = currentApiKey,
+                type = "expense",
+                category = "Вопрос аудитору",
+                subcategory = query,
+                amount = 0.0,
+                recentTransactions = recentTxs.take(5),
+                activeDebts = debts,
+                activeGoals = goals,
+                extraContext = "Пользователь $currentProfileName задает вопрос в чате: \"$query\". Ответь остроумно и по существу его финансов.",
+                allTransactions = recentTxs
+            )
+            comment.ifBlank { generateSmartDavidReply(query) }
+        } catch (_: Exception) {
+            generateSmartDavidReply(query)
+        }
+    }
+
     private fun generateSmartDavidReply(query: String): String {
-        val q = query.lowercase()
+        val q = query.lowercase(Locale.getDefault())
         return when {
-            q.contains("привет") || q.contains("здравствуй") || q.contains("ку") || q.contains("салют") ->
-                "И тебе привет! Кошелек в порядке или снова спасаем твой баланс от импульсивных заказов? Выбери период или нажми на кнопки внизу. 🐸"
+            q.contains("привет") || q.contains("салют") || q.contains("здравствуй") ->
+                "Салют, $currentProfileName! Хватит любезностей, давай проверим твои расходы. Нажми **«🐸 Давид, сделай отчет»**!"
 
-            q.contains("отчет") || q.contains("аудит") || q.contains("график") || q.contains("прожар") ->
-                "Так-так, чую запах незапланированных трат! Нажми на нужный период (**День**, **Неделя**, **Месяц**, **Год**) выше, и я выкачу детальный разбор с графиком и ачивками."
+            q.contains("отчет") || q.contains("выписк") || q.contains("аудит") || q.contains("трат") ->
+                "Готов провести жесткий разбор трат для профиля **$currentProfileName**. Выбери интервал: **День**, **Неделя**, **Месяц** или **Год**!"
 
-            q.contains("кофе") || q.contains("доставк") || q.contains("еда") || q.contains("ресторан") ->
-                "Ага! Категория «Спонсирование рестораторов» обнаружена. Если сложить все твои чеки на латте и пиццу, можно было купить акции этой кофейни. Держи аппетиты в узде!"
+            q.contains("цел") || q.contains("накоп") || q.contains("копилк") ->
+                "Финансовые цели любят дисциплину. Нажми кнопку **«🎯 Цели»** для статуса накоплений!"
 
-            q.contains("деньги") || q.contains("копить") || q.contains("накоп") || q.contains("вклад") ->
-                "Золотое правило Жабова: сначала плати себе (минимум 15-20% на накопительный счет), а уже потом корми маркетологов маркетплейсов. 🚀"
+            q.contains("долг") || q.contains("кредит") || q.contains("займ") ->
+                "Долги — это аренда чужой свободы. Закрывай их в первую очередь, пока проценты не сожрали твой бюджет!"
 
-            q.contains("спасибо") || q.contains("спс") || q.contains("красав") ->
-                "Пожалуйста! Мой сарказм бесплатен, а вот сэкономленные деньги — бесценны. Работаем дальше! 🐸✨"
+            q.contains("кофе") || q.contains("шаурм") || q.contains("еда") || q.contains("ресторан") ->
+                "Ага, опять гастрономические слабости! Каждая третья чашка навынос отдаляет тебя от финансовой независимости."
+
+            q.contains("совет") || q.contains("как сэконом") || q.contains("что делать") ->
+                "Золотое правило Жабова: сначала отложи 20% дохода на накопительный счет, а уже потом распределяй остаток по категориям."
 
             else ->
-                "Запрос принят. Мой вердикт: держи дельту положительной, режь мелкие подписки и заглядывай в отчеты регулярно. Готов провести аудит за любой период!"
+                "Запрос принят к сведению, $currentProfileName! Но лучший способ навести порядок в кошельке — сформировать полный PDF-аудит. Выбирай период выше!"
         }
+    }
+
+    fun sendTextMessage(text: String, soundManager: SoundManager? = null) {
+        sendUserMessage(text, soundManager)
     }
 
     /**
@@ -317,162 +676,41 @@ class DavidViewModel : ViewModel() {
     fun exportPdf(soundManager: SoundManager? = null) {
         viewModelScope.launch {
             soundManager?.playClick()
-            _messages.value = _messages.value + ChatMessage(
+
+            val userMsg = ChatMessage(
+                sender = currentProfileName,
+                type = ChatMessageType.Text("📄 Экспортировать аудит в файл PDF"),
+                timestamp = currentTime(),
+                isUser = true
+            )
+            sessionMessages.add(userMsg)
+            _messages.value = _messages.value + userMsg
+
+            _isDavidTyping.value = true
+            delay(500)
+            _isDavidTyping.value = false
+            soundManager?.playReceive()
+
+            val pdfMsg = ChatMessage(
                 sender = "Давид Жабов 🐸",
-                type = ChatMessageType.Text(
-                    "📄 **Отчет и график экспортированы в PDF!**\n\n" +
-                    "Файл сохранен с цифровой печатью Давида Жабова. Можешь распечатать и повесить на холодильник как напоминание о финансовой дисциплине."
+                type = ChatMessageType.File(
+                    name = "Финансовый_Аудит_${currentProfileName}_${SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())}.pdf",
+                    size = "3.8 MB",
+                    extension = "PDF"
                 ),
                 timestamp = currentTime(),
                 isUser = false
             )
+            sessionMessages.add(pdfMsg)
+            _messages.value = _messages.value + pdfMsg
         }
     }
 
-    /**
-     * Сброс диалога для нового аудита
-     */
     fun resetSession(soundManager: SoundManager? = null) {
         soundManager?.playClick()
+        sessionMessages.clear()
         _stage.value = DavidStage.INITIAL
-        initInitialGreeting()
-    }
-
-    /**
-     * Генератор данных и саркастического отчета по периодам
-     */
-    private fun getAuditDataForPeriod(period: String): AuditPeriodData {
-        return when (period) {
-            "День" -> AuditPeriodData(
-                income = 12500.0,
-                expense = 4200.0,
-                deltaPercent = 18.5,
-                dataPoints = listOf(15f, 25f, 40f, 30f, 65f, 85f),
-                chartSummary = "Дневной профицит: +8 300 ₽. Лимит соблюден на 100%.",
-                sarcasticReport = """
-# Главный Вердикт: 🚨 ТАКТИЧЕСКИЙ РАЗГУЛ
-Ты сегодня потратил **4 200 ₽** при заработанных **12 500 ₽**. Вроде бы в плюсе, но давай посмотрим правде в глаза: кофе навынос и доставка суши — это не инвестиции в основной капитал.
-
-## Цифры и Динамика
-- Доходы за день: **+12 500 ₽**
-- Траты за день: **-4 200 ₽**
-- Чистый остаток: **+8 300 ₽** (норма сбережений 66%)
-
-## Прожарка Транжиры 🔥
-Как писал Гоголь в «Мёртвых душах», Манилов тоже строил хрустальные мосты до обеда. Твои микротранзакции на фастфуд и снеки суммарно выглядят как спонсирование местной кофейни на пороге дефолта. Баланс спасен только потому, что ты не зашел на маркетплейс перед сном.
-
-## Ачивки и Достижения 🏆
-🏆 **Купеческий разгул** — спустил 35% дневного дохода на импульсивный обед
-🥇 **Кофейный барон** — переплата за латте на овсяном молоке превысила ставку ЦБ
-
-## Рекомендации Жабова 💡
-Завтра обедай дома, а сэкономленную тысячу переведи на накопительный счет, пока она не растворилась в тарифе «Комфорт Плюс».
-""".trimIndent()
-            )
-
-            "Неделя" -> AuditPeriodData(
-                income = 65000.0,
-                expense = 31200.0,
-                deltaPercent = 24.0,
-                dataPoints = listOf(20f, 35f, 45f, 60f, 50f, 75f, 90f),
-                chartSummary = "Недельный баланс: +33 800 ₽. Норма сбережений 52%.",
-                sarcasticReport = """
-# Главный Вердикт: 📈 УМЕРЕННЫЙ ПРОФИЦИТ
-Недельный результат изменился в **ЛУЧШУЮ** сторону (+24.0% к сбережениям). Но без драмы не обошлось: пятница чуть не пустила весь недельный бюджет под откос.
-
-## Цифры и Динамика
-- Доходы недели: **+65 000 ₽**
-- Расходы недели: **-31 200 ₽**
-- Свободный денежный поток: **+33 800 ₽**
-
-## Прожарка Транжиры 🔥
-Шекспировская трагедия развернулась в пятницу вечером: категория «Развлечения и рестораны» унесла треть бюджета. Ты распоряжался деньгами так, будто завтра революция 1917 года и накопления все равно национализируют. Хорошо хоть в понедельник включился режим аскезы по Раскольникову.
-
-## Ачивки и Достижения 🏆
-🏆 **Пятничный кутила** — закрыл счет за компанию в надежде на кэшбэк
-🏅 **Мастер кассового маневра** — чудом не влез в кредитку к воскресенью
-
-## Рекомендации Жабова 💡
-Установи жесткий лимит на уикенд. Переведи 50% профицита (16 900 ₽) на вклад с капитализацией уже сегодня.
-""".trimIndent()
-            )
-
-            "Месяц" -> AuditPeriodData(
-                income = 240000.0,
-                expense = 142000.0,
-                deltaPercent = 15.2,
-                dataPoints = listOf(25f, 40f, 35f, 70f, 60f, 85f, 78f, 95f),
-                chartSummary = "Месячный чистый резерв: +98 000 ₽ (+15.2%).",
-                sarcasticReport = """
-# Главный Вердикт: 👑 ФИНАНСОВЫЙ ТРИУМФ
-Месячный аудит закрыт с вердиктом: **ЛУЧШАЯ** динамика (+15.2% прироста). Капитал сбережен, хотя маркетплейсы отчаянно пытались тебя разорить.
-
-## Цифры и Динамика
-- Доходы за месяц: **+240 000 ₽**
-- Расходы за месяц: **-142 000 ₽**
-- Чистая прибыль: **+98 000 ₽** (норма сбережений 40.8%)
-
-## Прожарка Транжиры 🔥
-Пять доставок пиццы, спонтанный робот-пылесос и 12 подписок на сервисы, которые ты открывал один раз в жизни! Твой бюджет пережил набег почище Золотой Орды. Но благодаря своевременному закрытию обязательных платежей, кассового разрыва удалось избежать.
-
-## Ачивки и Достижения 🏆
-🏆 **Спонсор маркетплейсов** — 14 покупок категории «очень надо, потом разберусь»
-🥇 **Выживший в распродажах** — сохранил почти 100 000 ₽ чистыми вопреки скидкам
-
-## Рекомендации Жабова 💡
-Отмени неиспользуемые автоподписки (экономия ~2 400 ₽/мес) и отправь 98 000 ₽ в целевой фонд подушки безопасности.
-""".trimIndent()
-            )
-
-            "Год" -> AuditPeriodData(
-                income = 2850000.0,
-                expense = 1680000.0,
-                deltaPercent = 31.4,
-                dataPoints = listOf(30f, 45f, 55f, 65f, 70f, 80f, 75f, 90f, 85f, 95f, 92f, 100f),
-                chartSummary = "Годовой капитал вырос на +31.4%! Накоплено 1 170 000 ₽.",
-                sarcasticReport = """
-# Главный Вердикт: 🚀 КАПИТАЛИСТИЧЕСКИЙ ЛЕВ
-Годовой результат изменился в **ЛУЧШУЮ** сторону (+31.4% прироста капитала)! Ты не просто выжил в эпоху инфляции, но и приумножил баланс на зависть Уоррену Баффету.
-
-## Цифры и Динамика
-- Совокупный доход: **+2 850 000 ₽**
-- Совокупный расход: **-1 680 000 ₽**
-- Сформированный капитал: **+1 170 000 ₽**
-
-## Прожарка Транжиры 🔥
-За год ты прошел путь от графа Монте-Кристо в день зарплаты до бедного чиновника Акакия Акакиевича перед крупными платежами. Расходы на импульсивные гаджеты и такси сравнимы с бюджетом небольшой средневековой фактории в период Тюльпаномании. Однако железная дисциплина во втором полугодии совершила чудо!
-
-## Ачивки и Достижения 🏆
-🏆 **Магнат на максималках** — преодолел отметку в 1.1 млн чистых сбережений
-🥇 **Укротитель импульсов** — устоял перед 100+ маркетинговыми акциями
-
-## Рекомендации Жабова 💡
-Диверсифицируй накопленный 1.17 млн ₽: часть во вклады, часть на долгосрочные цели, и не забудь порадовать Давида Жабова регулярным аудитом!
-""".trimIndent()
-            )
-
-            else -> AuditPeriodData(
-                income = 150000.0,
-                expense = 90000.0,
-                deltaPercent = 12.0,
-                dataPoints = listOf(30f, 50f, 40f, 70f, 60f, 85f),
-                chartSummary = "Баланс стабилен: +60 000 ₽.",
-                sarcasticReport = """
-# Главный Вердикт: ⚖️ СТАБИЛЬНЫЙ БАЛАНС
-Финансовый срез показывает уверенный плюс: доходы превышают расходы на **60 000 ₽**.
-
-## Цифры и Динамика
-- Доходы: **+150 000 ₽**
-- Расходы: **-90 000 ₽**
-
-## Прожарка Транжиры 🔥
-Серьезных финансовых преступлений не обнаружено, хотя мелкие утечки на снеки и фастфуд присутствуют. 
-
-## Рекомендации Жабова 💡
-Продолжай вести учет и оптимизировать регулярные платежи!
-""".trimIndent()
-            )
-        }
+        observeNotifications()
     }
 }
 

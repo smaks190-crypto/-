@@ -272,6 +272,118 @@ fun DavidMessageItem(
                     timestamp = message.timestamp
                 )
             }
+            is ChatMessageType.Operation -> {
+                DavidOperationBubble(
+                    operation = type,
+                    timestamp = message.timestamp,
+                    modifier = Modifier
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Карточка добавленной операции от пользователя
+ */
+@Composable
+fun DavidOperationBubble(
+    operation: ChatMessageType.Operation,
+    timestamp: String,
+    modifier: Modifier = Modifier
+) {
+    val bubbleShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp)
+    val isExpense = operation.type == "expense"
+    val accentColor = if (isExpense) NeonRose else NeonEmerald
+    val amountPrefix = if (isExpense) "-" else "+"
+
+    Surface(
+        shape = bubbleShape,
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, NeonIndigo.copy(alpha = 0.5f)),
+        modifier = modifier
+            .widthIn(min = 120.dp, max = 320.dp)
+            .shadow(4.dp, bubbleShape, ambientColor = NeonIndigo.copy(alpha = 0.2f))
+    ) {
+        Box(
+            modifier = Modifier
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(Color(0xFF1E293B), Color(0xFF283548))
+                    )
+                )
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+        ) {
+            Column {
+                if (operation.userPhrase.isNotBlank()) {
+                    Text(
+                        text = operation.userPhrase,
+                        color = TextLight,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        lineHeight = 19.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                // Информационная плашка с категорией и суммой
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = DarkBackground.copy(alpha = 0.6f),
+                    border = BorderStroke(0.5.dp, SlateBorder.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = operation.category,
+                                color = TextLight,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (operation.subcategory.isNotBlank() && operation.subcategory != operation.category) {
+                                Text(
+                                    text = operation.subcategory,
+                                    color = TextMuted,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "$amountPrefix${operation.amount.toInt()} ₽",
+                            color = accentColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = timestamp,
+                        color = TextMuted,
+                        fontSize = 10.sp
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = if (operation.isRead) Icons.Default.DoneAll else Icons.Default.CheckCircle,
+                        contentDescription = "Отправлено",
+                        tint = if (operation.isRead) NeonEmerald else TextMuted,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
         }
     }
 }

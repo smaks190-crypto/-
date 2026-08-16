@@ -29,10 +29,10 @@ interface BudgetProfileDao {
 
 @Dao
 interface TransactionDao {
-    @Query("SELECT * FROM transactions ORDER BY date DESC, id DESC")
+    @Query("SELECT * FROM transactions ORDER BY date DESC, createdAt DESC, id DESC")
     fun getAllTransactions(): Flow<List<TransactionEntity>>
 
-    @Query("SELECT * FROM transactions WHERE budgetId = :budgetId ORDER BY date DESC, id DESC")
+    @Query("SELECT * FROM transactions WHERE budgetId = :budgetId ORDER BY date DESC, createdAt DESC, id DESC")
     fun getTransactionsByBudgetId(budgetId: String): Flow<List<TransactionEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

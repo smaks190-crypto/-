@@ -207,10 +207,11 @@ class TransactionStateDelegate(
             toastMessage.emit("Операция добавлена!")
             isGeneratingReaction.value = true
 
+            val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
             try {
                 val isFirstToday = transactions.value.none { it.date == date && it.id != tx.id }
                 val userPhrase = repository.generateUserPhrase(
-                    apiKey = apiKey.value,
+                    apiKey = effectiveKey,
                     type = type,
                     category = category,
                     subcategory = subcategory,
@@ -245,7 +246,7 @@ class TransactionStateDelegate(
                 }
                 
                 val comment = repository.generateDavidComment(
-                    apiKey = apiKey.value,
+                    apiKey = effectiveKey,
                     type = type,
                     category = category,
                     subcategory = subcategory,
@@ -268,7 +269,20 @@ class TransactionStateDelegate(
                     )
                 )
             } catch (e: Exception) {
-                e.printStackTrace()
+                com.example.utils.GlobalConsoleLogger.e("DAVID", "Ошибка при генерации реакции Давида: ${e.message}", e)
+                val fallbackUserPhrase = if (type == "income") "Записал доход: $subcategory на ${amount.toInt()} ₽" else "Записал расход: $subcategory на ${amount.toInt()} ₽"
+                val fallbackComment = if (type == "income") "О, плюс в кассу! Главное теперь не спустить всё за один вечер." else "Зафиксировал трату. Держись бюджета, ква-ква!"
+                repository.insertNotification(
+                    com.example.data.db.NotificationEntity(
+                        budgetId = currentBudgetId,
+                        title = if (type == "income") "Реакция Давида на доход" else "Прожарка от Давида",
+                        description = "||$type|$category|$subcategory|$amount|$fallbackUserPhrase||$fallbackComment",
+                        icon = "david",
+                        color = if (type == "income") "emerald400" else "rose500",
+                        timestamp = System.currentTimeMillis(),
+                        isRead = false
+                    )
+                )
             } finally {
                 isGeneratingReaction.value = false
             }
@@ -323,10 +337,11 @@ class TransactionStateDelegate(
                 repository.insertTransaction(tx)
                 com.example.utils.GlobalConsoleLogger.i("ROOM", "Сохранена транзакция в DB: ${tx.category} / ${tx.subcategory} (${tx.amount} ₽)")
 
+                val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
                 try {
                     val isFirstToday = transactions.value.none { it.date == finalDate && it.id != tx.id }
                     val userPhrase = repository.generateUserPhrase(
-                        apiKey = apiKey.value,
+                        apiKey = effectiveKey,
                         type = op.type,
                         category = finalCategory,
                         subcategory = finalSubcategory,
@@ -334,7 +349,7 @@ class TransactionStateDelegate(
                         isFirstToday = isFirstToday
                     )
                     val comment = repository.generateDavidComment(
-                        apiKey = apiKey.value,
+                        apiKey = effectiveKey,
                         type = op.type,
                         category = finalCategory,
                         subcategory = finalSubcategory,
@@ -356,7 +371,20 @@ class TransactionStateDelegate(
                         )
                     )
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    com.example.utils.GlobalConsoleLogger.e("DAVID", "Ошибка при генерации реакции на голосовую операцию: ${e.message}", e)
+                    val fallbackUserPhrase = if (op.type == "income") "Записал доход: $finalSubcategory на ${op.amount.toInt()} ₽" else "Записал расход: $finalSubcategory на ${op.amount.toInt()} ₽"
+                    val fallbackComment = if (op.type == "income") "О, плюс в кассу! Главное теперь не спустить всё за один вечер." else "Зафиксировал трату. Держись бюджета, ква-ква!"
+                    repository.insertNotification(
+                        com.example.data.db.NotificationEntity(
+                            budgetId = currentBudgetId,
+                            title = if (op.type == "income") "Реакция Давида на доход" else "Прожарка от Давида",
+                            description = "||${op.type}|$finalCategory|$finalSubcategory|${op.amount}|$fallbackUserPhrase||$fallbackComment",
+                            icon = "david",
+                            color = if (op.type == "income") "emerald400" else "rose500",
+                            timestamp = System.currentTimeMillis(),
+                            isRead = false
+                        )
+                    )
                 } finally {
                     isGeneratingReaction.value = false
                 }
@@ -382,13 +410,14 @@ class TransactionStateDelegate(
                     processedOps.add(op.copy(date = finalDate, category = finalCategory, subcategory = finalSubcategory))
                 }
 
+                val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
                 try {
                     val userPhrase = repository.generateUserPhraseMulti(
-                        apiKey = apiKey.value,
+                        apiKey = effectiveKey,
                         operations = processedOps
                     )
                     val comment = repository.generateDavidCommentMulti(
-                        apiKey = apiKey.value,
+                        apiKey = effectiveKey,
                         operations = processedOps,
                         recentTransactions = transactions.value.take(5),
                         activeDebts = accounts.value,
@@ -411,7 +440,22 @@ class TransactionStateDelegate(
                         )
                     )
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    com.example.utils.GlobalConsoleLogger.e("DAVID", "Ошибка при генерации групповой реакции: ${e.message}", e)
+                    val opsString = processedOps.joinToString(";") { "${it.type}|${it.category}|${it.subcategory}|${it.amount}" }
+                    val dominantType = if (processedOps.all { it.type == "income" }) "income" else "expense"
+                    val fallbackUserPhrase = "Записал пачку операций (${processedOps.size} шт.)"
+                    val fallbackComment = "Целая пачка трат/доходов залетела в бюджет. Зафиксировал всё до копейки, ква-ква!"
+                    repository.insertNotification(
+                        com.example.data.db.NotificationEntity(
+                            budgetId = currentBudgetId,
+                            title = if (dominantType == "income") "Реакция Давида на доходы" else "Групповая прожарка от Давида",
+                            description = "||MULTI||$opsString||$fallbackUserPhrase||$fallbackComment",
+                            icon = "david",
+                            color = if (dominantType == "income") "emerald400" else "rose500",
+                            timestamp = System.currentTimeMillis(),
+                            isRead = false
+                        )
+                    )
                 } finally {
                     isGeneratingReaction.value = false
                 }

@@ -39,6 +39,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
  */
 @Composable
 fun DavidChatScreen(
+    budgetId: String = "default",
+    profileName: String = "Максим",
+    apiKey: String = "",
     viewModel: DavidViewModel = viewModel(),
     soundManager: SoundManager? = null,
     onBack: (() -> Unit)? = null,
@@ -47,6 +50,10 @@ fun DavidChatScreen(
     val context = LocalContext.current
     val effectiveSoundManager = remember(soundManager) {
         soundManager ?: SoundManager(context)
+    }
+
+    LaunchedEffect(budgetId, profileName, apiKey) {
+        viewModel.bindProfile(budgetId, profileName, apiKey)
     }
 
     DisposableEffect(effectiveSoundManager) {
