@@ -311,7 +311,7 @@ fun DavidTextBubble(
         color = Color.Transparent,
         border = borderStroke,
         modifier = modifier
-            .widthIn(min = 80.dp, max = 320.dp)
+            .widthIn(min = 80.dp, max = if (isUser) 300.dp else 360.dp)
             .shadow(4.dp, bubbleShape, ambientColor = if (isUser) NeonIndigo.copy(alpha = 0.2f) else Color.Transparent)
     ) {
         Box(
@@ -323,26 +323,39 @@ fun DavidTextBubble(
                 if (!isUser) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(bottom = 4.dp)
+                        modifier = Modifier.padding(bottom = 6.dp)
                     ) {
-                        Text(text = "🐸", fontSize = 12.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(text = "🐸", fontSize = 13.sp)
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
                             text = "Давид Жабов",
                             color = NeonEmerald,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "• Аудитор",
+                            color = TextMuted,
+                            fontSize = 10.sp
                         )
                     }
                 }
 
-                Text(
-                    text = content,
-                    color = TextLight,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    fontWeight = FontWeight.Normal
-                )
+                if (!isUser && (content.contains("#") || content.contains("**") || content.contains("- "))) {
+                    com.example.ui.components.MarkdownFormattedText(
+                        markdownText = content,
+                        fontSize = 13.sp
+                    )
+                } else {
+                    Text(
+                        text = content,
+                        color = TextLight,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(4.dp))
 

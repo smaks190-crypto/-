@@ -1008,43 +1008,28 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             }
 
             if (showReportDialog) {
-                val activeAuditText = if (aiAuditLoading) {
-                    aiAuditResult ?: ""
-                } else {
-                    savedAiAudit?.auditText ?: aiAuditResult ?: ""
-                }
-                val periodTitleName = when (periodType) {
-                    PeriodType.DAY -> "День ($selectedDateDay)"
-                    PeriodType.WEEK -> "Неделя ($selectedDateDay)"
-                    PeriodType.MONTH -> "${com.example.ui.screens.MonthsRu.getOrElse(selectedMonthIdx) { "Месяц" }}"
-                    PeriodType.ALL -> "Период (с $allPeriodStart по $allPeriodEnd)"
-                }
                 val context = androidx.compose.ui.platform.LocalContext.current
                 val profileKey = currentProfile?.name ?: "default"
                 val appPrefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
-                ReportDetailsDialog(
-                    periodTitle = periodTitleName,
-                    auditText = activeAuditText,
-                    isLoading = aiAuditLoading,
-                    isGeneratingReaction = isGeneratingReaction,
-                    auditTimestamp = savedAiAudit?.timestamp,
-                    profileName = currentProfile?.name ?: "Вы",
-                    notifications = notifications,
-                    initialTab = reportDialogTab,
-                    onRequestAudit = {
-                        viewModel.requestAiAudit(filteredTransactions)
-                        true
-                    },
-                    onMarkAllRead = {
-                        appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
-                        viewModel.markNotificationsAsRead()
-                    },
-                    onDismiss = {
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = {
                         showReportDialog = false
                         appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
                         viewModel.markNotificationsAsRead()
-                    }
-                )
+                    },
+                    properties = androidx.compose.ui.window.DialogProperties(
+                        usePlatformDefaultWidth = false,
+                        decorFitsSystemWindows = false
+                    )
+                ) {
+                    com.example.davidapp.DavidChatScreen(
+                        onBack = {
+                            showReportDialog = false
+                            appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
+                            viewModel.markNotificationsAsRead()
+                        }
+                    )
+                }
             }
 
             // --- NATIVE OVERLAY FOR VOICE & MANUAL FAB ---

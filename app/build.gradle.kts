@@ -112,6 +112,10 @@ android {
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
+configurations.all {
+  exclude(group = "androidx.compose.compiler", module = "compiler")
+}
+
 secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
