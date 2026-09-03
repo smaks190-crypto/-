@@ -19,6 +19,13 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import kotlin.math.sin
+import kotlin.math.PI
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -634,50 +641,44 @@ fun VoiceRecordingOverlay(
             .padding(bottom = boxBottomPadding, end = boxEndPadding),
         contentAlignment = Alignment.BottomEnd
     ) {
-        MovingNeonGlow(
-            isRecording = isVoiceActive || isListening,
-            amplitude = normalizedAmplitude,
-            widthDp = cardWidthAnim.value,
-            heightDp = cardHeightAnim.value
+        Box(
+            modifier = Modifier
+                .width(cardWidthAnim.value.dp)
+                .height(cardHeightAnim.value.dp)
+                .shadow(
+                    elevation = if (showAsExpanded) (24 * borderAlpha).dp else 24.dp,
+                    shape = RoundedCornerShape(28.dp),
+                    clip = false,
+                    ambientColor = if (showAsExpanded) neonColor1.copy(alpha = borderAlpha) else Indigo500.copy(alpha = 0.8f),
+                    spotColor = if (showAsExpanded) neonColor2.copy(alpha = borderAlpha) else Indigo500.copy(alpha = 0.8f)
+                )
+                .background(surfaceColor, RoundedCornerShape(28.dp))
+                .border(
+                    width = 2.dp,
+                    brush = dynamicGradient,
+                    shape = RoundedCornerShape(28.dp)
+                )
+                .clip(RoundedCornerShape(28.dp)),
+            contentAlignment = Alignment.BottomEnd
         ) {
             Box(
-                modifier = Modifier
-                    .width(cardWidthAnim.value.dp)
-                    .height(cardHeightAnim.value.dp)
-                    .shadow(
-                        elevation = if (showAsExpanded) (24 * borderAlpha).dp else 24.dp,
-                        shape = RoundedCornerShape(28.dp),
-                        clip = false,
-                        ambientColor = if (showAsExpanded) neonColor1.copy(alpha = borderAlpha) else Indigo500.copy(alpha = 0.8f),
-                        spotColor = if (showAsExpanded) neonColor2.copy(alpha = borderAlpha) else Indigo500.copy(alpha = 0.8f)
-                    )
-                    .background(surfaceColor, RoundedCornerShape(28.dp))
-                    .border(
-                        width = 2.dp,
-                        brush = dynamicGradient,
-                        shape = RoundedCornerShape(28.dp)
-                    )
-                    .clip(RoundedCornerShape(28.dp)),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.BottomEnd
             ) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.BottomEnd
-                ) {
-                    AnimatedContent(
-                        targetState = currentOverlayState,
-                        label = "overlay_content",
-                        transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) }
-                    ) { overlayState ->
-                        when (overlayState) {
-                            OverlayState.CONSENT -> {
-                                VoiceConsentPane(
-                                    onAccept = {
-                                        viewModel.setGeminiConsentGiven(true)
-                                        showConsentRequested = false
-                                        tempApiKeyText = apiKey
-                                        showApiKeyRequested = true
-                                    },
+                AnimatedContent(
+                    targetState = currentOverlayState,
+                    label = "overlay_content",
+                    transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) }
+                ) { overlayState ->
+                    when (overlayState) {
+                        OverlayState.CONSENT -> {
+                            VoiceConsentPane(
+                                onAccept = {
+                                    viewModel.setGeminiConsentGiven(true)
+                                    showConsentRequested = false
+                                    tempApiKeyText = apiKey
+                                    showApiKeyRequested = true
+                                },
                                     dynamicGradient = dynamicGradient
                                 )
                             }
@@ -755,37 +756,58 @@ fun VoiceRecordingOverlay(
                                                 }
                                             } else {
                                                 Column(
+                                                    modifier = Modifier.fillMaxWidth(),
                                                     horizontalAlignment = Alignment.CenterHorizontally,
                                                     verticalArrangement = Arrangement.Center
                                                 ) {
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.Center
-                                                    ) {
-                                                        if (isRecordingLocked) {
-                                                            Icon(
-                                                                imageVector = Icons.Default.Lock,
-                                                                contentDescription = "Зафиксировано",
-                                                                tint = Rose500,
-                                                                modifier = Modifier.size(14.dp)
-                                                            )
-                                                            Spacer(modifier = Modifier.width(6.dp))
-                                                        }
-                                                        val statusText = when (voskStatus) {
-                                                            "DOWNLOADING" -> {
-                                                                val pct = (voskProgress?.let { (it * 100).toInt() } ?: 0)
-                                                                "Скачивание офлайн-модели ($pct%)"
-                                                            }
-                                                            "EXTRACTING" -> "Настройка модели..."
-                                                            else -> "Слушаю..."
+                                                    val isDownloadingOrExtracting = voskStatus == "DOWNLOADING" || voskStatus == "EXTRACTING"
+                                                    if (isDownloadingOrExtracting) {
+                                                        val statusText = if (voskStatus == "DOWNLOADING") {
+                                                            val pct = (voskProgress?.let { (it * 100).toInt() } ?: 0)
+                                                            "Скачивание офлайн-модели ($pct%)"
+                                                        } else {
+                                                            "Настройка модели..."
                                                         }
                                                         Text(
                                                             text = statusText,
-                                                            color = if (voskStatus == "DOWNLOADING" || voskStatus == "EXTRACTING") Emerald400 else Rose500,
+                                                            color = Emerald400,
                                                             fontSize = 13.sp,
                                                             fontWeight = FontWeight.Bold,
                                                             modifier = Modifier.padding(vertical = 4.dp)
                                                         )
+                                                    } else {
+                                                        // 32-Band Seamless Neon Glow Waveform Visualizer
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(38.dp),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Neon32BandVoiceVisualizer(
+                                                                amplitude = normalizedAmplitude,
+                                                                modifier = Modifier
+                                                                    .fillMaxWidth()
+                                                                    .height(36.dp)
+                                                            )
+
+                                                            if (isRecordingLocked) {
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .align(Alignment.CenterStart)
+                                                                        .padding(start = 4.dp)
+                                                                        .size(20.dp)
+                                                                        .background(DarkBg.copy(alpha = 0.6f), CircleShape),
+                                                                    contentAlignment = Alignment.Center
+                                                                ) {
+                                                                    Icon(
+                                                                        imageVector = Icons.Default.Lock,
+                                                                        contentDescription = "Зафиксировано",
+                                                                        tint = Rose500,
+                                                                        modifier = Modifier.size(12.dp)
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
                                                     }
 
                                                     if (activeText.isNotBlank() && !isListening) {
@@ -809,6 +831,7 @@ fun VoiceRecordingOverlay(
                         }
                     }
 
+
                     // Single Unified FAB Button
                     FABContainer(
                         modifier = Modifier.padding(bottom = fabPaddingBottom, end = fabPaddingEnd),
@@ -822,6 +845,169 @@ fun VoiceRecordingOverlay(
                 }
             }
         }
+    }
+
+/**
+ * 32-полосный непрерывный визуализатор голоса с неоновым свечением.
+ * Отрисовывает плавную синусоидально-гармоническую световую волну по 32 спектральным узлам
+ * без дискретных столбцов (seamless neon audio wave / glow).
+ */
+@Composable
+fun Neon32BandVoiceVisualizer(
+    amplitude: Float,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "voice_visualizer_anim")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "phase"
+    )
+    val secondaryPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (-2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(1700, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "secondaryPhase"
+    )
+
+    val animatedAmp by animateFloatAsState(
+        targetValue = amplitude.coerceIn(0.08f, 1f),
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
+        label = "animated_amplitude"
+    )
+
+    Canvas(
+        modifier = modifier
+    ) {
+        val width = size.width
+        val height = size.height
+        val centerY = height / 2f
+        val maxWaveHeight = (height * 0.42f) * animatedAmp.coerceIn(0.15f, 1f)
+
+        val bandCount = 32
+        val stepX = width / (bandCount - 1).toFloat()
+
+        val points = FloatArray(bandCount)
+        for (i in 0 until bandCount) {
+            val t = i.toFloat() / (bandCount - 1)
+            // Hann window function to smoothly fade ends to the baseline
+            val window = sin(PI * t).toFloat()
+            val h1 = sin(phase + i * 0.42f).toFloat()
+            val h2 = sin(secondaryPhase + i * 0.88f).toFloat() * 0.45f
+            val h3 = sin(phase * 1.6f + i * 1.3f).toFloat() * 0.25f
+
+            val displacement = (h1 + h2 + h3) * maxWaveHeight * window
+            points[i] = displacement
+        }
+
+        val wavePath = Path()
+        val glowFillPath = Path()
+        val mirrorPath = Path()
+
+        wavePath.moveTo(0f, centerY + points[0])
+        glowFillPath.moveTo(0f, centerY)
+        glowFillPath.lineTo(0f, centerY + points[0])
+
+        for (i in 0 until bandCount - 1) {
+            val x0 = i * stepX
+            val y0 = centerY + points[i]
+            val x1 = (i + 1) * stepX
+            val y1 = centerY + points[i + 1]
+
+            val cx = (x0 + x1) / 2f
+            wavePath.cubicTo(cx, y0, cx, y1, x1, y1)
+            glowFillPath.cubicTo(cx, y0, cx, y1, x1, y1)
+        }
+        glowFillPath.lineTo(width, centerY)
+        glowFillPath.close()
+
+        mirrorPath.moveTo(0f, centerY - points[0] * 0.65f)
+        for (i in 0 until bandCount - 1) {
+            val x0 = i * stepX
+            val y0 = centerY - points[i] * 0.65f
+            val x1 = (i + 1) * stepX
+            val y1 = centerY - points[i + 1] * 0.65f
+
+            val cx = (x0 + x1) / 2f
+            mirrorPath.cubicTo(cx, y0, cx, y1, x1, y1)
+        }
+
+        val neonGradient = Brush.horizontalGradient(
+            colors = listOf(
+                Emerald400,
+                Indigo500,
+                Rose500,
+                Indigo500,
+                Emerald400
+            )
+        )
+
+        // 1. Soft glowing fill under the wave
+        drawPath(
+            path = glowFillPath,
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Indigo500.copy(alpha = 0.22f * animatedAmp),
+                    Color.Transparent
+                ),
+                startY = centerY - maxWaveHeight,
+                endY = centerY + maxWaveHeight
+            )
+        )
+
+        // 2. Wide outer neon glow
+        drawPath(
+            path = wavePath,
+            brush = neonGradient,
+            style = Stroke(
+                width = 6.dp.toPx(),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            ),
+            alpha = 0.35f * animatedAmp.coerceIn(0.5f, 1f)
+        )
+
+        // 3. Mid neon glow aura
+        drawPath(
+            path = wavePath,
+            brush = neonGradient,
+            style = Stroke(
+                width = 3.dp.toPx(),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            ),
+            alpha = 0.85f
+        )
+
+        // 4. White-hot core filament
+        drawPath(
+            path = wavePath,
+            color = Color.White.copy(alpha = 0.95f),
+            style = Stroke(
+                width = 1.2.dp.toPx(),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
+        )
+
+        // 5. Mirrored secondary subtle wave
+        drawPath(
+            path = mirrorPath,
+            brush = neonGradient,
+            style = Stroke(
+                width = 1.5.dp.toPx(),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            ),
+            alpha = 0.4f
+        )
     }
 }
 

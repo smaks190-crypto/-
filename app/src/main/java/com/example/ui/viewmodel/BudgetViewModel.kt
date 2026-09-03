@@ -658,12 +658,12 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun importBackupAsNewBudget(json: String, onCompleted: (Boolean) -> Unit = {}) {
+    fun importBackupAsNewBudget(json: String, customName: String? = null, onCompleted: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
-            val newProfile = repository.importBackupAsNewBudget(json)
+            val newProfile = repository.importBackupAsNewBudget(json, customName)
             if (newProfile != null) {
                 selectBudget(newProfile.id)
-                _toastMessage.emit("Создан новый бюджет «${newProfile.name}»!")
+                _toastMessage.emit("Бюджет «${newProfile.name}» успешно загружен!")
                 onCompleted(true)
             } else {
                 _toastMessage.emit("Ошибка чтения файла или формата JSON")

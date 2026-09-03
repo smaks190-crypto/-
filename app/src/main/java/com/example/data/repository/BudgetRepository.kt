@@ -33,6 +33,7 @@ import java.util.Date
 import java.util.Locale
 
 data class BudgetBackup(
+    val profileName: String? = null,
     val transactions: List<TransactionEntity>? = emptyList(),
     val goals: List<GoalEntity>? = emptyList(),
     val categories: List<CategoryEntity>? = emptyList(),
@@ -537,11 +538,18 @@ class BudgetRepository(
 
     suspend fun syncToFile() {
         try {
+            val profileName = allProfiles.first().firstOrNull()?.name
             val txs = allTransactions.first()
             val goals = allGoals.first()
             val cats = allCategories.first()
             val accs = allAccounts.first()
-            val backup = BudgetBackup(txs, goals, cats, accs)
+            val backup = BudgetBackup(
+                profileName = profileName,
+                transactions = txs,
+                goals = goals,
+                categories = cats,
+                accounts = accs
+            )
             val json = backupAdapter.toJson(backup)
             storageFile.writeText(json)
         } catch (_: Exception) {}
@@ -699,11 +707,19 @@ class BudgetRepository(
 
 
     suspend fun exportJson(): String {
+        val currentProfiles = allProfiles.first()
+        val profile = currentProfiles.firstOrNull()
         val txs = allTransactions.first()
         val goals = allGoals.first()
         val cats = allCategories.first()
         val accs = allAccounts.first()
-        val backup = BudgetBackup(txs, goals, cats, accs)
+        val backup = BudgetBackup(
+            profileName = profile?.name,
+            transactions = txs,
+            goals = goals,
+            categories = cats,
+            accounts = accs
+        )
         val json = backupAdapter.toJson(backup)
         try {
             storageFile.writeText(json)
@@ -712,11 +728,19 @@ class BudgetRepository(
     }
 
     suspend fun exportJsonForBudget(budgetId: String): String {
+        val profile = allProfiles.first().firstOrNull { it.id == budgetId }
+        val profileName = profile?.name
         val txs = transactionDao.getTransactionsByBudgetId(budgetId).first()
         val goals = goalDao.getGoalsByBudgetId(budgetId).first()
         val cats = categoryDao.getCategoriesByBudgetId(budgetId).first()
         val accs = accountDao.getAccountsByBudgetId(budgetId).first()
-        val backup = BudgetBackup(txs, goals, cats, accs)
+        val backup = BudgetBackup(
+            profileName = profileName,
+            transactions = txs,
+            goals = goals,
+            categories = cats,
+            accounts = accs
+        )
         val json = backupAdapter.toJson(backup)
         try {
             val file = java.io.File(context.filesDir, "budget_${budgetId}.json")
@@ -729,7 +753,7 @@ class BudgetRepository(
         return try {
             val backup = backupAdapter.fromJson(jsonStr) ?: return null
             val dateStr = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
-            val name = customName ?: "Бюджет из копии ($dateStr)"
+            val name = customName ?: backup.profileName?.takeIf { it.isNotBlank() } ?: "Бюджет из копии ($dateStr)"
             val profile = createProfile(name)
             val newBudgetId = profile.id
 
@@ -763,7 +787,13 @@ class BudgetRepository(
             if (cats.isNotEmpty()) categoryDao.insertCategories(cats)
 
             val file = java.io.File(context.filesDir, "budget_${newBudgetId}.json")
-            val updatedBackup = BudgetBackup(txs, goals, cats, accs)
+            val updatedBackup = BudgetBackup(
+                profileName = name,
+                transactions = txs,
+                goals = goals,
+                categories = cats,
+                accounts = accs
+            )
             file.writeText(backupAdapter.toJson(updatedBackup))
             profile
         } catch (e: Exception) {
@@ -778,6 +808,9 @@ class BudgetRepository(
             clearAllData()
 
             val bId = targetBudgetId ?: "default"
+            val profileName = backup.profileName?.takeIf { it.isNotBlank() } ?: "Основной"
+            budgetProfileDao.insertProfile(BudgetProfileEntity(id = bId, name = profileName))
+
             val rawTxs = backup.transactions ?: emptyList()
             val rawGoals = backup.goals ?: emptyList()
             val rawCats = backup.categories ?: emptyList()
@@ -793,7 +826,13 @@ class BudgetRepository(
             if (goals.isNotEmpty()) goalDao.insertGoals(goals)
             if (cats.isNotEmpty()) categoryDao.insertCategories(cats)
 
-            val updatedBackup = BudgetBackup(txs, goals, cats, accs)
+            val updatedBackup = BudgetBackup(
+                profileName = profileName,
+                transactions = txs,
+                goals = goals,
+                categories = cats,
+                accounts = accs
+            )
             val updatedJson = backupAdapter.toJson(updatedBackup)
             storageFile.writeText(updatedJson)
             true

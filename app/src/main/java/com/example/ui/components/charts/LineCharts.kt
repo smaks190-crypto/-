@@ -102,34 +102,46 @@ fun ExpenseDynamicsAreaChartCard(
         val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
 
         if (selectedPeriod == "Неделя") {
+            // Find current week's dates strictly (Monday to Sunday)
+            val currentCal = java.util.Calendar.getInstance().apply {
+                firstDayOfWeek = java.util.Calendar.MONDAY
+                set(java.util.Calendar.DAY_OF_WEEK, java.util.Calendar.MONDAY)
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }
+            val weekDates = (0..6).map { dayOffset ->
+                val dayCal = (currentCal.clone() as java.util.Calendar).apply {
+                    add(java.util.Calendar.DAY_OF_YEAR, dayOffset)
+                }
+                sdf.format(dayCal.time)
+            }
             val map = DoubleArray(7) { 0.0 }
             expenseTx.forEach { tx ->
-                try {
-                    val txDate = sdf.parse(tx.date)
-                    if (txDate != null) {
-                        val cal = java.util.Calendar.getInstance().apply { time = txDate }
-                        val dayOfWeek = (cal.get(java.util.Calendar.DAY_OF_WEEK) + 5) % 7 // 0=Mon .. 6=Sun
-                        map[dayOfWeek] += tx.amount
-                    }
-                } catch (e: Exception) {
-                    val day = tx.date.split("-").lastOrNull()?.toIntOrNull() ?: 1
-                    val dayOfWeek = (day - 1) % 7
-                    map[dayOfWeek] += tx.amount
+                val idx = weekDates.indexOf(tx.date)
+                if (idx in 0..6) {
+                    map[idx] += tx.amount
                 }
             }
             Pair(map.toList(), weekDays)
         } else {
-            // Group by day of month for the transactions passed (1..maxDay)
+            // Group by day of month for the current month
+            val currentCal = java.util.Calendar.getInstance()
+            val currentYearMonth = String.format(java.util.Locale.US, "%04d-%02d", currentCal.get(java.util.Calendar.YEAR), currentCal.get(java.util.Calendar.MONTH) + 1)
+            val daysInMonth = currentCal.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+
             val map = mutableMapOf<Int, Double>()
-            var maxDayInTx = 28
             expenseTx.forEach { tx ->
-                val day = tx.date.split("-").lastOrNull()?.toIntOrNull() ?: 1
-                map[day] = (map[day] ?: 0.0) + tx.amount
-                if (day > maxDayInTx) maxDayInTx = day
+                if (tx.date.startsWith(currentYearMonth)) {
+                    val day = tx.date.split("-").lastOrNull()?.toIntOrNull()
+                    if (day != null && day in 1..daysInMonth) {
+                        map[day] = (map[day] ?: 0.0) + tx.amount
+                    }
+                }
             }
-            val totalDays = maxOf(maxDayInTx, 30)
-            val points = (1..totalDays).map { day -> map[day] ?: 0.0 }
-            val labels = listOf("1", "5", "10", "15", "20", "25", "$totalDays")
+            val points = (1..daysInMonth).map { day -> map[day] ?: 0.0 }
+            val labels = listOf("1", "5", "10", "15", "20", "25", "$daysInMonth")
             Pair(points, labels)
         }
     }

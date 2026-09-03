@@ -458,7 +458,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                             onRenameBudget = { id, name -> viewModel.renameBudget(id, name) },
                             onDeleteBudget = { id -> viewModel.deleteBudget(id) },
                             onExportBudget = { budgetId -> triggerDirectExport(budgetId) },
-                            onImportFromBackup = { json -> viewModel.importBackupAsNewBudget(json) },
+                            onImportFromBackup = { json, nameHint -> viewModel.importBackupAsNewBudget(json, nameHint) },
                             onOpenApiKeyModal = {
                                 settingsInitialScreen = com.example.ui.components.SettingsScreen.API_KEY
                                 showSettingsHubModal = true

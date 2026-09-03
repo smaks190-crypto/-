@@ -159,10 +159,15 @@ class VoiceInputManager(private val context: Context) {
                 _voskProgress.value = null
 
                 val buffer = ByteArray(8192)
+                val canonicalDestDir = context.filesDir.canonicalPath
                 ZipInputStream(BufferedInputStream(tempZip.inputStream())).use { zis ->
                     var entry = zis.nextEntry
                     while (entry != null) {
                         val newFile = File(context.filesDir, entry.name)
+                        val canonicalDestination = newFile.canonicalPath
+                        if (!canonicalDestination.startsWith(canonicalDestDir + File.separator) && canonicalDestination != canonicalDestDir) {
+                            throw SecurityException("Обнаружена попытка выхода за пределы директории (Zip Slip): ${entry.name}")
+                        }
                         if (entry.isDirectory) {
                             newFile.mkdirs()
                         } else {

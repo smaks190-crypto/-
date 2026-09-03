@@ -2,10 +2,14 @@ package com.example.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Base64
 import androidx.biometric.BiometricManager
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import java.security.MessageDigest
+import java.security.SecureRandom
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 
 class SecurityManager(context: Context) {
     private val oldPrefs: SharedPreferences =
@@ -62,7 +66,8 @@ class SecurityManager(context: Context) {
     }
 
     fun setPin(pin: String) {
-        val hash = hashPin(pin)
+        val salt = generateSalt()
+        val hash = hashPinWithSalt(pin, salt)
         prefs.edit()
             .putString(KEY_PIN_HASH, hash)
             .putBoolean(KEY_PIN_ENABLED, true)
@@ -81,7 +86,34 @@ class SecurityManager(context: Context) {
 
     fun verifyPin(pin: String): Boolean {
         val storedHash = getPinHash()
-        return storedHash.isNotEmpty() && storedHash == hashPin(pin)
+        if (storedHash.isEmpty()) return false
+
+        // 1. Check if stored hash uses modern PBKDF2 format
+        if (storedHash.startsWith(PBKDF2_PREFIX)) {
+            val parts = storedHash.removePrefix(PBKDF2_PREFIX).split("$")
+            if (parts.size == 2) {
+                try {
+                    val salt = Base64.decode(parts[0], Base64.NO_WRAP)
+                    val expectedHash = parts[1]
+                    val spec = PBEKeySpec(pin.toCharArray(), salt, PBKDF2_ITERATIONS, PBKDF2_KEY_LENGTH)
+                    val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                    val actualHashBytes = factory.generateSecret(spec).encoded
+                    val actualHash = Base64.encodeToString(actualHashBytes, Base64.NO_WRAP)
+                    return MessageDigest.isEqual(expectedHash.toByteArray(Charsets.UTF_8), actualHash.toByteArray(Charsets.UTF_8))
+                } catch (e: Exception) {
+                    return false
+                }
+            }
+        }
+
+        // 2. Backward compatibility with legacy SHA-256
+        val legacy = legacySha256(pin)
+        val matches = MessageDigest.isEqual(storedHash.toByteArray(Charsets.UTF_8), legacy.toByteArray(Charsets.UTF_8))
+        if (matches) {
+            // Automatically upgrade legacy hash to PBKDF2 with salt
+            setPin(pin)
+        }
+        return matches
     }
 
     private fun getPinHash(): String {
@@ -103,7 +135,23 @@ class SecurityManager(context: Context) {
         return biometricManager.canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS
     }
 
-    private fun hashPin(pin: String): String {
+    private fun generateSalt(): ByteArray {
+        val random = SecureRandom()
+        val salt = ByteArray(16)
+        random.nextBytes(salt)
+        return salt
+    }
+
+    private fun hashPinWithSalt(pin: String, salt: ByteArray): String {
+        val spec = PBEKeySpec(pin.toCharArray(), salt, PBKDF2_ITERATIONS, PBKDF2_KEY_LENGTH)
+        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val hash = factory.generateSecret(spec).encoded
+        val saltBase64 = Base64.encodeToString(salt, Base64.NO_WRAP)
+        val hashBase64 = Base64.encodeToString(hash, Base64.NO_WRAP)
+        return "$PBKDF2_PREFIX$saltBase64$$hashBase64"
+    }
+
+    private fun legacySha256(pin: String): String {
         val bytes = MessageDigest.getInstance("SHA-256").digest(pin.toByteArray())
         return bytes.joinToString("") { "%02x".format(it) }
     }
@@ -154,5 +202,9 @@ class SecurityManager(context: Context) {
         private const val KEY_BIOMETRIC_ENABLED = "key_biometric_enabled"
         private const val KEY_FAILED_ATTEMPTS = "key_failed_attempts"
         private const val KEY_BLOCKED_UNTIL = "key_blocked_until"
+
+        private const val PBKDF2_PREFIX = "pbkdf2$"
+        private const val PBKDF2_ITERATIONS = 12000
+        private const val PBKDF2_KEY_LENGTH = 256
     }
 }

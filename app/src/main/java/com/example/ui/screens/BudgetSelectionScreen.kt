@@ -119,7 +119,7 @@ fun BudgetSelectionScreen(
     onRenameBudget: (id: String, newName: String) -> Unit,
     onDeleteBudget: (id: String) -> Unit,
     onExportBudget: (id: String) -> Unit,
-    onImportFromBackup: (json: String) -> Unit,
+    onImportFromBackup: (json: String, nameHint: String?) -> Unit,
     onOpenApiKeyModal: (() -> Unit)? = null,
     onOpenCategoriesModal: (() -> Unit)? = null,
     onOpenReminderModal: (() -> Unit)? = null,
@@ -152,6 +152,38 @@ fun BudgetSelectionScreen(
     }
 
     // Launchers for Importing (Opening JSON file)
+    fun extractNameHint(uri: Uri): String? {
+        var fileName: String? = null
+        if (uri.scheme == "content") {
+            try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (idx >= 0) {
+                            fileName = cursor.getString(idx)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        if (fileName == null) {
+            fileName = uri.lastPathSegment
+        }
+        if (fileName != null) {
+            val baseName = fileName!!.substringBeforeLast(".json").substringBeforeLast(".txt")
+            val cleanName = baseName
+                .replace(Regex("_\\d{8}_\\d{4}$"), "")
+                .replace(Regex("_\\d{8}$"), "")
+                .replace(Regex("_\\d{4}-\\d{2}-\\d{2}.*$"), "")
+                .replace("_", " ")
+                .trim()
+            if (cleanName.isNotBlank() && cleanName.lowercase() != "budget" && cleanName.lowercase() != "backup") {
+                return cleanName
+            }
+        }
+        return null
+    }
+
     val openDocumentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -161,7 +193,8 @@ fun BudgetSelectionScreen(
                     inputStream.bufferedReader().use { it.readText() }
                 }
                 if (!json.isNullOrBlank()) {
-                    onImportFromBackup(json)
+                    val nameHint = extractNameHint(uri)
+                    onImportFromBackup(json, nameHint)
                 } else {
                     Toast.makeText(context, "Выбранный файл пуст", Toast.LENGTH_SHORT).show()
                 }
@@ -180,7 +213,8 @@ fun BudgetSelectionScreen(
                     inputStream.bufferedReader().use { it.readText() }
                 }
                 if (!json.isNullOrBlank()) {
-                    onImportFromBackup(json)
+                    val nameHint = extractNameHint(uri)
+                    onImportFromBackup(json, nameHint)
                 } else {
                     Toast.makeText(context, "Выбранный файл пуст", Toast.LENGTH_SHORT).show()
                 }

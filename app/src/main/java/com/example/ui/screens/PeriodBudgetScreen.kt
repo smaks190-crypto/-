@@ -851,7 +851,7 @@ fun PeriodBudgetScreen(
 
         // --- STEP 4: RECENT TRANSACTIONS SECTION ("ПОСЛЕДНИЕ ОПЕРАЦИИ") ---
         val recentTxList = remember(filteredTransactions) {
-            filteredTransactions.take(10)
+            filteredTransactions.take(5)
         }
 
         Card(

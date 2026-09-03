@@ -58,7 +58,8 @@ object ExportImportHelper {
 
     fun shareJsonFile(context: Context, fileName: String, jsonContent: String) {
         try {
-            val cacheFile = File(context.cacheDir, fileName)
+            val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+            val cacheFile = File(exportDir, fileName)
             cacheFile.writeText(jsonContent, Charsets.UTF_8)
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", cacheFile)
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
@@ -69,15 +70,7 @@ object ExportImportHelper {
             }
             context.startActivity(Intent.createChooser(shareIntent, "Сохранить или отправить резервную копию"))
         } catch (e: Exception) {
-            // Ultimate fallback: copy to clipboard
-            try {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                val clip = android.content.ClipData.newPlainText("BudgetBackup", jsonContent)
-                clipboard.setPrimaryClip(clip)
-                Toast.makeText(context, "Резервная копия скопирована в буфер обмена", Toast.LENGTH_LONG).show()
-            } catch (e2: Exception) {
-                Toast.makeText(context, "Ошибка экспорта: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
+            Toast.makeText(context, "Не удалось экспортировать файл: ${e.localizedMessage ?: e.message}", Toast.LENGTH_LONG).show()
         }
     }
 }
