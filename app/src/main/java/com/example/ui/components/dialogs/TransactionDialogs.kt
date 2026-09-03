@@ -787,6 +787,7 @@ fun AddTransactionDialog(
 fun AllTransactionsDialog(
     transactions: List<TransactionEntity>,
     onDeleteTransaction: ((String) -> Unit)? = null,
+    onRestoreTransaction: ((TransactionEntity) -> Unit)? = null,
     onEditTransaction: ((TransactionEntity) -> Unit)? = null,
     initialFilterType: String = "all",
     initialDate: String? = null,
@@ -794,6 +795,7 @@ fun AllTransactionsDialog(
 ) {
     val lazyListState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     val isScrolled by remember {
         androidx.compose.runtime.derivedStateOf {
             lazyListState.firstVisibleItemIndex > 0 || lazyListState.firstVisibleItemScrollOffset > 40
@@ -2836,7 +2838,23 @@ fun AllTransactionsDialog(
                                 items(itemsForDay, key = { it.id }) { tx ->
                                     TransactionRowItem(
                                         item = tx,
-                                        onDelete = { txId -> onDeleteTransaction?.invoke(txId) },
+                                        onDelete = { txId ->
+                                            val targetTx = transactions.find { it.id == txId }
+                                            onDeleteTransaction?.invoke(txId)
+                                            if (targetTx != null) {
+                                                coroutineScope.launch {
+                                                    snackbarHostState.currentSnackbarData?.dismiss()
+                                                    val result = snackbarHostState.showSnackbar(
+                                                        message = "Операция «${targetTx.category}» удалена",
+                                                        actionLabel = "ОТМЕНИТЬ",
+                                                        duration = SnackbarDuration.Short
+                                                    )
+                                                    if (result == SnackbarResult.ActionPerformed) {
+                                                        onRestoreTransaction?.invoke(targetTx)
+                                                    }
+                                                }
+                                            }
+                                        },
                                         onClick = { onEditTransaction?.invoke(tx) }
                                     )
                                 }
@@ -2844,6 +2862,21 @@ fun AllTransactionsDialog(
                         }
                     }
                 }
+            }
+
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp)
+            ) { snackbarData ->
+                Snackbar(
+                    snackbarData = snackbarData,
+                    containerColor = Slate900,
+                    contentColor = Color.White,
+                    actionColor = Emerald400,
+                    shape = RoundedCornerShape(16.dp)
+                )
             }
         }
 

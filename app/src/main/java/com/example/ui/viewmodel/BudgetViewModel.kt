@@ -600,6 +600,13 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         stateDelegate.deleteTransaction(id)
     }
 
+    fun restoreTransaction(transaction: TransactionEntity) {
+        viewModelScope.launch {
+            repository.insertTransaction(transaction)
+            _toastMessage.emit("Операция восстановлена")
+        }
+    }
+
     fun addGoalProgress(goalId: String, amount: Double) {
         stateDelegate.addGoalProgress(goalId, amount, todayIso)
     }
