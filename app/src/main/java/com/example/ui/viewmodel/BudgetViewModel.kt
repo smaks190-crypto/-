@@ -289,6 +289,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         )
 
         stateDelegate = TransactionStateDelegate(
+            context = application.applicationContext,
             repository = repository,
             scope = viewModelScope,
             selectedBudgetId = _selectedBudgetId.asStateFlow(),
@@ -311,6 +312,17 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             aiAuditLoading = _aiAuditLoading,
             getSavedApiKey = { getSavedApiKey() }
         )
+
+        viewModelScope.launch {
+            transactions.collect { txList ->
+                val totalIncome = txList.filter { it.type == "income" }.sumOf { it.amount }
+                val totalExpense = txList.filter { it.type == "expense" }.sumOf { it.amount }
+                val totalBalance = totalIncome - totalExpense
+                if (totalBalance >= 1_000_000.0) {
+                    com.example.davidapp.AchievementManager.unlock(getApplication(), "millionaire")
+                }
+            }
+        }
 
         viewModelScope.launch {
             repository.ensureDefaultProfileExists()
@@ -420,6 +432,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
             if (newLimit != null && newLimit > 0) {
+                com.example.davidapp.AchievementManager.unlock(getApplication(), "budget_limit")
                 _toastMessage.emit("Лимит $categoryName: ${newLimit.toInt()} ₽")
             } else {
                 _toastMessage.emit("Лимит для $categoryName сброшен")
@@ -653,6 +666,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     fun exportBackup(onExported: (String) -> Unit) {
         viewModelScope.launch {
+            com.example.davidapp.AchievementManager.unlock(getApplication(), "security_backup")
             val json = repository.exportJsonForBudget(_selectedBudgetId.value ?: "default")
             onExported(json)
         }
@@ -660,6 +674,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     fun exportBackupForBudget(budgetId: String, onExported: (String) -> Unit) {
         viewModelScope.launch {
+            com.example.davidapp.AchievementManager.unlock(getApplication(), "security_backup")
             val json = repository.exportJsonForBudget(budgetId)
             onExported(json)
         }

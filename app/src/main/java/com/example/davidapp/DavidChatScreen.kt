@@ -74,6 +74,7 @@ fun DavidChatScreen(
     val isTyping by viewModel.isDavidTyping.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
+    var showAchievementsDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     // Автоматическая прокрутка вниз при поступлении новых сообщений или активации ввода
@@ -92,6 +93,7 @@ fun DavidChatScreen(
         DavidChatTopBar(
             onBack = onBack,
             onReset = { viewModel.resetSession(effectiveSoundManager) },
+            onOpenAchievements = { showAchievementsDialog = true },
             isTyping = isTyping,
             modifier = Modifier.statusBarsPadding()
         )
@@ -167,4 +169,9 @@ fun DavidChatScreen(
             )
         }
     }
+
+    if (showAchievementsDialog) {
+        AchievementsDialog(onDismiss = { showAchievementsDialog = false })
+    }
 }
+

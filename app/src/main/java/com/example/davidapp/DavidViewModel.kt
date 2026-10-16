@@ -183,6 +183,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
             soundManager?.playClick()
             when (action) {
                 "START" -> {
+                    AchievementManager.unlock(getApplication(), "first_audit")
                     val userMsg = ChatMessage(
                         sender = currentProfileName,
                         type = ChatMessageType.Text("🐸 Давид, сделай отчет"),
@@ -211,6 +212,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                     _messages.value = _messages.value + botMsg
                 }
                 "AUDIT" -> {
+                    AchievementManager.unlock(getApplication(), "first_audit")
                     val userMsg = ChatMessage(
                         sender = currentProfileName,
                         type = ChatMessageType.Text("⚡ Провести экспресс-аудит за текущий месяц"),
@@ -270,6 +272,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
      * Обработка выбора периода: рассчитывает реальные данные профиля, формирует отчет и интерактивный график
      */
     fun processFile(period: String, soundManager: SoundManager? = null) {
+        AchievementManager.unlock(getApplication(), "first_audit")
         viewModelScope.launch {
             soundManager?.playSend()
 
@@ -581,6 +584,7 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
      */
     fun sendUserMessage(text: String, soundManager: SoundManager? = null) {
         if (text.isBlank()) return
+        AchievementManager.unlock(getApplication(), "first_chat")
 
         viewModelScope.launch {
             soundManager?.playSend()

@@ -63,6 +63,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.WindowInsets
@@ -157,6 +158,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         com.example.utils.GlobalConsoleLogger.setupUncaughtExceptionHandler()
+        com.example.davidapp.AchievementManager.initIfNeeded(this)
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -1082,8 +1084,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 }
             }
         }
-
-        }
         if (com.example.BuildConfig.DEBUG) {
             com.example.ui.components.GlobalConsoleOverlay(
                 isVisible = showDebugConsole,
@@ -1108,6 +1108,14 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 onExitFinished = { splashStage = "done" }
             )
         }
+
+        // Всплывающее неоновое уведомление о получении достижения от Давида Жабова
+        com.example.davidapp.AchievementUnlockedBanner(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+        )
+    }
 }
 
 @Composable

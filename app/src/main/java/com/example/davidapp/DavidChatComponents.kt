@@ -11,6 +11,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -80,6 +82,7 @@ import java.util.Locale
 val NeonEmerald = Color(0xFF34D399)
 val NeonIndigo = Color(0xFF6366F1)
 val NeonRose = Color(0xFFF43F5E)
+val NeonAmber = Color(0xFFF59E0B)
 val DarkBackground = Color(0xFF0B0F19)
 val DarkSurface = Color(0xFF0F172A)
 val DarkCard = Color(0xFF1E293B)
@@ -100,6 +103,7 @@ val CyberpunkGradient = Brush.linearGradient(
 fun DavidChatTopBar(
     onBack: (() -> Unit)? = null,
     onReset: () -> Unit,
+    onOpenAchievements: (() -> Unit)? = null,
     isTyping: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -217,6 +221,38 @@ fun DavidChatTopBar(
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
                 )
+            }
+
+            if (onOpenAchievements != null) {
+                val achievementsList by AchievementManager.achievementsFlow.collectAsState()
+                val unlockedCount = achievementsList.count { it.isUnlocked }
+
+                IconButton(
+                    onClick = onOpenAchievements,
+                    modifier = Modifier.testTag("david_chat_achievements_button")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(text = "🏆", fontSize = 18.sp)
+                        if (unlockedCount > 0) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .offset(x = 6.dp, y = (-4).dp)
+                                    .size(15.dp)
+                                    .clip(CircleShape)
+                                    .background(NeonAmber)
+                            ) {
+                                Text(
+                                    text = unlockedCount.toString(),
+                                    color = DarkBackground,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             IconButton(

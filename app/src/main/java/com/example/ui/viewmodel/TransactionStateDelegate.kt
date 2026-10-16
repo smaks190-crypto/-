@@ -18,6 +18,7 @@ import java.util.Locale
 import java.util.UUID
 
 class TransactionStateDelegate(
+    private val context: Context,
     private val repository: BudgetRepository,
     private val scope: CoroutineScope,
     private val selectedBudgetId: StateFlow<String?>,
@@ -218,6 +219,11 @@ class TransactionStateDelegate(
                     amount = amount,
                     isFirstToday = isFirstToday
                 )
+                if (category.contains("совмест", true) || category.contains("сплит", true) || category.contains("дележ", true) ||
+                    subcategory.contains("совмест", true) || subcategory.contains("сплит", true) || subcategory.contains("пополам", true) || subcategory.contains("дележ", true)) {
+                    com.example.davidapp.AchievementManager.unlock(context, "expense_share")
+                }
+
                 var extraCtx = ""
                 if (accountId != null) {
                     val debt = accounts.value.find { it.id == accountId }
@@ -234,6 +240,10 @@ class TransactionStateDelegate(
                         }
                         val debtTotal = debt.balance.coerceAtLeast(1.0)
                         val ratioPercent = (amount / debtTotal) * 100.0
+
+                        if (remaining <= 0) {
+                            com.example.davidapp.AchievementManager.unlock(context, "debt_slayer")
+                        }
 
                         extraCtx = if (remaining <= 0) {
                             "Операция относится к долгу '${debt.name}' (общая сумма долга была: ${debtTotal.toInt()} руб.). ПОЛЬЗОВАТЕЛЬ ТОЛЬКО ЧТО ПОЛНОСТЬЮ ЗАКРЫЛ/ПОГАСИЛ ЭТОТ ДОЛГ! Прокомментируй это радостное событие."
@@ -311,6 +321,7 @@ class TransactionStateDelegate(
         operations: List<ParsedVoiceOperation>,
         dateStr: String
     ) {
+        com.example.davidapp.AchievementManager.unlock(context, "voice_master")
         val currentBudgetId = selectedBudgetId.value ?: "default"
         com.example.utils.GlobalConsoleLogger.i("UI", "Подтверждение операций (${operations.size} шт.), дата: $dateStr")
         scope.launch {
@@ -535,6 +546,7 @@ class TransactionStateDelegate(
 
             if (updatedCurrent >= goal.targetAmount) {
                 // Goal reached! Delete goal automatically and emit congratulation event
+                com.example.davidapp.AchievementManager.unlock(context, "goal_completed")
                 repository.deleteGoal(goal.id)
                 completedGoalEvent.value = goal.name
             } else {
@@ -547,6 +559,7 @@ class TransactionStateDelegate(
     fun saveNewGoal(name: String, target: Double, current: Double, todayIso: String) {
         val currentBudgetId = selectedBudgetId.value ?: "default"
         com.example.utils.GlobalConsoleLogger.i("UI", "Создание финансовой цели: «$name» (цель: $target ₽, начально: $current ₽)")
+        com.example.davidapp.AchievementManager.unlock(context, "first_goal")
         scope.launch {
             if (current > 0) {
                 val tx = TransactionEntity(
@@ -562,6 +575,7 @@ class TransactionStateDelegate(
 
             if (target > 0 && current >= target) {
                 // Goal created already at or above 100% target
+                com.example.davidapp.AchievementManager.unlock(context, "goal_completed")
                 completedGoalEvent.value = name
             } else {
                 val goal = GoalEntity(
@@ -633,6 +647,9 @@ class TransactionStateDelegate(
                     accountNumber = accountNumber
                 )
             )
+            if (type == "joint" || type == "shared" || name.contains("совмест", true) || name.contains("общий", true)) {
+                com.example.davidapp.AchievementManager.unlock(context, "expense_share")
+            }
             
             if (type == "we_owe" || type == "owes_us") {
                 try {

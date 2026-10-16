@@ -64,6 +64,9 @@ class SecurityManager(context: Context) {
 
     fun setPinEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_PIN_ENABLED, enabled).apply()
+        if (enabled) {
+            com.example.davidapp.AchievementManager.unlock(appContext, "security_backup")
+        }
     }
 
     fun setPin(pin: String) {
@@ -73,6 +76,7 @@ class SecurityManager(context: Context) {
             .putString(KEY_PIN_HASH, hash)
             .putBoolean(KEY_PIN_ENABLED, true)
             .apply()
+        com.example.davidapp.AchievementManager.unlock(appContext, "security_backup")
     }
 
     fun removePin() {

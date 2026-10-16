@@ -90,6 +90,17 @@ class SoundManager(context: Context) {
     }
 
     /**
+     * Победный звук при разблокировке достижения (Ачивки)
+     */
+    fun playAchievement() {
+        try {
+            toneGenerator?.startTone(ToneGenerator.TONE_PROP_PROMPT, 200)
+        } catch (e: Exception) {
+            Log.d("DavidSoundManager", "Error playing achievement sound: ${e.message}")
+        }
+    }
+
+    /**
      * Освобождение аудио-ресурсов
      */
     fun release() {
@@ -103,3 +114,9 @@ class SoundManager(context: Context) {
         }
     }
 }
+
+/**
+ * Алиас для обращения к менеджеру звуков Давида
+ */
+typealias DavidSoundManager = SoundManager
+
