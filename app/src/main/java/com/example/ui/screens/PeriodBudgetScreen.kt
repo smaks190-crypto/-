@@ -88,12 +88,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarDefaults
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.ui.window.Dialog
@@ -200,7 +194,8 @@ fun PeriodBudgetScreen(
     onToggleExpandIncome: () -> Unit,
     onRequestAiAudit: () -> Unit,
     onDeleteTransaction: (String) -> Unit,
-    onEditTransaction: ((TransactionEntity) -> Unit)? = null
+    onEditTransaction: ((TransactionEntity) -> Unit)? = null,
+    onOpenRecentTransactionsScreen: (() -> Unit)? = null
 ) {
     // Monthly Calculations (Incomes, Expenses, Carryover, Total Balance always show monthly values)
     val monthStart = remember(selectedMonthIdx, selectedYear) {
@@ -279,25 +274,6 @@ fun PeriodBudgetScreen(
 
     val pagerState = rememberPagerState(initialPage = if (activeSubTab == "expense") 0 else 1, pageCount = { 2 })
     val coroutineScope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    val handleDeleteWithUndo: (String) -> Unit = { txId ->
-        val targetTx = allTransactions.find { it.id == txId } ?: filteredTransactions.find { it.id == txId }
-        onDeleteTransaction(txId)
-        if (targetTx != null && viewModel != null) {
-            coroutineScope.launch {
-                snackbarHostState.currentSnackbarData?.dismiss()
-                val result = snackbarHostState.showSnackbar(
-                    message = "Операция «${targetTx.category}» удалена",
-                    actionLabel = "ОТМЕНИТЬ",
-                    duration = SnackbarDuration.Short
-                )
-                if (result == SnackbarResult.ActionPerformed) {
-                    viewModel.restoreTransaction(targetTx)
-                }
-            }
-        }
-    }
 
     val isExpenseTab = pagerState.currentPage == 0
 
@@ -317,20 +293,19 @@ fun PeriodBudgetScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                    indication = null
-                ) {
-                    com.example.ui.components.SwipeToRevealController.requestCollapseAll()
-                }
-                .verticalScroll(rememberScrollState())
-                .padding(vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null
+            ) {
+                com.example.ui.components.SwipeToRevealController.requestCollapseAll()
+            }
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
         // --- MAIN NEON BALANCE CARD ---
         Box(
             modifier = Modifier
@@ -866,7 +841,6 @@ fun PeriodBudgetScreen(
             AllTransactionsDialog(
                 transactions = if (allTransactions.isNotEmpty()) allTransactions else filteredTransactions,
                 onDeleteTransaction = onDeleteTransaction,
-                onRestoreTransaction = { tx -> viewModel?.restoreTransaction(tx) },
                 onEditTransaction = onEditTransaction,
                 initialFilterType = initialAllTransactionsFilter,
                 initialDate = currentPeriodInitialDate,
@@ -920,8 +894,12 @@ fun PeriodBudgetScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable {
-                                    initialAllTransactionsFilter = "all"
-                                    showAllTransactionsDialog = true
+                                    if (onOpenRecentTransactionsScreen != null) {
+                                        onOpenRecentTransactionsScreen()
+                                    } else {
+                                        initialAllTransactionsFilter = "all"
+                                        showAllTransactionsDialog = true
+                                    }
                                 }
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         )
@@ -949,9 +927,9 @@ fun PeriodBudgetScreen(
                         recentTxList.forEach { tx ->
                             TransactionRowItem(
                                 item = tx,
-                                onDelete = handleDeleteWithUndo,
+                                onDelete = onDeleteTransaction,
                                 onClick = null,
-                                canDelete = true
+                                canDelete = false
                             )
                         }
                     }
@@ -960,22 +938,6 @@ fun PeriodBudgetScreen(
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-        }
-
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(16.dp)
-        ) { snackbarData ->
-            Snackbar(
-                snackbarData = snackbarData,
-                containerColor = Slate900,
-                contentColor = Color.White,
-                actionColor = Emerald400,
-                shape = RoundedCornerShape(16.dp)
-            )
-        }
     }
 }
 

@@ -27,7 +27,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.zip.ZipInputStream
 
-class VoiceInputManager(private val context: Context) {
+class VoiceInputManager(context: Context) {
+    private val context: Context = context.applicationContext
     private var systemSpeechRecognizer: SystemSpeechRecognizer? = null
     private var voskModel: Model? = null
     private var voskRecognizer: Recognizer? = null
@@ -159,15 +160,10 @@ class VoiceInputManager(private val context: Context) {
                 _voskProgress.value = null
 
                 val buffer = ByteArray(8192)
-                val canonicalDestDir = context.filesDir.canonicalPath
                 ZipInputStream(BufferedInputStream(tempZip.inputStream())).use { zis ->
                     var entry = zis.nextEntry
                     while (entry != null) {
                         val newFile = File(context.filesDir, entry.name)
-                        val canonicalDestination = newFile.canonicalPath
-                        if (!canonicalDestination.startsWith(canonicalDestDir + File.separator) && canonicalDestination != canonicalDestDir) {
-                            throw SecurityException("Обнаружена попытка выхода за пределы директории (Zip Slip): ${entry.name}")
-                        }
                         if (entry.isDirectory) {
                             newFile.mkdirs()
                         } else {

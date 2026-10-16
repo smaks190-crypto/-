@@ -18,7 +18,7 @@ class ReminderReceiver : BroadcastReceiver() {
                 try {
                     val todayIso = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
                     val db = com.example.data.db.AppDatabase.getDatabase(context)
-                    val expenseCount = db.transactionDao().getExpenseCountForDateSync(todayIso)
+                    val expenseCount = db.transactionDao().getExpenseCountForDate(todayIso)
                     if (expenseCount == 0) {
                         ReminderManager.showNotification(context)
                     }

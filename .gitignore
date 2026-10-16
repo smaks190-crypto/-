@@ -1,19 +1,75 @@
-*.iml
-.gradle
-.kotlin
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
+# Built application files
+*.apk
+*.aar
+*.aab
+*.ap_
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated files
+bin/
+gen/
+out/
+/build/
+app/build/
 .externalNativeBuild
 .cxx
+
+# Gradle files
+.gradle/
+build/
+
+# Local configuration file (sdk path, etc)
 local.properties
-.env
+
+# Proguard / R8 mapping files
+proguard/
+
+# Android Studio / IntelliJ IDEA
+*.iml
+.idea/
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+*.iws
+
+# OS-specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+captures/
+
+# Secrets, keys and environment files
+.env*
+!.env.example
+*.jks
+*.keystore
 debug.keystore
 my-upload-key.jks
+google-services.json
+
+# Temporary scripts & Python caches
+fix*.py
+patch*.py
+update*.py
+add_imports*.py
+clean_nested.py
+count_braces.py
+implement_single_animated_content.py
+rewrite_chat.py
+test_icon.py
+test_typing.py
+__pycache__/
+*.pyc
+*.pyo

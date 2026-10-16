@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,7 +42,7 @@ fun MovingNeonGlow(
     val infiniteTransition = rememberInfiniteTransition(label = "neon_perimeter_orbit")
     
     // Smooth progress 0f..1f travelling around the capsule perimeter
-    val progress by infiniteTransition.animateFloat(
+    val progressState = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -53,7 +52,7 @@ fun MovingNeonGlow(
         label = "perimeter_progress"
     )
 
-    val wavePhase by infiniteTransition.animateFloat(
+    val wavePhaseState = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 6.28318f,
         animationSpec = infiniteRepeatable(
@@ -63,11 +62,10 @@ fun MovingNeonGlow(
         label = "wave_phase"
     )
 
-    val activeAmp = if (isRecording) {
-        (amplitude + (sin(wavePhase.toDouble()).toFloat() * 0.15f + 0.15f)).coerceIn(0.15f, 1f)
-    } else 0f
-
     val pathMeasure = remember { PathMeasure() }
+    val capsulePath = remember { Path() }
+    val segmentPath1 = remember { Path() }
+    val segmentPath2 = remember { Path() }
 
     Box(
         modifier = modifier,
@@ -79,6 +77,11 @@ fun MovingNeonGlow(
                     .width((widthDp + 36f).dp)
                     .height((heightDp + 36f).dp)
             ) {
+                // Read animation state inside DRAW scope only, preventing full composable recomposition!
+                val progress = progressState.value
+                val wavePhase = wavePhaseState.value
+                val activeAmp = (amplitude + (sin(wavePhase.toDouble()).toFloat() * 0.15f + 0.15f)).coerceIn(0.15f, 1f)
+
                 val outerStrokeWidth = 14f + activeAmp * 16f
                 val midStrokeWidth = 6f + activeAmp * 8f
                 val coreStrokeWidth = 2.5f + activeAmp * 2.5f
@@ -88,14 +91,13 @@ fun MovingNeonGlow(
                 val rectRight = rectLeft + widthDp.dp.toPx()
                 val rectBottom = rectTop + heightDp.dp.toPx()
 
-                val capsulePath = Path().apply {
-                    addRoundRect(
-                        RoundRect(
-                            rect = Rect(rectLeft, rectTop, rectRight, rectBottom),
-                            cornerRadius = CornerRadius(cornerRadiusDp.dp.toPx())
-                        )
+                capsulePath.rewind()
+                capsulePath.addRoundRect(
+                    RoundRect(
+                        rect = Rect(rectLeft, rectTop, rectRight, rectBottom),
+                        cornerRadius = CornerRadius(cornerRadiusDp.dp.toPx())
                     )
-                }
+                )
 
                 pathMeasure.setPath(capsulePath, false)
                 val totalLength = pathMeasure.length
@@ -124,7 +126,9 @@ fun MovingNeonGlow(
                             startDist = startDist,
                             endDist = endDist,
                             color = color.copy(alpha = 0.22f + activeAmp * 0.28f),
-                            strokeWidth = outerStrokeWidth
+                            strokeWidth = outerStrokeWidth,
+                            path1 = segmentPath1,
+                            path2 = segmentPath2
                         )
                         // Medium glow
                         drawPerimeterSegment(
@@ -133,7 +137,9 @@ fun MovingNeonGlow(
                             startDist = startDist,
                             endDist = endDist,
                             color = color.copy(alpha = 0.55f + activeAmp * 0.35f),
-                            strokeWidth = midStrokeWidth
+                            strokeWidth = midStrokeWidth,
+                            path1 = segmentPath1,
+                            path2 = segmentPath2
                         )
                         // Core bright line
                         drawPerimeterSegment(
@@ -142,7 +148,9 @@ fun MovingNeonGlow(
                             startDist = startDist,
                             endDist = endDist,
                             color = color.copy(alpha = 0.95f),
-                            strokeWidth = coreStrokeWidth
+                            strokeWidth = coreStrokeWidth,
+                            path1 = segmentPath1,
+                            path2 = segmentPath2
                         )
                     }
                 }
@@ -159,29 +167,31 @@ private fun DrawScope.drawPerimeterSegment(
     startDist: Float,
     endDist: Float,
     color: Color,
-    strokeWidth: Float
+    strokeWidth: Float,
+    path1: Path,
+    path2: Path
 ) {
     if (endDist <= totalLength) {
-        val segmentPath = Path()
-        pathMeasure.getSegment(startDist, endDist, segmentPath, true)
+        path1.rewind()
+        pathMeasure.getSegment(startDist, endDist, path1, true)
         drawPath(
-            path = segmentPath,
+            path = path1,
             color = color,
             style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
         )
     } else {
         // Wrap around path length
-        val segmentPath1 = Path()
-        pathMeasure.getSegment(startDist, totalLength, segmentPath1, true)
+        path1.rewind()
+        pathMeasure.getSegment(startDist, totalLength, path1, true)
         drawPath(
-            path = segmentPath1,
+            path = path1,
             color = color,
             style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
         )
-        val segmentPath2 = Path()
-        pathMeasure.getSegment(0f, endDist - totalLength, segmentPath2, true)
+        path2.rewind()
+        pathMeasure.getSegment(0f, endDist - totalLength, path2, true)
         drawPath(
-            path = segmentPath2,
+            path = path2,
             color = color,
             style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
         )

@@ -22,6 +22,8 @@ import com.example.data.db.TransactionDao
 import com.example.data.db.TransactionEntity
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.first
@@ -41,7 +43,7 @@ data class BudgetBackup(
 )
 
 class BudgetRepository(
-    private val context: android.content.Context,
+    context: android.content.Context,
     private val budgetProfileDao: BudgetProfileDao,
     private val transactionDao: TransactionDao,
     private val goalDao: GoalDao,
@@ -52,6 +54,7 @@ class BudgetRepository(
     private val db: AppDatabase,
     private val apiService: GeminiApiService = RetrofitClient.service
 ) {
+    private val context: android.content.Context = context.applicationContext
     val allProfiles: Flow<List<BudgetProfileEntity>> = budgetProfileDao.getAllProfiles()
 
     fun getAccountsForBudget(budgetId: String): Flow<List<AccountEntity>> =
@@ -677,7 +680,7 @@ class BudgetRepository(
         }
     }
 
-    suspend fun loadDemoData(budgetId: String = "default") {
+    suspend fun loadDemoData(budgetId: String = "default") = withContext(Dispatchers.IO) {
         initializeDefaultCategories(budgetId)
 
         try {
@@ -706,7 +709,7 @@ class BudgetRepository(
     }
 
 
-    suspend fun exportJson(): String {
+    suspend fun exportJson(): String = withContext(Dispatchers.IO) {
         val currentProfiles = allProfiles.first()
         val profile = currentProfiles.firstOrNull()
         val txs = allTransactions.first()
@@ -724,10 +727,10 @@ class BudgetRepository(
         try {
             storageFile.writeText(json)
         } catch (_: Exception) {}
-        return json
+        json
     }
 
-    suspend fun exportJsonForBudget(budgetId: String): String {
+    suspend fun exportJsonForBudget(budgetId: String): String = withContext(Dispatchers.IO) {
         val profile = allProfiles.first().firstOrNull { it.id == budgetId }
         val profileName = profile?.name
         val txs = transactionDao.getTransactionsByBudgetId(budgetId).first()
@@ -746,12 +749,12 @@ class BudgetRepository(
             val file = java.io.File(context.filesDir, "budget_${budgetId}.json")
             file.writeText(json)
         } catch (_: Exception) {}
-        return json
+        json
     }
 
-    suspend fun importBackupAsNewBudget(jsonStr: String, customName: String? = null): BudgetProfileEntity? {
-        return try {
-            val backup = backupAdapter.fromJson(jsonStr) ?: return null
+    suspend fun importBackupAsNewBudget(jsonStr: String, customName: String? = null): BudgetProfileEntity? = withContext(Dispatchers.IO) {
+        try {
+            val backup = backupAdapter.fromJson(jsonStr) ?: return@withContext null
             val dateStr = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
             val name = customName ?: backup.profileName?.takeIf { it.isNotBlank() } ?: "Бюджет из копии ($dateStr)"
             val profile = createProfile(name)
@@ -802,9 +805,9 @@ class BudgetRepository(
         }
     }
 
-    suspend fun importJson(jsonStr: String, targetBudgetId: String? = null): Boolean {
-        return try {
-            val backup = backupAdapter.fromJson(jsonStr) ?: return false
+    suspend fun importJson(jsonStr: String, targetBudgetId: String? = null): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val backup = backupAdapter.fromJson(jsonStr) ?: return@withContext false
             clearAllData()
 
             val bId = targetBudgetId ?: "default"

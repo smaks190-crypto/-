@@ -68,6 +68,11 @@
     <fields>;
     <methods>;
 }
+-keep class com.yourdomain.davidbudget.data.** { *; }
+-keepclassmembers class com.yourdomain.davidbudget.data.** {
+    <fields>;
+    <methods>;
+}
 
 # Jetpack Compose State & Node Retention
 -keepclassmembers class * extends androidx.compose.ui.node.Owner { *; }
@@ -87,5 +92,11 @@
     public static *** clear(...);
     public static *** setupUncaughtExceptionHandler(...);
 }
-
-
+-assumenosideeffects class com.yourdomain.davidbudget.utils.GlobalConsoleLogger {
+    public static *** d(...);
+    public static *** i(...);
+    public static *** w(...);
+    public static *** e(...);
+    public static *** clear(...);
+    public static *** setupUncaughtExceptionHandler(...);
+}

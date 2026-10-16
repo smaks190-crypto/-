@@ -78,6 +78,8 @@ object RetrofitClient {
         .addInterceptor(HttpLoggingInterceptor { message ->
             com.example.utils.GlobalConsoleLogger.i("NETWORK", message)
         }.apply {
+            redactHeader("x-goog-api-key")
+            redactHeader("Authorization")
             level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC else HttpLoggingInterceptor.Level.NONE
         })
         .build()

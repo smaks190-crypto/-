@@ -1,10 +1,12 @@
 package com.example.davidapp
 
+import androidx.compose.runtime.Immutable
 import java.util.UUID
 
 /**
  * Типы сообщений в чате с Давидом Жабовым
  */
+@Immutable
 sealed class ChatMessageType {
     /**
      * Обычное текстовое сообщение
@@ -48,6 +50,7 @@ sealed class ChatMessageType {
 /**
  * Модель отдельного сообщения в диалоге
  */
+@Immutable
 data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val sender: String,

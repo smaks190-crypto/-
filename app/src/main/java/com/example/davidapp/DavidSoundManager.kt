@@ -11,7 +11,8 @@ import android.util.Log
  * Менеджер звуковых эффектов для отправки, получения и системных сигналов.
  * Поддерживает кастомные SoundPool ресурсы и встроенный аппаратный ToneGenerator.
  */
-class SoundManager(private val context: Context) {
+class SoundManager(context: Context) {
+    private val context: Context = context.applicationContext
 
     private var soundPool: SoundPool? = null
     private var sendSoundId: Int = 0

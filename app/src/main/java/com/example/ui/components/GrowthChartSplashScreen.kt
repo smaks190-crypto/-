@@ -66,14 +66,12 @@ fun WalletSplashIcon(
         }
     }
 
-    val flyOffVal = flyOffAnim.value
-    // Fade out as it nears bottom exit
-    val alphaVal = entryAlpha.value * (if (flyOffVal > 0.5f) 1f - ((flyOffVal - 0.5f) / 0.5f) else 1f)
-
     Box(
         modifier = modifier
             .size(size)
             .graphicsLayer {
+                val flyOffVal = flyOffAnim.value
+                val alphaVal = entryAlpha.value * (if (flyOffVal > 0.5f) 1f - ((flyOffVal - 0.5f) / 0.5f) else 1f)
                 alpha = alphaVal.coerceIn(0f, 1f)
                 // Slide DOWN off the bottom of the screen
                 translationY = flyOffVal * size.toPx() * 3.5f

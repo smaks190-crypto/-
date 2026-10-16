@@ -42,6 +42,9 @@ interface TransactionDao {
     suspend fun insertTransactions(transactions: List<TransactionEntity>)
 
     @Query("SELECT COUNT(*) FROM transactions WHERE date = :dateStr AND type = 'expense'")
+    suspend fun getExpenseCountForDate(dateStr: String): Int
+
+    @Query("SELECT COUNT(*) FROM transactions WHERE date = :dateStr AND type = 'expense'")
     fun getExpenseCountForDateSync(dateStr: String): Int
 
     @Query("DELETE FROM transactions WHERE id = :id")

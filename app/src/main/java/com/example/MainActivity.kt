@@ -121,6 +121,7 @@ import com.example.ui.screens.AnnualReportScreen
 import com.example.ui.screens.BudgetSelectionScreen
 import com.example.ui.screens.GoalsScreen
 import com.example.ui.screens.PeriodBudgetScreen
+import com.example.ui.screens.RecentTransactionsScreen
 import com.example.ui.components.ReportDetailsDialog
 import com.example.ui.theme.BudgetTheme
 import com.example.ui.theme.Emerald400
@@ -238,6 +239,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     var showAddGoalModal by remember { mutableStateOf(false) }
     var showSettingsHubModal by remember { mutableStateOf(false) }
     var showReportDialog by remember { mutableStateOf(false) }
+    var showRecentTransactionsScreen by remember { mutableStateOf(false) }
     var reportDialogTab by remember { mutableStateOf(0) }
     var settingsInitialScreen by remember { mutableStateOf(com.example.ui.components.SettingsScreen.HUB) }
 
@@ -567,8 +569,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                 }
 
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     // --- EXPANDING NEON CHAT BUTTON CONTAINER ---
                                     val context = androidx.compose.ui.platform.LocalContext.current
@@ -866,7 +867,8 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             viewModel.requestAiAudit(filteredTransactions)
                                         },
                                         onDeleteTransaction = { viewModel.deleteTransaction(it) },
-                                        onEditTransaction = { editingTransaction = it }
+                                        onEditTransaction = { editingTransaction = it },
+                                        onOpenRecentTransactionsScreen = { showRecentTransactionsScreen = true }
                                     )
 
                                     1 -> DebtsScreen(
@@ -1035,13 +1037,23 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 }
             }
 
+            if (showRecentTransactionsScreen) {
+                RecentTransactionsScreen(
+                    transactions = transactions,
+                    accounts = accounts,
+                    onDeleteTransaction = { viewModel.deleteTransaction(it) },
+                    onEditTransaction = { editingTransaction = it },
+                    onBack = { showRecentTransactionsScreen = false }
+                )
+            }
+
             // --- NATIVE OVERLAY FOR VOICE & MANUAL FAB ---
             val parsedVoiceOperations by viewModel.parsedVoiceOperations.collectAsState()
             var isVoiceOverlayActive by remember { mutableStateOf(false) }
             val isVoicePipelineActive = isVoiceActive || isAnalyzingVoice || !parsedVoiceOperations.isNullOrEmpty() || showAddTxModal || isVoiceOverlayActive
 
             val isImeVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
-            val isAnyModalOpen = showSettingsHubModal || showCategoriesModal || showAddGoalModal || showConsentDialog || showReportDialog
+            val isAnyModalOpen = showSettingsHubModal || showCategoriesModal || showAddGoalModal || showConsentDialog || showReportDialog || showRecentTransactionsScreen
 
             Box(
                 modifier = Modifier

@@ -1,4 +1,4 @@
-package com.example.util
+package com.example.utils
 
 import android.content.ContentValues
 import android.content.Context
@@ -13,12 +13,13 @@ import java.io.File
 object ExportImportHelper {
 
     fun saveOrShareExportFile(context: Context, fileName: String, jsonContent: String) {
+        val appContext = context.applicationContext
         var savedSuccessfully = false
 
         // 1. Try MediaStore Downloads on Android Q+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
-                val resolver = context.contentResolver
+                val resolver = appContext.contentResolver
                 val contentValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
                     put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
@@ -29,23 +30,24 @@ object ExportImportHelper {
                     resolver.openOutputStream(uri)?.use { os ->
                         os.write(jsonContent.toByteArray(Charsets.UTF_8))
                     }
-                    Toast.makeText(context, "Сохранено в Загрузки: $fileName", Toast.LENGTH_LONG).show()
+                    Toast.makeText(appContext, "Сохранено в Загрузки: $fileName", Toast.LENGTH_LONG).show()
                     savedSuccessfully = true
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 savedSuccessfully = false
             }
         } else {
             // Android 9 and lower
             try {
+                @Suppress("DEPRECATION")
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 if (downloadsDir.exists() || downloadsDir.mkdirs()) {
                     val file = File(downloadsDir, fileName)
                     file.writeText(jsonContent, Charsets.UTF_8)
-                    Toast.makeText(context, "Сохранено в Загрузки: ${file.name}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(appContext, "Сохранено в Загрузки: ${file.name}", Toast.LENGTH_LONG).show()
                     savedSuccessfully = true
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 savedSuccessfully = false
             }
         }
@@ -67,8 +69,16 @@ object ExportImportHelper {
                 putExtra(Intent.EXTRA_STREAM, uri)
                 putExtra(Intent.EXTRA_SUBJECT, fileName)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                if (context !is android.app.Activity) {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
             }
-            context.startActivity(Intent.createChooser(shareIntent, "Сохранить или отправить резервную копию"))
+            val chooser = Intent.createChooser(shareIntent, "Сохранить или отправить резервную копию").apply {
+                if (context !is android.app.Activity) {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+            context.startActivity(chooser)
         } catch (e: Exception) {
             Toast.makeText(context, "Не удалось экспортировать файл: ${e.localizedMessage ?: e.message}", Toast.LENGTH_LONG).show()
         }

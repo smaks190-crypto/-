@@ -1,8 +1,6 @@
 package com.example.davidapp
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,12 +10,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -26,9 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -36,6 +30,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 /**
  * Основной экран чата с кибер-консультантом Давидом Жабовым.
  * Выполнен в стиле Dark Neon / Cyberpunk Minimalist.
+ * 
+ * Архитектура верстки:
+ * 1. Корневой Column с Modifier.fillMaxSize().
+ * 2. Список сообщений (LazyColumn) расположен в контейнере с Modifier.weight(1f),
+ *    что исключает выталкивание нижней панели ввода за пределы экрана при любом объеме сообщений.
+ * 3. Нижняя панель действий и ввода имеет Modifier.imePadding().navigationBarsPadding(),
+ *    что гарантирует корректное отображение над полосой жестов Android и клавиатурой.
  */
 @Composable
 fun DavidChatScreen(
@@ -49,7 +50,11 @@ fun DavidChatScreen(
 ) {
     val context = LocalContext.current
     val effectiveSoundManager = remember(soundManager) {
-        soundManager ?: SoundManager(context)
+        soundManager ?: SoundManager(context.applicationContext)
+    }
+
+    if (onBack != null) {
+        BackHandler(onBack = onBack)
     }
 
     LaunchedEffect(budgetId, profileName, apiKey) {
@@ -78,61 +83,24 @@ fun DavidChatScreen(
         }
     }
 
-    Scaffold(
-        containerColor = DarkBackground,
-        topBar = {
-            DavidChatTopBar(
-                onBack = onBack,
-                onReset = { viewModel.resetSession(effectiveSoundManager) },
-                isTyping = isTyping,
-                modifier = Modifier.statusBarsPadding()
-            )
-        },
-        bottomBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .imePadding()
-            ) {
-                // Динамическая панель действий согласно текущему этапу
-                DavidQuickActionsBar(
-                    stage = stage,
-                    onActionClick = { action ->
-                        viewModel.handleAction(action, effectiveSoundManager)
-                    },
-                    onPeriodSelect = { period ->
-                        viewModel.processFile(period, effectiveSoundManager)
-                    },
-                    onExportPdf = {
-                        viewModel.exportPdf(effectiveSoundManager)
-                    }
-                )
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+    ) {
+        // 1. Верхняя панель (с отступом статус-бара)
+        DavidChatTopBar(
+            onBack = onBack,
+            onReset = { viewModel.resetSession(effectiveSoundManager) },
+            isTyping = isTyping,
+            modifier = Modifier.statusBarsPadding()
+        )
 
-                // Поле ввода текста
-                DavidChatInputBar(
-                    text = inputText,
-                    onTextChange = { inputText = it },
-                    onSend = {
-                        if (inputText.isNotBlank()) {
-                            val textToSend = inputText
-                            inputText = ""
-                            viewModel.sendTextMessage(textToSend, effectiveSoundManager)
-                        }
-                    },
-                    onAttach = {
-                        viewModel.handleAction("START", effectiveSoundManager)
-                    }
-                )
-            }
-        },
-        modifier = modifier.fillMaxSize()
-    ) { paddingValues ->
+        // 2. Список сообщений: строго weight(1f), не выталкивает нижнюю панель
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .background(DarkBackground)
+                .weight(1f)
+                .fillMaxWidth()
         ) {
             LazyColumn(
                 state = listState,
@@ -159,6 +127,44 @@ fun DavidChatScreen(
                     Spacer(modifier = Modifier.height(14.dp))
                 }
             }
+        }
+
+        // 3. Нижняя панель действий и ввода с отступами от полосы жестов и мягкой клавиатуры
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .navigationBarsPadding()
+        ) {
+            // Динамическая панель действий согласно текущему этапу ("Давид, сделай отчет" и др.)
+            DavidQuickActionsBar(
+                stage = stage,
+                onActionClick = { action ->
+                    viewModel.handleAction(action, effectiveSoundManager)
+                },
+                onPeriodSelect = { period ->
+                    viewModel.processFile(period, effectiveSoundManager)
+                },
+                onExportPdf = {
+                    viewModel.exportPdf(effectiveSoundManager)
+                }
+            )
+
+            // Поле ввода текста со скрепкой и кнопкой отправки
+            DavidChatInputBar(
+                text = inputText,
+                onTextChange = { inputText = it },
+                onSend = {
+                    if (inputText.isNotBlank()) {
+                        val textToSend = inputText
+                        inputText = ""
+                        viewModel.sendTextMessage(textToSend, effectiveSoundManager)
+                    }
+                },
+                onAttach = {
+                    viewModel.handleAction("START", effectiveSoundManager)
+                }
+            )
         }
     }
 }

@@ -12,18 +12,19 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
 class SecurityManager(context: Context) {
+    private val appContext = context.applicationContext
     private val oldPrefs: SharedPreferences =
-        context.getSharedPreferences("app_security_prefs", Context.MODE_PRIVATE)
+        appContext.getSharedPreferences("app_security_prefs", Context.MODE_PRIVATE)
 
     private val prefs: SharedPreferences
 
     init {
         val securePrefs = try {
-            val masterKey = MasterKey.Builder(context)
+            val masterKey = MasterKey.Builder(appContext)
                 .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                 .build()
             EncryptedSharedPreferences.create(
-                context,
+                appContext,
                 "app_security_prefs_secure",
                 masterKey,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
@@ -31,7 +32,7 @@ class SecurityManager(context: Context) {
             )
         } catch (e: Exception) {
             // Fallback to standard SharedPreferences if encrypted initialization fails
-            context.getSharedPreferences("app_security_prefs_secure_fallback", Context.MODE_PRIVATE)
+            appContext.getSharedPreferences("app_security_prefs_secure_fallback", Context.MODE_PRIVATE)
         }
         prefs = securePrefs
 

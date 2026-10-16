@@ -44,13 +44,15 @@ fun RollingCurrencyText(
         )
     }
 
+    if (!animateFromZeroOnStart && currentText != text) {
+        currentText = text
+    }
+
     LaunchedEffect(text, animateKey) {
         if (animateFromZeroOnStart) {
             val zeroText = text.map { if (it.isDigit()) '0' else it }.joinToString("")
             currentText = zeroText
             delay(40)
-            currentText = text
-        } else {
             currentText = text
         }
     }

@@ -24,6 +24,13 @@ data class LogEntry(
     val message: String
 )
 
+/**
+ * Глобальный отладочный логгер приложения.
+ * В релизной сборке (BuildConfig.DEBUG == false) логирование полностью выключено:
+ * - Вызовы d/i/w/e не добавляют записи в память и не пишут в Logcat;
+ * - Обработчик UncaughtExceptionHandler не перехватывает системный поток;
+ * - R8 дополнительно удаляет вызовы благодаря правилам -assumenosideeffects в proguard-rules.pro.
+ */
 object GlobalConsoleLogger {
     private const val MAX_LOGS = 500
     private var nextId = 1L
@@ -85,6 +92,8 @@ object GlobalConsoleLogger {
 
     @Synchronized
     private fun addEntry(level: LogLevel, tag: String, message: String) {
+        if (!BuildConfig.DEBUG) return
+
         val entry = LogEntry(
             id = nextId++,
             timestamp = dateFormat.format(Date()),
