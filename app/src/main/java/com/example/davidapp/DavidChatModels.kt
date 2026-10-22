@@ -56,7 +56,8 @@ data class ChatMessage(
     val sender: String,
     val type: ChatMessageType,
     val timestamp: String = "12:00",
-    val isUser: Boolean = false
+    val isUser: Boolean = false,
+    val timestampMillis: Long = System.currentTimeMillis()
 )
 
 /**

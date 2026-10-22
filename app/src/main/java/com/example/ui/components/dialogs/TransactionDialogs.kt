@@ -805,7 +805,7 @@ fun AllTransactionsDialog(
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
     var sortOption by remember { mutableStateOf("date") }
     var filterType by remember { mutableStateOf(initialFilterType) } // "all", "income", "expense"
-    var selectedPeriod by remember { mutableStateOf("all") } // "all", "week", "month", "year", "custom"
+    var selectedPeriod by remember { mutableStateOf("month") } // "all", "week", "month", "year", "custom"
     var chartViewMode by remember { mutableStateOf("donut") } // "donut", "bar"
     var selectedAccountFilter by remember { mutableStateOf<String?>(null) } // null = all, "Black" etc.
     var excludeTransfers by remember { mutableStateOf(false) }
@@ -847,7 +847,7 @@ fun AllTransactionsDialog(
         if (!initialDate.isNullOrBlank()) {
             initialDate
         } else if (transactions.isNotEmpty()) {
-            transactions.first().date
+            transactions.maxByOrNull { it.date }?.date ?: transactions.first().date
         } else {
             SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         }
@@ -866,187 +866,126 @@ fun AllTransactionsDialog(
         else -> swipeMonthOffset
     }
 
-    LaunchedEffect(selectedPeriod, filterType) {
-        if (stableAnchorDateStr.isBlank()) {
-            stableAnchorDateStr = defaultAnchor
-        }
-        swipeWeekOffset = 0
-        swipeMonthOffset = 0
-        swipeYearOffset = 0
+    LaunchedEffect(filterType) {
         isDrilledDownToMixed = false
         selectedCategoryFilter = null
     }
 
-    val dynamicMonthLabel = remember(visibleDateStr.value, stableAnchorDateStr, customLabelStr, selectedPeriod, swipeMonthOffset, swipeWeekOffset, swipeYearOffset) {
-        if (!customLabelStr.isNullOrBlank()) {
+    LaunchedEffect(selectedPeriod) {
+        if (stableAnchorDateStr.isBlank()) {
+            stableAnchorDateStr = defaultAnchor
+        }
+        isDrilledDownToMixed = false
+        selectedCategoryFilter = null
+    }
+
+    val dynamicMonthLabel = remember(stableAnchorDateStr, customLabelStr, selectedPeriod, swipeMonthOffset, swipeWeekOffset, swipeYearOffset) {
+        if (selectedPeriod == "custom" && !customLabelStr.isNullOrBlank()) {
             customLabelStr!!
+        } else if (selectedPeriod == "all") {
+            "За всё время"
         } else {
-            val baseDateStr = if (selectedPeriod == "all" || selectedPeriod == "custom") visibleDateStr.value else stableAnchorDateStr
-            val anchorDateStr = baseDateStr.ifBlank { "2026-08-01" }
+            val anchorDateStr = stableAnchorDateStr.ifBlank { "2026-08-01" }
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
             val anchorDate = try { sdf.parse(anchorDateStr) } catch (e: Exception) { null } ?: Date()
             val cal = Calendar.getInstance().apply { time = anchorDate }
 
             if (selectedPeriod == "week") {
                 cal.add(Calendar.WEEK_OF_YEAR, swipeWeekOffset)
+                cal.firstDayOfWeek = Calendar.MONDAY
                 val startCal = (cal.clone() as Calendar).apply {
-                    set(Calendar.DAY_OF_WEEK, firstDayOfWeek)
+                    set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
                 }
-                val endCal = (cal.clone() as Calendar).apply {
-                    set(Calendar.DAY_OF_WEEK, firstDayOfWeek)
-                    add(Calendar.DAY_OF_WEEK, 6)
+                val endCal = (startCal.clone() as Calendar).apply {
+                    add(Calendar.DAY_OF_YEAR, 6)
                 }
                 val df = SimpleDateFormat("dd.MM", Locale.getDefault())
                 "Неделя ${df.format(startCal.time)} - ${df.format(endCal.time)}"
             } else if (selectedPeriod == "year") {
                 cal.add(Calendar.YEAR, swipeYearOffset)
                 "${cal.get(Calendar.YEAR)} год"
-            } else if (selectedPeriod == "month") {
+            } else {
                 cal.add(Calendar.MONTH, swipeMonthOffset)
                 val currentYear = Calendar.getInstance().get(Calendar.YEAR)
                 val monthYear = cal.get(Calendar.YEAR)
                 val formatPattern = if (monthYear != currentYear) "LLLL yyyy" else "LLLL"
                 val rawStr = SimpleDateFormat(formatPattern, Locale("ru", "RU")).format(cal.time)
                 rawStr.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale("ru", "RU")) else it.toString() }
-            } else {
-                try {
-                    val d = sdf.parse(anchorDateStr)
-                    if (d != null) {
-                        val parsedCal = Calendar.getInstance().apply { time = d }
-                        val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-                        val parsedYear = parsedCal.get(Calendar.YEAR)
-                        val formatPattern = if (parsedYear != currentYear) "LLLL yyyy" else "LLLL"
-                        val rawStr = SimpleDateFormat(formatPattern, Locale("ru", "RU")).format(d)
-                        rawStr.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale("ru", "RU")) else it.toString() }
-                    } else "Август"
-                } catch (e: Exception) {
-                    "Август"
-                }
             }
         }
     }
 
-    // Filter transactions by period ("week", "month", "year", "custom") relative to visible/selected month
-    val periodFilteredList = remember(transactions, selectedPeriod, customStartStr, customEndStr, visibleDateStr.value, stableAnchorDateStr, swipeWeekOffset, swipeMonthOffset, swipeYearOffset) {
-        if (selectedPeriod == "custom" && !customStartStr.isNullOrBlank() && !customEndStr.isNullOrBlank()) {
+    fun getFilteredListForOffset(offset: Int): List<TransactionEntity> {
+        if (selectedPeriod == "custom" && !customStartStr.isNullOrBlank() && !customEndStr.isNullOrBlank() && offset == currentOffsetInt) {
             val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
             val startDate = try { sdf.parse(customStartStr!!) } catch (e: Exception) { null }
             val endDate = try { sdf.parse(customEndStr!!) } catch (e: Exception) { null }
-            transactions.filter { tx ->
+            return transactions.filter { tx ->
                 val txDate = try { sdf.parse(tx.date) } catch (e: Exception) { null }
                 if (txDate == null) true
                 else if (startDate != null && endDate != null) {
                     !txDate.before(startDate) && !txDate.after(endDate)
                 } else true
             }
-        } else if (selectedPeriod == "week") {
-            val anchorDateStr = stableAnchorDateStr.ifBlank { "2026-08-01" }
-            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-            val anchorDate = try { sdf.parse(anchorDateStr) } catch(e: Exception) { null } ?: Date()
-            val cal = Calendar.getInstance().apply { time = anchorDate }
-            cal.add(Calendar.WEEK_OF_YEAR, swipeWeekOffset)
-            val adjustedDate = cal.time
-            transactions.filter { tx ->
-                val txDate = try { sdf.parse(tx.date) } catch(e: Exception) { null }
-                if (txDate == null) true
-                else {
-                    val diffMs = kotlin.math.abs(adjustedDate.time - txDate.time)
-                    val diffDays = diffMs / (1000 * 60 * 60 * 24)
-                    diffDays <= 7
-                }
-            }
-        } else if (selectedPeriod == "month") {
-            val anchorDateStr = stableAnchorDateStr.ifBlank { "2026-08-01" }
-            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-            val anchorDate = try { sdf.parse(anchorDateStr) } catch(e: Exception) { null } ?: Date()
-            val cal = Calendar.getInstance().apply { time = anchorDate }
-            cal.add(Calendar.MONTH, swipeMonthOffset)
-            val currentYear = cal.get(Calendar.YEAR)
-            val currentMonth = cal.get(Calendar.MONTH)
-            transactions.filter { tx ->
-                val txDate = try { sdf.parse(tx.date) } catch(e: Exception) { null }
-                if (txDate == null) true
-                else {
-                    val txCal = Calendar.getInstance().apply { time = txDate }
-                    txCal.get(Calendar.YEAR) == currentYear && txCal.get(Calendar.MONTH) == currentMonth
-                }
-            }
-        } else if (selectedPeriod == "year") {
-            val anchorDateStr = stableAnchorDateStr.ifBlank { "2026-08-01" }
-            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-            val anchorDate = try { sdf.parse(anchorDateStr) } catch(e: Exception) { null } ?: Date()
-            val cal = Calendar.getInstance().apply { time = anchorDate }
-            cal.add(Calendar.YEAR, swipeYearOffset)
-            val currentYear = cal.get(Calendar.YEAR)
-            transactions.filter { tx ->
-                val txDate = try { sdf.parse(tx.date) } catch(e: Exception) { null }
-                if (txDate == null) true
-                else {
-                    val txCal = Calendar.getInstance().apply { time = txDate }
-                    txCal.get(Calendar.YEAR) == currentYear
-                }
-            }
-        } else {
-            // "all" - show ALL transactions!
-            transactions
         }
-    }
+        if (selectedPeriod == "all" && offset == currentOffsetInt) {
+            return transactions
+        }
 
-    fun getFilteredListForOffset(offset: Int): List<TransactionEntity> {
         val effectivePeriod = if (selectedPeriod == "all" || selectedPeriod == "custom") "month" else selectedPeriod
-
-        val anchorDateStr = if (selectedPeriod == "all" || selectedPeriod == "custom") {
-            visibleDateStr.value.ifBlank { "2026-08-01" }
-        } else {
-            stableAnchorDateStr.ifBlank { "2026-08-01" }
-        }
+        val anchorDateStr = stableAnchorDateStr.ifBlank { "2026-08-01" }
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val anchorDate = try { sdf.parse(anchorDateStr) } catch(e: Exception) { null } ?: Date()
         val cal = Calendar.getInstance().apply { time = anchorDate }
 
-        val baseList = if (selectedPeriod == "custom") periodFilteredList else transactions
-
         return when (effectivePeriod) {
             "week" -> {
                 cal.add(Calendar.WEEK_OF_YEAR, offset)
-                val adjustedDate = cal.time
-                baseList.filter { tx ->
-                    val txDate = try { sdf.parse(tx.date) } catch(e: Exception) { null }
-                    if (txDate == null) true
-                    else {
-                        val diffMs = kotlin.math.abs(adjustedDate.time - txDate.time)
-                        val diffDays = diffMs / (1000 * 60 * 60 * 24)
-                        diffDays <= 7
-                    }
+                cal.firstDayOfWeek = Calendar.MONDAY
+                val startCal = (cal.clone() as Calendar).apply {
+                    set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                val endCal = (startCal.clone() as Calendar).apply {
+                    add(Calendar.DAY_OF_YEAR, 6)
+                    set(Calendar.HOUR_OF_DAY, 23)
+                    set(Calendar.MINUTE, 59)
+                    set(Calendar.SECOND, 59)
+                    set(Calendar.MILLISECOND, 999)
+                }
+                val startStr = sdf.format(startCal.time)
+                val endStr = sdf.format(endCal.time)
+                transactions.filter { tx ->
+                    tx.date >= startStr && tx.date <= endStr
                 }
             }
             "month" -> {
                 cal.add(Calendar.MONTH, offset)
                 val currentYear = cal.get(Calendar.YEAR)
-                val currentMonth = cal.get(Calendar.MONTH)
-                baseList.filter { tx ->
-                    val txDate = try { sdf.parse(tx.date) } catch(e: Exception) { null }
-                    if (txDate == null) true
-                    else {
-                        val txCal = Calendar.getInstance().apply { time = txDate }
-                        txCal.get(Calendar.YEAR) == currentYear && txCal.get(Calendar.MONTH) == currentMonth
-                    }
+                val currentMonth = cal.get(Calendar.MONTH) + 1
+                val monthPrefix = String.format(Locale.US, "%04d-%02d-", currentYear, currentMonth)
+                transactions.filter { tx ->
+                    tx.date.startsWith(monthPrefix)
                 }
             }
             "year" -> {
                 cal.add(Calendar.YEAR, offset)
                 val currentYear = cal.get(Calendar.YEAR)
-                baseList.filter { tx ->
-                    val txDate = try { sdf.parse(tx.date) } catch(e: Exception) { null }
-                    if (txDate == null) true
-                    else {
-                        val txCal = Calendar.getInstance().apply { time = txDate }
-                        txCal.get(Calendar.YEAR) == currentYear
-                    }
+                val yearPrefix = String.format(Locale.US, "%04d-", currentYear)
+                transactions.filter { tx ->
+                    tx.date.startsWith(yearPrefix)
                 }
             }
-            else -> baseList
+            else -> transactions
         }
+    }
+
+    // Filter transactions by period ("week", "month", "year", "custom", "all") synchronized with chart & header
+    val periodFilteredList = remember(transactions, selectedPeriod, customStartStr, customEndStr, stableAnchorDateStr, swipeWeekOffset, swipeMonthOffset, swipeYearOffset) {
+        getFilteredListForOffset(currentOffsetInt)
     }
 
     fun getCategoryTotalsForOffset(offset: Int): List<Pair<String, Double>> {
@@ -1087,20 +1026,9 @@ fun AllTransactionsDialog(
         }
     }
 
-    // Category sums map for current filter
-    val categoryTotalsMap = remember(typeFilteredList, visibleDateStr.value, selectedPeriod) {
-        val listForCategory = if (selectedPeriod == "all" || selectedPeriod == "custom") {
-            val dateParts = visibleDateStr.value.split("-")
-            if (dateParts.size >= 2) {
-                val prefix = "${dateParts[0]}-${dateParts[1]}-"
-                typeFilteredList.filter { it.date.startsWith(prefix) }
-            } else {
-                typeFilteredList
-            }
-        } else {
-            typeFilteredList
-        }
-        listForCategory
+    // Category sums map for current filter (strictly synchronized with typeFilteredList)
+    val categoryTotalsMap = remember(typeFilteredList) {
+        typeFilteredList
             .groupBy { it.category.ifBlank { "Прочее" } }
             .mapValues { entry -> entry.value.sumOf { kotlin.math.abs(it.amount) } }
             .filterValues { it > 0 }
@@ -1228,33 +1156,11 @@ fun AllTransactionsDialog(
         sortedList.groupBy { it.date }
     }
 
-    val totalExpenseAmt = remember(periodFilteredList, visibleDateStr.value, selectedPeriod) {
-        if (selectedPeriod == "all" || selectedPeriod == "custom") {
-            val dateParts = visibleDateStr.value.split("-")
-            if (dateParts.size >= 2) {
-                val prefix = "${dateParts[0]}-${dateParts[1]}-"
-                periodFilteredList.filter { it.type == "expense" && it.date.startsWith(prefix) }
-                    .sumOf { kotlin.math.abs(it.amount) }
-            } else {
-                periodFilteredList.filter { it.type == "expense" }.sumOf { kotlin.math.abs(it.amount) }
-            }
-        } else {
-            periodFilteredList.filter { it.type == "expense" }.sumOf { kotlin.math.abs(it.amount) }
-        }
+    val totalExpenseAmt = remember(periodFilteredList) {
+        periodFilteredList.filter { it.type.equals("expense", ignoreCase = true) }.sumOf { kotlin.math.abs(it.amount) }
     }
-    val totalIncomeAmt = remember(periodFilteredList, visibleDateStr.value, selectedPeriod) {
-        if (selectedPeriod == "all" || selectedPeriod == "custom") {
-            val dateParts = visibleDateStr.value.split("-")
-            if (dateParts.size >= 2) {
-                val prefix = "${dateParts[0]}-${dateParts[1]}-"
-                periodFilteredList.filter { it.type == "income" && it.date.startsWith(prefix) }
-                    .sumOf { kotlin.math.abs(it.amount) }
-            } else {
-                periodFilteredList.filter { it.type == "income" }.sumOf { kotlin.math.abs(it.amount) }
-            }
-        } else {
-            periodFilteredList.filter { it.type == "income" }.sumOf { kotlin.math.abs(it.amount) }
-        }
+    val totalIncomeAmt = remember(periodFilteredList) {
+        periodFilteredList.filter { it.type.equals("income", ignoreCase = true) }.sumOf { kotlin.math.abs(it.amount) }
     }
 
     val animatedHeaderDragOffsetY by animateFloatAsState(
@@ -1535,7 +1441,7 @@ fun AllTransactionsDialog(
                                                         fontSize = 18.sp,
                                                         fontWeight = FontWeight.ExtraBold
                                                     )
-                                                    Text("Траты", color = Slate400, fontSize = 11.sp)
+                                                    Text("Траты • $dynamicMonthLabel", color = Slate400, fontSize = 11.sp)
                                                     Box(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
@@ -1569,7 +1475,7 @@ fun AllTransactionsDialog(
                                                         fontSize = 18.sp,
                                                         fontWeight = FontWeight.ExtraBold
                                                     )
-                                                    Text("Доходы", color = Slate400, fontSize = 11.sp)
+                                                    Text("Доходы • $dynamicMonthLabel", color = Slate400, fontSize = 11.sp)
                                                     Box(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
@@ -1658,10 +1564,10 @@ fun AllTransactionsDialog(
                                                 }
                                                 Spacer(modifier = Modifier.height(4.dp))
                                                 Text(
-                                                    text = titleText,
+                                                    text = "$titleText • $dynamicMonthLabel",
                                                     color = Slate400,
-                                                    fontSize = 16.sp,
-                                                    fontWeight = FontWeight.Normal
+                                                    fontSize = 15.sp,
+                                                    fontWeight = FontWeight.Medium
                                                 )
                                             }
 
@@ -1697,7 +1603,13 @@ fun AllTransactionsDialog(
                                                                     "week" -> swipeWeekOffset += 1
                                                                     "month" -> swipeMonthOffset += 1
                                                                     "year" -> swipeYearOffset += 1
-                                                                    else -> swipeMonthOffset += 1
+                                                                    else -> {
+                                                                        customStartStr = null
+                                                                        customEndStr = null
+                                                                        customLabelStr = null
+                                                                        selectedPeriod = "month"
+                                                                        swipeMonthOffset += 1
+                                                                    }
                                                                 }
                                                             } else if (totalDragX > threshold) {
                                                                 // Swipe Right -> Prev
@@ -1705,7 +1617,13 @@ fun AllTransactionsDialog(
                                                                     "week" -> swipeWeekOffset -= 1
                                                                     "month" -> swipeMonthOffset -= 1
                                                                     "year" -> swipeYearOffset -= 1
-                                                                    else -> swipeMonthOffset -= 1
+                                                                    else -> {
+                                                                        customStartStr = null
+                                                                        customEndStr = null
+                                                                        customLabelStr = null
+                                                                        selectedPeriod = "month"
+                                                                        swipeMonthOffset -= 1
+                                                                    }
                                                                 }
                                                             }
                                                         },

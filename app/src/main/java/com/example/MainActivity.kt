@@ -315,9 +315,11 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     ) { uri: android.net.Uri? ->
         if (uri != null && !pendingExportJson.isNullOrEmpty()) {
             try {
+                val jsonWithAchievements = com.example.utils.ExportImportHelper.injectAchievements(context, pendingExportJson!!)
                 context.contentResolver.openOutputStream(uri)?.use { outputStream ->
-                    outputStream.write(pendingExportJson!!.toByteArray(Charsets.UTF_8))
+                    outputStream.write(jsonWithAchievements.toByteArray(Charsets.UTF_8))
                 }
+                com.example.davidapp.AchievementManager.unlock(context, "security_backup")
                 Toast.makeText(context, "Файл бюджета успешно сохранен", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(context, "Ошибка сохранения: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -869,8 +871,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             viewModel.requestAiAudit(filteredTransactions)
                                         },
                                         onDeleteTransaction = { viewModel.deleteTransaction(it) },
-                                        onEditTransaction = { editingTransaction = it },
-                                        onOpenRecentTransactionsScreen = { showRecentTransactionsScreen = true }
+                                        onEditTransaction = { editingTransaction = it }
                                     )
 
                                     1 -> DebtsScreen(
@@ -1015,37 +1016,15 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 val context = androidx.compose.ui.platform.LocalContext.current
                 val profileKey = currentProfile?.name ?: "default"
                 val appPrefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
-                androidx.compose.ui.window.Dialog(
-                    onDismissRequest = {
+                com.example.davidapp.DavidChatScreen(
+                    budgetId = currentProfile?.id ?: "default",
+                    profileName = currentProfile?.name ?: "Максим",
+                    apiKey = apiKey,
+                    onBack = {
                         showReportDialog = false
                         appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
                         viewModel.markNotificationsAsRead()
-                    },
-                    properties = androidx.compose.ui.window.DialogProperties(
-                        usePlatformDefaultWidth = false,
-                        decorFitsSystemWindows = false
-                    )
-                ) {
-                    com.example.davidapp.DavidChatScreen(
-                        budgetId = currentProfile?.id ?: "default",
-                        profileName = currentProfile?.name ?: "Максим",
-                        apiKey = apiKey,
-                        onBack = {
-                            showReportDialog = false
-                            appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
-                            viewModel.markNotificationsAsRead()
-                        }
-                    )
-                }
-            }
-
-            if (showRecentTransactionsScreen) {
-                RecentTransactionsScreen(
-                    transactions = transactions,
-                    accounts = accounts,
-                    onDeleteTransaction = { viewModel.deleteTransaction(it) },
-                    onEditTransaction = { editingTransaction = it },
-                    onBack = { showRecentTransactionsScreen = false }
+                    }
                 )
             }
 
@@ -1055,7 +1034,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             val isVoicePipelineActive = isVoiceActive || isAnalyzingVoice || !parsedVoiceOperations.isNullOrEmpty() || showAddTxModal || isVoiceOverlayActive
 
             val isImeVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
-            val isAnyModalOpen = showSettingsHubModal || showCategoriesModal || showAddGoalModal || showConsentDialog || showReportDialog || showRecentTransactionsScreen
+            val isAnyModalOpen = showSettingsHubModal || showCategoriesModal || showAddGoalModal || showConsentDialog || showReportDialog
 
             Box(
                 modifier = Modifier
@@ -1114,6 +1093,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
+                .padding(top = 12.dp)
         )
     }
 }

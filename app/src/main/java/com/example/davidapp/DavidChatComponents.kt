@@ -994,9 +994,7 @@ fun DavidQuickActionsBar(
         modifier = modifier.fillMaxWidth()
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
             when (stage) {
                 DavidStage.INITIAL -> {
@@ -1184,22 +1182,15 @@ fun DavidChatInputBar(
 ) {
     Surface(
         color = DarkSurface,
-        modifier = modifier
-            .fillMaxWidth()
-            .drawBehind {
-                drawLine(
-                    color = SlateBorder.copy(alpha = 0.5f),
-                    start = Offset(0f, 0f),
-                    end = Offset(size.width, 0f),
-                    strokeWidth = 1.dp.toPx()
-                )
-            }
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(1.dp, SlateBorder.copy(alpha = 0.5f)),
+        modifier = modifier.fillMaxWidth()
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 12.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
             IconButton(
                 onClick = onAttach,

@@ -1,12 +1,15 @@
 package com.example.davidapp
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -94,13 +97,19 @@ fun AchievementUnlockedBanner(
     AnimatedVisibility(
         visible = currentBanner != null,
         enter = slideInVertically(
-            initialOffsetY = { -it },
-            animationSpec = tween(400, easing = FastOutSlowInEasing)
-        ) + fadeIn(animationSpec = tween(300)),
+            initialOffsetY = { fullHeight -> -fullHeight - 100 },
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessLow
+            )
+        ) + fadeIn(),
         exit = slideOutVertically(
-            targetOffsetY = { -it },
-            animationSpec = tween(350, easing = FastOutSlowInEasing)
-        ) + fadeOut(animationSpec = tween(250)),
+            targetOffsetY = { fullHeight -> -fullHeight - 100 },
+            animationSpec = tween(
+                durationMillis = 400,
+                easing = FastOutLinearInEasing
+            )
+        ) + fadeOut(),
         modifier = modifier
     ) {
         val achievement = currentBanner ?: return@AnimatedVisibility

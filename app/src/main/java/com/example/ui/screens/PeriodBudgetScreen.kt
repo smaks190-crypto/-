@@ -837,10 +837,26 @@ fun PeriodBudgetScreen(
         }
 
         if (showAllTransactionsDialog && !isAppLocked) {
-            val currentPeriodInitialDate = if (periodType == PeriodType.DAY || periodType == PeriodType.WEEK) selectedDateDay else monthStart
+            val currentPeriodInitialDate = if (initialAllTransactionsFilter != "all") {
+                monthStart
+            } else if (periodType == PeriodType.DAY || periodType == PeriodType.WEEK) {
+                selectedDateDay
+            } else {
+                monthStart
+            }
             AllTransactionsDialog(
                 transactions = if (allTransactions.isNotEmpty()) allTransactions else filteredTransactions,
                 onDeleteTransaction = onDeleteTransaction,
+                onRestoreTransaction = { restoredTx ->
+                    viewModel?.addTransaction(
+                        type = restoredTx.type,
+                        date = restoredTx.date,
+                        category = restoredTx.category,
+                        subcategory = restoredTx.subcategory,
+                        amount = restoredTx.amount,
+                        accountId = restoredTx.accountId
+                    )
+                },
                 onEditTransaction = onEditTransaction,
                 initialFilterType = initialAllTransactionsFilter,
                 initialDate = currentPeriodInitialDate,
@@ -885,7 +901,7 @@ fun PeriodBudgetScreen(
                         )
                     }
 
-                    if (filteredTransactions.isNotEmpty()) {
+                    if (filteredTransactions.isNotEmpty() || allTransactions.isNotEmpty()) {
                         Text(
                             text = "Все ›",
                             color = Indigo500,
@@ -894,12 +910,8 @@ fun PeriodBudgetScreen(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable {
-                                    if (onOpenRecentTransactionsScreen != null) {
-                                        onOpenRecentTransactionsScreen()
-                                    } else {
-                                        initialAllTransactionsFilter = "all"
-                                        showAllTransactionsDialog = true
-                                    }
+                                    initialAllTransactionsFilter = if (activeSubTab == "income") "income" else "expense"
+                                    showAllTransactionsDialog = true
                                 }
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         )

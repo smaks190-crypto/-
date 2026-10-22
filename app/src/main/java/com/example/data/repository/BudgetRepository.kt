@@ -39,7 +39,8 @@ data class BudgetBackup(
     val transactions: List<TransactionEntity>? = emptyList(),
     val goals: List<GoalEntity>? = emptyList(),
     val categories: List<CategoryEntity>? = emptyList(),
-    val accounts: List<AccountEntity>? = emptyList()
+    val accounts: List<AccountEntity>? = emptyList(),
+    val achievements: Map<String, Long>? = null
 )
 
 class BudgetRepository(
@@ -598,29 +599,16 @@ class BudgetRepository(
         if (existing.isEmpty()) {
             val default = BudgetProfileEntity(id = "default", name = "Казума Сато")
             budgetProfileDao.insertProfile(default)
-            if (storageFile.exists()) {
-                try {
-                    val json = storageFile.readText()
-                    val imported = importJson(json, "default")
-                    if (!imported) {
-                        loadDemoData("default")
-                    }
-                } catch (e: Exception) {
-                    loadDemoData("default")
-                }
-            } else {
-                loadDemoData("default")
-            }
+            loadDemoData("default")
             return default
         } else {
-            if (storageFile.exists()) {
-                try {
-                    val currentTxs = allTransactions.first()
-                    if (currentTxs.isEmpty()) {
-                        val json = storageFile.readText()
-                        importJson(json, existing.first().id)
-                    }
-                } catch (_: Exception) {}
+            val firstProfile = existing.first()
+            val currentTxs = allTransactions.first()
+            if (currentTxs.isEmpty()) {
+                loadDemoData(firstProfile.id)
+            } else if (firstProfile.name == "Казума Сато" && currentTxs.none { it.subcategory.contains("Белуга") }) {
+                // Автоматическое обновление старого неполного демо-бюджета на полный сатирический год
+                loadDemoData(firstProfile.id)
             }
         }
         return existing.first()
@@ -681,8 +669,6 @@ class BudgetRepository(
     }
 
     suspend fun loadDemoData(budgetId: String = "default") = withContext(Dispatchers.IO) {
-        initializeDefaultCategories(budgetId)
-
         try {
             val cal = Calendar.getInstance()
             val currentYear = cal.get(Calendar.YEAR)
@@ -694,17 +680,32 @@ class BudgetRepository(
             val backup = backupAdapter.fromJson(jsonWithYear)
             if (backup != null) {
                 transactionDao.deleteTransactionsByBudgetId(budgetId)
-                val txs = (backup.transactions ?: emptyList()).map { it.copy(budgetId = budgetId) }
+                goalDao.deleteGoalsByBudgetId(budgetId)
+                categoryDao.deleteCategoriesByBudgetId(budgetId)
+                accountDao.deleteAccountsByBudgetId(budgetId)
+
+                val accountIdMap = mutableMapOf<String, String>()
+                val accs = (backup.accounts ?: emptyList()).map { oldAcc ->
+                    val newId = if (budgetId == "default") oldAcc.id else "${oldAcc.id}_$budgetId"
+                    accountIdMap[oldAcc.id] = newId
+                    oldAcc.copy(id = newId, budgetId = budgetId)
+                }
+                val txs = (backup.transactions ?: emptyList()).map { oldTx ->
+                    val mappedAccId = oldTx.accountId?.let { accountIdMap[it] ?: it }
+                    oldTx.copy(budgetId = budgetId, accountId = mappedAccId)
+                }
                 val goals = (backup.goals ?: emptyList()).map { it.copy(budgetId = budgetId) }
                 val cats = (backup.categories ?: emptyList()).map { it.copy(budgetId = budgetId) }
 
-                transactionDao.insertTransactions(txs)
-                goalDao.insertGoals(goals)
-                categoryDao.insertCategories(cats)
+                if (accs.isNotEmpty()) accountDao.insertAccounts(accs)
+                if (cats.isNotEmpty()) categoryDao.insertCategories(cats)
+                if (goals.isNotEmpty()) goalDao.insertGoals(goals)
+                if (txs.isNotEmpty()) transactionDao.insertTransactions(txs)
                 syncToFile()
             }
         } catch (e: Exception) {
             e.printStackTrace()
+            initializeDefaultCategories(budgetId)
         }
     }
 
@@ -721,7 +722,8 @@ class BudgetRepository(
             transactions = txs,
             goals = goals,
             categories = cats,
-            accounts = accs
+            accounts = accs,
+            achievements = com.example.davidapp.AchievementManager.exportUnlockedIds(context)
         )
         val json = backupAdapter.toJson(backup)
         try {
@@ -742,7 +744,8 @@ class BudgetRepository(
             transactions = txs,
             goals = goals,
             categories = cats,
-            accounts = accs
+            accounts = accs,
+            achievements = com.example.davidapp.AchievementManager.exportUnlockedIds(context)
         )
         val json = backupAdapter.toJson(backup)
         try {
@@ -789,13 +792,21 @@ class BudgetRepository(
             if (goals.isNotEmpty()) goalDao.insertGoals(goals)
             if (cats.isNotEmpty()) categoryDao.insertCategories(cats)
 
+            // Восстановление достижений с обратной совместимостью
+            if (backup.achievements != null && backup.achievements.isNotEmpty()) {
+                com.example.davidapp.AchievementManager.importUnlockedIds(context, backup.achievements)
+            } else {
+                com.example.utils.ExportImportHelper.extractAndImportAchievements(context, jsonStr)
+            }
+
             val file = java.io.File(context.filesDir, "budget_${newBudgetId}.json")
             val updatedBackup = BudgetBackup(
                 profileName = name,
                 transactions = txs,
                 goals = goals,
                 categories = cats,
-                accounts = accs
+                accounts = accs,
+                achievements = com.example.davidapp.AchievementManager.exportUnlockedIds(context)
             )
             file.writeText(backupAdapter.toJson(updatedBackup))
             profile
@@ -829,12 +840,20 @@ class BudgetRepository(
             if (goals.isNotEmpty()) goalDao.insertGoals(goals)
             if (cats.isNotEmpty()) categoryDao.insertCategories(cats)
 
+            // Восстановление достижений с обратной совместимостью
+            if (backup.achievements != null && backup.achievements.isNotEmpty()) {
+                com.example.davidapp.AchievementManager.importUnlockedIds(context, backup.achievements)
+            } else {
+                com.example.utils.ExportImportHelper.extractAndImportAchievements(context, jsonStr)
+            }
+
             val updatedBackup = BudgetBackup(
                 profileName = profileName,
                 transactions = txs,
                 goals = goals,
                 categories = cats,
-                accounts = accs
+                accounts = accs,
+                achievements = com.example.davidapp.AchievementManager.exportUnlockedIds(context)
             )
             val updatedJson = backupAdapter.toJson(updatedBackup)
             storageFile.writeText(updatedJson)

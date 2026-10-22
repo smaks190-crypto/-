@@ -8,12 +8,58 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import com.example.davidapp.AchievementManager
+import org.json.JSONObject
 import java.io.File
 
 object ExportImportHelper {
 
+    /**
+     * Внедряет открытые достижения в JSON-структуру бэкапа перед экспортом
+     */
+    fun injectAchievements(context: Context, jsonContent: String): String {
+        return try {
+            val root = JSONObject(jsonContent)
+            val unlockedMap = AchievementManager.exportUnlockedIds(context)
+            val achievementsObj = JSONObject()
+            unlockedMap.forEach { (id, time) ->
+                achievementsObj.put(id, time)
+            }
+            root.put("achievements", achievementsObj)
+            root.toString(2)
+        } catch (_: Exception) {
+            jsonContent
+        }
+    }
+
+    /**
+     * Извлекает и импортирует достижения из JSON-структуры бэкапа
+     * Обеспечивает полную обратную совместимость (если поля achievements нет, ничего не ломается)
+     */
+    fun extractAndImportAchievements(context: Context, jsonContent: String) {
+        try {
+            val root = JSONObject(jsonContent)
+            if (root.has("achievements")) {
+                val achievementsObj = root.optJSONObject("achievements")
+                if (achievementsObj != null) {
+                    val map = mutableMapOf<String, Long>()
+                    val keys = achievementsObj.keys()
+                    while (keys.hasNext()) {
+                        val key = keys.next()
+                        val timestamp = achievementsObj.optLong(key, 0L)
+                        map[key] = timestamp
+                    }
+                    if (map.isNotEmpty()) {
+                        AchievementManager.importUnlockedIds(context, map)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
     fun saveOrShareExportFile(context: Context, fileName: String, jsonContent: String) {
         val appContext = context.applicationContext
+        val finalJson = injectAchievements(appContext, jsonContent)
         var savedSuccessfully = false
 
         // 1. Try MediaStore Downloads on Android Q+
@@ -28,10 +74,11 @@ object ExportImportHelper {
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
                 if (uri != null) {
                     resolver.openOutputStream(uri)?.use { os ->
-                        os.write(jsonContent.toByteArray(Charsets.UTF_8))
+                        os.write(finalJson.toByteArray(Charsets.UTF_8))
                     }
                     Toast.makeText(appContext, "Сохранено в Загрузки: $fileName", Toast.LENGTH_LONG).show()
                     savedSuccessfully = true
+                    AchievementManager.unlock(appContext, "security_backup")
                 }
             } catch (_: Exception) {
                 savedSuccessfully = false
@@ -43,9 +90,10 @@ object ExportImportHelper {
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 if (downloadsDir.exists() || downloadsDir.mkdirs()) {
                     val file = File(downloadsDir, fileName)
-                    file.writeText(jsonContent, Charsets.UTF_8)
+                    file.writeText(finalJson, Charsets.UTF_8)
                     Toast.makeText(appContext, "Сохранено в Загрузки: ${file.name}", Toast.LENGTH_LONG).show()
                     savedSuccessfully = true
+                    AchievementManager.unlock(appContext, "security_backup")
                 }
             } catch (_: Exception) {
                 savedSuccessfully = false
@@ -54,15 +102,18 @@ object ExportImportHelper {
 
         // 2. If direct save to Downloads didn't happen or as additional share option, launch Share
         if (!savedSuccessfully) {
-            shareJsonFile(context, fileName, jsonContent)
+            shareJsonFile(context, fileName, finalJson)
         }
     }
 
     fun shareJsonFile(context: Context, fileName: String, jsonContent: String) {
+        val finalJson = injectAchievements(context, jsonContent)
         try {
             val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
             val cacheFile = File(exportDir, fileName)
-            cacheFile.writeText(jsonContent, Charsets.UTF_8)
+            cacheFile.writeText(finalJson, Charsets.UTF_8)
+            AchievementManager.unlock(context, "security_backup")
+
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", cacheFile)
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "application/json"

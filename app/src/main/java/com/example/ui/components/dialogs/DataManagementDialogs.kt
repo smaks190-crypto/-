@@ -35,12 +35,14 @@ fun DataManagementDialog(
     onResetData: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var showResetConfirm by remember { mutableStateOf(false) }
 
     if (showResetConfirm) {
         ConfirmResetDataDialog(
             onConfirmReset = {
                 showResetConfirm = false
+                com.example.davidapp.AchievementManager.resetAll(context)
                 onResetData()
             },
             onDismiss = { showResetConfirm = false }
@@ -146,7 +148,10 @@ fun DataManagementDialog(
                         icon = Icons.Default.Code,
                         accentColor = Emerald400,
                         modifier = Modifier.weight(1f),
-                        onClick = onExportJson
+                        onClick = {
+                            com.example.davidapp.AchievementManager.unlock(context, "security_backup")
+                            onExportJson()
+                        }
                     )
 
                     DataActionCard(

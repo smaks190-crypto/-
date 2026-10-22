@@ -26,8 +26,9 @@ import java.util.Locale
  * Полная интеграция:
  * 1. Привязка к активному профилю бюджета (budgetId, profileName).
  * 2. Синхронизация и отображение реакций Давида на добавленные транзакции (из NotificationEntity).
- * 3. Расчёт реальных финансовых показателей и генерация персонального аудита (День, Неделя, Месяц, Год).
- * 4. Интерактивная диаграмма динамики баланса на основе фактических транзакций.
+ * 3. Строгий сквозной хронологический порядок всех элементов диалога (транзакции, отчеты, диаграммы, сообщения).
+ * 4. Расчёт реальных финансовых показателей и генерация персонального аудита (День, Неделя, Месяц, Год).
+ * 5. Интерактивная диаграмма динамики баланса на основе фактических транзакций.
  */
 class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -58,6 +59,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     private var currentApiKey: String = ""
 
     private var notificationsJob: Job? = null
+    private var currentNotifications: List<NotificationEntity> = emptyList()
     private val sessionMessages = mutableListOf<ChatMessage>()
 
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
@@ -79,7 +81,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     fun setProfileName(name: String) {
         if (name.isNotBlank() && name != currentProfileName) {
             currentProfileName = name
-            rebuildMessages(emptyList())
+            rebuildChronologicalMessages()
         }
     }
 
@@ -87,30 +89,34 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         notificationsJob?.cancel()
         notificationsJob = viewModelScope.launch {
             repository.getNotificationsForBudget(currentBudgetId).collect { notifs ->
-                rebuildMessages(notifs)
+                currentNotifications = notifs
+                rebuildChronologicalMessages()
             }
         }
     }
 
-    private fun rebuildMessages(notifications: List<NotificationEntity>) {
-        val result = mutableListOf<ChatMessage>()
+    private fun addSessionMessage(message: ChatMessage) {
+        sessionMessages.add(message)
+        rebuildChronologicalMessages()
+    }
 
-        // 1. Начальное приветствие от Давида
-        result.add(
-            ChatMessage(
-                id = "greeting_${currentBudgetId}",
-                sender = "Давид Жабов 🐸",
-                type = ChatMessageType.Text(
-                    "Салют, $currentProfileName! Я **Давид Жабов** — твой персональный финансовый аудитор и безжалостный критик транжирства.\n\n" +
-                    "Готов провести жесткий разбор трат, прожарить нелепые расходы и выдать сочные ачивки. Выбери период или нажми **«🐸 Давид, сделай отчет»**!"
-                ),
-                timestamp = "09:00",
-                isUser = false
-            )
+    private fun rebuildChronologicalMessages() {
+        // 1. Начальное приветствие от Давида (всегда первое, timestampMillis = 0L)
+        val greetingMsg = ChatMessage(
+            id = "greeting_${currentBudgetId}",
+            sender = "Давид Жабов 🐸",
+            type = ChatMessageType.Text(
+                "Салют, $currentProfileName! Я **Давид Жабов** — твой персональный финансовый аудитор и безжалостный критик транжирства.\n\n" +
+                "Готов провести жесткий разбор трат, прожарить нелепые расходы и выдать сочные ачивки. Выбери период или нажми **«🐸 Давид, сделай отчет»**!"
+            ),
+            timestamp = "09:00",
+            isUser = false,
+            timestampMillis = 0L
         )
 
         // 2. Добавление реакций на транзакции и действия из базы данных
-        for (notif in notifications) {
+        val notifMessages = mutableListOf<ChatMessage>()
+        for (notif in currentNotifications) {
             val (ops, userPhrase, comment) = extractOpsAndComment(notif)
             val notifTime = timeFormat.format(Date(notif.timestamp))
 
@@ -135,7 +141,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                     "$opCategory ($opSub) — ${opAmount.toInt()} ₽"
                 }
 
-                result.add(
+                notifMessages.add(
                     ChatMessage(
                         id = "user_notif_${notif.id}",
                         sender = currentProfileName,
@@ -148,29 +154,34 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                             isRead = notif.isRead
                         ),
                         timestamp = notifTime,
-                        isUser = true
+                        isUser = true,
+                        timestampMillis = notif.timestamp
                     )
                 )
             }
 
             // Ответ Давида (реакция / прожарка)
             if (comment.isNotBlank()) {
-                result.add(
+                notifMessages.add(
                     ChatMessage(
                         id = "david_notif_${notif.id}",
                         sender = "Давид Жабов 🐸",
                         type = ChatMessageType.Text(comment),
                         timestamp = notifTime,
-                        isUser = false
+                        isUser = false,
+                        timestampMillis = notif.timestamp + 1L
                     )
                 )
             }
         }
 
-        // 3. Добавление сообщений текущей интерактивной сессии (запросы аудита, графики, ответы)
-        result.addAll(sessionMessages)
+        // 3. Строгая хронологическая сортировка всех динамических элементов ленты
+        val dynamicMessages = (notifMessages + sessionMessages).sortedWith(
+            compareBy<ChatMessage> { it.timestampMillis }.thenBy { it.id }
+        )
 
-        _messages.value = result
+        // 4. Приветствие всегда в начале истории
+        _messages.value = listOf(greetingMsg) + dynamicMessages
     }
 
     private fun currentTime(): String = timeFormat.format(Date())
@@ -184,14 +195,15 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
             when (action) {
                 "START" -> {
                     AchievementManager.unlock(getApplication(), "first_audit")
+                    val now = System.currentTimeMillis()
                     val userMsg = ChatMessage(
                         sender = currentProfileName,
                         type = ChatMessageType.Text("🐸 Давид, сделай отчет"),
                         timestamp = currentTime(),
-                        isUser = true
+                        isUser = true,
+                        timestampMillis = now
                     )
-                    sessionMessages.add(userMsg)
-                    _messages.value = _messages.value + userMsg
+                    addSessionMessage(userMsg)
 
                     _stage.value = DavidStage.PROCESSING
                     _isDavidTyping.value = true
@@ -206,10 +218,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                             "Отлично, $currentProfileName! Выбери временной интервал для выписки. Я соберу все твои фактические траты и выдам сочный финансовый вердикт."
                         ),
                         timestamp = currentTime(),
-                        isUser = false
+                        isUser = false,
+                        timestampMillis = System.currentTimeMillis()
                     )
-                    sessionMessages.add(botMsg)
-                    _messages.value = _messages.value + botMsg
+                    addSessionMessage(botMsg)
                 }
                 "AUDIT" -> {
                     AchievementManager.unlock(getApplication(), "first_audit")
@@ -217,10 +229,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                         sender = currentProfileName,
                         type = ChatMessageType.Text("⚡ Провести экспресс-аудит за текущий месяц"),
                         timestamp = currentTime(),
-                        isUser = true
+                        isUser = true,
+                        timestampMillis = System.currentTimeMillis()
                     )
-                    sessionMessages.add(userMsg)
-                    _messages.value = _messages.value + userMsg
+                    addSessionMessage(userMsg)
                     processFile("Месяц", soundManager)
                 }
                 "GOALS" -> {
@@ -228,10 +240,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                         sender = currentProfileName,
                         type = ChatMessageType.Text("🎯 Покажи статус моих финансовых целей"),
                         timestamp = currentTime(),
-                        isUser = true
+                        isUser = true,
+                        timestampMillis = System.currentTimeMillis()
                     )
-                    sessionMessages.add(userMsg)
-                    _messages.value = _messages.value + userMsg
+                    addSessionMessage(userMsg)
 
                     _isDavidTyping.value = true
                     delay(600)
@@ -256,10 +268,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                         sender = "Давид Жабов 🐸",
                         type = ChatMessageType.Text(goalsText),
                         timestamp = currentTime(),
-                        isUser = false
+                        isUser = false,
+                        timestampMillis = System.currentTimeMillis()
                     )
-                    sessionMessages.add(botMsg)
-                    _messages.value = _messages.value + botMsg
+                    addSessionMessage(botMsg)
                 }
                 else -> {
                     processFile("Месяц", soundManager)
@@ -294,6 +306,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             // Добавляем сообщение-запрос с файлом от пользователя
+            val fileTime = System.currentTimeMillis()
             val fileMsg = ChatMessage(
                 sender = currentProfileName,
                 type = ChatMessageType.File(
@@ -302,10 +315,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                     extension = "PDF"
                 ),
                 timestamp = currentTime(),
-                isUser = true
+                isUser = true,
+                timestampMillis = fileTime
             )
-            sessionMessages.add(fileMsg)
-            _messages.value = _messages.value + fileMsg
+            addSessionMessage(fileMsg)
 
             _stage.value = DavidStage.PROCESSING
 
@@ -318,9 +331,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
             val auditData = calculateRealAuditData(periodFormatted, allTxs)
             val sections = splitReportIntoSections(auditData.sarcasticReport)
+            val reportBaseTime = System.currentTimeMillis()
 
             // 1. Отправляем каждую секцию отчета отдельным баблом с эффектом печати
-            for (section in sections) {
+            sections.forEachIndexed { index, section ->
                 _isDavidTyping.value = true
                 delay(600)
                 _isDavidTyping.value = false
@@ -330,10 +344,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                     sender = "Давид Жабов 🐸",
                     type = ChatMessageType.Text(section),
                     timestamp = currentTime(),
-                    isUser = false
+                    isUser = false,
+                    timestampMillis = reportBaseTime + index + 1
                 )
-                sessionMessages.add(textMsg)
-                _messages.value = _messages.value + textMsg
+                addSessionMessage(textMsg)
                 delay(150)
             }
 
@@ -354,10 +368,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                     dataPoints = auditData.dataPoints
                 ),
                 timestamp = currentTime(),
-                isUser = false
+                isUser = false,
+                timestampMillis = reportBaseTime + sections.size + 1
             )
-            sessionMessages.add(chartMsg)
-            _messages.value = _messages.value + chartMsg
+            addSessionMessage(chartMsg)
 
             _stage.value = DavidStage.FOLLOW_UP
         }
@@ -593,10 +607,10 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
                 sender = currentProfileName,
                 type = ChatMessageType.Text(text.trim()),
                 timestamp = currentTime(),
-                isUser = true
+                isUser = true,
+                timestampMillis = System.currentTimeMillis()
             )
-            sessionMessages.add(userMsg)
-            _messages.value = _messages.value + userMsg
+            addSessionMessage(userMsg)
 
             val prevStage = _stage.value
             _isDavidTyping.value = true
@@ -616,10 +630,10 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
                 sender = "Давид Жабов 🐸",
                 type = ChatMessageType.Text(reply),
                 timestamp = currentTime(),
-                isUser = false
+                isUser = false,
+                timestampMillis = System.currentTimeMillis()
             )
-            sessionMessages.add(botMsg)
-            _messages.value = _messages.value + botMsg
+            addSessionMessage(botMsg)
 
             _stage.value = if (prevStage == DavidStage.INITIAL) DavidStage.FILE_SELECTION else prevStage
         }
@@ -690,10 +704,10 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
                 sender = currentProfileName,
                 type = ChatMessageType.Text("📄 Экспортировать аудит в файл PDF"),
                 timestamp = currentTime(),
-                isUser = true
+                isUser = true,
+                timestampMillis = System.currentTimeMillis()
             )
-            sessionMessages.add(userMsg)
-            _messages.value = _messages.value + userMsg
+            addSessionMessage(userMsg)
 
             _isDavidTyping.value = true
             delay(500)
@@ -708,10 +722,10 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
                     extension = "PDF"
                 ),
                 timestamp = currentTime(),
-                isUser = false
+                isUser = false,
+                timestampMillis = System.currentTimeMillis()
             )
-            sessionMessages.add(pdfMsg)
-            _messages.value = _messages.value + pdfMsg
+            addSessionMessage(pdfMsg)
         }
     }
 
@@ -719,7 +733,7 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         soundManager?.playClick()
         sessionMessages.clear()
         _stage.value = DavidStage.INITIAL
-        observeNotifications()
+        rebuildChronologicalMessages()
     }
 }
 

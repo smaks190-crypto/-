@@ -244,6 +244,55 @@ object AchievementManager {
     }
 
     /**
+     * Возвращает словарь открытых achievementId и времени их открытия unlockedAt
+     */
+    fun exportUnlockedIds(context: Context): Map<String, Long> {
+        val prefs = getPrefs(context)
+        val result = mutableMapOf<String, Long>()
+        for (item in INITIAL_ACHIEVEMENTS) {
+            val unlocked = prefs.getBoolean(KEY_PREFIX_UNLOCKED + item.id, false)
+            if (unlocked) {
+                val timestamp = prefs.getLong(KEY_PREFIX_UNLOCKED_AT + item.id, 0L)
+                result[item.id] = timestamp
+            }
+        }
+        return result
+    }
+
+    /**
+     * Восстанавливает открытые достижения в SharedPreferences и обновляет achievementsFlow
+     * (без показа всплывающих баннеров и без звуков)
+     */
+    fun importUnlockedIds(context: Context, unlockedMap: Map<String, Long>) {
+        if (unlockedMap.isEmpty()) return
+        val prefs = getPrefs(context)
+        val editor = prefs.edit()
+        val now = System.currentTimeMillis()
+        for ((id, time) in unlockedMap) {
+            editor.putBoolean(KEY_PREFIX_UNLOCKED + id, true)
+            editor.putLong(KEY_PREFIX_UNLOCKED_AT + id, if (time > 0L) time else now)
+        }
+        editor.apply()
+
+        // Обновляем список и ранг без анимации баннера
+        loadFromPrefs(prefs)
+        isInitialized = true
+    }
+
+    /**
+     * Полностью очищает открытые достижения (для полного сброса данных приложения)
+     */
+    fun resetAll(context: Context) {
+        val prefs = getPrefs(context)
+        prefs.edit().clear().apply()
+        _achievementsFlow.value = INITIAL_ACHIEVEMENTS
+        _playerRankFlow.value = calculateRankInfo(INITIAL_ACHIEVEMENTS)
+        bannerDismissJob?.cancel()
+        _unlockedBannerQueue.value = null
+        isInitialized = true
+    }
+
+    /**
      * Расчет звания, уровня и шкалы XP по списку достижений
      */
     private fun calculateRankInfo(achievements: List<Achievement>): PlayerRankInfo {

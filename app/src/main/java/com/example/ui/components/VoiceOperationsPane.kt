@@ -135,6 +135,7 @@ fun VoiceOperationsPane(
                     onClick = {
                         com.example.utils.GlobalConsoleLogger.i("UI", "Подтверждение сохранения ${editableList.size} распознанных операций")
                         if (editableList.isNotEmpty()) {
+                            com.example.davidapp.AchievementManager.unlock(context, "voice_master")
                             viewModel.confirmVoiceOperations(editableList, selectedDate)
                             viewModel.clearParsedVoiceOperations()
                             viewModel.setVoiceActive(false)

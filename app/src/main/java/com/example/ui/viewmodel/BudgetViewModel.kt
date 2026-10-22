@@ -361,6 +361,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun clearAllDataAndResetSecurity(securityManager: com.example.data.SecurityManager) {
+        com.example.davidapp.AchievementManager.resetAll(getApplication())
         viewModelScope.launch {
             securityManager.removePin()
             repository.clearAllData()
@@ -652,6 +653,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearAllData() {
         val currentBudgetId = _selectedBudgetId.value
+        com.example.davidapp.AchievementManager.resetAll(getApplication())
         viewModelScope.launch {
             if (currentBudgetId != null) {
                 repository.deleteProfile(currentBudgetId)
