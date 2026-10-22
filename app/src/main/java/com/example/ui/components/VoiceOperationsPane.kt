@@ -40,6 +40,16 @@ import com.example.ui.theme.Rose500
 import com.example.ui.viewmodel.BudgetViewModel
 import java.util.Locale
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import com.example.ui.theme.DarkBg
+import com.example.ui.theme.Indigo500
+import com.example.ui.theme.Slate400
+
 @Composable
 fun VoiceOperationsPane(
     viewModel: BudgetViewModel,
@@ -53,6 +63,13 @@ fun VoiceOperationsPane(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val voiceManager = viewModel.voiceInputManager
+    val isListening by voiceManager.isListening.collectAsState()
+    val rmsDb by voiceManager.rmsDb.collectAsState()
+    val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
+    val normalizedAmplitude = remember(rmsDb) {
+        (rmsDb / 12f).coerceIn(0f, 1f)
+    }
 
     val currentEditingIndex = editingIndex?.takeIf { it in editableList.indices }
     if (editingIndex != currentEditingIndex) {
@@ -83,12 +100,30 @@ fun VoiceOperationsPane(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Column {
-                        Text(
-                            text = "Распознано: ${editableList.size}",
-                            color = Color.White,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Распознано: ${editableList.size}",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (isListening || isAnalyzingVoice) {
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Indigo500.copy(alpha = 0.2f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isAnalyzingVoice) "LIVE • ИИ..." else "LIVE",
+                                        color = Indigo500,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+                        }
                         val totalAmount = editableList.sumOf { if (it.type == "expense") -it.amount else it.amount }
                         Text(
                             text = if (totalAmount >= 0) "+${String.format(Locale.US, "%.0f", totalAmount)} ₽" else "${String.format(Locale.US, "%.0f", totalAmount)} ₽",
@@ -113,7 +148,7 @@ fun VoiceOperationsPane(
                         onDelete = {
                             if (index in editableList.indices) {
                                 editableList.removeAt(index)
-                                if (editableList.isEmpty()) {
+                                if (editableList.isEmpty() && !isListening && !isAnalyzingVoice) {
                                     onDismissVoiceOperations()
                                 }
                             }
@@ -122,21 +157,91 @@ fun VoiceOperationsPane(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            AnimatedVisibility(visible = isListening || isAnalyzingVoice) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp, end = 16.dp)
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(DarkBg.copy(alpha = 0.65f))
+                        .border(1.dp, Indigo500.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
+                        .clickable {
+                            if (isListening) {
+                                viewModel.stopVoiceRecordingAndProcess()
+                            }
+                        }
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isListening) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Neon32BandVoiceVisualizer(
+                                amplitude = normalizedAmplitude,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(32.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            if (isAnalyzingVoice) {
+                                CircularProgressIndicator(
+                                    color = Indigo500,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            } else {
+                                Text(
+                                    text = "Говорите ещё...",
+                                    color = Slate400,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    } else {
+                        Row(
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(
+                                color = Indigo500,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Gemini Live дослушивает фразу...",
+                                color = Indigo500,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 16.dp),
+                    .padding(top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Button(
                     onClick = {
                         com.example.utils.GlobalConsoleLogger.i("UI", "Подтверждение сохранения ${editableList.size} распознанных операций")
+                        if (isListening) {
+                            voiceManager.onAudioChunkReady = null
+                            voiceManager.stopListening()
+                        }
                         if (editableList.isNotEmpty()) {
                             com.example.davidapp.AchievementManager.unlock(context, "voice_master")
-                            viewModel.confirmVoiceOperations(editableList, selectedDate)
+                            viewModel.confirmVoiceOperations(editableList.toList(), selectedDate)
                             viewModel.clearParsedVoiceOperations()
                             viewModel.setVoiceActive(false)
                         } else {

@@ -278,10 +278,18 @@ fun VoiceRecordingOverlay(
             }
 
             if (longPressTriggered == false) {
-                if (isVoiceActive) {
-                    viewModel.cancelVoiceRecording()
-                } else {
-                    onOpenManualInput()
+                when {
+                    !parsedVoiceOperations.isNullOrEmpty() -> {
+                        viewModel.cancelVoiceRecording()
+                        viewModel.clearParsedVoiceOperations()
+                        viewModel.setVoiceActive(false)
+                    }
+                    isVoiceActive -> {
+                        viewModel.cancelVoiceRecording()
+                    }
+                    else -> {
+                        onOpenManualInput()
+                    }
                 }
             } else {
                 val hasPerm = try {
@@ -366,7 +374,8 @@ fun VoiceRecordingOverlay(
                 460f.coerceAtMost(screenHeightDp - 60f)
             } else {
                 val count = editableList.size
-                val baseHeight = 170f + count * 76f
+                val liveExtra = if (isListening || isAnalyzingVoice) 62f else 0f
+                val baseHeight = 170f + count * 76f + liveExtra
                 baseHeight.coerceIn(240f, screenHeightDp - 60f)
             }
         }
@@ -734,7 +743,7 @@ fun VoiceRecordingOverlay(
                                                 .clickable { viewModel.stopVoiceRecordingAndProcess() },
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            if (isAnalyzingVoice) {
+                                            if (!isListening && isAnalyzingVoice) {
                                                 Row(
                                                     horizontalArrangement = Arrangement.Center,
                                                     verticalAlignment = Alignment.CenterVertically
@@ -746,7 +755,7 @@ fun VoiceRecordingOverlay(
                                                     )
                                                     Spacer(modifier = Modifier.width(8.dp))
                                                     Text(
-                                                        text = "Анализ ИИ...",
+                                                        text = "Gemini Live...",
                                                         color = Indigo500,
                                                         fontSize = 12.sp,
                                                         fontWeight = FontWeight.Bold
@@ -791,7 +800,18 @@ fun VoiceRecordingOverlay(
                                                         }
                                                     }
 
-                                                    if (activeText.isNotBlank() && !isListening) {
+                                                    if (isAnalyzingVoice) {
+                                                        Spacer(modifier = Modifier.height(2.dp))
+                                                        Text(
+                                                            text = "Gemini Live распознает...",
+                                                            color = Indigo500,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    } else if (activeText.isNotBlank() && !isListening) {
                                                         Spacer(modifier = Modifier.height(2.dp))
                                                         Text(
                                                             text = "«$activeText»",
@@ -821,7 +841,7 @@ fun VoiceRecordingOverlay(
                         fabTint = fabTint,
                         fabContentDescription = fabContentDescription,
                         surfaceColor = surfaceColor,
-                        isClickable = isConsentNeeded || isApiKeyNeeded || showManualInput || isEditingOperations || isVoiceActive
+                        isClickable = isConsentNeeded || isApiKeyNeeded || showManualInput || isDetailEditing
                     )
                 }
             }

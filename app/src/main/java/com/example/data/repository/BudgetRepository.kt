@@ -1415,30 +1415,26 @@ class BudgetRepository(
     }
 
     suspend fun parseVoiceAudioOperations(
-        audioFile: java.io.File,
+        audioBytes: ByteArray,
         apiKey: String,
         expenseCategories: List<String>,
-        incomeCategories: List<String>
+        incomeCategories: List<String>,
+        mimeType: String = "audio/wav"
     ): List<ParsedVoiceOperation> = withContext(Dispatchers.IO) {
-        if (!audioFile.exists() || audioFile.length() == 0L) return@withContext emptyList()
+        if (audioBytes.isEmpty()) return@withContext emptyList()
 
         if (apiKey.isBlank()) {
             throw IllegalArgumentException("Для анализа речи с помощью ИИ укажите API ключ Gemini в настройках приложения.")
         }
 
-        val audioBytes = try {
-            audioFile.readBytes()
-        } finally {
-            try { audioFile.delete() } catch (_: Throwable) {}
-        }
         val base64Audio = android.util.Base64.encodeToString(audioBytes, android.util.Base64.NO_WRAP)
 
         val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
         val todayStr = dateFormat.format(java.util.Date())
         val dayOfWeekStr = java.text.SimpleDateFormat("EEEE", java.util.Locale("ru")).format(java.util.Date())
 
-        val systemPrompt = "Вы — экспертный финансовый ассистент. Прослушайте аудиозапись пользователя на русском языке и извлеките из неё ВСЕ упомянутые финансовые операции (доходы и расходы).\n" +
-                "Игнорируйте паузы, слова-паразиты ('эээ', 'ну', 'короче', 'так') и фоновый шум.\n" +
+        val systemPrompt = "Вы — экспертный финансовый ассистент в режиме реального времени (Gemini Live). Прослушайте аудиофрагмент пользователя на русском языке и извлеките из него ВСЕ упомянутые финансовые операции (доходы и расходы).\n" +
+                "Игнорируйте паузы, слова-паразиты ('эээ', 'ну', 'короче', 'так') и фоновый шум. Если в фрагменте нет финансовой операции (только вздох или шум), верните пустой массив [].\n" +
                 "Разделите сказанное на отдельные операции и для каждой выделите название, тип (income или expense), сумму (число), категорию, подкатегорию (конкретное название покупки/источника) и дату (если упомянута).\n" +
                 "Текущая дата сегодня: $todayStr (день недели: $dayOfWeekStr).\n" +
                 "ПРАВИЛА ДЛЯ ДАТЫ ('date'):\n" +
@@ -1456,7 +1452,7 @@ class BudgetRepository(
             Категории расходов: ${expenseCategories.joinToString(", ")}
             Категории доходов: ${incomeCategories.joinToString(", ")}
 
-            Прослушай прикрепленную аудиозапись и верни ТОЛЬКО JSON массив объектов формата:
+            Прослушай прикрепленный аудиофрагмент и верни ТОЛЬКО JSON массив объектов формата (или [] если операций нет):
             [
               {
                 "title": "Такси",
@@ -1475,7 +1471,7 @@ class BudgetRepository(
                     parts = listOf(
                         GeminiPart(
                             inlineData = com.example.data.api.GeminiInlineData(
-                                mimeType = "audio/mp4",
+                                mimeType = mimeType,
                                 data = base64Audio
                             )
                         ),
@@ -1493,11 +1489,11 @@ class BudgetRepository(
             "gemini-3.1-flash-lite"
         )
 
-        GlobalConsoleLogger.i("GEMINI", "Отправка аудиозаписи (${audioBytes.size} байт) напрямую в Gemini API...")
+        GlobalConsoleLogger.i("GEMINI", "Отправка Live-аудиофрагмента (${audioBytes.size} байт) в Gemini API...")
 
         for (model in modelsToTry) {
             try {
-                GlobalConsoleLogger.d("GEMINI", "Анализ аудио моделью: $model")
+                GlobalConsoleLogger.d("GEMINI", "Live-анализ аудио моделью: $model")
                 val response = apiService.generateContent(model, apiKey, request)
                 if (response.error == null) {
                     val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
@@ -1505,10 +1501,8 @@ class BudgetRepository(
                         val jsonString = extractJsonArray(responseText)
                         if (jsonString.isNotBlank()) {
                             val parsed = parseJsonOperations(jsonString, todayStr)
-                            if (parsed.isNotEmpty()) {
-                                GlobalConsoleLogger.i("GEMINI", "Успешный разбор аудио ($model): найдено ${parsed.size} операций")
-                                return@withContext parsed
-                            }
+                            GlobalConsoleLogger.i("GEMINI", "Live-ответ ($model): распознано ${parsed.size} операций")
+                            return@withContext parsed
                         }
                     }
                 } else {
@@ -1521,8 +1515,10 @@ class BudgetRepository(
             }
         }
 
-        GlobalConsoleLogger.e("GEMINI", "Не удалось распознать операции из аудио: $lastError")
-        throw IllegalStateException(lastError ?: "Не удалось распознать операции из голосовой записи. Попробуйте сказать четче: название и сумму.")
+        if (lastError != null) {
+            GlobalConsoleLogger.e("GEMINI", "Ошибка Gemini Live аудио: $lastError")
+        }
+        return@withContext emptyList()
     }
 
     private fun extractJsonArray(rawText: String): String {
