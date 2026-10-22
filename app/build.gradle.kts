@@ -2,7 +2,7 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
-  alias(libs.plugins.roborazzi)
+  // alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
 }
 
@@ -23,14 +23,14 @@ if (versionPropsFile.exists()) {
     versionPropsFile.outputStream().use { versionProps.store(it, "Auto-generated build version. You can edit this file to change the version.") }
 }
 
-// Автоматически увеличиваем версию при сборке
-val isBuilding = gradle.startParameter.taskNames.any { 
-    it.contains("assemble", ignoreCase = true) || 
-    it.contains("bundle", ignoreCase = true) || 
-    it.contains("install", ignoreCase = true) || 
-    it.contains("compile", ignoreCase = true)
+// Автоматически увеличиваем версию только при релизной сборке (Release), чтобы не сбрасывать инкрементальный кэш BuildConfig/Resources/KSP при каждой Debug-сборке
+val isReleaseBuild = gradle.startParameter.taskNames.any { 
+    it.contains("Release", ignoreCase = true) && (
+        it.contains("assemble", ignoreCase = true) || 
+        it.contains("bundle", ignoreCase = true)
+    )
 }
-if (isBuilding) {
+if (isReleaseBuild) {
     manualVersionCode += 1
     versionProps.setProperty("VERSION_CODE", manualVersionCode.toString())
     versionPropsFile.outputStream().use { versionProps.store(it, "Auto-incremented build version.") }
@@ -153,9 +153,9 @@ dependencies {
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
-  testImplementation(libs.roborazzi)
-  testImplementation(libs.roborazzi.compose)
-  testImplementation(libs.roborazzi.junit.rule)
+  // testImplementation(libs.roborazzi)
+  // testImplementation(libs.roborazzi.compose)
+  // testImplementation(libs.roborazzi.junit.rule)
   androidTestImplementation(platform(libs.androidx.compose.bom))
   androidTestImplementation(libs.androidx.espresso.core)
   androidTestImplementation(libs.androidx.junit)
@@ -163,13 +163,13 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
-  "ksp"(libs.moshi.kotlin.codegen)
+  // "ksp"(libs.moshi.kotlin.codegen) // Не используется (применяется рефлексивный KotlinJsonAdapterFactory)
 
   // Автоматический парсинг Markdown для Jetpack Compose
   implementation("com.github.jeziellago:compose-markdown:0.5.0")
   
-  // Google Generative AI SDK для взаимодействия с Gemini
-  implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+  // Google Generative AI SDK отключен, т.к. запросы идут напрямую через Retrofit
+  // implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 
   // Локальное офлайн-распознавание речи VOSK
   implementation("com.alphacephei:vosk-android:0.3.47")
