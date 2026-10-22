@@ -144,10 +144,6 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         stateDelegate.startVoiceRecording(context)
     }
 
-    fun processContinuousVoiceChunk(chunkText: String) {
-        stateDelegate.processContinuousVoiceChunk(chunkText)
-    }
-
     fun stopVoiceRecordingAndProcess() {
         stateDelegate.stopVoiceRecordingAndProcess()
     }

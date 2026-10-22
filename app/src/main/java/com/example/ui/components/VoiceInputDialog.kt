@@ -138,8 +138,6 @@ fun VoiceRecordingOverlay(
     val normalizedAmplitude = remember(rmsDb) {
         (rmsDb / 12f).coerceIn(0f, 1f)
     }
-    val voskStatus by voiceManager.voskStatus.collectAsState()
-    val voskProgress by voiceManager.voskProgress.collectAsState()
 
     val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
     val manualText by viewModel.manualText.collectAsState()
@@ -760,52 +758,35 @@ fun VoiceRecordingOverlay(
                                                     horizontalAlignment = Alignment.CenterHorizontally,
                                                     verticalArrangement = Arrangement.Center
                                                 ) {
-                                                    val isDownloadingOrExtracting = voskStatus == "DOWNLOADING" || voskStatus == "EXTRACTING"
-                                                    if (isDownloadingOrExtracting) {
-                                                        val statusText = if (voskStatus == "DOWNLOADING") {
-                                                            val pct = (voskProgress?.let { (it * 100).toInt() } ?: 0)
-                                                            "Скачивание офлайн-модели ($pct%)"
-                                                        } else {
-                                                            "Настройка модели..."
-                                                        }
-                                                        Text(
-                                                            text = statusText,
-                                                            color = Emerald400,
-                                                            fontSize = 13.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            modifier = Modifier.padding(vertical = 4.dp)
-                                                        )
-                                                    } else {
-                                                        // 32-Band Seamless Neon Glow Waveform Visualizer
-                                                        Box(
+                                                    // 32-Band Seamless Neon Glow Waveform Visualizer
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .height(38.dp),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Neon32BandVoiceVisualizer(
+                                                            amplitude = normalizedAmplitude,
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
-                                                                .height(38.dp),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            Neon32BandVoiceVisualizer(
-                                                                amplitude = normalizedAmplitude,
-                                                                modifier = Modifier
-                                                                    .fillMaxWidth()
-                                                                    .height(36.dp)
-                                                            )
+                                                                .height(36.dp)
+                                                        )
 
-                                                            if (isRecordingLocked) {
-                                                                Box(
-                                                                    modifier = Modifier
-                                                                        .align(Alignment.CenterStart)
-                                                                        .padding(start = 4.dp)
-                                                                        .size(20.dp)
-                                                                        .background(DarkBg.copy(alpha = 0.6f), CircleShape),
-                                                                    contentAlignment = Alignment.Center
-                                                                ) {
-                                                                    Icon(
-                                                                        imageVector = Icons.Default.Lock,
-                                                                        contentDescription = "Зафиксировано",
-                                                                        tint = Rose500,
-                                                                        modifier = Modifier.size(12.dp)
-                                                                    )
-                                                                }
+                                                        if (isRecordingLocked) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .align(Alignment.CenterStart)
+                                                                    .padding(start = 4.dp)
+                                                                    .size(20.dp)
+                                                                    .background(DarkBg.copy(alpha = 0.6f), CircleShape),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.Lock,
+                                                                    contentDescription = "Зафиксировано",
+                                                                    tint = Rose500,
+                                                                    modifier = Modifier.size(12.dp)
+                                                                )
                                                             }
                                                         }
                                                     }

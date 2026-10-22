@@ -171,6 +171,6 @@ dependencies {
   // Google Generative AI SDK отключен, т.к. запросы идут напрямую через Retrofit
   // implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
 
-  // Локальное офлайн-распознавание речи VOSK
-  implementation("com.alphacephei:vosk-android:0.3.47")
+  // Локальное офлайн-распознавание речи VOSK отключено (используется прямая отправка аудио в Gemini)
+  // implementation("com.alphacephei:vosk-android:0.3.47")
 }

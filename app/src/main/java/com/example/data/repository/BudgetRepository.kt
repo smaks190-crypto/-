@@ -1377,6 +1377,7 @@ class BudgetRepository(
         var lastError: String? = null
 
         val modelsToTry = listOf(
+            "gemini-2.5-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite"
         )
@@ -1411,6 +1412,117 @@ class BudgetRepository(
 
         GlobalConsoleLogger.e("GEMINI", "Все Gemini модели завершились ошибкой: $lastError")
         throw IllegalStateException(lastError ?: "Не удалось разбрать операции из текста. Попробуйте сформулировать точнее.")
+    }
+
+    suspend fun parseVoiceAudioOperations(
+        audioFile: java.io.File,
+        apiKey: String,
+        expenseCategories: List<String>,
+        incomeCategories: List<String>
+    ): List<ParsedVoiceOperation> = withContext(Dispatchers.IO) {
+        if (!audioFile.exists() || audioFile.length() == 0L) return@withContext emptyList()
+
+        if (apiKey.isBlank()) {
+            throw IllegalArgumentException("Для анализа речи с помощью ИИ укажите API ключ Gemini в настройках приложения.")
+        }
+
+        val audioBytes = try {
+            audioFile.readBytes()
+        } finally {
+            try { audioFile.delete() } catch (_: Throwable) {}
+        }
+        val base64Audio = android.util.Base64.encodeToString(audioBytes, android.util.Base64.NO_WRAP)
+
+        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        val todayStr = dateFormat.format(java.util.Date())
+        val dayOfWeekStr = java.text.SimpleDateFormat("EEEE", java.util.Locale("ru")).format(java.util.Date())
+
+        val systemPrompt = "Вы — экспертный финансовый ассистент. Прослушайте аудиозапись пользователя на русском языке и извлеките из неё ВСЕ упомянутые финансовые операции (доходы и расходы).\n" +
+                "Игнорируйте паузы, слова-паразиты ('эээ', 'ну', 'короче', 'так') и фоновый шум.\n" +
+                "Разделите сказанное на отдельные операции и для каждой выделите название, тип (income или expense), сумму (число), категорию, подкатегорию (конкретное название покупки/источника) и дату (если упомянута).\n" +
+                "Текущая дата сегодня: $todayStr (день недели: $dayOfWeekStr).\n" +
+                "ПРАВИЛА ДЛЯ ДАТЫ ('date'):\n" +
+                "- Если пользователь говорит 'вчера', вычисли дату за день до сегодняшней ($todayStr).\n" +
+                "- Если пользователь говорит 'позавчера', вычисли дату за 2 дня до сегодняшней ($todayStr).\n" +
+                "- Если пользователь указывает день недели или число (например 'в прошлый вторник', '15 июля'), вычисли соответствующую дату в формате YYYY-MM-DD.\n" +
+                "- Если дата не упомянута, укажи текущую дату '$todayStr'.\n" +
+                "ОСОБОЕ ПРАВИЛО ДЛЯ ДЕТАЛИЗАЦИИ:\n" +
+                "- Если пользователь перечисляет несколько конкретных покупок в рамках одной общей категории (например, 'в фастфуде бургер за 300 рублей и кола за 150' или 'потратил в супермаркете: молоко 100 и хлеб 50'), обязательно раздели это на ОТДЕЛЬНЫЕ операции.\n" +
+                "- Каждой операции присвой одну и ту же общую подходящую категорию из списка имеющихся категорий, а в качестве 'title' и 'subcategory' укажи конкретную покупку ('Бургер', 'Кола', 'Молоко', 'Хлеб').\n" +
+                "Подбирайте наиболее подходящие категории из предоставленных списков. Избегайте значений 'null' или пустых названий.\n" +
+                "Верните СТРОГО JSON-массив объектов без какого-либо разметочного текста или комментариев."
+
+        val userQuery = """
+            Категории расходов: ${expenseCategories.joinToString(", ")}
+            Категории доходов: ${incomeCategories.joinToString(", ")}
+
+            Прослушай прикрепленную аудиозапись и верни ТОЛЬКО JSON массив объектов формата:
+            [
+              {
+                "title": "Такси",
+                "type": "expense",
+                "amount": 450.0,
+                "category": "Такси и Транспорт",
+                "subcategory": "Яндекс Такси",
+                "date": "$todayStr"
+              }
+            ]
+        """.trimIndent()
+
+        val request = GeminiRequest(
+            contents = listOf(
+                GeminiContent(
+                    parts = listOf(
+                        GeminiPart(
+                            inlineData = com.example.data.api.GeminiInlineData(
+                                mimeType = "audio/mp4",
+                                data = base64Audio
+                            )
+                        ),
+                        GeminiPart(text = userQuery)
+                    )
+                )
+            ),
+            systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
+        )
+
+        var lastError: String? = null
+        val modelsToTry = listOf(
+            "gemini-2.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.1-flash-lite"
+        )
+
+        GlobalConsoleLogger.i("GEMINI", "Отправка аудиозаписи (${audioBytes.size} байт) напрямую в Gemini API...")
+
+        for (model in modelsToTry) {
+            try {
+                GlobalConsoleLogger.d("GEMINI", "Анализ аудио моделью: $model")
+                val response = apiService.generateContent(model, apiKey, request)
+                if (response.error == null) {
+                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                    if (!responseText.isNullOrEmpty()) {
+                        val jsonString = extractJsonArray(responseText)
+                        if (jsonString.isNotBlank()) {
+                            val parsed = parseJsonOperations(jsonString, todayStr)
+                            if (parsed.isNotEmpty()) {
+                                GlobalConsoleLogger.i("GEMINI", "Успешный разбор аудио ($model): найдено ${parsed.size} операций")
+                                return@withContext parsed
+                            }
+                        }
+                    }
+                } else {
+                    lastError = response.error.message
+                    GlobalConsoleLogger.w("GEMINI", "Ошибка от Gemini ($model) при разборе аудио: ${response.error.message}")
+                }
+            } catch (e: Exception) {
+                lastError = e.message
+                GlobalConsoleLogger.e("GEMINI", "Исключение при отправке аудио в $model: ${e.localizedMessage}", e)
+            }
+        }
+
+        GlobalConsoleLogger.e("GEMINI", "Не удалось распознать операции из аудио: $lastError")
+        throw IllegalStateException(lastError ?: "Не удалось распознать операции из голосовой записи. Попробуйте сказать четче: название и сумму.")
     }
 
     private fun extractJsonArray(rawText: String): String {

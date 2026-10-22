@@ -27,8 +27,14 @@ data class GeminiContent(
     val parts: List<GeminiPart>
 )
 
+data class GeminiInlineData(
+    @field:Json(name = "mime_type") val mimeType: String,
+    val data: String
+)
+
 data class GeminiPart(
-    val text: String
+    val text: String? = null,
+    @field:Json(name = "inline_data") val inlineData: GeminiInlineData? = null
 )
 
 data class GeminiResponse(

@@ -53,61 +53,65 @@ class TransactionStateDelegate(
         manualText.value = ""
         voiceErrorMessage.value = null
         voiceInputManager.onErrorCallback = { cancelVoiceRecording() }
-        voiceInputManager.onChunkRecognized = { chunkText ->
-            processContinuousVoiceChunk(chunkText)
-        }
         voiceInputManager.startListening(context)
-    }
-
-    fun processContinuousVoiceChunk(chunkText: String) {
-        val trimmed = chunkText.trim()
-        if (trimmed.isBlank() || !isVoiceActive.value) return
-
-        scope.launch {
-            isAnalyzingVoice.value = true
-            voiceErrorMessage.value = null
-            try {
-                val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
-                val incCats = categories.value.filter { it.type == "income" }.map { it.name }
-
-                val result = repository.parseVoiceOperations(
-                    voiceText = trimmed,
-                    apiKey = apiKey.value,
-                    expenseCategories = expCats,
-                    incomeCategories = incCats
-                )
-
-                if (result.isNotEmpty()) {
-                    val currentList = parsedVoiceOperations.value ?: emptyList()
-                    val updatedList = currentList + result
-                    parsedVoiceOperations.value = updatedList
-                    com.example.utils.GlobalConsoleLogger.i("UI", "Добавлены новые операции (${result.size} шт.). Всего: ${updatedList.size} шт.")
-                } else {
-                    com.example.utils.GlobalConsoleLogger.d("GEMINI", "В фрагменте «$trimmed» операции не найдены")
-                }
-            } catch (e: Exception) {
-                com.example.utils.GlobalConsoleLogger.e("GEMINI", "Ошибка при обработке фрагмента «$trimmed»: ${e.localizedMessage}", e)
-            } finally {
-                isAnalyzingVoice.value = false
-            }
-        }
     }
 
     fun stopVoiceRecordingAndProcess() {
         voiceCollectionJob?.cancel()
         voiceCollectionJob = null
-        voiceInputManager.stopListening()
-        isVoiceActive.value = false
-        val textToProcess = when {
-            manualText.value.isNotBlank() -> manualText.value
-            voiceInputManager.recognizedText.value.isNotBlank() -> voiceInputManager.recognizedText.value
-            voiceInputManager.partialText.value.isNotBlank() -> voiceInputManager.partialText.value
-            else -> ""
-        }
-        if (textToProcess.isNotBlank()) {
-            processVoiceText(textToProcess)
+        val audioFile = voiceInputManager.stopListeningAndGetAudioFile()
+        if (audioFile != null) {
+            processVoiceAudioFile(audioFile)
         } else {
-            cancelVoiceRecording()
+            val textToProcess = when {
+                manualText.value.isNotBlank() -> manualText.value
+                voiceInputManager.recognizedText.value.isNotBlank() -> voiceInputManager.recognizedText.value
+                voiceInputManager.partialText.value.isNotBlank() -> voiceInputManager.partialText.value
+                else -> ""
+            }
+            if (textToProcess.isNotBlank()) {
+                isVoiceActive.value = false
+                processVoiceText(textToProcess)
+            } else {
+                cancelVoiceRecording()
+            }
+        }
+    }
+
+    private fun processVoiceAudioFile(audioFile: java.io.File) {
+        voiceCollectionJob = scope.launch {
+            isAnalyzingVoice.value = true
+            isVoiceActive.value = false
+            voiceErrorMessage.value = null
+            try {
+                val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
+                val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
+                val incCats = categories.value.filter { it.type == "income" }.map { it.name }
+
+                val result = repository.parseVoiceAudioOperations(
+                    audioFile = audioFile,
+                    apiKey = effectiveKey,
+                    expenseCategories = expCats,
+                    incomeCategories = incCats
+                )
+
+                if (result.isEmpty()) {
+                    val msg = "Не удалось распознать операции. Назовите покупку и сумму, например: «Кофе 300 и такси 500»"
+                    voiceErrorMessage.value = msg
+                    toastMessage.emit(msg)
+                    parsedVoiceOperations.value = null
+                } else {
+                    parsedVoiceOperations.value = result
+                    com.example.utils.GlobalConsoleLogger.i("UI", "Аудио успешно разобрано ИИ: ${result.size} операций")
+                }
+            } catch (e: Exception) {
+                val msg = e.message ?: "Ошибка анализа голоса"
+                voiceErrorMessage.value = msg
+                toastMessage.emit(msg)
+                parsedVoiceOperations.value = null
+            } finally {
+                isAnalyzingVoice.value = false
+            }
         }
     }
 
@@ -137,28 +141,29 @@ class TransactionStateDelegate(
             isAnalyzingVoice.value = true
             voiceErrorMessage.value = null
             try {
+                val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
                 val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
                 val incCats = categories.value.filter { it.type == "income" }.map { it.name }
 
                 val result = repository.parseVoiceOperations(
                     voiceText = voiceText,
-                    apiKey = apiKey.value,
+                    apiKey = effectiveKey,
                     expenseCategories = expCats,
                     incomeCategories = incCats
                 )
 
                 if (result.isEmpty()) {
-                    voiceErrorMessage.value = "Не удалось распознать операции из текста. Укажите суммы и название, например: «Потратил 500 рублей на такси»"
+                    val msg = "Не удалось распознать операции из текста. Укажите суммы и название, например: «Потратил 500 рублей на такси»"
+                    voiceErrorMessage.value = msg
+                    toastMessage.emit(msg)
                     parsedVoiceOperations.value = null
                 } else {
                     parsedVoiceOperations.value = result
-                    val finalDate = selectedDateDay.value.ifBlank {
-                        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-                    }
-                    confirmVoiceOperations(result, finalDate)
                 }
             } catch (e: Exception) {
-                voiceErrorMessage.value = "Ошибка при анализе: ${e.message}"
+                val msg = "Ошибка при анализе: ${e.message}"
+                voiceErrorMessage.value = msg
+                toastMessage.emit(msg)
                 parsedVoiceOperations.value = null
             } finally {
                 isAnalyzingVoice.value = false

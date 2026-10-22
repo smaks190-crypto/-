@@ -1,13 +1,10 @@
 package com.example.utils
 
 import android.content.Context
-import android.content.Intent
-import android.os.Bundle
+import android.media.MediaRecorder
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.speech.RecognitionListener as SystemRecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer as SystemSpeechRecognizer
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,24 +12,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import org.vosk.Model
-import org.vosk.Recognizer
-import org.vosk.android.RecognitionListener as VoskRecognitionListener
-import org.vosk.android.SpeechService
-import java.io.BufferedInputStream
 import java.io.File
-import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.zip.ZipInputStream
+import kotlin.math.log10
 
 class VoiceInputManager(context: Context) {
     private val context: Context = context.applicationContext
-    private var systemSpeechRecognizer: SystemSpeechRecognizer? = null
-    private var voskModel: Model? = null
-    private var voskRecognizer: Recognizer? = null
-    private var voskSpeechService: SpeechService? = null
+    private var mediaRecorder: MediaRecorder? = null
+    private var currentAudioFile: File? = null
+    private var recordingStartTimestamp: Long = 0L
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val _isListening = MutableStateFlow(false)
@@ -50,444 +37,175 @@ class VoiceInputManager(context: Context) {
     private val _errorState = MutableStateFlow<String?>(null)
     val errorState: StateFlow<String?> = _errorState.asStateFlow()
 
-    // VOSK specific states
-    private val _voskStatus = MutableStateFlow("") // "", "DOWNLOADING", "EXTRACTING", "READY", "ERROR"
-    val voskStatus: StateFlow<String> = _voskStatus.asStateFlow()
-
-    private val _voskProgress = MutableStateFlow<Float?>(null)
-    val voskProgress: StateFlow<Float?> = _voskProgress.asStateFlow()
-
-    private var accumulatedText = ""
-    private var isContinuous = false
-    private var isPaused = false
-    @Volatile private var isProcessingAllowed = true
-    private var lastProcessedChunk = ""
-
-    private var activeContextRef: java.lang.ref.WeakReference<Context>? = null
-
     var onErrorCallback: (() -> Unit)? = null
     var onChunkRecognized: ((String) -> Unit)? = null
 
-    private fun parsePartialHypothesis(json: String): String {
-        return try {
-            val regex = "\"partial\"\\s*:\\s*\"([^\"]*)\"".toRegex()
-            regex.find(json)?.groupValues?.get(1) ?: ""
-        } catch (_: Throwable) { "" }
+    init {
+        // Очистка старой тяжелой офлайн-модели VOSK (~50 МБ), если она осталась от прошлых версий
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val legacyVoskDir = File(this@VoiceInputManager.context.filesDir, "vosk-model-small-ru-0.22")
+                if (legacyVoskDir.exists()) {
+                    legacyVoskDir.deleteRecursively()
+                    GlobalConsoleLogger.i("VOICE", "Удалена устаревшая офлайн-модель VOSK из памяти устройства")
+                }
+                val legacyZip = File(this@VoiceInputManager.context.cacheDir, "vosk_model.zip")
+                if (legacyZip.exists()) {
+                    legacyZip.delete()
+                }
+            } catch (_: Throwable) {}
+        }
     }
 
-    private fun parseResultHypothesis(json: String): String {
-        return try {
-            val regex = "\"text\"\\s*:\\s*\"([^\"]*)\"".toRegex()
-            regex.find(json)?.groupValues?.get(1) ?: ""
-        } catch (_: Throwable) { "" }
+    private val amplitudePollRunnable = object : Runnable {
+        override fun run() {
+            val recorder = mediaRecorder
+            if (recorder != null && _isListening.value) {
+                try {
+                    val maxAmp = recorder.maxAmplitude // 0 .. 32767
+                    val normalizedRms = if (maxAmp > 80) {
+                        val db = 20f * log10(maxAmp.toFloat() / 100f)
+                        ((db - 8f) / 3.2f).coerceIn(1.2f, 12f)
+                    } else {
+                        1.0f
+                    }
+                    _rmsDb.value = normalizedRms
+                } catch (_: Throwable) {
+                    _rmsDb.value = 1.0f
+                }
+                mainHandler.postDelayed(this, 40L)
+            }
+        }
     }
 
-    fun startListening(callerContext: Context) {
-        GlobalConsoleLogger.i("VOICE", "Запуск непрерывного прослушивания микрофона...")
-        muteSystemBeeps()
-        activeContextRef = java.lang.ref.WeakReference(callerContext)
-        isContinuous = true
-        isPaused = false
-        isProcessingAllowed = true
-        lastProcessedChunk = ""
+    fun startListening(callerContext: Context = context) {
+        GlobalConsoleLogger.i("VOICE", "Запуск прямой аудиозаписи для Gemini...")
+        stopRecorderSafely(deleteFile = true)
 
-        accumulatedText = ""
         _recognizedText.value = ""
         _partialText.value = ""
         _errorState.value = null
 
-        val targetDir = File(context.filesDir, "vosk-model-small-ru-0.22")
-        if (targetDir.exists() && targetDir.isDirectory && targetDir.list()?.isNotEmpty() == true) {
-            _voskStatus.value = "READY"
-            GlobalConsoleLogger.i("VOSK", "Найдена локальная офлайн-модель VOSK")
-            initVoskAndStart(callerContext)
-        } else {
-            GlobalConsoleLogger.i("VOSK", "Модель VOSK не найдена локально, запускаем загрузку")
-            downloadAndInitModel(callerContext)
-        }
-    }
-
-    fun startListening() {
-        activeContextRef = null
-        isContinuous = true
-        isPaused = false
-        startListening(context)
-    }
-
-    private fun downloadAndInitModel(callerContext: Context) {
-        _voskStatus.value = "DOWNLOADING"
-        _voskProgress.value = 0f
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val url = URL("https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip")
-                val connection = url.openConnection() as HttpURLConnection
-                connection.connectTimeout = 20000
-                connection.readTimeout = 20000
-                connection.connect()
-
-                if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-                    throw Exception("Ошибка загрузки модели с сервера VOSK code: ${connection.responseCode}")
-                }
-
-                val fileLength = connection.contentLength
-                val inputStream = BufferedInputStream(connection.inputStream)
-                val tempZip = File(context.cacheDir, "vosk_model.zip")
-                val outputStream = FileOutputStream(tempZip)
-
-                val data = ByteArray(8192)
-                var total: Long = 0
-                var count: Int
-                while (inputStream.read(data).also { count = it } != -1) {
-                    if (isPaused || !isContinuous) {
-                        outputStream.close()
-                        inputStream.close()
-                        tempZip.delete()
-                        _voskStatus.value = ""
-                        _voskProgress.value = null
-                        return@launch
-                    }
-                    total += count
-                    if (fileLength > 0) {
-                        _voskProgress.value = total.toFloat() / fileLength
-                    }
-                    outputStream.write(data, 0, count)
-                }
-                outputStream.flush()
-                outputStream.close()
-                inputStream.close()
-
-                _voskStatus.value = "EXTRACTING"
-                _voskProgress.value = null
-
-                val buffer = ByteArray(8192)
-                ZipInputStream(BufferedInputStream(tempZip.inputStream())).use { zis ->
-                    var entry = zis.nextEntry
-                    while (entry != null) {
-                        val newFile = File(context.filesDir, entry.name)
-                        if (entry.isDirectory) {
-                            newFile.mkdirs()
-                        } else {
-                            newFile.parentFile?.mkdirs()
-                            FileOutputStream(newFile).use { fos ->
-                                var len: Int
-                                while (zis.read(buffer).also { len = it } > 0) {
-                                    fos.write(buffer, 0, len)
-                                }
-                            }
-                        }
-                        zis.closeEntry()
-                        entry = zis.nextEntry
-                    }
-                }
-                tempZip.delete()
-
-                _voskStatus.value = "READY"
-                withContext(Dispatchers.Main) {
-                    initVoskAndStart(callerContext)
-                }
-            } catch (e: Exception) {
-                _voskStatus.value = "ERROR"
-                _voskProgress.value = null
-                _errorState.value = "Не удалось загрузить офлайн-модель: ${e.localizedMessage}"
-                Log.e("VoiceInputManager", "Vosk download error", e)
-                withContext(Dispatchers.Main) {
-                    // Fallback to system speech recognition
-                    startSystemSpeechRecognizer(callerContext)
-                }
-            }
-        }
-    }
-
-    private fun initVoskAndStart(callerContext: Context) {
         try {
-            GlobalConsoleLogger.i("VOSK", "Инициализация офлайн-модели VOSK...")
-            val targetDir = File(context.filesDir, "vosk-model-small-ru-0.22")
-            if (voskModel == null) {
-                voskModel = Model(targetDir.absolutePath)
+            val outputFile = File(context.cacheDir, "gemini_voice_input.m4a")
+            if (outputFile.exists()) {
+                outputFile.delete()
             }
-            if (voskRecognizer == null) {
-                voskRecognizer = Recognizer(voskModel, 16000f)
+            currentAudioFile = outputFile
+
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(callerContext)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
             }
 
-            voskSpeechService?.stop()
-            val service = SpeechService(voskRecognizer, 16000f)
-            voskSpeechService = service
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            recorder.setAudioChannels(1)
+            recorder.setAudioSamplingRate(16000)
+            recorder.setAudioEncodingBitRate(32000)
+            recorder.setOutputFile(outputFile.absolutePath)
 
-            service.startListening(object : VoskRecognitionListener {
-                override fun onResult(hypothesis: String) {
-                    if (!isProcessingAllowed) return
-                    val text = parseResultHypothesis(hypothesis).trim()
-                    if (text.isNotBlank() && text != lastProcessedChunk) {
-                        lastProcessedChunk = text
-                        GlobalConsoleLogger.d("VOSK", "Распознан фрагмент: «$text»")
-                        _recognizedText.value = text
-                        _partialText.value = ""
-                        onChunkRecognized?.invoke(text)
-                    }
-                }
+            recorder.prepare()
+            recorder.start()
 
-                override fun onPartialResult(hypothesis: String) {
-                    if (!isProcessingAllowed) return
-                    val partial = parsePartialHypothesis(hypothesis).trim()
-                    if (partial.isNotBlank()) {
-                        _partialText.value = partial
-                    }
-                }
-
-                override fun onFinalResult(hypothesis: String) {
-                    if (!isProcessingAllowed) return
-                    val text = parseResultHypothesis(hypothesis).trim()
-                    if (text.isNotBlank() && text != lastProcessedChunk) {
-                        lastProcessedChunk = text
-                        GlobalConsoleLogger.i("VOSK", "Финальный результат VOSK: «$text»")
-                        _recognizedText.value = text
-                        _partialText.value = ""
-                        onChunkRecognized?.invoke(text)
-                    }
-                }
-
-                override fun onError(exception: Exception) {
-                    if (!isProcessingAllowed) return
-                    GlobalConsoleLogger.e("VOSK", "Ошибка VOSK слушателя: ${exception.localizedMessage}", exception)
-                    Log.e("VoiceInputManager", "Vosk listener error", exception)
-                    _errorState.value = exception.localizedMessage
-                }
-
-                override fun onTimeout() {
-                    // Continuous listening, do not stop automatically
-                }
-            })
-
+            mediaRecorder = recorder
+            recordingStartTimestamp = System.currentTimeMillis()
             _isListening.value = true
-            _errorState.value = null
-            GlobalConsoleLogger.i("VOSK", "VOSK успешно запущен и слушатель готов (offline)")
-            Log.d("VoiceInputManager", "Vosk successfully started listening offline!")
+            _rmsDb.value = 1.5f
+
+            mainHandler.removeCallbacks(amplitudePollRunnable)
+            mainHandler.post(amplitudePollRunnable)
+
+            GlobalConsoleLogger.i("VOICE", "Запись аудио в файл ${outputFile.name} успешно начата")
         } catch (e: Throwable) {
-            GlobalConsoleLogger.e("VOSK", "Ошибка JNI VOSK, переход на системный SpeechRecognizer: ${e.localizedMessage}", e)
-            Log.e("VoiceInputManager", "Vosk JNI error, falling back to system SpeechRecognizer", e)
-            startSystemSpeechRecognizer(callerContext)
+            Log.e("VoiceInputManager", "MediaRecorder start error", e)
+            GlobalConsoleLogger.e("VOICE", "Ошибка запуска записи микрофона: ${e.localizedMessage}", e)
+            _errorState.value = "Ошибка запуска микрофона: ${e.localizedMessage}"
+            _isListening.value = false
+            stopRecorderSafely(deleteFile = true)
+            onErrorCallback?.invoke()
         }
     }
 
-    private fun startSystemSpeechRecognizer(callerContext: Context) {
-        val currentContext = activeContextRef?.get() ?: callerContext
-        val isAvailable = try {
-            val intent = Intent("android.speech.RecognitionService")
-            val services = currentContext.packageManager.queryIntentServices(intent, 0)
-            !services.isNullOrEmpty() && SystemSpeechRecognizer.isRecognitionAvailable(currentContext)
-        } catch (_: Throwable) {
-            false
-        }
+    fun stopListeningAndGetAudioFile(): File? {
+        GlobalConsoleLogger.i("VOICE", "Завершение записи аудио и подготовка файла для Gemini")
+        mainHandler.removeCallbacks(amplitudePollRunnable)
+        val durationMs = System.currentTimeMillis() - recordingStartTimestamp
+        val recorder = mediaRecorder
+        mediaRecorder = null
+        _isListening.value = false
+        _rmsDb.value = 0f
 
-        if (!isAvailable) {
-            _errorState.value = "Голосовая служба недоступна. Пожалуйста, введите текст вручную."
-            _isListening.value = false
-            return
-        }
-
-        mainHandler.post {
+        if (recorder != null) {
             try {
-                stopRecognizerOnly()
-
-                val recognizer = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                    SystemSpeechRecognizer.createSpeechRecognizer(currentContext.createAttributionContext("voice_input"))
-                } else {
-                    SystemSpeechRecognizer.createSpeechRecognizer(currentContext)
-                }
-
-                systemSpeechRecognizer = recognizer
-                recognizer.setRecognitionListener(object : SystemRecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {
-                        GlobalConsoleLogger.d("VOICE", "Системный распознаватель готов к приему речи")
-                        _isListening.value = true
-                        _errorState.value = null
-                    }
-
-                    override fun onBeginningOfSpeech() {
-                        GlobalConsoleLogger.d("VOICE", "Обнаружено начало речи")
-                        _isListening.value = true
-                    }
-
-                    override fun onRmsChanged(rmsdB: Float) {
-                        val normalized = ((rmsdB + 2f) / 14f).coerceIn(0.05f, 1f)
-                        _rmsDb.value = normalized
-                    }
-
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-
-                    override fun onEndOfSpeech() {
-                        GlobalConsoleLogger.d("VOICE", "Завершение речевого фрагмента")
-                        if (!isContinuous || isPaused) {
-                            _isListening.value = false
-                        }
-                    }
-
-                    override fun onError(error: Int) {
-                        GlobalConsoleLogger.w("VOICE", "Системный распознаватель вернул ошибку code: $error")
-                        Log.d("VoiceInputManager", "System recognizer onError code: $error")
-                        if (isContinuous && !isPaused) {
-                            _isListening.value = true
-                            mainHandler.postDelayed({
-                                if (isContinuous && !isPaused) {
-                                    startSystemSpeechRecognizer(currentContext)
-                                }
-                            }, 200)
-                        } else {
-                            _isListening.value = false
-                        }
-                    }
-
-                    override fun onResults(results: Bundle?) {
-                        if (!isProcessingAllowed) return
-                        val matches = results?.getStringArrayList(SystemSpeechRecognizer.RESULTS_RECOGNITION)
-                        if (!matches.isNullOrEmpty()) {
-                            val text = matches[0].trim()
-                            if (text.isNotBlank() && text != lastProcessedChunk) {
-                                lastProcessedChunk = text
-                                GlobalConsoleLogger.i("VOICE", "Системный движок распознал: «$text»")
-                                _recognizedText.value = text
-                                _partialText.value = ""
-                                onChunkRecognized?.invoke(text)
-                            }
-                        }
-
-                        if (isContinuous && !isPaused) {
-                            _isListening.value = true
-                            mainHandler.post {
-                                if (isContinuous && !isPaused) {
-                                    startSystemSpeechRecognizer(currentContext)
-                                }
-                            }
-                        } else {
-                            _isListening.value = false
-                        }
-                    }
-
-                    override fun onPartialResults(partialResults: Bundle?) {
-                        val matches = partialResults?.getStringArrayList(SystemSpeechRecognizer.RESULTS_RECOGNITION)
-                        if (!matches.isNullOrEmpty()) {
-                            val text = matches[0]
-                            if (text.isNotBlank()) {
-                                _partialText.value = text
-                            }
-                        }
-                    }
-
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
-
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "ru-RU")
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                    putExtra("android.speech.extra.DICTATION_MODE", true)
-                    putExtra("android.speech.extra.SOUND_OFF", true)
-                    putExtra("android.speech.extras.SPEECH_INPUT_DISABLE_NOTIFICATION_SOUNDS", true)
-                }
-
-                recognizer.startListening(intent)
-                _isListening.value = true
-                _errorState.value = null
+                recorder.stop()
             } catch (e: Throwable) {
-                _isListening.value = false
-                _errorState.value = "Ошибка запуска микрофона: ${e.message}"
+                Log.w("VoiceInputManager", "MediaRecorder stop warning (too short or interrupted): ${e.message}")
+            } finally {
+                try {
+                    recorder.release()
+                } catch (_: Throwable) {}
             }
+        }
+
+        val file = currentAudioFile
+        return if (file != null && file.exists() && file.length() > 256L && durationMs >= 300L) {
+            GlobalConsoleLogger.i("VOICE", "Аудиофайл готов: ${file.length()} байт (${durationMs} мс)")
+            file
+        } else {
+            GlobalConsoleLogger.w("VOICE", "Запись слишком короткая (${durationMs} мс), файл отброшен")
+            try { file?.delete() } catch (_: Throwable) {}
+            currentAudioFile = null
+            null
         }
     }
 
     fun stopListening() {
-        GlobalConsoleLogger.i("VOICE", "Остановка распознавания речи")
-        isProcessingAllowed = false
-        isContinuous = false
-        isPaused = false
-        stopRecognizerOnly()
+        GlobalConsoleLogger.i("VOICE", "Отмена/остановка записи речи")
+        stopRecorderSafely(deleteFile = true)
     }
 
-    private var isMutedByVoice = false
-
-    private fun muteSystemBeeps() {
-        try {
-            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_SYSTEM, android.media.AudioManager.ADJUST_MUTE, 0)
-                audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_NOTIFICATION, android.media.AudioManager.ADJUST_MUTE, 0)
-            } else {
-                @Suppress("DEPRECATION")
-                audioManager.setStreamMute(android.media.AudioManager.STREAM_SYSTEM, true)
-                @Suppress("DEPRECATION")
-                audioManager.setStreamMute(android.media.AudioManager.STREAM_NOTIFICATION, true)
-            }
-            isMutedByVoice = true
-        } catch (_: Throwable) {}
-    }
-
-    private fun restoreSystemBeeps() {
-        if (!isMutedByVoice) return
-        try {
-            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_SYSTEM, android.media.AudioManager.ADJUST_UNMUTE, 0)
-                audioManager.adjustStreamVolume(android.media.AudioManager.STREAM_NOTIFICATION, android.media.AudioManager.ADJUST_UNMUTE, 0)
-            } else {
-                @Suppress("DEPRECATION")
-                audioManager.setStreamMute(android.media.AudioManager.STREAM_SYSTEM, false)
-                @Suppress("DEPRECATION")
-                audioManager.setStreamMute(android.media.AudioManager.STREAM_NOTIFICATION, false)
-            }
-            isMutedByVoice = false
-        } catch (_: Throwable) {}
-    }
-
-    private fun stopRecognizerOnly() {
-        try {
-            systemSpeechRecognizer?.stopListening()
-            systemSpeechRecognizer?.destroy()
-        } catch (_: Throwable) {}
-        systemSpeechRecognizer = null
-
-        try {
-            voskSpeechService?.stop()
-        } catch (_: Throwable) {}
-        voskSpeechService = null
-
-        restoreSystemBeeps()
-
-        activeContextRef = null
+    private fun stopRecorderSafely(deleteFile: Boolean) {
+        mainHandler.removeCallbacks(amplitudePollRunnable)
+        val recorder = mediaRecorder
+        mediaRecorder = null
         _isListening.value = false
         _rmsDb.value = 0f
-    }
 
-    fun pauseListening() {
-        if (isContinuous) {
-            isPaused = true
-            stopRecognizerOnly()
+        if (recorder != null) {
+            try {
+                recorder.stop()
+            } catch (_: Throwable) {
+            } finally {
+                try {
+                    recorder.release()
+                } catch (_: Throwable) {}
+            }
         }
-    }
 
-    fun resumeListening() {
-        if (isContinuous && isPaused) {
-            isPaused = false
-            val currentContext = activeContextRef?.get() ?: context
-            startListening(currentContext)
+        if (deleteFile) {
+            try {
+                currentAudioFile?.delete()
+            } catch (_: Throwable) {}
+            currentAudioFile = null
         }
     }
 
     fun clear() {
-        accumulatedText = ""
         _recognizedText.value = ""
         _partialText.value = ""
         _errorState.value = null
     }
 
     fun setRecognizedTextManually(text: String) {
-        accumulatedText = text
         _recognizedText.value = text
         _partialText.value = ""
     }
 
     fun destroy() {
-        stopListening()
+        stopRecorderSafely(deleteFile = true)
     }
 }
