@@ -104,6 +104,8 @@ fun DavidChatTopBar(
     onBack: (() -> Unit)? = null,
     onReset: () -> Unit,
     onOpenAchievements: (() -> Unit)? = null,
+    hasApiKey: Boolean = true,
+    onOpenApiKeyDialog: (() -> Unit)? = null,
     isTyping: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -190,7 +192,17 @@ fun DavidChatTopBar(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .then(
+                        if (onOpenApiKeyDialog != null) {
+                            Modifier.clickable { onOpenApiKeyDialog() }
+                        } else {
+                            Modifier
+                        }
+                    )
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "Давид Жабов",
@@ -201,14 +213,14 @@ fun DavidChatTopBar(
                     Spacer(modifier = Modifier.width(6.dp))
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(NeonIndigo.copy(alpha = 0.2f))
-                            .border(0.5.dp, NeonIndigo.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(com.example.ui.theme.PurpleAccent.copy(alpha = 0.2f))
+                            .border(0.5.dp, com.example.ui.theme.PurpleAccent.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "AI BOT",
-                            color = NeonIndigo,
+                            text = "Gemini 3.8",
+                            color = com.example.ui.theme.PurpleLight,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
@@ -216,8 +228,16 @@ fun DavidChatTopBar(
                     }
                 }
                 Text(
-                    text = if (isTyping) "печатает..." else "в сети",
-                    color = if (isTyping) NeonIndigo else NeonEmerald,
+                    text = when {
+                        isTyping -> "печатает..."
+                        hasApiKey -> "● Финансовый ревизор и критик трат"
+                        else -> "Требуется Gemini API ключ (нажмите)"
+                    },
+                    color = when {
+                        isTyping -> NeonIndigo
+                        hasApiKey -> com.example.ui.theme.EmeraldLight
+                        else -> com.example.ui.theme.WarningAmber
+                    },
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -275,6 +295,8 @@ fun DavidChatTopBar(
 @Composable
 fun DavidMessageItem(
     message: ChatMessage,
+    onConfirmProposal: ((String) -> Unit)? = null,
+    onDismissProposal: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val alignment = if (message.isUser) Alignment.End else Alignment.Start
@@ -313,6 +335,99 @@ fun DavidMessageItem(
                     operation = type,
                     timestamp = message.timestamp,
                     modifier = Modifier
+                )
+            }
+            is ChatMessageType.ParsedTransactionProposal -> {
+                DavidParsedTransactionProposalBubble(
+                    proposal = type,
+                    onConfirm = { onConfirmProposal?.invoke(message.id) },
+                    onDismiss = { onDismissProposal?.invoke(message.id) }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Интерактивная карточка распознанной в чате операции с кнопками «Добавить» / «Отмена»
+ */
+@Composable
+fun DavidParsedTransactionProposalBubble(
+    proposal: ChatMessageType.ParsedTransactionProposal,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val tx = proposal.operation
+    val isExpense = tx.type == "expense"
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = com.example.ui.theme.SurfaceCard,
+        border = BorderStroke(1.dp, NeonEmerald.copy(alpha = 0.45f)),
+        modifier = modifier
+            .widthIn(min = 220.dp, max = 330.dp)
+            .shadow(4.dp, RoundedCornerShape(16.dp))
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                com.example.ui.components.CategoryIconBadge(
+                    categoryName = tx.category,
+                    type = tx.type,
+                    size = 38.dp,
+                    iconSize = 19.dp
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (proposal.isAdded) "Операция сохранена" else "Распознана операция",
+                        color = if (proposal.isAdded) com.example.ui.theme.EmeraldLight else TextMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "${tx.subcategory.ifBlank { tx.title.ifBlank { tx.category } }} • ${tx.category}",
+                        color = TextLight,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "${if (isExpense) "-" else "+"}${com.example.ui.components.formatRublesCompact(tx.amount)} ₽",
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 14.sp,
+                    color = if (isExpense) com.example.ui.theme.ExpenseRed else com.example.ui.theme.IncomeGreen
+                )
+            }
+            if (!proposal.isAdded) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    androidx.compose.material3.TextButton(onClick = onDismiss) {
+                        Text("Отмена", color = TextMuted, fontSize = 12.sp)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    androidx.compose.material3.Button(
+                        onClick = onConfirm,
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                            containerColor = com.example.ui.theme.EmeraldPrimary,
+                            contentColor = DarkBackground
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                    ) {
+                        Text("Добавить", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            } else {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "✅ Записано в текущий бюджет",
+                    color = com.example.ui.theme.EmeraldLight,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
@@ -1170,7 +1285,61 @@ fun CyberpunkPeriodChip(
 }
 
 /**
- * Нижняя строка ввода текста с кнопкой отправки и вложениями
+ * Горизонтальная лента быстрых подсказок (SuggestionChips) в стиле David-finance-main-2
+ */
+@Composable
+fun DavidSuggestionChipsRow(
+    hasApiKey: Boolean,
+    onSendPrompt: (String) -> Unit,
+    onActionClick: (String) -> Unit,
+    onOpenApiKeyDialog: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val suggestions = listOf(
+        "📊 Мой баланс и аналитика" to "PROMPT",
+        "💡 На чём сэкономить?" to "PROMPT",
+        "🐸 Жабий аудит трат" to "AUDIT",
+        "🎯 Мои финансовые цели" to "GOALS",
+        (if (hasApiKey) "🔑 Сменить API ключ" else "🔑 Ввести API ключ") to "API_KEY"
+    )
+
+    androidx.compose.foundation.lazy.LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(suggestions.size) { index ->
+            val (label, kind) = suggestions[index]
+            androidx.compose.material3.SuggestionChip(
+                onClick = {
+                    when (kind) {
+                        "API_KEY" -> onOpenApiKeyDialog()
+                        "AUDIT" -> onActionClick("AUDIT")
+                        "GOALS" -> onActionClick("GOALS")
+                        else -> onSendPrompt(label)
+                    }
+                },
+                label = {
+                    Text(
+                        text = label,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                },
+                colors = androidx.compose.material3.SuggestionChipDefaults.suggestionChipColors(
+                    containerColor = com.example.ui.theme.SurfaceCard,
+                    labelColor = TextLight
+                ),
+                border = androidx.compose.material3.SuggestionChipDefaults.suggestionChipBorder(
+                    enabled = true,
+                    borderColor = SlateBorder.copy(alpha = 0.6f)
+                )
+            )
+        }
+    }
+}
+
+/**
+ * Нижняя строка ввода текста с кнопкой отправки, вложениями и авто-маскировкой API-ключа
  */
 @Composable
 fun DavidChatInputBar(
@@ -1180,6 +1349,11 @@ fun DavidChatInputBar(
     onAttach: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val trimmedInput = text.trim()
+    val isSecretInput = trimmedInput.startsWith("AIza") ||
+        trimmedInput.startsWith("AQ.") ||
+        (trimmedInput.length >= 25 && !trimmedInput.contains(" "))
+
     Surface(
         color = DarkSurface,
         shape = RoundedCornerShape(24.dp),
@@ -1216,9 +1390,10 @@ fun DavidChatInputBar(
             ) {
                 if (text.isEmpty()) {
                     Text(
-                        text = "Спросить Давида...",
+                        text = "Спросите Давида или напишите: Такси 500...",
                         color = TextMuted,
-                        fontSize = 14.sp
+                        fontSize = 13.sp,
+                        maxLines = 1
                     )
                 }
 
@@ -1229,6 +1404,11 @@ fun DavidChatInputBar(
                         color = TextLight,
                         fontSize = 14.sp
                     ),
+                    visualTransformation = if (isSecretInput) {
+                        androidx.compose.ui.text.input.PasswordVisualTransformation('*')
+                    } else {
+                        androidx.compose.ui.text.input.VisualTransformation.None
+                    },
                     cursorBrush = SolidColor(NeonEmerald),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { onSend() }),
@@ -1268,3 +1448,4 @@ fun DavidChatInputBar(
         }
     }
 }
+

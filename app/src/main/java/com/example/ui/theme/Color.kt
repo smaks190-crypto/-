@@ -33,3 +33,25 @@ val BorderSlate = Slate700
 val TextPrimary = Color(0xFFF8FAFC)
 val TextSecondary = Slate400
 val TextMuted = Slate500
+
+// FinTech Neon Palette (David-finance-main-2)
+val EmeraldPrimary = Color(0xFF00C853)
+val EmeraldLight = Color(0xFF69F0AE)
+val EmeraldDark = Color(0xFF009624)
+
+val PurpleAccent = Color(0xFF7C4DFF)
+val PurpleLight = Color(0xFFB388FF)
+
+val SurfaceCard = Color(0xFF151922)
+val SurfaceElevated = Color(0xFF1E2433)
+
+val ExpenseRed = Color(0xFFFF5252)
+val IncomeGreen = Color(0xFF00E676)
+val WarningAmber = Color(0xFFFFB300)
+
+val NeonEmerald = Color(0xFF00F59B)
+val NeonCyan = Color(0xFF00E5FF)
+val NeonRose = Color(0xFFFF007A)
+val NeonIndigo = Color(0xFF6366F1)
+val NeonAmber = Color(0xFFFFD600)
+

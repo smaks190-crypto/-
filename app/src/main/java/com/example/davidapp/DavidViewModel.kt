@@ -54,6 +54,9 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     private val _isDavidTyping = MutableStateFlow(false)
     val isDavidTyping: StateFlow<Boolean> = _isDavidTyping.asStateFlow()
 
+    private val _hasApiKey = MutableStateFlow(false)
+    val hasApiKey: StateFlow<Boolean> = _hasApiKey.asStateFlow()
+
     private var currentBudgetId: String = "default"
     private var currentProfileName: String = "Максим"
     private var currentApiKey: String = ""
@@ -69,7 +72,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         val isDifferentBudget = budgetId != currentBudgetId || profileName != currentProfileName
         currentBudgetId = budgetId
         currentProfileName = if (profileName.isNotBlank()) profileName else "Пользователь"
-        currentApiKey = apiKey
+        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
+        val effectiveKey = apiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        currentApiKey = effectiveKey
+        _hasApiKey.value = effectiveKey.isNotBlank()
 
         if (isDifferentBudget || notificationsJob == null) {
             sessionMessages.clear()
@@ -77,6 +83,31 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
             observeNotifications()
         }
     }
+
+    fun saveApiKeyFromChat(newKey: String, soundManager: SoundManager? = null) {
+        val clean = newKey.trim()
+        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("gemini_api_key", clean).putBoolean("gemini_consent_given", true).apply()
+        currentApiKey = clean
+        _hasApiKey.value = clean.isNotBlank()
+        soundManager?.playReceive()
+        addSessionMessage(
+            ChatMessage(
+                sender = "Давид Жабов 🐸",
+                type = ChatMessageType.Text(
+                    if (clean.isNotBlank()) {
+                        "🐸 Ква! API-ключ успешно сохранён и активирован! Теперь я работаю на базе **Gemini 3.8** — спрашивай про бюджет или пиши траты прямо сюда (например: *«Такси 500»*)!"
+                    } else {
+                        "API-ключ очищен. Я переключился в локальный офлайн-режим."
+                    }
+                ),
+                timestamp = currentTime(),
+                isUser = false,
+                timestampMillis = System.currentTimeMillis()
+            )
+        )
+    }
+
 
     fun setProfileName(name: String) {
         if (name.isNotBlank() && name != currentProfileName) {
@@ -597,15 +628,35 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
      * Отправка произвольного сообщения от пользователя
      */
     fun sendUserMessage(text: String, soundManager: SoundManager? = null) {
-        if (text.isBlank()) return
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
         AchievementManager.unlock(getApplication(), "first_chat")
+
+        // 1. Проверка, не вставил ли пользователь Gemini API-ключ прямо в чат
+        val looksLikeApiKey = trimmed.startsWith("AIza") ||
+            trimmed.startsWith("AQ.") ||
+            (trimmed.length >= 25 && !trimmed.contains(" ") && trimmed.all { it.isLetterOrDigit() || it == '_' || it == '-' || it == '.' })
+
+        if (looksLikeApiKey) {
+            soundManager?.playSend()
+            val maskedMsg = ChatMessage(
+                sender = currentProfileName,
+                type = ChatMessageType.Text("🔑 API-ключ: ••••••••••••"),
+                timestamp = currentTime(),
+                isUser = true,
+                timestampMillis = System.currentTimeMillis()
+            )
+            addSessionMessage(maskedMsg)
+            saveApiKeyFromChat(trimmed, soundManager)
+            return
+        }
 
         viewModelScope.launch {
             soundManager?.playSend()
 
             val userMsg = ChatMessage(
                 sender = currentProfileName,
-                type = ChatMessageType.Text(text.trim()),
+                type = ChatMessageType.Text(trimmed),
                 timestamp = currentTime(),
                 isUser = true,
                 timestampMillis = System.currentTimeMillis()
@@ -616,10 +667,13 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             _isDavidTyping.value = true
             _stage.value = DavidStage.PROCESSING
 
+            // 2. Попытка распознать операцию из естественной фразы в чате (например, «Такси 500» или «Купил кофе за 350»)
+            val proposedOp = tryParseOperationFromChat(trimmed)
+
             val reply = if (currentApiKey.isNotBlank()) {
-                generateGeminiReply(text.trim())
+                generateGeminiReply(trimmed)
             } else {
-                generateSmartDavidReply(text.trim())
+                generateSmartDavidReply(trimmed)
             }
 
             delay(650)
@@ -635,9 +689,100 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             )
             addSessionMessage(botMsg)
 
+            if (proposedOp != null && proposedOp.amount > 0.0) {
+                val proposalMsg = ChatMessage(
+                    sender = "Давид Жабов 🐸",
+                    type = ChatMessageType.ParsedTransactionProposal(
+                        operation = proposedOp,
+                        isAdded = false
+                    ),
+                    timestamp = currentTime(),
+                    isUser = false,
+                    timestampMillis = System.currentTimeMillis() + 1L
+                )
+                addSessionMessage(proposalMsg)
+            }
+
             _stage.value = if (prevStage == DavidStage.INITIAL) DavidStage.FILE_SELECTION else prevStage
         }
     }
+
+    private suspend fun tryParseOperationFromChat(text: String): com.example.data.repository.ParsedVoiceOperation? {
+        val lower = text.lowercase(Locale.getDefault())
+        if (lower.contains("?") ||
+            lower.startsWith("покажи") ||
+            lower.startsWith("сделай") ||
+            lower.startsWith("на чем") ||
+            lower.startsWith("на чём") ||
+            lower.startsWith("мой баланс") ||
+            lower.startsWith("жабий аудит")
+        ) {
+            return null
+        }
+
+        val cats = try {
+            repository.getCategoriesForBudget(currentBudgetId).first()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val expNames = cats.filter { it.type == "expense" }.map { it.name }.ifEmpty {
+            listOf("Продукты", "Кафе и рестораны", "Транспорт", "ЖКХ", "Развлечения", "Покупки", "Здоровье", "Прочее")
+        }
+        val incNames = cats.filter { it.type == "income" }.map { it.name }.ifEmpty {
+            listOf("Зарплата", "Фриланс", "Кэшбэк", "Подарки")
+        }
+
+        val parsedList = com.example.utils.VoiceParserHelper.parseHeuristically(text, expNames, incNames)
+        val firstOp = parsedList.firstOrNull { it.amount > 0.0 } ?: return null
+
+        val semanticMatch = com.example.ui.components.detectCategoryAndTypeByTitle(text, cats, firstOp.type)
+        return if (semanticMatch != null) {
+            firstOp.copy(
+                type = semanticMatch.first,
+                category = semanticMatch.second,
+                subcategory = firstOp.title.ifBlank { semanticMatch.second }
+            )
+        } else {
+            firstOp.copy(
+                subcategory = firstOp.title.ifBlank { firstOp.category }
+            )
+        }
+    }
+
+    fun confirmChatProposedOperation(messageId: String, soundManager: SoundManager? = null) {
+        viewModelScope.launch {
+            val index = sessionMessages.indexOfFirst { it.id == messageId }
+            if (index == -1) return@launch
+            val msg = sessionMessages[index]
+            val proposal = msg.type as? ChatMessageType.ParsedTransactionProposal ?: return@launch
+            if (proposal.isAdded) return@launch
+
+            val op = proposal.operation
+            soundManager?.playClick()
+            database.transactionDao().insertTransaction(
+                TransactionEntity(
+                    budgetId = currentBudgetId,
+                    type = op.type,
+                    date = op.date.ifBlank { isoFormat.format(Date()) },
+                    category = op.category.ifBlank { "Прочее" },
+                    subcategory = op.subcategory.ifBlank { op.title.ifBlank { op.category } },
+                    amount = op.amount
+                )
+            )
+            sessionMessages[index] = msg.copy(
+                type = proposal.copy(isAdded = true)
+            )
+            rebuildChronologicalMessages()
+        }
+    }
+
+    fun dismissChatProposedOperation(messageId: String) {
+        val removed = sessionMessages.removeAll { it.id == messageId }
+        if (removed) {
+            rebuildChronologicalMessages()
+        }
+    }
+
 
     private suspend fun generateGeminiReply(query: String): String {
         return try {

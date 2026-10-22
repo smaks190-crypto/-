@@ -40,11 +40,20 @@ object GlobalConsoleLogger {
 
     private val dateFormat by lazy { SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()) }
 
-    fun setupUncaughtExceptionHandler() {
-        if (!BuildConfig.DEBUG) return
+    fun setupUncaughtExceptionHandler(context: android.content.Context? = null) {
+        val appContext = context?.applicationContext
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            e("ERROR", "Uncaught Exception in thread ${thread.name}: ${throwable.localizedMessage}\n${throwable.stackTraceToString()}")
+            try {
+                val trace = "Поток: ${thread.name}\nОшибка: ${throwable.localizedMessage}\n\n${throwable.stackTraceToString()}"
+                appContext?.getSharedPreferences("crash_prefs", android.content.Context.MODE_PRIVATE)
+                    ?.edit()
+                    ?.putString("last_crash", trace)
+                    ?.commit()
+            } catch (_: Throwable) {}
+            if (BuildConfig.DEBUG) {
+                e("ERROR", "Uncaught Exception in thread ${thread.name}: ${throwable.localizedMessage}\n${throwable.stackTraceToString()}")
+            }
             defaultHandler?.uncaughtException(thread, throwable)
         }
     }
