@@ -483,19 +483,21 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         Column(
                             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
                         ) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            // --- TOP APP BAR ---
+                            Spacer(modifier = Modifier.height(8.dp))
+                            // --- OBSIDIAN NEO-BANK TOP APP BAR ---
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                                    .padding(horizontal = 2.dp, vertical = 6.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(contentAlignment = Alignment.CenterStart) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.clickable(
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .clickable(
                                             interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                                             indication = null
                                         ) {
@@ -514,75 +516,83 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             settingsInitialScreen = com.example.ui.components.SettingsScreen.HUB
                                             showSettingsHubModal = true
                                         }
+                                        .padding(end = 8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(42.dp),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Box(
-                                            modifier = Modifier.size(48.dp),
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .background(
+                                                    com.example.ui.theme.ObsidianSurface,
+                                                    CircleShape
+                                                )
+                                                .border(
+                                                    width = 1.5.dp,
+                                                    brush = Brush.linearGradient(
+                                                        listOf(
+                                                            Emerald400.copy(alpha = 0.7f),
+                                                            com.example.ui.theme.GlassBorder
+                                                        )
+                                                    ),
+                                                    shape = CircleShape
+                                                )
+                                                .padding(2.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            // Neon Glow Background underneath
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(48.dp)
-                                                    .background(
-                                                        Brush.radialGradient(
-                                                            colors = listOf(
-                                                                Indigo500.copy(alpha = 0.6f),
-                                                                Indigo500.copy(alpha = 0.2f),
-                                                                Color.Transparent
-                                                            )
-                                                        ),
-                                                        CircleShape
-                                                    )
-                                            )
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(40.dp)
-                                                    .background(
-                                                        Brush.sweepGradient(listOf(Emerald400, Indigo500, Rose500, Emerald400)),
-                                                        CircleShape
-                                                    )
-                                                    .padding(2.dp)
-                                            ) {
-                                                Box(
+                                            if (avatarBitmap != null) {
+                                                Image(
+                                                    bitmap = avatarBitmap,
+                                                    contentDescription = "Аватар",
                                                     modifier = Modifier
                                                         .fillMaxSize()
-                                                        .background(DarkBg, CircleShape),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    if (avatarBitmap != null) {
-                                                        Image(
-                                                            bitmap = avatarBitmap,
-                                                            contentDescription = "Аватар",
-                                                            modifier = Modifier
-                                                                .fillMaxSize()
-                                                                .clip(CircleShape),
-                                                            contentScale = ContentScale.Crop
-                                                        )
-                                                    } else {
-                                                        Text(
-                                                            text = getProfileInitials(currentProfile?.name ?: ""),
-                                                            color = Emerald400,
-                                                            fontWeight = FontWeight.Bold,
-                                                            fontSize = 14.sp
-                                                        )
-                                                    }
-                                                }
+                                                        .clip(CircleShape),
+                                                    contentScale = ContentScale.Crop
+                                                )
+                                            } else {
+                                                Text(
+                                                    text = getProfileInitials(currentProfile?.name ?: ""),
+                                                    color = Emerald400,
+                                                    fontFamily = com.example.ui.theme.ManropeFontFamily,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 14.sp
+                                                )
                                             }
                                         }
+                                    }
+
+                                    Column {
+                                        Text(
+                                            text = currentProfile?.name ?: "Личный бюджет",
+                                            color = Color.White,
+                                            fontSize = 15.sp,
+                                            fontFamily = com.example.ui.theme.ManropeFontFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1
+                                        )
+                                        Text(
+                                            text = "Профиль и настройки ›",
+                                            color = Slate400,
+                                            fontSize = 11.sp,
+                                            fontFamily = com.example.ui.theme.ManropeFontFamily,
+                                            fontWeight = FontWeight.Medium
+                                        )
                                     }
                                 }
 
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // --- EXPANDING NEON CHAT BUTTON CONTAINER ---
+                                    // --- OBSIDIAN GLASS DAVID AI CHAT PILL ---
                                     val context = androidx.compose.ui.platform.LocalContext.current
                                     val pName = currentProfile?.name ?: "default"
                                     val prefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
                                     val hasOpenedChatBefore = remember(showReportDialog, pName) { prefs.getBoolean("has_opened_david_chat_before_$pName", false) }
                                     val hasUnread = unreadNotificationsCount > 0 || !hasOpenedChatBefore
                                     val shouldShowMessage = showWelcomeBubble || (hasUnread && unreadNotificationsCount > 0)
-                                    val iconNeonColor = Indigo500
+                                    val iconNeonColor = Emerald400
 
                                     var isExpandedByNeon by remember { mutableStateOf(false) }
                                     var isNeonFlickering by remember { mutableStateOf(false) }
@@ -592,45 +602,29 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     LaunchedEffect(shouldShowMessage, unreadNotificationsCount) {
                                         if (shouldShowMessage) {
                                             if (isExpandedByNeon) {
-                                                com.example.utils.GlobalConsoleLogger.i("ANIM", "Плашка уже раскрыта (isExpandedByNeon = true), обновление содержимого без повторного мерцания (непрочитанных: $unreadNotificationsCount)")
                                                 kotlinx.coroutines.delay(4000)
                                                 isExpandedByNeon = false
                                                 return@LaunchedEffect
                                             }
 
-                                            com.example.utils.GlobalConsoleLogger.i("ANIM", "Запуск анимации плашки уведомлений (непрочитанных: $unreadNotificationsCount, приветствие: $showWelcomeBubble)")
-                                            // Step 1: Collapse box & start neon flickering first
                                             isExpandedByNeon = false
                                             isNeonFlickering = true
-                                            com.example.utils.GlobalConsoleLogger.d("ANIM", "Эффект неонового мерцания [Старт]: мигание лампы 0.15f -> 1.0f")
 
-                                            // Neon lamp turning-on flickering animation sequence
-                                            neonAlpha.snapTo(0.15f)
+                                            neonAlpha.snapTo(0.25f)
                                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             kotlinx.coroutines.delay(70)
                                             neonAlpha.snapTo(1f)
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             kotlinx.coroutines.delay(50)
-                                            neonAlpha.snapTo(0.2f)
-                                            kotlinx.coroutines.delay(90)
-                                            neonAlpha.snapTo(0.9f)
-                                            kotlinx.coroutines.delay(40)
-                                            neonAlpha.snapTo(0.1f)
+                                            neonAlpha.snapTo(0.35f)
                                             kotlinx.coroutines.delay(80)
                                             neonAlpha.snapTo(1f)
 
                                             isNeonFlickering = false
-                                            com.example.utils.GlobalConsoleLogger.d("ANIM", "Эффект неонового мерцания [Завершен]")
-
-                                            // Step 2: Expand container after flickering completes
                                             isExpandedByNeon = true
-                                            com.example.utils.GlobalConsoleLogger.i("ANIM", "Раскрытие плашки уведомлений: isExpandedByNeon = true")
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 
-                                            // Step 3: Show message for 4 seconds, then auto-collapse back to glowing icon
                                             kotlinx.coroutines.delay(4000)
                                             isExpandedByNeon = false
-                                            com.example.utils.GlobalConsoleLogger.i("ANIM", "Авто-сворачивание плашки уведомлений по таймауту (4 сек)")
                                         } else {
                                             isNeonFlickering = false
                                             isExpandedByNeon = false
@@ -640,25 +634,19 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
 
                                     Box(
                                         modifier = Modifier
-                                            .height(38.dp)
-                                            .shadow(
-                                                elevation = if (shouldShowMessage || hasUnread) 12.dp else 2.dp,
-                                                shape = RoundedCornerShape(14.dp),
-                                                ambientColor = iconNeonColor,
-                                                spotColor = iconNeonColor
-                                            )
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(Slate900.copy(alpha = 0.9f))
+                                            .height(40.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(com.example.ui.theme.ObsidianSurface)
                                             .border(
-                                                width = if (shouldShowMessage || hasUnread) 1.5.dp else 1.dp,
+                                                width = 1.dp,
                                                 color = if (isNeonFlickering) {
-                                                    iconNeonColor.copy(alpha = neonAlpha.value.coerceIn(0.1f, 1f))
+                                                    iconNeonColor.copy(alpha = neonAlpha.value.coerceIn(0.15f, 1f))
                                                 } else if (shouldShowMessage || hasUnread) {
-                                                    iconNeonColor.copy(alpha = 0.85f)
+                                                    iconNeonColor.copy(alpha = 0.6f)
                                                 } else {
-                                                    Slate800
+                                                    com.example.ui.theme.GlassBorder
                                                 },
-                                                shape = RoundedCornerShape(14.dp)
+                                                shape = RoundedCornerShape(16.dp)
                                             )
                                             .animateContentSize(
                                                 animationSpec = spring(
@@ -666,31 +654,39 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                     dampingRatio = Spring.DampingRatioLowBouncy
                                                 )
                                             )
-                                            
                                             .clickable {
-                                                com.example.utils.GlobalConsoleLogger.i("UI", "Нажатие на плашку уведомлений/чата, открытие диалога")
                                                 showWelcomeBubble = false
                                                 isExpandedByNeon = false
                                                 reportDialogTab = 0
                                                 showReportDialog = true
                                             }
-                                            .padding(horizontal = 9.dp, vertical = 6.dp),
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.Center
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            Box(contentAlignment = Alignment.TopEnd) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Chat,
-                                                    contentDescription = "Чат с Давидом",
-                                                    tint = iconNeonColor.copy(
-                                                        alpha = if (isNeonFlickering) neonAlpha.value.coerceIn(0.15f, 1f) else 1f
-                                                    ),
-                                                    modifier = Modifier.size(20.dp)
+                                            Text(
+                                                text = "🐸",
+                                                fontSize = 15.sp
+                                            )
+                                            if (!isExpandedByNeon || !shouldShowMessage) {
+                                                Text(
+                                                    text = "Давид AI",
+                                                    color = Color.White,
+                                                    fontSize = 12.sp,
+                                                    fontFamily = com.example.ui.theme.ManropeFontFamily,
+                                                    fontWeight = FontWeight.Bold
                                                 )
-
+                                                if (unreadNotificationsCount > 0) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(7.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Emerald400)
+                                                    )
+                                                }
                                             }
 
                                             AnimatedVisibility(
@@ -706,7 +702,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             ) {
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
-                                                    modifier = Modifier.padding(start = 8.dp, end = 2.dp)
+                                                    modifier = Modifier.padding(start = 4.dp, end = 2.dp)
                                                 ) {
                                                     val welcomeGreeting = remember(currentProfile?.id, currentProfile?.name) {
                                                         val prefs = context.getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
@@ -728,23 +724,26 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                     }
                                                     if (hasUnread && unreadNotificationsCount > 0) {
                                                         Text(
-                                                            text = "У вас есть непрочитанные сообщения",
-                                                            color = Color.White,
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.Medium
+                                                            text = "Новое сообщение от Давида",
+                                                            color = Emerald400,
+                                                            fontSize = 11.sp,
+                                                            fontFamily = com.example.ui.theme.ManropeFontFamily,
+                                                            fontWeight = FontWeight.Bold
                                                         )
                                                     } else {
                                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                                             Text(
                                                                 text = "$welcomeGreeting, ",
                                                                 color = Color.White,
-                                                                fontSize = 10.sp,
+                                                                fontSize = 11.sp,
+                                                                fontFamily = com.example.ui.theme.ManropeFontFamily,
                                                                 fontWeight = FontWeight.Medium
                                                             )
                                                             Text(
                                                                 text = "${currentProfile?.name ?: "Друг"}!",
                                                                 color = Emerald400,
-                                                                fontSize = 10.sp,
+                                                                fontSize = 11.sp,
+                                                                fontFamily = com.example.ui.theme.ManropeFontFamily,
                                                                 fontWeight = FontWeight.Bold
                                                             )
                                                         }
@@ -753,85 +752,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             }
                                         }
                                     }
-                                }
-
-                            }
-
-// --- NAVIGATION TABS ---
-                            val currentMainTab = mainPagerState.currentPage
-                            BoxWithConstraints(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp)
-                                    .padding(vertical = 2.dp)
-                                    .clip(CircleShape)
-                                    .background(Slate900.copy(alpha = 0.6f))
-                                    .border(1.dp, Slate800, CircleShape)
-                                    .padding(4.dp)
-                            ) {
-                                val barWidth = maxWidth
-                                val tabCount = 4
-                                val tabWidth = barWidth / tabCount
-
-                                val animatedFraction by animateFloatAsState(
-                                    targetValue = currentMainTab.toFloat(),
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioLowBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                )
-
-                                Box(
-                                    modifier = Modifier
-                                        .width(tabWidth)
-                                        .fillMaxHeight()
-                                        .offset(x = tabWidth * animatedFraction)
-                                        .shadow(
-                                            elevation = 14.dp,
-                                            shape = CircleShape,
-                                            ambientColor = Emerald400,
-                                            spotColor = Emerald400
-                                        )
-                                        .background(Emerald400.copy(alpha = 0.18f), CircleShape)
-                                        .border(1.dp, Emerald400.copy(alpha = 0.5f), CircleShape)
-                                )
-
-                                Row(
-                                    modifier = Modifier.fillMaxSize(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    NavTabButton(
-                                        text = "Период",
-                                        icon = androidx.compose.material.icons.Icons.Default.GridView,
-                                        isSelected = currentMainTab == 0,
-                                        modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_period"),
-                                        onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(0) } }
-                                    )
-
-                                    NavTabButton(
-                                        text = "Долги",
-                                        icon = androidx.compose.material.icons.Icons.Default.CreditCard,
-                                        isSelected = currentMainTab == 1,
-                                        modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_debts"),
-                                        onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(1) } }
-                                    )
-
-                                    NavTabButton(
-                                        text = "Цели",
-                                        icon = androidx.compose.material.icons.Icons.Default.EmojiEvents,
-                                        isSelected = currentMainTab == 2,
-                                        modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_goals"),
-                                        onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(2) } }
-                                    )
-
-                                    NavTabButton(
-                                        text = "Отчет",
-                                        icon = androidx.compose.material.icons.Icons.Default.PieChart,
-                                        isSelected = currentMainTab == 3,
-                                        modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_annual"),
-                                        onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(3) } }
-                                    )
                                 }
                             }
 
@@ -1028,13 +948,110 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 )
             }
 
-            // --- NATIVE OVERLAY FOR VOICE & MANUAL FAB ---
+            // --- FLOATING OBSIDIAN BOTTOM NAVIGATION DOCK & UNIFIED VOICE/ADD FAB ---
             val parsedVoiceOperations by viewModel.parsedVoiceOperations.collectAsState()
             var isVoiceOverlayActive by remember { mutableStateOf(false) }
             val isVoicePipelineActive = isVoiceActive || isAnalyzingVoice || !parsedVoiceOperations.isNullOrEmpty() || showAddTxModal || isVoiceOverlayActive
 
             val isImeVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
             val isAnyModalOpen = showSettingsHubModal || showCategoriesModal || showAddGoalModal || showConsentDialog || showReportDialog
+            val currentMainTab = mainPagerState.currentPage
+            val dockEndPadding by animateDpAsState(
+                targetValue = if (currentMainTab == 0) 84.dp else 16.dp,
+                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                label = "dock_end_padding"
+            )
+
+            // Floating Obsidian Glass Bottom Navigation Dock
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+                    .padding(start = 16.dp, end = dockEndPadding, bottom = 16.dp),
+                contentAlignment = Alignment.BottomStart
+            ) {
+                AnimatedVisibility(
+                    visible = selectedBudgetId != null && !isImeVisible && !isAnyModalOpen && !isVoicePipelineActive,
+                    enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.92f, animationSpec = tween(220)),
+                    exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.92f, animationSpec = tween(150))
+                ) {
+                    BoxWithConstraints(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .shadow(
+                                elevation = 20.dp,
+                                shape = CircleShape,
+                                ambientColor = Color.Black,
+                                spotColor = Color.Black
+                            )
+                            .clip(CircleShape)
+                            .background(com.example.ui.theme.ObsidianSurface.copy(alpha = 0.95f))
+                            .border(1.dp, com.example.ui.theme.GlassHighlight, CircleShape)
+                            .padding(4.dp)
+                    ) {
+                        val barWidth = maxWidth
+                        val tabCount = 4
+                        val tabWidth = barWidth / tabCount
+
+                        val animatedFraction by animateFloatAsState(
+                            targetValue = currentMainTab.toFloat(),
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            ),
+                            label = "bottom_nav_pill"
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .width(tabWidth)
+                                .fillMaxHeight()
+                                .offset(x = tabWidth * animatedFraction)
+                                .background(Emerald400.copy(alpha = 0.15f), CircleShape)
+                                .border(1.dp, Emerald400.copy(alpha = 0.4f), CircleShape)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            NavTabButton(
+                                text = "Период",
+                                icon = androidx.compose.material.icons.Icons.Default.GridView,
+                                isSelected = currentMainTab == 0,
+                                modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_period"),
+                                onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(0) } }
+                            )
+
+                            NavTabButton(
+                                text = "Долги",
+                                icon = androidx.compose.material.icons.Icons.Default.CreditCard,
+                                isSelected = currentMainTab == 1,
+                                modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_debts"),
+                                onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(1) } }
+                            )
+
+                            NavTabButton(
+                                text = "Цели",
+                                icon = androidx.compose.material.icons.Icons.Default.EmojiEvents,
+                                isSelected = currentMainTab == 2,
+                                modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_goals"),
+                                onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(2) } }
+                            )
+
+                            NavTabButton(
+                                text = "Отчет",
+                                icon = androidx.compose.material.icons.Icons.Default.PieChart,
+                                isSelected = currentMainTab == 3,
+                                modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_annual"),
+                                onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(3) } }
+                            )
+                        }
+                    }
+                }
+            }
 
             Box(
                 modifier = Modifier
@@ -1073,7 +1090,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(bottom = 80.dp, end = 12.dp),
+                        .padding(bottom = 86.dp, end = 12.dp),
                     contentAlignment = Alignment.BottomEnd
                 ) {
                     com.example.ui.components.DebugConsoleFloatingButton(onClick = { showDebugConsole = true })
@@ -1108,27 +1125,13 @@ fun NavTabButton(
 ) {
     val contentColor by animateColorAsState(
         targetValue = if (isSelected) Emerald400 else Slate400,
-        animationSpec = tween(250)
+        animationSpec = tween(220),
+        label = "nav_tab_color"
     )
     val iconScale by animateFloatAsState(
-        targetValue = if (isSelected) 1.25f else 1.0f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
-    )
-    val targetRotation = when {
-        !isSelected -> 0f
-        text == "Период" -> 90f
-        text == "Долги" -> -10f
-        text == "Цели" -> 15f
-        text == "Отчет" -> 360f
-        else -> 15f
-    }
-    val iconRotation by animateFloatAsState(
-        targetValue = targetRotation,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
-    )
-    val iconTranslationY by animateDpAsState(
-        targetValue = if (isSelected) (-2).dp else 0.dp,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+        targetValue = if (isSelected) 1.12f else 1.0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
+        label = "nav_tab_scale"
     )
 
     Box(
@@ -1137,28 +1140,29 @@ fun NavTabButton(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        androidx.compose.foundation.layout.Row(
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
             androidx.compose.material3.Icon(
                 imageVector = icon,
-                contentDescription = null,
+                contentDescription = text,
                 tint = contentColor,
                 modifier = Modifier
-                    .size(16.dp)
+                    .size(18.dp)
                     .graphicsLayer {
                         scaleX = iconScale
                         scaleY = iconScale
-                        rotationZ = iconRotation
-                        translationY = iconTranslationY.toPx()
                     }
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = text,
                 color = contentColor,
-                fontSize = 12.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                fontSize = 10.sp,
+                fontFamily = com.example.ui.theme.ManropeFontFamily,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1
             )
         }
     }

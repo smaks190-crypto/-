@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -7,14 +8,18 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
@@ -23,21 +28,21 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.IconButton
-import androidx.compose.foundation.layout.size
-import com.example.ui.theme.Rose500
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
@@ -54,23 +60,37 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.GoalEntity
 import com.example.ui.components.RollingCurrencyText
-import com.example.ui.components.formatAmountInput
+import com.example.ui.components.SwipeToDismissDialog
 import com.example.ui.components.formatAmountTextFieldValue
 import com.example.ui.components.formatFullCurrency
+import com.example.ui.components.formatShortCurrency
 import com.example.ui.components.parseAmountInput
-import androidx.compose.ui.text.input.TextFieldValue
-import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Rose500
-import com.example.ui.theme.Slate100
-import com.example.ui.theme.Slate400
-import com.example.ui.theme.Slate800
-import com.example.ui.theme.Slate900
 import com.example.ui.theme.DarkBg
+import com.example.ui.theme.Emerald400
+import com.example.ui.theme.Emerald500
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.GlassHighlight
+import com.example.ui.theme.Indigo400
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.ObsidianElevated
+import com.example.ui.theme.ObsidianSurface
+import com.example.ui.theme.Rose500
+import com.example.ui.theme.Sky400
+import com.example.ui.theme.Slate100
+import com.example.ui.theme.Slate300
+import com.example.ui.theme.Slate400
+import com.example.ui.theme.Slate500
+import com.example.ui.theme.Slate800
+import com.example.ui.theme.SpaceGroteskFontFamily
+import java.util.Calendar
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 @Composable
 fun GoalsScreen(
@@ -84,23 +104,73 @@ fun GoalsScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
+    val totalSaved = remember(goals) { goals.sumOf { it.currentAmount.coerceAtLeast(0.0) } }
+    val totalTarget = remember(goals) { goals.sumOf { it.targetAmount.coerceAtLeast(0.0) } }
+    val overallProgressFraction = remember(totalSaved, totalTarget) {
+        if (totalTarget > 0.0) (totalSaved / totalTarget).toFloat().coerceIn(0f, 1f) else 0f
+    }
+    val overallPercent = (overallProgressFraction * 100f).roundToInt()
+
     completedGoalName?.let { name ->
-        com.example.ui.components.SwipeToDismissDialog(onDismissRequest = onDismissCompletedGoal) {
-            androidx.compose.material3.Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = Slate900,
-                border = androidx.compose.foundation.BorderStroke(1.dp, Slate800),
-                modifier = Modifier.fillMaxWidth().padding(16.dp)
+        SwipeToDismissDialog(onDismissRequest = onDismissCompletedGoal) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = ObsidianSurface,
+                border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.45f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Text("🎉 Поздравляем!", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Цель «$name» успешно достигнута!", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Вы полностью накопили нужную сумму. Цель выполнена и автоматически удалена из списка активных целей.", color = Emerald400, fontSize = 13.sp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Emerald400.copy(alpha = 0.15f))
+                                .border(1.dp, Emerald400.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("🐸", fontSize = 20.sp)
+                        }
+                        Column {
+                            Text(
+                                text = "Цель взята!",
+                                color = Color.White,
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp
+                            )
+                            Text(
+                                text = "Давид Жабов гордится дисциплиной",
+                                color = Emerald400,
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Копилка «$name» закрыта на 100%!",
+                            color = Color.White,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Вы полностью собрали целевую сумму. Цель перенесена в архив достижений.",
+                            color = Slate300,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 13.sp
+                        )
                     }
 
                     Row(
@@ -110,9 +180,15 @@ fun GoalsScreen(
                         Button(
                             onClick = onDismissCompletedGoal,
                             colors = ButtonDefaults.buttonColors(containerColor = Emerald400),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(14.dp)
                         ) {
-                            Text("Ура! 🥳", color = DarkBg, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                            Text(
+                                text = "Отлично! 🥳",
+                                color = DarkBg,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 13.sp
+                            )
                         }
                     }
                 }
@@ -120,7 +196,11 @@ fun GoalsScreen(
         }
     }
 
-    Column(
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 300.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
@@ -129,77 +209,214 @@ fun GoalsScreen(
                     keyboardController?.hide()
                 })
             }
-            .padding(vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Top Header
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.8f)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800),
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(18.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        // 1. HERO OBSIDIAN PORTFOLIO CARD
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                border = BorderStroke(
+                    width = 1.dp,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(GlassHighlight, GlassBorder)
+                    )
+                ),
+                shape = RoundedCornerShape(28.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Управление целями", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text("Внесенные пополнения автоматически списываются в расходы.", color = Slate400, fontSize = 11.sp)
-                }
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    // Radial Emerald Glow in top-right
+                    Box(
+                        modifier = Modifier
+                            .size(200.dp)
+                            .align(Alignment.TopEnd)
+                            .offset(x = 50.dp, y = (-50).dp)
+                            .background(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        Emerald500.copy(alpha = 0.22f),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
 
-                Spacer(modifier = Modifier.width(12.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "КАПИТАЛ И КОПИЛКИ",
+                                    color = Slate400,
+                                    fontFamily = ManropeFontFamily,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 1.2.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                RollingCurrencyText(
+                                    text = formatFullCurrency(totalSaved),
+                                    color = Color.White,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontSize = 30.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
 
-                Button(
-                    onClick = {
-                        focusManager.clearFocus()
-                        keyboardController?.hide()
-                        onOpenAddGoalModal()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Emerald400),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.testTag("add_goal_button")
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = DarkBg)
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Цель", color = DarkBg, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                            Button(
+                                onClick = {
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                    onOpenAddGoalModal()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Emerald400),
+                                shape = RoundedCornerShape(14.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                                modifier = Modifier.testTag("add_goal_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Новая цель",
+                                    tint = DarkBg,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Цель",
+                                    color = DarkBg,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+
+                        // Overall progress bar + Target summary
+                        if (goals.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Из общей цели ${formatFullCurrency(totalTarget)}",
+                                        color = Slate400,
+                                        fontFamily = ManropeFontFamily,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Emerald400.copy(alpha = 0.14f))
+                                            .border(1.dp, Emerald400.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "$overallPercent% выполнено",
+                                            color = Emerald400,
+                                            fontFamily = SpaceGroteskFontFamily,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(DarkBg)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(overallProgressFraction)
+                                            .height(8.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    listOf(Emerald500, Sky400)
+                                                )
+                                            )
+                                    )
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "Пополнения целей автоматически учитываются в расходах периода и приближают вашу финансовую свободу.",
+                                color = Slate400,
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
                 }
             }
         }
 
+        // 2. EMPTY STATE OR GOALS LIST
         if (goals.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("У вас нет активных целей. Добавьте новую!", color = Slate400, fontSize = 13.sp)
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = ObsidianSurface.copy(alpha = 0.7f)),
+                    border = BorderStroke(1.dp, GlassBorder),
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 36.dp, horizontal = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(Emerald400.copy(alpha = 0.12f))
+                                .border(1.dp, Emerald400.copy(alpha = 0.3f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Flag,
+                                contentDescription = null,
+                                tint = Emerald400,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        Text(
+                            text = "У вас пока нет активных копилок",
+                            color = Color.White,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Создайте цель (отпуск, подушка безопасности или гаджет) — Давид рассчитает комфортный темп накоплений.",
+                            color = Slate400,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
             }
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 280.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = {
-                            focusManager.clearFocus()
-                            keyboardController?.hide()
-                        })
-                    }
-            ) {
-                items(goals, key = { it.id }) { goal ->
-                    GoalCardItem(
-                        goal = goal,
-                        onAddProgress = { amount -> onAddGoalProgress(goal.id, amount) },
-                        onDelete = { onDeleteGoal(goal.id) }
-                    )
-                }
+            items(goals, key = { it.id }) { goal ->
+                GoalCardItem(
+                    goal = goal,
+                    onAddProgress = { amount -> onAddGoalProgress(goal.id, amount) },
+                    onDelete = { onDeleteGoal(goal.id) }
+                )
             }
         }
     }
@@ -216,7 +433,21 @@ fun GoalCardItem(
     var progressInput by remember { mutableStateOf(TextFieldValue("")) }
     var isPendingDelete by remember { mutableStateOf(false) }
 
-    val percent = Math.min(100, Math.round((goal.currentAmount / goal.targetAmount) * 100))
+    val progressFraction = if (goal.targetAmount > 0.0) {
+        (goal.currentAmount / goal.targetAmount).toFloat().coerceIn(0f, 1f)
+    } else 0f
+    val percent = (progressFraction * 100f).roundToInt().coerceIn(0, 100)
+    val remainingToSave = (goal.targetAmount - goal.currentAmount).coerceAtLeast(0.0)
+
+    // Forecast calculation: recommended monthly contribution to finish within 6 months (or end of year)
+    val monthsLeftInYear = remember {
+        val cal = Calendar.getInstance()
+        val currentMonth = cal.get(Calendar.MONTH) // 0..11
+        (12 - currentMonth).coerceAtLeast(1)
+    }
+    val recommendedMonthly = remember(remainingToSave, monthsLeftInYear) {
+        if (remainingToSave <= 0.0) 0.0 else ceil(remainingToSave / monthsLeftInYear)
+    }
 
     val submitAmount = {
         val amount = parseAmountInput(progressInput.text)
@@ -228,13 +459,20 @@ fun GoalCardItem(
         }
     }
 
-    val cardBg = if (isPendingDelete) Rose500.copy(alpha = 0.9f) else Slate900.copy(alpha = 0.8f)
-    val cardBorder = if (isPendingDelete) androidx.compose.foundation.BorderStroke(1.5.dp, Rose500) else androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+    val cardBg = if (isPendingDelete) Rose500.copy(alpha = 0.9f) else ObsidianSurface
+    val cardBorder = if (isPendingDelete) {
+        BorderStroke(1.5.dp, Rose500)
+    } else {
+        BorderStroke(
+            width = 1.dp,
+            brush = Brush.verticalGradient(listOf(GlassHighlight, GlassBorder))
+        )
+    }
 
     Card(
         colors = CardDefaults.cardColors(containerColor = cardBg),
         border = cardBorder,
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(24.dp),
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
@@ -245,7 +483,10 @@ fun GoalCardItem(
                 }
             }
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             if (isPendingDelete) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -272,10 +513,11 @@ fun GoalCardItem(
                             )
                         }
                         Text(
-                            text = "⚠️ Нажмите для подтверждения",
+                            text = "Нажмите на карточку для удаления цели",
                             color = Color.White,
+                            fontFamily = ManropeFontFamily,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Bold,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -297,57 +539,117 @@ fun GoalCardItem(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = goal.name,
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.ExtraBold,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f)
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { isPendingDelete = true }
-                            .padding(6.dp)
                     ) {
-                        Text(
-                            text = "✕",
-                            color = Slate400,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Emerald400.copy(alpha = 0.14f))
+                                .border(1.dp, Emerald400.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.TrendingUp,
+                                contentDescription = null,
+                                tint = Emerald400,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = goal.name,
+                                color = Color.White,
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (remainingToSave > 0) {
+                                    "Осталось: ${formatFullCurrency(remainingToSave)}"
+                                } else {
+                                    "Цель достигнута!"
+                                },
+                                color = Slate400,
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Emerald400.copy(alpha = 0.14f))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "$percent%",
+                                color = Emerald400,
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { isPendingDelete = true }
+                                .padding(6.dp)
+                        ) {
+                            Text(
+                                text = "✕",
+                                color = Slate400,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
+            // Current vs Target Amount Row in Space Grotesk
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Bottom
             ) {
                 RollingCurrencyText(
                     text = formatFullCurrency(goal.currentAmount),
                     color = if (isPendingDelete) Color.White else Emerald400,
-                    fontSize = 13.sp,
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Bold
                 )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("из ", color = if (isPendingDelete) Color.White.copy(alpha = 0.8f) else Slate400, fontSize = 12.sp)
+                    Text(
+                        text = "из ",
+                        color = if (isPendingDelete) Color.White.copy(alpha = 0.8f) else Slate400,
+                        fontFamily = ManropeFontFamily,
+                        fontSize = 12.sp
+                    )
                     RollingCurrencyText(
                         text = formatFullCurrency(goal.targetAmount),
-                        color = if (isPendingDelete) Color.White.copy(alpha = 0.9f) else Slate400,
-                        fontSize = 12.sp,
+                        color = if (isPendingDelete) Color.White.copy(alpha = 0.9f) else Slate300,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold
                     )
-                    Text(" ($percent%)", color = if (isPendingDelete) Color.White.copy(alpha = 0.9f) else Slate400, fontSize = 12.sp)
                 }
             }
-
-            Spacer(modifier = Modifier.height(6.dp))
 
             // Progress Bar
             Box(
@@ -359,15 +661,79 @@ fun GoalCardItem(
             ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(percent / 100f)
+                        .fillMaxWidth(progressFraction)
                         .height(8.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(if (isPendingDelete) Color.White else Emerald400)
+                        .background(
+                            if (isPendingDelete) {
+                                Brush.horizontalGradient(listOf(Color.White, Color.White))
+                            } else {
+                                Brush.horizontalGradient(listOf(Emerald500, Sky400))
+                            }
+                        )
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            // AI Forecast & Quick Top-Up Chips (when not pending delete)
+            if (!isPendingDelete && remainingToSave > 0) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(ObsidianElevated.copy(alpha = 0.75f))
+                        .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = Indigo400,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "Темп к концу года: ~${formatShortCurrency(recommendedMonthly)}/мес",
+                        color = Slate300,
+                        fontFamily = ManropeFontFamily,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
+                // Quick Preset Chips (+500, +1 000, +5 000)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(500.0, 1000.0, 5000.0).forEach { preset ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(DarkBg)
+                                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+                                .clickable {
+                                    onAddProgress(preset)
+                                }
+                                .padding(vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "+${formatShortCurrency(preset)}",
+                                color = Emerald400,
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Custom Amount Input + Submit Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -376,8 +742,23 @@ fun GoalCardItem(
                 OutlinedTextField(
                     value = progressInput,
                     onValueChange = { progressInput = formatAmountTextFieldValue(progressInput, it) },
-                    placeholder = { Text("+ Сумма", color = if (isPendingDelete) Color.White.copy(alpha = 0.6f) else Slate400, fontSize = 11.sp) },
-                    suffix = { Text("₽", color = if (isPendingDelete) Color.White else Emerald400, fontWeight = FontWeight.Bold, fontSize = 11.sp) },
+                    placeholder = {
+                        Text(
+                            text = "+ Своя сумма",
+                            color = if (isPendingDelete) Color.White.copy(alpha = 0.6f) else Slate500,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 12.sp
+                        )
+                    },
+                    suffix = {
+                        Text(
+                            text = "₽",
+                            color = if (isPendingDelete) Color.White else Emerald400,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
                         imeAction = ImeAction.Done
@@ -391,19 +772,28 @@ fun GoalCardItem(
                         focusedContainerColor = if (isPendingDelete) Color.White.copy(alpha = 0.15f) else DarkBg,
                         unfocusedContainerColor = if (isPendingDelete) Color.White.copy(alpha = 0.15f) else DarkBg,
                         focusedBorderColor = if (isPendingDelete) Color.White else Emerald400,
-                        unfocusedBorderColor = if (isPendingDelete) Color.White.copy(alpha = 0.4f) else Slate800,
+                        unfocusedBorderColor = if (isPendingDelete) Color.White.copy(alpha = 0.4f) else GlassBorder,
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White
                     ),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(14.dp)
                 )
 
                 Button(
                     onClick = { submitAmount() },
-                    colors = ButtonDefaults.buttonColors(containerColor = if (isPendingDelete) Color.White else Emerald400),
-                    shape = RoundedCornerShape(12.dp)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isPendingDelete) Color.White else Emerald400
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
                 ) {
-                    Text("Внести", color = if (isPendingDelete) Rose500 else DarkBg, fontWeight = FontWeight.Black, fontSize = 12.sp)
+                    Text(
+                        text = "Внести",
+                        color = if (isPendingDelete) Rose500 else DarkBg,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 12.sp
+                    )
                 }
             }
         }

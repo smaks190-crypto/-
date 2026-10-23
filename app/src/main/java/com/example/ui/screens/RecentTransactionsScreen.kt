@@ -646,22 +646,13 @@ private fun TransactionItemRow(
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
-            // Category Icon Badge
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(accentColor.copy(alpha = 0.12f))
-                    .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = item.category,
-                    tint = accentColor,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
+            // Category Icon Badge (FinTech Neon style from David-finance-main-2)
+            com.example.ui.components.CategoryIconBadge(
+                categoryName = item.category,
+                type = item.type,
+                size = 42.dp,
+                iconSize = 22.dp
+            )
 
             Spacer(modifier = Modifier.width(12.dp))
 

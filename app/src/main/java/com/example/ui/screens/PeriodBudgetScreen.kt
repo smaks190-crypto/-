@@ -69,6 +69,8 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
@@ -126,9 +128,16 @@ import com.example.ui.components.dialogs.AllTransactionsDialog
 import com.example.ui.components.DatePickerField
 import com.example.ui.components.MarkdownFormattedText
 import com.example.ui.components.formatFullCurrency
+import com.example.ui.components.formatShortCurrency
+import com.example.ui.theme.Amber400
 import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.GlassHighlight
 import com.example.ui.theme.Indigo500
 import com.example.ui.theme.Indigo400
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.ObsidianElevated
+import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate100
 import com.example.ui.theme.Slate200
@@ -136,6 +145,7 @@ import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
 import com.example.ui.theme.Slate700
+import com.example.ui.theme.SpaceGroteskFontFamily
 
 import com.example.ui.components.RollingCurrencyText
 import androidx.compose.ui.text.style.TextOverflow
@@ -145,12 +155,6 @@ import com.example.ui.theme.DarkBg
 import com.example.ui.viewmodel.PeriodType
 import com.example.ui.viewmodel.BudgetViewModel
 import kotlinx.coroutines.launch
-import androidx.compose.material.icons.filled.CardGiftcard
-import androidx.compose.material.icons.filled.Theaters
-import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.Savings
-import androidx.compose.material.icons.filled.MedicalServices
-import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.filled.SouthWest
 import androidx.compose.material.icons.filled.TrendingUp
@@ -197,19 +201,23 @@ fun PeriodBudgetScreen(
     onEditTransaction: ((TransactionEntity) -> Unit)? = null,
     onOpenRecentTransactionsScreen: (() -> Unit)? = null
 ) {
-    // Monthly Calculations (Incomes, Expenses, Carryover, Total Balance always show monthly values)
     val monthStart = remember(selectedMonthIdx, selectedYear) {
         val monthFormatted = String.format(Locale.US, "%02d", selectedMonthIdx + 1)
         "$selectedYear-$monthFormatted-01"
     }
 
-    val monthEnd = remember(selectedMonthIdx, selectedYear) {
-        val cal = Calendar.getInstance().apply {
+    val daysInSelectedMonth = remember(selectedMonthIdx, selectedYear) {
+        Calendar.getInstance().apply {
             set(Calendar.YEAR, selectedYear)
             set(Calendar.MONTH, selectedMonthIdx)
-            set(Calendar.DAY_OF_MONTH, getActualMaximum(Calendar.DAY_OF_MONTH))
-        }
-        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(cal.time)
+            set(Calendar.DAY_OF_MONTH, 1)
+        }.getActualMaximum(Calendar.DAY_OF_MONTH)
+    }
+
+    val monthEnd = remember(selectedMonthIdx, selectedYear, daysInSelectedMonth) {
+        val monthFormatted = String.format(Locale.US, "%02d", selectedMonthIdx + 1)
+        val dayFormatted = String.format(Locale.US, "%02d", daysInSelectedMonth)
+        "$selectedYear-$monthFormatted-$dayFormatted"
     }
 
     val monthTransactions = remember(allTransactions, monthStart, monthEnd) {
@@ -222,6 +230,23 @@ fun PeriodBudgetScreen(
     val monthTotalIncome = remember(monthIncomes) { monthIncomes.sumOf { it.amount } }
     val monthTotalExpense = remember(monthExpenses) { monthExpenses.sumOf { it.amount } }
     val monthNetBalance = monthTotalIncome - monthTotalExpense
+
+    // Previous month comparison (MoM %)
+    val (prevMonthIncome, prevMonthExpense) = remember(allTransactions, selectedMonthIdx, selectedYear) {
+        val prevIdx = if (selectedMonthIdx > 0) selectedMonthIdx - 1 else 11
+        val prevYear = if (selectedMonthIdx > 0) selectedYear else selectedYear - 1
+        val prevPrefix = String.format(Locale.US, "%04d-%02d", prevYear, prevIdx + 1)
+        val prevTxs = allTransactions.filter { it.date.startsWith(prevPrefix) }
+        val pInc = prevTxs.filter { it.type == "income" }.sumOf { it.amount }
+        val pExp = prevTxs.filter { it.type == "expense" }.sumOf { it.amount }
+        Pair(pInc, pExp)
+    }
+
+    val expenseMoMPercent = remember(monthTotalExpense, prevMonthExpense) {
+        if (prevMonthExpense > 0) {
+            Math.round(((monthTotalExpense - prevMonthExpense) / prevMonthExpense) * 100).toInt()
+        } else null
+    }
 
     val previousCarryover = remember(allTransactions, monthStart) {
         val prevIncomes = allTransactions
@@ -237,16 +262,12 @@ fun PeriodBudgetScreen(
     val monthTotalAccumulatedBalance = previousCarryover + monthNetBalance
     val monthSavingsRate = if (monthTotalIncome > 0) Math.max(0, Math.round((monthNetBalance / monthTotalIncome) * 100)) else 0
 
-    val incomes = remember(filteredTransactions) { filteredTransactions.filter { it.type == "income" } }
     val expenses = remember(filteredTransactions) { filteredTransactions.filter { it.type == "expense" } }
 
     val categoryExpenseTotals = remember(expenses) {
         expenses.groupBy { it.category }.mapValues { entry -> entry.value.sumOf { it.amount } }
     }
 
-    var showMonthWheelPicker by remember { mutableStateOf(false) }
-    var showDateRangePicker by remember { mutableStateOf(false) }
-    var showReportDialog by remember { mutableStateOf(false) }
     var showSharesDialog by remember { mutableStateOf(false) }
     var showCategoryLimitsDialog by remember { mutableStateOf(false) }
     var showIncomeExpenseSummaryDialog by remember { mutableStateOf(false) }
@@ -256,26 +277,37 @@ fun PeriodBudgetScreen(
     val categoriesListState = viewModel?.categories?.collectAsStateWithLifecycle()
     val categoriesList = categoriesListState?.value ?: remember { emptyList() }
 
-    val activeAuditText = savedAiAudit?.auditText ?: aiAuditResult
-    val isReportReady = !activeAuditText.isNullOrEmpty()
-
-    val periodTitleName = when (periodType) {
-        PeriodType.DAY -> "День ($selectedDateDay)"
-        PeriodType.WEEK -> "Неделя ($selectedDateDay)"
-        PeriodType.MONTH -> "${MonthsRu.getOrElse(selectedMonthIdx) { "Месяц" }}"
-        PeriodType.ALL -> "Период (с $allPeriodStart по $allPeriodEnd)"
+    // Safe-to-Spend Daily Limit calculation
+    val totalMonthlyLimit = remember(categoriesList, monthTotalIncome) {
+        val sumLimits = categoriesList.filter { it.type == "expense" }.mapNotNull { it.monthlyLimit }.sum()
+        if (sumLimits > 0) sumLimits else if (monthTotalIncome > 0) monthTotalIncome * 0.8 else 0.0
     }
 
-    val context = LocalContext.current
+    val todayIso = remember {
+        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Calendar.getInstance().time)
+    }
 
-    fun handleAnalyzeClick() {
-        onRequestAiAudit()
+    val todaySpent = remember(monthExpenses, todayIso) {
+        monthExpenses.filter { it.date == todayIso }.sumOf { it.amount }
+    }
+
+    val remainingDaysInMonth = remember(selectedMonthIdx, selectedYear, daysInSelectedMonth) {
+        val now = Calendar.getInstance()
+        val isCurrentMonth = now.get(Calendar.YEAR) == selectedYear && now.get(Calendar.MONTH) == selectedMonthIdx
+        if (isCurrentMonth) {
+            (daysInSelectedMonth - now.get(Calendar.DAY_OF_MONTH) + 1).coerceAtLeast(1)
+        } else {
+            daysInSelectedMonth.coerceAtLeast(1)
+        }
+    }
+
+    val safeDailyBudget = remember(totalMonthlyLimit, monthTotalExpense, todaySpent, remainingDaysInMonth) {
+        val spentBeforeToday = (monthTotalExpense - todaySpent).coerceAtLeast(0.0)
+        val remainingPool = (totalMonthlyLimit - spentBeforeToday).coerceAtLeast(0.0)
+        remainingPool / remainingDaysInMonth
     }
 
     val pagerState = rememberPagerState(initialPage = if (activeSubTab == "expense") 0 else 1, pageCount = { 2 })
-    val coroutineScope = rememberCoroutineScope()
-
-    val isExpenseTab = pagerState.currentPage == 0
 
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.settledPage }.collect { page ->
@@ -303,27 +335,141 @@ fun PeriodBudgetScreen(
                 com.example.ui.components.SwipeToRevealController.requestCollapseAll()
             }
             .verticalScroll(rememberScrollState())
-            .padding(vertical = 8.dp),
+            .padding(vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // --- MAIN NEON BALANCE CARD ---
+        // --- OBSIDIAN NEO-BANK PERIOD SELECTOR & QUICK AUDIT BAR ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(ObsidianSurface)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            val newIdx = if (selectedMonthIdx > 0) selectedMonthIdx - 1 else 11
+                            if (selectedMonthIdx == 0) onChangeSelectedAnnualYear(selectedYear - 1)
+                            onSetPeriodType(PeriodType.MONTH)
+                            onChangeSelectedMonthIdx(newIdx)
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                        contentDescription = "Предыдущий месяц",
+                        tint = Slate300,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Text(
+                    text = "${MonthsRu.getOrElse(selectedMonthIdx) { "Месяц" }} $selectedYear",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp)
+                )
+
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            val newIdx = if (selectedMonthIdx < 11) selectedMonthIdx + 1 else 0
+                            if (selectedMonthIdx == 11) onChangeSelectedAnnualYear(selectedYear + 1)
+                            onSetPeriodType(PeriodType.MONTH)
+                            onChangeSelectedMonthIdx(newIdx)
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Следующий месяц",
+                        tint = Slate300,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Quick Limits & Analytics Pill
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(ObsidianSurface)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                    .clickable { showCategoryLimitsDialog = true }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.TrendingUp,
+                    contentDescription = null,
+                    tint = Emerald400,
+                    modifier = Modifier.size(15.dp)
+                )
+                Text(
+                    text = "Лимиты",
+                    color = Slate200,
+                    fontSize = 12.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        // --- HERO OBSIDIAN NEO-BANK BALANCE CARD ---
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(Slate900)
+                .clip(RoundedCornerShape(28.dp))
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF111827),
+                            Color(0xFF0A0E17)
+                        )
+                    )
+                )
+                .drawBehind {
+                    // Ambient Obsidian-Emerald Radial Aura in top-right
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Emerald400.copy(alpha = 0.14f),
+                                Indigo500.copy(alpha = 0.05f),
+                                Color.Transparent
+                            ),
+                            center = Offset(size.width * 0.85f, size.height * 0.15f),
+                            radius = size.width * 0.65f
+                        ),
+                        center = Offset(size.width * 0.85f, size.height * 0.15f),
+                        radius = size.width * 0.65f
+                    )
+                }
                 .border(
                     width = 1.dp,
-                    brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                    brush = Brush.verticalGradient(
                         listOf(
-                            Emerald400.copy(alpha = 0.4f),
-                            Indigo500.copy(alpha = 0.4f),
-                            Rose500.copy(alpha = 0.4f)
+                            GlassHighlight,
+                            GlassBorder,
+                            Color.White.copy(alpha = 0.03f)
                         )
                     ),
-                    shape = RoundedCornerShape(24.dp)
+                    shape = RoundedCornerShape(28.dp)
                 )
-                .padding(20.dp)
+                .padding(22.dp)
         ) {
             Column {
                 Row(
@@ -332,17 +478,21 @@ fun PeriodBudgetScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "ТЕКУЩИЙ БАЛАНС",
+                        text = "ЧИСТЫЙ КАПИТАЛ",
                         color = Slate400,
-                        fontSize = 10.sp,
-                        letterSpacing = 1.sp,
-                        fontWeight = FontWeight.Medium
+                        fontSize = 11.sp,
+                        fontFamily = ManropeFontFamily,
+                        letterSpacing = 1.2.sp,
+                        fontWeight = FontWeight.Bold
                     )
 
                     Surface(
                         shape = CircleShape,
-                        color = Emerald400.copy(alpha = 0.1f),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Emerald400.copy(alpha = 0.3f))
+                        color = if (monthSavingsRate >= 15) Emerald400.copy(alpha = 0.12f) else Indigo500.copy(alpha = 0.12f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (monthSavingsRate >= 15) Emerald400.copy(alpha = 0.3f) else Indigo500.copy(alpha = 0.3f)
+                        )
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -350,151 +500,232 @@ fun PeriodBudgetScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             Icon(
-                                androidx.compose.material.icons.Icons.Default.TrendingUp,
+                                Icons.Default.TrendingUp,
                                 contentDescription = null,
-                                tint = Emerald400,
+                                tint = if (monthSavingsRate >= 15) Emerald400 else Indigo400,
                                 modifier = Modifier.size(12.dp)
                             )
                             Text(
-                                text = "Норма ${monthSavingsRate}%",
-                                color = Emerald400,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold
+                                text = "Сбережения ${monthSavingsRate}%",
+                                color = if (monthSavingsRate >= 15) Emerald400 else Indigo400,
+                                fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-                // Total Balance Amount in Monospace font
+                // Total Balance Amount in Space Grotesk (modern geometric fintech typography)
                 Text(
                     text = formatFullCurrency(monthTotalAccumulatedBalance),
                     color = Color.White,
-                    fontSize = 28.sp,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                    fontWeight = FontWeight.ExtraBold
+                    fontSize = 34.sp,
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp
                 )
+
+                // Safe-to-Spend Daily Limit Bar ("Можно потратить сегодня")
+                if (safeDailyBudget > 0) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    val safeRemainingToday = (safeDailyBudget - todaySpent).coerceAtLeast(0.0)
+                    val isOverDaily = todaySpent > safeDailyBudget
+                    val dailyProgress = (todaySpent / safeDailyBudget.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+                    val statusColor = when {
+                        isOverDaily -> Rose500
+                        dailyProgress > 0.8f -> Amber400
+                        else -> Emerald400
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White.copy(alpha = 0.04f))
+                            .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (isOverDaily) "Дневной лимит превышен" else "Можно потратить сегодня",
+                                    color = Slate300,
+                                    fontSize = 11.sp,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = if (isOverDaily) {
+                                        "Перерасход ${formatShortCurrency(todaySpent - safeDailyBudget)}"
+                                    } else {
+                                        "${formatShortCurrency(safeRemainingToday)} из ${formatShortCurrency(safeDailyBudget)}"
+                                    },
+                                    color = statusColor,
+                                    fontSize = 12.sp,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.08f))
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(fraction = dailyProgress.coerceAtLeast(0.04f))
+                                        .height(4.dp)
+                                        .clip(CircleShape)
+                                        .background(statusColor)
+                                )
+                            }
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // Income & Expense Bento Sub-Cards
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Income SubItem
+                    // Income Glass Card
                     Row(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(18.dp))
                             .clickable {
                                 initialAllTransactionsFilter = "income"
                                 showAllTransactionsDialog = true
                             }
-                            .background(Emerald400.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
-                            .border(1.dp, Emerald400.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+                            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(18.dp))
+                            .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
-                                .shadow(
-                                    elevation = 12.dp,
-                                    shape = CircleShape,
-                                    ambientColor = Emerald400,
-                                    spotColor = Emerald400
-                                )
-                                .clip(CircleShape)
-                                .background(Emerald400.copy(alpha = 0.12f))
-                                .border(1.dp, Emerald400.copy(alpha = 0.4f), CircleShape),
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Emerald400.copy(alpha = 0.14f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = androidx.compose.material.icons.Icons.Default.SouthWest,
+                                imageVector = Icons.Default.SouthWest,
                                 contentDescription = null,
                                 tint = Emerald400,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(text = "Доходы", color = Slate400, fontSize = 11.sp)
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "+\u00A0${formatFullCurrency(monthTotalIncome)}",
+                                text = "Доходы",
+                                color = Slate400,
+                                fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "+${formatShortCurrency(monthTotalIncome)}",
                                 color = Emerald400,
-                                fontSize = 13.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontFamily = SpaceGroteskFontFamily,
                                 maxLines = 1,
                                 softWrap = false,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
-                    // Expense SubItem
+                    // Expense Glass Card with MoM % Delta
                     Row(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(18.dp))
                             .clickable {
                                 initialAllTransactionsFilter = "expense"
                                 showAllTransactionsDialog = true
                             }
-                            .background(Rose500.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
-                            .border(1.dp, Rose500.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+                            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(18.dp))
+                            .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
-                                .shadow(
-                                    elevation = 12.dp,
-                                    shape = CircleShape,
-                                    ambientColor = Rose500,
-                                    spotColor = Rose500
-                                )
-                                .clip(CircleShape)
-                                .background(Rose500.copy(alpha = 0.12f))
-                                .border(1.dp, Rose500.copy(alpha = 0.4f), CircleShape),
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Rose500.copy(alpha = 0.14f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = androidx.compose.material.icons.Icons.Default.NorthEast,
+                                imageVector = Icons.Default.NorthEast,
                                 contentDescription = null,
                                 tint = Rose500,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(text = "Расходы", color = Slate400, fontSize = 11.sp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "Расходы",
+                                    color = Slate400,
+                                    fontSize = 11.sp,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                if (expenseMoMPercent != null && expenseMoMPercent != 0) {
+                                    val sign = if (expenseMoMPercent > 0) "+" else ""
+                                    Text(
+                                        text = "$sign$expenseMoMPercent%",
+                                        color = if (expenseMoMPercent <= 0) Emerald400 else Rose500,
+                                        fontSize = 9.sp,
+                                        fontFamily = SpaceGroteskFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                             Text(
-                                text = "-\u00A0${formatFullCurrency(monthTotalExpense)}",
-                                color = Rose500,
-                                fontSize = 13.sp,
+                                text = "-${formatShortCurrency(monthTotalExpense)}",
+                                color = Color.White,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontFamily = SpaceGroteskFontFamily,
                                 maxLines = 1,
                                 softWrap = false,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 }
             }
         }
-        
 
+        // --- EXPENSE DYNAMICS AREA CHART ---
         com.example.ui.components.charts.ExpenseDynamicsAreaChartCard(
             transactions = monthTransactions,
             title = "ДИНАМИКА РАСХОДОВ",
             onClick = null
         )
 
-        // --- STEP 3: CATEGORIES GRID SECTION ("КАТЕГОРИИ" - 3 Column Neon Grid matching HTML mockup) ---
+        // --- STEP 3: OBSIDIAN BENTO CATEGORIES SECTION (2-Column Readable Cards with Real Limits) ---
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -505,18 +736,23 @@ fun PeriodBudgetScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "КАТЕГОРИИ",
+                    text = "КАТЕГОРИИ И ЛИМИТЫ",
                     color = Slate300,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp
                 )
                 Text(
-                    text = "Все категории",
-                    color = Indigo500,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.clickable { showCategoryLimitsDialog = true }
+                    text = "Настроить ›",
+                    color = Emerald400,
+                    fontSize = 12.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { showCategoryLimitsDialog = true }
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
 
@@ -529,53 +765,34 @@ fun PeriodBudgetScreen(
             )
 
             val displayCategories = remember(categoryExpenseTotals, categoriesList) {
+                val colors = listOf(Emerald400, Indigo500, Rose500, Color(0xFFF59E0B), Color(0xFF06B6D4))
                 if (categoryExpenseTotals.isNotEmpty()) {
-                    val colors = listOf(Emerald400, Indigo500, Rose500, Color(0xFFF59E0B), Color(0xFF06B6D4))
                     val realSorted = categoryExpenseTotals.entries.sortedByDescending { it.value }.take(5)
                     val realItems = realSorted.mapIndexed { idx, entry ->
-                        val (col, ic) = when {
-                            entry.key.contains("игра", true) || entry.key.contains("гейм", true) || entry.key.contains("аниме", true) -> Emerald400 to Icons.Default.SportsEsports
-                            entry.key.contains("бар", true) || entry.key.contains("тусов", true) || entry.key.contains("алко", true) -> Indigo500 to Icons.Default.LocalBar
-                            entry.key.contains("такси", true) || entry.key.contains("транс", true) || entry.key.contains("авто", true) -> Rose500 to Icons.Default.DirectionsCar
-                            entry.key.contains("продукт", true) || entry.key.contains("еда", true) || entry.key.contains("кафе", true) -> Emerald400 to Icons.Default.Restaurant
-                            entry.key.contains("форс", true) || entry.key.contains("авар", true) -> Indigo500 to Icons.Default.Warning
-                            else -> colors[idx % colors.size] to Icons.Default.ShoppingBag
-                        }
-                        Triple(entry.key, entry.value, col to ic)
+                        val (col, ic) = getCategoryColorAndIcon(entry.key, "")
+                        val finalCol = if (col == Slate400) colors[idx % colors.size] else col
+                        Triple(entry.key, entry.value, finalCol to ic)
                     }
 
                     if (realItems.size < 5) {
                         val remainingDb = categoriesList
                             .filter { it.type == "expense" && realItems.none { item -> item.first.equals(it.name, true) } }
                             .mapIndexed { index, cat ->
-                                val (col, ic) = when {
-                                    cat.name.contains("игра", true) || cat.name.contains("гейм", true) || cat.name.contains("аниме", true) -> Emerald400 to Icons.Default.SportsEsports
-                                    cat.name.contains("бар", true) || cat.name.contains("тусов", true) || cat.name.contains("алко", true) -> Indigo500 to Icons.Default.LocalBar
-                                    cat.name.contains("такси", true) || cat.name.contains("транс", true) || cat.name.contains("авто", true) -> Rose500 to Icons.Default.DirectionsCar
-                                    cat.name.contains("продукт", true) || cat.name.contains("еда", true) || cat.name.contains("кафе", true) -> Emerald400 to Icons.Default.Restaurant
-                                    cat.name.contains("форс", true) || cat.name.contains("авар", true) -> Indigo500 to Icons.Default.Warning
-                                    else -> colors[(realItems.size + index) % colors.size] to Icons.Default.ShoppingBag
-                                }
-                                Triple(cat.name, 0.0, col to ic)
+                                val (col, ic) = getCategoryColorAndIcon(cat.name, "")
+                                val finalCol = if (col == Slate400) colors[(realItems.size + index) % colors.size] else col
+                                Triple(cat.name, 0.0, finalCol to ic)
                             }
                         (realItems + remainingDb).take(5)
                     } else {
                         realItems
                     }
                 } else {
-                    val colors = listOf(Emerald400, Indigo500, Rose500, Color(0xFFF59E0B), Color(0xFF06B6D4))
                     val expenseDbCats = categoriesList.filter { it.type == "expense" }
                     if (expenseDbCats.isNotEmpty()) {
                         expenseDbCats.mapIndexed { idx, cat ->
-                            val (col, ic) = when {
-                                cat.name.contains("игра", true) || cat.name.contains("гейм", true) || cat.name.contains("аниме", true) -> Emerald400 to Icons.Default.SportsEsports
-                                cat.name.contains("бар", true) || cat.name.contains("тусов", true) || cat.name.contains("алко", true) -> Indigo500 to Icons.Default.LocalBar
-                                cat.name.contains("такси", true) || cat.name.contains("транс", true) || cat.name.contains("авто", true) -> Rose500 to Icons.Default.DirectionsCar
-                                cat.name.contains("продукт", true) || cat.name.contains("еда", true) || cat.name.contains("кафе", true) -> Emerald400 to Icons.Default.Restaurant
-                                cat.name.contains("форс", true) || cat.name.contains("авар", true) -> Indigo500 to Icons.Default.Warning
-                                else -> colors[idx % colors.size] to Icons.Default.ShoppingBag
-                            }
-                            Triple(cat.name, 0.0, col to ic)
+                            val (col, ic) = getCategoryColorAndIcon(cat.name, "")
+                            val finalCol = if (col == Slate400) colors[idx % colors.size] else col
+                            Triple(cat.name, 0.0, finalCol to ic)
                         }.take(5)
                     } else {
                         defaultCategories.map { Triple(it.first, 0.0, it.third) }
@@ -587,206 +804,175 @@ fun PeriodBudgetScreen(
                 displayCategories.maxOfOrNull { it.second }?.coerceAtLeast(1.0) ?: 1.0
             }
 
-            // Row 1: First 3 items
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                displayCategories.take(3).forEach { (name, amount, colorAndIcon) ->
-                    val (color, icon) = colorAndIcon
-                    val ratio = (amount / maxCategoryVal).toFloat().coerceIn(0.12f, 1f)
-
-                    Card(
-                        onClick = { showCategoryLimitsDialog = true },
-                        colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.6f)),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate800.copy(alpha = 0.8f)),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(118.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(10.dp),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(color.copy(alpha = 0.12f))
-                                    .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = null,
-                                    tint = color,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            Text(
-                                text = name,
-                                color = Slate300,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                lineHeight = 12.sp,
-                                modifier = Modifier.height(26.dp)
-                            )
-
-                            Text(
-                                text = formatFullCurrency(amount),
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
-
-                            // Indicator bar
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(Color(0xFF020617))
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(fraction = ratio)
-                                        .height(4.dp)
-                                        .clip(RoundedCornerShape(2.dp))
-                                        .background(color)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Row 2: Remaining items (Items 4, 5 and "+ Добавить" item)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                displayCategories.drop(3).take(2).forEach { (name, amount, colorAndIcon) ->
-                    val (color, icon) = colorAndIcon
-                    val ratio = (amount / maxCategoryVal).toFloat().coerceIn(0.12f, 1f)
-
-                    Card(
-                        onClick = { showCategoryLimitsDialog = true },
-                        colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.6f)),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate800.copy(alpha = 0.8f)),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(118.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(10.dp),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(color.copy(alpha = 0.12f))
-                                    .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = icon,
-                                    contentDescription = null,
-                                    tint = color,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-
-                            Text(
-                                text = name,
-                                color = Slate300,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                lineHeight = 12.sp,
-                                modifier = Modifier.height(26.dp)
-                            )
-
-                            Text(
-                                text = formatFullCurrency(amount),
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
-
-                            // Indicator bar
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(RoundedCornerShape(2.dp))
-                                    .background(Color(0xFF020617))
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(fraction = ratio)
-                                        .height(4.dp)
-                                        .clip(RoundedCornerShape(2.dp))
-                                        .background(color)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 6th Card: "+ Добавить" tile
-                Card(
-                    onClick = { showCategoryLimitsDialog = true },
-                    colors = CardDefaults.cardColors(containerColor = Indigo500.copy(alpha = 0.08f)),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Indigo500.copy(alpha = 0.35f)),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(118.dp)
+            // 2-Column Bento Grid (3 rows x 2 columns: 5 top categories + "+ Лимит / Категория" card)
+            val rows = displayCategories.chunked(2)
+            rows.forEachIndexed { rowIdx, rowItems ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(10.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(CircleShape)
-                                .background(Indigo500),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
+                    rowItems.forEach { (name, amount, colorAndIcon) ->
+                        val (baseColor, icon) = colorAndIcon
+                        val limitObj = categoriesList.find { it.name.equals(name, ignoreCase = true) && it.type == "expense" }
+                        val catLimit = limitObj?.monthlyLimit
+                        val ratio = if (catLimit != null && catLimit > 0) {
+                            (amount / catLimit).toFloat().coerceIn(0.06f, 1f)
+                        } else {
+                            (amount / maxCategoryVal).toFloat().coerceIn(0.08f, 1f)
                         }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Добавить",
-                            color = Indigo500,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1
-                        )
+                        val barColor = when {
+                            catLimit != null && catLimit > 0 && amount > catLimit -> Rose500
+                            catLimit != null && catLimit > 0 && amount >= catLimit * 0.8 -> Amber400
+                            else -> baseColor
+                        }
+
+                        Card(
+                            onClick = { showCategoryLimitsDialog = true },
+                            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder),
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(88.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(baseColor.copy(alpha = 0.14f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = null,
+                                            tint = baseColor,
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                    }
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = name,
+                                            color = Slate200,
+                                            fontSize = 12.sp,
+                                            fontFamily = ManropeFontFamily,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = formatShortCurrency(amount),
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontFamily = SpaceGroteskFontFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+
+                                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                    if (catLimit != null && catLimit > 0) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "Лимит ${formatShortCurrency(catLimit)}",
+                                                color = Slate500,
+                                                fontSize = 9.sp,
+                                                fontFamily = ManropeFontFamily
+                                            )
+                                            Text(
+                                                text = "${Math.round((amount / catLimit) * 100)}%",
+                                                color = barColor,
+                                                fontSize = 9.sp,
+                                                fontFamily = SpaceGroteskFontFamily,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(4.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.White.copy(alpha = 0.07f))
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth(fraction = ratio)
+                                                .height(4.dp)
+                                                .clip(CircleShape)
+                                                .background(barColor)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Fill 2nd slot of last row with "+ Все категории / Лимиты" card
+                    if (rowItems.size == 1) {
+                        Card(
+                            onClick = { showCategoryLimitsDialog = true },
+                            colors = CardDefaults.cardColors(containerColor = ObsidianSurface.copy(alpha = 0.6f)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Emerald400.copy(alpha = 0.25f)),
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(88.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Emerald400.copy(alpha = 0.14f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = null,
+                                        tint = Emerald400,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = "Все лимиты",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontFamily = ManropeFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "${categoriesList.count { it.type == "expense" }} категорий",
+                                        color = Emerald400,
+                                        fontSize = 11.sp,
+                                        fontFamily = ManropeFontFamily,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -864,22 +1050,24 @@ fun PeriodBudgetScreen(
             )
         }
 
-
-
-        // --- STEP 4: RECENT TRANSACTIONS SECTION ("ПОСЛЕДНИЕ ОПЕРАЦИИ") ---
+        // --- STEP 4: RECENT TRANSACTIONS SECTION WITH DATE GROUPING ---
         val recentTxList = remember(filteredTransactions) {
-            filteredTransactions.take(5)
+            filteredTransactions.take(7)
+        }
+
+        val groupedRecentTx = remember(recentTxList) {
+            recentTxList.groupBy { it.date }
         }
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.6f)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800.copy(alpha = 0.8f)),
-            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder),
+            shape = RoundedCornerShape(24.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -888,33 +1076,40 @@ fun PeriodBudgetScreen(
                 ) {
                     Column {
                         Text(
-                            text = "ПОСЛЕДНИЕ ОПЕРАЦИИ",
-                            color = Slate400,
-                            fontSize = 11.sp,
+                            text = "ИСТОРИЯ ОПЕРАЦИЙ",
+                            color = Slate300,
+                            fontSize = 12.sp,
+                            fontFamily = ManropeFontFamily,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.sp
                         )
                         Text(
-                            text = "Всего ${filteredTransactions.size} транзакций",
+                            text = "Всего ${filteredTransactions.size} записей за период",
                             color = Slate500,
-                            fontSize = 10.sp
+                            fontSize = 11.sp,
+                            fontFamily = ManropeFontFamily
                         )
                     }
 
                     if (filteredTransactions.isNotEmpty() || allTransactions.isNotEmpty()) {
-                        Text(
-                            text = "Все ›",
-                            color = Indigo500,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable {
-                                    initialAllTransactionsFilter = if (activeSubTab == "income") "income" else "expense"
-                                    showAllTransactionsDialog = true
-                                }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color.White.copy(alpha = 0.05f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder),
+                            modifier = Modifier.clickable {
+                                initialAllTransactionsFilter = "all"
+                                showAllTransactionsDialog = true
+                            }
+                        ) {
+                            Text(
+                                text = "Все операции ›",
+                                color = Emerald400,
+                                fontSize = 12.sp,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
                     }
                 }
 
@@ -922,35 +1117,95 @@ fun PeriodBudgetScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 20.dp),
+                            .padding(vertical = 24.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = "Нет операций за выбранный период",
                             color = Slate500,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
+                            fontFamily = ManropeFontFamily,
                             fontWeight = FontWeight.Medium
                         )
                     }
                 } else {
                     Column(
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        recentTxList.forEach { tx ->
-                            TransactionRowItem(
-                                item = tx,
-                                onDelete = onDeleteTransaction,
-                                onClick = null,
-                                canDelete = false
-                            )
+                        groupedRecentTx.forEach { (dateStr, dayTxs) ->
+                            val dayLabel = remember(dateStr, todayIso) {
+                                formatHumanDateHeader(dateStr, todayIso)
+                            }
+                            val dayNet = remember(dayTxs) {
+                                dayTxs.sumOf { if (it.type == "income") it.amount else -it.amount }
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp, bottom = 2.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = dayLabel,
+                                    color = Slate400,
+                                    fontSize = 11.sp,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = if (dayNet >= 0) "+${formatShortCurrency(dayNet)}" else formatShortCurrency(dayNet),
+                                    color = Slate500,
+                                    fontSize = 11.sp,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+
+                            dayTxs.forEach { tx ->
+                                TransactionRowItem(
+                                    item = tx,
+                                    onDelete = onDeleteTransaction,
+                                    onClick = if (onEditTransaction != null) {
+                                        { onEditTransaction(tx) }
+                                    } else null,
+                                    canDelete = false
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        // Extra bottom padding so the floating Obsidian Bottom Dock & Voice FAB never cover the last card
+        Spacer(modifier = Modifier.height(88.dp))
     }
+}
+
+private fun formatHumanDateHeader(dateStr: String, todayIso: String): String {
+    if (dateStr == todayIso) return "Сегодня"
+    try {
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val cal = Calendar.getInstance()
+        cal.time = sdf.parse(todayIso) ?: return dateStr
+        cal.add(Calendar.DAY_OF_YEAR, -1)
+        val yesterdayIso = sdf.format(cal.time)
+        if (dateStr == yesterdayIso) return "Вчера"
+
+        val parts = dateStr.split("-")
+        if (parts.size == 3) {
+            val monthNum = parts[1].toIntOrNull() ?: 1
+            val dayNum = parts[2].toIntOrNull() ?: 1
+            val monthsGenitive = listOf(
+                "января", "февраля", "марта", "апреля", "мая", "июня",
+                "июля", "августа", "сентября", "октября", "ноября", "декабря"
+            )
+            return "$dayNum ${monthsGenitive.getOrElse(monthNum - 1) { "" }}"
+        }
+    } catch (_: Exception) {}
+    return dateStr
 }
 
 @Composable
@@ -962,22 +1217,12 @@ fun PeriodButton(
 ) {
     Box(
         modifier = modifier
-            .then(
-                if (isSelected) {
-                    Modifier.shadow(
-                        elevation = 8.dp,
-                        shape = RoundedCornerShape(8.dp),
-                        ambientColor = Indigo500,
-                        spotColor = Indigo500
-                    )
-                } else Modifier
-            )
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (isSelected) Indigo500 else Color.Transparent)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (isSelected) Emerald400.copy(alpha = 0.16f) else Color.Transparent)
             .border(
                 width = 1.dp,
-                color = if (isSelected) Indigo500.copy(alpha = 0.8f) else Color.Transparent,
-                shape = RoundedCornerShape(8.dp)
+                color = if (isSelected) Emerald400.copy(alpha = 0.5f) else Color.Transparent,
+                shape = RoundedCornerShape(10.dp)
             )
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp),
@@ -985,8 +1230,9 @@ fun PeriodButton(
     ) {
         Text(
             text = text,
-            color = if (isSelected) Color.White else Slate400,
+            color = if (isSelected) Emerald400 else Slate400,
             fontSize = 11.sp,
+            fontFamily = ManropeFontFamily,
             fontWeight = FontWeight.Bold,
             maxLines = 1
         )
@@ -996,23 +1242,26 @@ fun PeriodButton(
 fun getCategoryColorAndIcon(category: String, subcategory: String): Pair<androidx.compose.ui.graphics.Color, androidx.compose.ui.graphics.vector.ImageVector> {
     val text = "$category $subcategory".lowercase()
     return when {
+        text.contains("игра") || text.contains("гейм") || text.contains("аниме") || text.contains("кибер") -> Pair(Emerald400, Icons.Default.SportsEsports)
+        text.contains("бар") || text.contains("тусов") || text.contains("алко") || text.contains("вечерин") -> Pair(Indigo500, Icons.Default.LocalBar)
+        text.contains("форс") || text.contains("авар") || text.contains("штраф") -> Pair(Amber400, Icons.Default.Warning)
         text.contains("кредит") || text.contains("займ") || text.contains("ипотек") || text.contains("долг") || text.contains("банк") -> Pair(Rose500, Icons.Default.AccountBalance)
         text.contains("аптек") || text.contains("лекарст") || text.contains("здоровье") || text.contains("больниц") || text.contains("врач") || text.contains("медицин") -> Pair(Rose500, Icons.Default.MedicalServices)
         text.contains("сбережен") || text.contains("копилк") || text.contains("накоплен") || text.contains("вклад") || text.contains("инвест") || text.contains("фонд") || text.contains("цель") -> Pair(Indigo500, Icons.Default.Savings)
         text.contains("яндекс") || text.contains("yandex") -> Pair(androidx.compose.ui.graphics.Color(0xFFFC3F1D), Icons.Default.ShoppingBag)
         text.contains("сбер") || text.contains("перевод") || text.contains("тинькофф") || text.contains("карта") || text.contains("спб") -> Pair(Emerald400, Icons.Default.Refresh)
-        text.contains("продукт") || text.contains("супермаркет") || text.contains("еда") || text.contains("магнит") || text.contains("пятерочк") || text.contains("ашан") || text.contains("магазин") -> Pair(androidx.compose.ui.graphics.Color(0xFFF59E0B), Icons.Default.ShoppingBag)
-        text.contains("кафе") || text.contains("ресторан") || text.contains("фастфуд") || text.contains("доставк") || text.contains("кофе") || text.contains("столовая") -> Pair(androidx.compose.ui.graphics.Color(0xFFEC4899), Icons.Default.ShoppingBag)
-        text.contains("транспорт") || text.contains("такси") || text.contains("авто") || text.contains("бензин") || text.contains("заправк") || text.contains("метро") || text.contains("автобус") -> Pair(Indigo500, Icons.Default.DirectionsCar)
-        text.contains("развлечени") || text.contains("кино") || text.contains("игры") || text.contains("подписк") || text.contains("музык") || text.contains("театр") || text.contains("спорт") -> Pair(androidx.compose.ui.graphics.Color(0xFFA855F7), Icons.Default.Theaters)
+        text.contains("продукт") || text.contains("супермаркет") || text.contains("еда") || text.contains("магнит") || text.contains("пятерочк") || text.contains("ашан") || text.contains("магазин") -> Pair(androidx.compose.ui.graphics.Color(0xFFF59E0B), Icons.Default.Restaurant)
+        text.contains("кафе") || text.contains("ресторан") || text.contains("фастфуд") || text.contains("доставк") || text.contains("кофе") || text.contains("столовая") -> Pair(androidx.compose.ui.graphics.Color(0xFFEC4899), Icons.Default.Restaurant)
+        text.contains("транспорт") || text.contains("такси") || text.contains("авто") || text.contains("бензин") || text.contains("заправк") || text.contains("метро") || text.contains("автобус") -> Pair(Indigo400, Icons.Default.DirectionsCar)
+        text.contains("развлечени") || text.contains("кино") || text.contains("подписк") || text.contains("музык") || text.contains("театр") || text.contains("спорт") -> Pair(androidx.compose.ui.graphics.Color(0xFFA855F7), Icons.Default.Theaters)
         text.contains("жилье") || text.contains("коммунал") || text.contains("дом") || text.contains("жкх") || text.contains("аренд") || text.contains("квартир") -> Pair(androidx.compose.ui.graphics.Color(0xFF06B6D4), Icons.Default.Home)
         text.contains("связь") || text.contains("интернет") || text.contains("телефон") || text.contains("мобильн") || text.contains("техник") -> Pair(androidx.compose.ui.graphics.Color(0xFF3B82F6), Icons.Default.Call)
-        text.contains("зарплат") || text.contains("доход") || text.contains("преми") || text.contains("аванс") || text.contains("кэшбэк") -> Pair(Emerald400, Icons.Default.Payments)
+        text.contains("зарплат") || text.contains("доход") || text.contains("преми") || text.contains("аванс") || text.contains("кэшбэк") || text.contains("халтур") -> Pair(Emerald400, Icons.Default.Payments)
         text.contains("одежд") || text.contains("обувь") || text.contains("гардероб") || text.contains("сумка") || text.contains("красот") || text.contains("салон") -> Pair(androidx.compose.ui.graphics.Color(0xFFEC4899), Icons.Default.Checkroom)
         text.contains("подарок") || text.contains("подарк") || text.contains("праздник") || text.contains("цветы") -> Pair(Rose500, Icons.Default.CardGiftcard)
         text.contains("книг") || text.contains("литератур") || text.contains("чтени") || text.contains("литрес") -> Pair(androidx.compose.ui.graphics.Color(0xFF8B5CF6), Icons.Default.List)
         text.contains("обучени") || text.contains("образовани") || text.contains("курсы") || text.contains("школа") -> Pair(androidx.compose.ui.graphics.Color(0xFF60A5FA), Icons.Default.School)
-        else -> Pair(Slate400, Icons.Default.List)
+        else -> Pair(Slate400, Icons.Default.ShoppingBag)
     }
 }
 
@@ -1044,9 +1293,9 @@ fun TransactionRowItem(
         Row(
             modifier = modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(DarkBg.copy(alpha = 0.6f))
-                .border(androidx.compose.foundation.BorderStroke(1.dp, Slate800.copy(alpha = 0.5f)), RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color.White.copy(alpha = 0.035f))
+                .border(androidx.compose.foundation.BorderStroke(1.dp, GlassBorder), RoundedCornerShape(18.dp))
                 .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1058,17 +1307,16 @@ fun TransactionRowItem(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(catColor.copy(alpha = 0.1f))
-                        .border(0.5.dp, catColor.copy(alpha = 0.3f), CircleShape),
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(catColor.copy(alpha = 0.14f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = catIcon,
                         contentDescription = item.category,
                         tint = catColor,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
@@ -1076,8 +1324,9 @@ fun TransactionRowItem(
                     Text(
                         text = topTitle,
                         color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = if (hasSubcategory) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 14.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
@@ -1086,7 +1335,8 @@ fun TransactionRowItem(
                             text = bottomTitle,
                             color = Slate400,
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Normal,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
@@ -1097,7 +1347,8 @@ fun TransactionRowItem(
             Text(
                 text = "$prefix${numberFormat.format(item.amount)} ₽",
                 color = if (isExpense) Color.White else Emerald400,
-                fontSize = 14.sp,
+                fontSize = 15.sp,
+                fontFamily = SpaceGroteskFontFamily,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -1107,7 +1358,7 @@ fun TransactionRowItem(
         SwipeToRevealBox(
             swipeDirection = SwipeDirection.Both,
             onDelete = { onDelete(item.id) },
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(18.dp),
             modifier = modifier
         ) {
             content()

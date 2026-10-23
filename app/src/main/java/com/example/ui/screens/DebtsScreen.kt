@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -7,11 +8,13 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,6 +33,7 @@ import com.example.ui.components.capitalizeFirstLetter
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Handshake
@@ -63,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.AccountEntity
@@ -74,17 +79,28 @@ import com.example.ui.components.formatAmountTextFieldValue
 import com.example.ui.components.formatFullCurrency
 import com.example.ui.components.formatDayHeaderLabel
 import com.example.ui.components.parseAmountInput
+import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
+import com.example.ui.theme.Emerald500
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.GlassHighlight
+import com.example.ui.theme.Indigo400
 import com.example.ui.theme.Indigo500
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.ObsidianElevated
+import com.example.ui.theme.ObsidianSurface
+import com.example.ui.theme.Rose400
 import com.example.ui.theme.Rose500
+import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
-import com.example.ui.theme.DarkBg
+import com.example.ui.theme.SpaceGroteskFontFamily
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun DebtsScreen(
@@ -104,7 +120,7 @@ fun DebtsScreen(
     fun getDebtRemainingBalance(debt: AccountEntity): Double {
         val txs = transactions.filter { it.accountId == debt.id }
         val isWeOwe = debt.type != "owes_us" // Default legacy type to "we_owe"
-        
+
         return if (isWeOwe) {
             val income = txs.filter { it.type == "income" }.sumOf { it.amount }
             val expense = txs.filter { it.type == "expense" }.sumOf { it.amount }
@@ -124,154 +140,223 @@ fun DebtsScreen(
         accounts.filter { it.type == "owes_us" }.sumOf { getDebtRemainingBalance(it).coerceAtLeast(0.0) }
     }
 
+    // Priority obligation for David's Smart Snowball strategy (smallest positive "we_owe" debt to close first)
+    val nextSnowballDebt = remember(accounts, transactions) {
+        accounts
+            .filter { it.type != "owes_us" }
+            .map { it to getDebtRemainingBalance(it) }
+            .filter { it.second > 0.0 }
+            .minByOrNull { it.second }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
                 detectTapGestures(onTap = { focusManager.clearFocus() })
             }
-            .padding(16.dp)
+            .padding(vertical = 8.dp)
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // 1. OBSIDIAN NEO-BANK HEADER CARD
+            Card(
+                colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                border = BorderStroke(
+                    width = 1.dp,
+                    brush = Brush.verticalGradient(listOf(GlassHighlight, GlassBorder))
+                ),
+                shape = RoundedCornerShape(26.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column {
-                    Text(
-                        text = "ДОЛГИ И ЗАЙМЫ",
-                        color = Slate400,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                    Text(
-                        text = "Контроль задолженностей",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                Button(
-                    onClick = { showAddDebtModal = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = Indigo500.copy(alpha = 0.2f)),
-                    shape = RoundedCornerShape(12.dp),
+                Column(
                     modifier = Modifier
-                        .border(1.dp, Indigo500.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                        .testTag("add_debt_button")
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Добавить долг",
-                        tint = Indigo500,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Долг", color = Indigo500, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "ОБЯЗАТЕЛЬСТВА И ЗАЙМЫ",
+                                color = Slate400,
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 1.2.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Контроль долгов",
+                                color = Color.White,
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Button(
+                            onClick = { showAddDebtModal = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = Indigo500),
+                            shape = RoundedCornerShape(14.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                            modifier = Modifier.testTag("add_debt_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Добавить долг",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Долг",
+                                color = Color.White,
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+
+                    // Dual Summary Bento Row ("Я должен" / "Мне должны")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Card for "Я должен" (We owe)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(ObsidianElevated)
+                                .border(1.dp, Rose500.copy(alpha = 0.32f), RoundedCornerShape(18.dp))
+                                .padding(14.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .clip(RoundedCornerShape(7.dp))
+                                            .background(Rose500.copy(alpha = 0.16f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDownward,
+                                            contentDescription = null,
+                                            tint = Rose500,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = "Я ДОЛЖЕН",
+                                        color = Slate400,
+                                        fontFamily = ManropeFontFamily,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        letterSpacing = 0.8.sp
+                                    )
+                                }
+                                RollingCurrencyText(
+                                    text = formatFullCurrency(totalWeOwe),
+                                    color = if (totalWeOwe > 0) Rose400 else Color.White,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Card for "Мне должны" (Owed to us)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(ObsidianElevated)
+                                .border(1.dp, Emerald400.copy(alpha = 0.32f), RoundedCornerShape(18.dp))
+                                .padding(14.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .clip(RoundedCornerShape(7.dp))
+                                            .background(Emerald400.copy(alpha = 0.16f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowUpward,
+                                            contentDescription = null,
+                                            tint = Emerald400,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                    Text(
+                                        text = "МНЕ ДОЛЖНЫ",
+                                        color = Slate400,
+                                        fontFamily = ManropeFontFamily,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        letterSpacing = 0.8.sp
+                                    )
+                                }
+                                RollingCurrencyText(
+                                    text = formatFullCurrency(totalOwesUs),
+                                    color = if (totalOwesUs > 0) Emerald400 else Color.White,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // David AI Debt Strategy Hint (if active debt exists)
+                    nextSnowballDebt?.let { (priorityDebt, remAmount) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Indigo500.copy(alpha = 0.12f))
+                                .border(1.dp, Indigo400.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
+                                .clickable { selectedDebtForDetails = priorityDebt }
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = Indigo400,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "🐸 Совет Давида (Метод снежного кома): закройте «${priorityDebt.name}» (${formatFullCurrency(remAmount)}) первым для быстрой разгрузки бюджета.",
+                                color = Slate300,
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                 }
             }
 
-            // Dual Summary Card (Ya Dolzhen / Mne Dolzhny)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Card for "Я должен" (We owe)
-                Card(
-                    modifier = Modifier
-                        .weight(1f)
-                        .shadow(
-                            elevation = 8.dp,
-                            shape = RoundedCornerShape(20.dp),
-                            clip = false,
-                            ambientColor = Rose500,
-                            spotColor = Rose500
-                        ),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = Slate900),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Rose500.copy(alpha = 0.3f))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ArrowDownward,
-                                contentDescription = null,
-                                tint = Rose500,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "Я ДОЛЖЕН",
-                                color = Slate400,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        RollingCurrencyText(
-                            text = formatFullCurrency(totalWeOwe),
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                }
-
-                // Card for "Мне должны" (Owed to us)
-                Card(
-                    modifier = Modifier
-                        .weight(1f)
-                        .shadow(
-                            elevation = 8.dp,
-                            shape = RoundedCornerShape(20.dp),
-                            clip = false,
-                            ambientColor = Emerald400,
-                            spotColor = Emerald400
-                        ),
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = Slate900),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Emerald400.copy(alpha = 0.3f))
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ArrowUpward,
-                                contentDescription = null,
-                                tint = Emerald400,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = "МНЕ ДОЛЖНЫ",
-                                color = Slate400,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        RollingCurrencyText(
-                            text = formatFullCurrency(totalOwesUs),
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-                }
-            }
-
-            // Debts List
+            // 2. DEBTS LIST
             if (accounts.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -285,33 +370,41 @@ fun DebtsScreen(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(72.dp)
+                                .size(68.dp)
                                 .clip(CircleShape)
-                                .background(Rose500.copy(alpha = 0.1f))
-                                .border(1.dp, Rose500.copy(alpha = 0.35f), CircleShape),
+                                .background(ObsidianSurface)
+                                .border(1.dp, GlassBorder, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "•︵•",
-                                color = Rose500,
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Bold
+                            Icon(
+                                imageVector = Icons.Default.Handshake,
+                                contentDescription = null,
+                                tint = Emerald400,
+                                modifier = Modifier.size(28.dp)
                             )
                         }
                         Text(
-                            text = "У вас отсутствуют долги",
+                            text = "Долгов и активных займов нет",
+                            color = Color.White,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Чистый баланс обязательств — лучшая база для накоплений",
                             color = Slate400,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 12.sp
                         )
                     }
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(accounts) { debt ->
+                    items(accounts, key = { it.id }) { debt ->
                         val remaining = getDebtRemainingBalance(debt)
                         DebtCard(
                             debt = debt,
@@ -363,31 +456,38 @@ fun DebtCard(
     val directionLabel = if (isWeOwe) "Я должен" else "Мне должны"
     val icon = if (isWeOwe) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward
 
+    val safeInitial = debt.balance.coerceAtLeast(1.0)
+    val safeRemaining = remainingBalance.coerceAtLeast(0.0)
+    val repaidAmount = (debt.balance - safeRemaining).coerceAtLeast(0.0)
+    val repaidFraction = if (debt.balance > 0.0) {
+        (repaidAmount / safeInitial).toFloat().coerceIn(0f, 1f)
+    } else if (safeRemaining <= 0.0) 1f else 0f
+    val repaidPercent = (repaidFraction * 100f).roundToInt().coerceIn(0, 100)
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
-            .shadow(
-                elevation = 6.dp,
-                shape = RoundedCornerShape(20.dp),
-                clip = false,
-                ambientColor = accentColor,
-                spotColor = accentColor
-            ),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Slate900.copy(alpha = 0.85f)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+        border = BorderStroke(
+            width = 1.dp,
+            brush = Brush.verticalGradient(
+                colors = listOf(accentColor.copy(alpha = 0.35f), GlassBorder)
+            )
+        )
     ) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            // Subtle Neon Glow inside card
+        Box(modifier = Modifier.padding(18.dp)) {
+            // Subtle Radial Glow inside card
             Box(
                 modifier = Modifier
-                    .size(100.dp)
+                    .size(110.dp)
                     .align(Alignment.TopEnd)
+                    .offset(x = 24.dp, y = (-24).dp)
                     .background(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                accentColor.copy(alpha = 0.15f),
+                                accentColor.copy(alpha = 0.14f),
                                 Color.Transparent
                             )
                         )
@@ -402,14 +502,15 @@ fun DebtCard(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(accentColor.copy(alpha = 0.15f))
-                                .border(1.dp, accentColor.copy(alpha = 0.3f), RoundedCornerShape(10.dp)),
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(accentColor.copy(alpha = 0.14f))
+                                .border(1.dp, accentColor.copy(alpha = 0.32f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -420,37 +521,60 @@ fun DebtCard(
                             )
                         }
 
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = debt.name,
                                 color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = if (debt.accountNumber.isNotBlank()) "$directionLabel • ${debt.accountNumber}" else directionLabel,
                                 color = Slate400,
-                                fontSize = 11.sp
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         if (remainingBalance <= 0.0) {
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Emerald400.copy(alpha = 0.2f))
-                                    .border(1.dp, Emerald400.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Emerald400.copy(alpha = 0.16f))
+                                    .border(1.dp, Emerald400.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
                             ) {
                                 Text(
-                                    text = "ПОГАШЕН",
+                                    text = "ЗАКРЫТ",
                                     color = Emerald400,
-                                    fontSize = 9.sp,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(ObsidianElevated)
+                                    .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = "$repaidPercent% погашено",
+                                    color = Slate300,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -477,25 +601,47 @@ fun DebtCard(
                 ) {
                     Column {
                         Text(
-                            text = "Оставшийся долг",
+                            text = "Остаток долга",
                             color = Slate400,
-                            fontSize = 10.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Medium
                         )
                         RollingCurrencyText(
-                            text = formatFullCurrency(remainingBalance.coerceAtLeast(0.0)),
+                            text = formatFullCurrency(safeRemaining),
                             color = if (remainingBalance <= 0.0) Slate400 else Color.White,
-                            fontSize = 20.sp,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontSize = 22.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
 
                     Text(
-                        text = "Начальный: " + formatFullCurrency(debt.balance),
-                        color = Slate400.copy(alpha = 0.8f),
-                        fontSize = 11.sp,
+                        text = "Из " + formatFullCurrency(debt.balance),
+                        color = Slate400,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(bottom = 2.dp)
+                    )
+                }
+
+                // Repayment Progress Bar
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(DarkBg)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(repaidFraction)
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(
+                                if (remainingBalance <= 0.0) Emerald400 else accentColor
+                            )
                     )
                 }
             }
