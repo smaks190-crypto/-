@@ -76,11 +76,9 @@ fun DavidChatScreen(
     val messages by viewModel.messages.collectAsState()
     val stage by viewModel.stage.collectAsState()
     val isTyping by viewModel.isDavidTyping.collectAsState()
-    val hasApiKey by viewModel.hasApiKey.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
     var showAchievementsDialog by remember { mutableStateOf(false) }
-    var showApiKeyDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     // Автоматическая плавная прокрутка к последнему элементу внизу списка
@@ -102,8 +100,6 @@ fun DavidChatScreen(
                 onBack = onBack,
                 onReset = { viewModel.resetSession(effectiveSoundManager) },
                 onOpenAchievements = { showAchievementsDialog = true },
-                hasApiKey = hasApiKey,
-                onOpenApiKeyDialog = { showApiKeyDialog = true },
                 isTyping = isTyping,
                 modifier = Modifier.statusBarsPadding()
             )
@@ -117,7 +113,7 @@ fun DavidChatScreen(
                     .imePadding()
                     .padding(horizontal = 12.dp)
                     .padding(top = 6.dp, bottom = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Динамическая панель действий согласно текущему этапу ("Давид, сделай отчет", выбор периода PDF и др.)
                 DavidQuickActionsBar(
@@ -131,18 +127,6 @@ fun DavidChatScreen(
                     onExportPdf = {
                         viewModel.exportPdf(effectiveSoundManager)
                     }
-                )
-
-                // Горизонтальная лента быстрых подсказок (из David-finance-main-2)
-                DavidSuggestionChipsRow(
-                    hasApiKey = hasApiKey,
-                    onSendPrompt = { prompt ->
-                        viewModel.sendTextMessage(prompt, effectiveSoundManager)
-                    },
-                    onActionClick = { action ->
-                        viewModel.handleAction(action, effectiveSoundManager)
-                    },
-                    onOpenApiKeyDialog = { showApiKeyDialog = true }
                 )
 
                 // Поле ввода текста со скрепкой и кнопкой отправки
@@ -177,15 +161,7 @@ fun DavidChatScreen(
                 items = messages,
                 key = { it.id }
             ) { message ->
-                DavidMessageItem(
-                    message = message,
-                    onConfirmProposal = { msgId ->
-                        viewModel.confirmChatProposedOperation(msgId, effectiveSoundManager)
-                    },
-                    onDismissProposal = { msgId ->
-                        viewModel.dismissChatProposedOperation(msgId)
-                    }
-                )
+                DavidMessageItem(message = message)
             }
 
             if (isTyping) {
@@ -203,69 +179,4 @@ fun DavidChatScreen(
     if (showAchievementsDialog) {
         AchievementsDialog(onDismiss = { showAchievementsDialog = false })
     }
-
-    if (showApiKeyDialog) {
-        var keyText by remember { mutableStateOf("") }
-        val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showApiKeyDialog = false },
-            containerColor = com.example.ui.theme.SurfaceCard,
-            title = {
-                androidx.compose.material3.Text(
-                    "🔑 Gemini API Ключ",
-                    color = TextLight,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                )
-            },
-            text = {
-                Column {
-                    androidx.compose.material3.Text(
-                        "Введите ключ от Google AI Studio для активации Давида Жабова (Gemini 3.8) и голосового ввода.",
-                        color = TextMuted,
-                        fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    androidx.compose.material3.OutlinedTextField(
-                        value = keyText,
-                        onValueChange = { keyText = it },
-                        label = { androidx.compose.material3.Text("API Key") },
-                        singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation('*'),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    androidx.compose.material3.OutlinedButton(
-                        onClick = {
-                            clipboardManager.getText()?.text?.let { pasted ->
-                                if (pasted.isNotBlank()) keyText = pasted.trim()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        androidx.compose.material3.Text("📋 Вставить из буфера")
-                    }
-                }
-            },
-            confirmButton = {
-                androidx.compose.material3.Button(
-                    onClick = {
-                        viewModel.saveApiKeyFromChat(keyText, effectiveSoundManager)
-                        showApiKeyDialog = false
-                    },
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                        containerColor = com.example.ui.theme.EmeraldPrimary,
-                        contentColor = DarkBackground
-                    )
-                ) {
-                    androidx.compose.material3.Text("Сохранить", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showApiKeyDialog = false }) {
-                    androidx.compose.material3.Text("Отмена", color = TextMuted)
-                }
-            }
-        )
-    }
 }
-

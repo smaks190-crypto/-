@@ -53,7 +53,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -369,18 +368,18 @@ fun VoiceRecordingOverlay(
     val desiredHeight = when {
         isConsentNeeded -> 230f.coerceAtMost(screenHeightDp - 60f)
         isApiKeyNeeded -> 430f.coerceAtMost(screenHeightDp - 60f)
-        showManualInput -> 490f.coerceAtMost(screenHeightDp - 60f)
+        showManualInput -> 442f.coerceAtMost(screenHeightDp - 60f)
         isEditingOperations -> {
             if (editingIndex != null) {
-                505f.coerceAtMost(screenHeightDp - 60f)
+                460f.coerceAtMost(screenHeightDp - 60f)
             } else {
                 val count = editableList.size
-                val liveExtra = if (isListening || isAnalyzingVoice) 72f else 0f
-                val baseHeight = 175f + count * 78f + liveExtra
-                baseHeight.coerceIn(245f, screenHeightDp - 60f)
+                val liveExtra = if (isListening || isAnalyzingVoice) 62f else 0f
+                val baseHeight = 170f + count * 76f + liveExtra
+                baseHeight.coerceIn(240f, screenHeightDp - 60f)
             }
         }
-        isVoiceActive -> 64f
+        isVoiceActive -> 56f
         else -> 56f
     }
 
@@ -726,7 +725,7 @@ fun VoiceRecordingOverlay(
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(64.dp),
+                                        .height(56.dp),
                                     contentAlignment = Alignment.CenterEnd
                                 ) {
                                     AnimatedVisibility(
@@ -735,105 +734,96 @@ fun VoiceRecordingOverlay(
                                         exit = fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing)) + slideOutHorizontally(animationSpec = tween(150)) { -it / 4 },
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(start = 10.dp, end = 62.dp)
+                                            .padding(start = 56.dp, end = 56.dp)
                                     ) {
-                                        Row(
+                                        Box(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .height(64.dp)
+                                                .height(56.dp)
                                                 .clickable { viewModel.stopVoiceRecordingAndProcess() },
-                                            verticalAlignment = Alignment.CenterVertically
+                                            contentAlignment = Alignment.Center
                                         ) {
-                                            // Left pulsing radial neon Mic button / AI spinner (from David-finance-main-2)
-                                            Box(
-                                                modifier = Modifier.size(44.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                if (isListening) {
-                                                    val pulseScale by animateFloatAsState(
-                                                        targetValue = 1f + (rmsDb / 14f).coerceIn(0f, 0.45f),
-                                                        animationSpec = tween(100),
-                                                        label = "mic_pulse"
+                                            if (!isListening && isAnalyzingVoice) {
+                                                Row(
+                                                    horizontalArrangement = Arrangement.Center,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    CircularProgressIndicator(
+                                                        color = Indigo500,
+                                                        strokeWidth = 2.dp,
+                                                        modifier = Modifier.size(18.dp)
                                                     )
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size((36 * pulseScale).dp)
-                                                            .clip(CircleShape)
-                                                            .background(
-                                                                Brush.radialGradient(
-                                                                    colors = listOf(
-                                                                        com.example.ui.theme.NeonCyan.copy(alpha = 0.55f),
-                                                                        com.example.ui.theme.NeonEmerald.copy(alpha = 0.25f),
-                                                                        Color.Transparent
-                                                                    )
-                                                                )
-                                                            )
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Text(
+                                                        text = "Gemini Live...",
+                                                        color = Indigo500,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold
                                                     )
                                                 }
-
-                                                if (isAnalyzingVoice && !isListening) {
-                                                    CircularProgressIndicator(
-                                                        color = com.example.ui.theme.NeonEmerald,
-                                                        strokeWidth = 2.5.dp,
-                                                        modifier = Modifier.size(28.dp)
-                                                    )
-                                                } else {
+                                            } else {
+                                                Column(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.Center
+                                                ) {
+                                                    // 32-Band Seamless Neon Glow Waveform Visualizer
                                                     Box(
                                                         modifier = Modifier
-                                                            .size(38.dp)
-                                                            .clip(CircleShape)
-                                                            .background(
-                                                                if (isListening) com.example.ui.theme.NeonCyan else com.example.ui.theme.EmeraldPrimary
-                                                            ),
+                                                            .fillMaxWidth()
+                                                            .height(38.dp),
                                                         contentAlignment = Alignment.Center
                                                     ) {
-                                                        Icon(
-                                                            imageVector = if (isRecordingLocked) Icons.Default.Lock else Icons.Default.Mic,
-                                                            contentDescription = "Голосовой ввод",
-                                                            tint = DarkBg,
-                                                            modifier = Modifier.size(18.dp)
+                                                        Neon32BandVoiceVisualizer(
+                                                            amplitude = normalizedAmplitude,
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(36.dp)
+                                                        )
+
+                                                        if (isRecordingLocked) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .align(Alignment.CenterStart)
+                                                                    .padding(start = 4.dp)
+                                                                    .size(20.dp)
+                                                                    .background(DarkBg.copy(alpha = 0.6f), CircleShape),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.Lock,
+                                                                    contentDescription = "Зафиксировано",
+                                                                    tint = Rose500,
+                                                                    modifier = Modifier.size(12.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+
+                                                    if (isAnalyzingVoice) {
+                                                        Spacer(modifier = Modifier.height(2.dp))
+                                                        Text(
+                                                            text = "Gemini Live распознает...",
+                                                            color = Indigo500,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    } else if (activeText.isNotBlank() && !isListening) {
+                                                        Spacer(modifier = Modifier.height(2.dp))
+                                                        Text(
+                                                            text = "«$activeText»",
+                                                            color = Color.White,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
                                                         )
                                                     }
                                                 }
-                                            }
-
-                                            Spacer(modifier = Modifier.width(8.dp))
-
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.Center
-                                            ) {
-                                                val displayLine = when {
-                                                    isAnalyzingVoice && !isListening -> "✨ Давид разбирает операции через Gemini..."
-                                                    activeText.isNotBlank() -> activeText
-                                                    isListening -> "Слушаю вас... (нажмите для отправки)"
-                                                    else -> "Нажмите для записи"
-                                                }
-                                                Text(
-                                                    text = displayLine,
-                                                    color = if (isAnalyzingVoice) com.example.ui.theme.NeonEmerald else Color.White,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-
-                                                Spacer(modifier = Modifier.height(3.dp))
-
-                                                Neon32BandVoiceVisualizer(
-                                                    amplitude = normalizedAmplitude,
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .height(20.dp)
-                                                )
-
-                                                Spacer(modifier = Modifier.height(2.dp))
-
-                                                MovingNeonGlowVisualizer(
-                                                    isRecording = isListening,
-                                                    rmsLevel = rmsDb,
-                                                    modifier = Modifier.fillMaxWidth()
-                                                )
                                             }
                                         }
                                     }
@@ -841,7 +831,6 @@ fun VoiceRecordingOverlay(
                             }
                         }
                     }
-
 
 
                     // Single Unified FAB Button

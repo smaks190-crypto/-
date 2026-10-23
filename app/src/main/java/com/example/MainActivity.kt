@@ -157,29 +157,15 @@ class MainActivity : FragmentActivity() {
     private val viewModel: BudgetViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        com.example.utils.GlobalConsoleLogger.setupUncaughtExceptionHandler(this)
+        com.example.utils.GlobalConsoleLogger.setupUncaughtExceptionHandler()
         com.example.davidapp.AchievementManager.initIfNeeded(this)
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val crashPrefs = getSharedPreferences("crash_prefs", android.content.Context.MODE_PRIVATE)
-        val initialCrash = crashPrefs.getString("last_crash", null)
-
         setContent {
             BudgetTheme {
-                var activeCrashTrace by remember { mutableStateOf(initialCrash) }
-                if (!activeCrashTrace.isNullOrBlank()) {
-                    CrashReportScreen(
-                        crashLog = activeCrashTrace!!,
-                        onClearAndContinue = {
-                            crashPrefs.edit().remove("last_crash").apply()
-                            activeCrashTrace = null
-                        }
-                    )
-                } else {
-                    MainAppScreen(viewModel = viewModel)
-                }
+                MainAppScreen(viewModel = viewModel)
             }
         }
     }
@@ -1227,84 +1213,3 @@ private fun getProfileInitials(name: String): String {
         "Б"
     }
 }
-
-@Composable
-fun CrashReportScreen(
-    crashLog: String,
-    onClearAndContinue: () -> Unit
-) {
-    val context = LocalContext.current
-    val scrollState = androidx.compose.foundation.rememberScrollState()
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DarkBg)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(16.dp)
-    ) {
-        Text(
-            text = "⚠️ Обнаружен сбой запуска",
-            color = com.example.ui.theme.ExpenseRed,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = "Лог ошибки перехвачен диагностической системой:",
-            color = Slate400,
-            fontSize = 13.sp
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(com.example.ui.theme.SurfaceCard)
-                .padding(12.dp)
-        ) {
-            Text(
-                text = crashLog,
-                color = Color.White,
-                fontSize = 11.sp,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .then(Modifier)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            androidx.compose.material3.OutlinedButton(
-                onClick = {
-                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                    clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("CrashLog", crashLog))
-                    Toast.makeText(context, "Лог скопирован в буфер обмена", Toast.LENGTH_SHORT).show()
-                },
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Скопировать", color = com.example.ui.theme.EmeraldLight)
-            }
-
-            androidx.compose.material3.Button(
-                onClick = onClearAndContinue,
-                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                    containerColor = com.example.ui.theme.EmeraldPrimary,
-                    contentColor = DarkBg
-                ),
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Очистить и запустить", fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-

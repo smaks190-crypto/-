@@ -55,13 +55,6 @@ import com.example.ui.theme.Slate900
 import com.example.ui.viewmodel.BudgetViewModel
 import java.util.Locale
 
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import com.example.ui.theme.Indigo500
-import com.example.ui.theme.NeonEmerald
-
 @Composable
 fun CompactParsedOperationCard(
     operation: ParsedVoiceOperation,
@@ -83,42 +76,30 @@ fun CompactParsedOperationCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(DarkBg)
-            .border(1.dp, Slate800, RoundedCornerShape(14.dp))
+            .border(1.dp, Slate800, RoundedCornerShape(10.dp))
             .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.weight(1f),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            CategoryIconBadge(
-                categoryName = operation.category,
-                type = operation.type,
-                size = 36.dp,
-                iconSize = 18.dp
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = operation.subcategory.ifBlank { operation.category },
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = operation.subcategory.ifBlank { operation.title.ifBlank { operation.category } },
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "${operation.category} • Нажмите для правки",
-                    color = Slate400,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+            Text(
+                text = operation.category,
+                color = Slate400,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
 
         Row(
@@ -128,18 +109,18 @@ fun CompactParsedOperationCard(
             Text(
                 text = "${if (isExpense) "-" else "+"}${numberFormat.format(operation.amount)} ₽",
                 color = color,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.ExtraBold
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
             )
             IconButton(
                 onClick = onDelete,
-                modifier = Modifier.size(24.dp)
+                modifier = Modifier.size(22.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Удалить",
                     tint = Rose500.copy(alpha = 0.8f),
-                    modifier = Modifier.size(15.dp)
+                    modifier = Modifier.size(14.dp)
                 )
             }
         }
@@ -164,7 +145,6 @@ fun FullParsedOperationFormCard(
         mutableStateOf(TextFieldValue(str))
     }
     var dropdownExpanded by remember { mutableStateOf(false) }
-    var userManuallyPickedCategory by remember(operation) { mutableStateOf(false) }
 
     val filteredCategories = remember(categories, type) { categories.filter { it.type == type } }
 
@@ -187,7 +167,7 @@ fun FullParsedOperationFormCard(
             .background(DarkBg)
             .border(1.dp, Slate800, RoundedCornerShape(16.dp))
             .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -206,26 +186,17 @@ fun FullParsedOperationFormCard(
                             .background(Slate900)
                             .border(1.dp, Slate800, RoundedCornerShape(12.dp))
                             .clickable { dropdownExpanded = true }
-                            .padding(horizontal = 10.dp),
+                            .padding(horizontal = 12.dp),
                         contentAlignment = Alignment.CenterStart
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CategoryIconBadge(
-                                categoryName = selectedCategory.ifEmpty { "Прочее" },
-                                type = type,
-                                size = 28.dp,
-                                iconSize = 15.dp
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = selectedCategory.ifEmpty { "Категория" },
-                                color = if (selectedCategory.isNotEmpty()) Color.White else Slate400,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                        Text(
+                            text = selectedCategory.ifEmpty { "Категория" },
+                            color = if (selectedCategory.isNotEmpty()) Color.White else Slate400,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
 
                     DropdownMenu(
@@ -235,21 +206,9 @@ fun FullParsedOperationFormCard(
                     ) {
                         filteredCategories.forEach { cat ->
                             DropdownMenuItem(
-                                text = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        CategoryIconBadge(
-                                            categoryName = cat.name,
-                                            type = cat.type,
-                                            size = 24.dp,
-                                            iconSize = 13.dp
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(cat.name, color = Color.White)
-                                    }
-                                },
+                                text = { Text(cat.name, color = Color.White) },
                                 onClick = {
                                     selectedCategory = cat.name
-                                    userManuallyPickedCategory = true
                                     dropdownExpanded = false
                                 }
                             )
@@ -266,49 +225,9 @@ fun FullParsedOperationFormCard(
                     onToggle = {
                         val newType = if (type == "expense") "income" else "expense"
                         type = newType
-                        userManuallyPickedCategory = false
                         selectedCategory = categories.filter { it.type == newType }.firstOrNull()?.name ?: ""
                     }
                 )
-            }
-        }
-
-        if (filteredCategories.isNotEmpty()) {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(filteredCategories, key = { it.id }) { cat ->
-                    val isSelected = cat.name == selectedCategory
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = {
-                            selectedCategory = cat.name
-                            userManuallyPickedCategory = true
-                        },
-                        label = {
-                            Text(
-                                text = cat.name,
-                                fontSize = 11.sp,
-                                maxLines = 1
-                            )
-                        },
-                        leadingIcon = {
-                            CategoryIconBadge(
-                                categoryName = cat.name,
-                                type = cat.type,
-                                size = 18.dp,
-                                iconSize = 11.dp
-                            )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Indigo500.copy(alpha = 0.25f),
-                            selectedLabelColor = NeonEmerald,
-                            containerColor = Slate900,
-                            labelColor = Slate400
-                        )
-                    )
-                }
             }
         }
 
@@ -317,18 +236,7 @@ fun FullParsedOperationFormCard(
             Spacer(modifier = Modifier.height(4.dp))
             OutlinedTextField(
                 value = subcategory,
-                onValueChange = { newVal ->
-                    val cap = newVal.capitalizeFirstLetter()
-                    subcategory = cap
-                    if (!userManuallyPickedCategory) {
-                        val detected = detectCategoryAndTypeByTitle(cap, categories, type)
-                        if (detected != null) {
-                            val (detType, detCat) = detected
-                            if (detType != type) type = detType
-                            selectedCategory = detCat
-                        }
-                    }
-                },
+                onValueChange = { subcategory = it.capitalizeFirstLetter() },
                 placeholder = { Text("Описание", color = Slate400, fontSize = 13.sp) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
@@ -385,4 +293,3 @@ fun FullParsedOperationFormCard(
         }
     }
 }
-

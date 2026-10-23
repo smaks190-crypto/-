@@ -62,12 +62,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import com.example.ui.theme.NeonEmerald
-
 @Composable
 fun VoiceManualInputPane(
     viewModel: BudgetViewModel,
@@ -145,18 +139,14 @@ fun VoiceManualInputPane(
         if (trimmed.length >= 3) {
             kotlinx.coroutines.delay(600)
             if (subcategory.trim() == trimmed) {
-                // Only call remote AI suggestion if 0ms local semantic detector didn't already match
-                val instantMatch = detectCategoryAndTypeByTitle(trimmed, categories, type)
-                if (instantMatch == null) {
-                    isAiSuggesting = true
-                    val catNames = categories.filter { it.type == type }.map { it.name }
-                    val suggested = viewModel.suggestCategory(trimmed, type, catNames)
-                    isAiSuggesting = false
-                    if (suggested.isNotBlank()) {
-                        aiSuggestedCategory = suggested
-                        if (!userManuallySelectedCategory || selectedCategory.isBlank()) {
-                            selectedCategory = suggested
-                        }
+                isAiSuggesting = true
+                val catNames = categories.filter { it.type == type }.map { it.name }
+                val suggested = viewModel.suggestCategory(trimmed, type, catNames)
+                isAiSuggesting = false
+                if (suggested.isNotBlank()) {
+                    aiSuggestedCategory = suggested
+                    if (!userManuallySelectedCategory || selectedCategory.isBlank()) {
+                        selectedCategory = suggested
                     }
                 }
             }
@@ -192,7 +182,7 @@ fun VoiceManualInputPane(
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -211,7 +201,7 @@ fun VoiceManualInputPane(
                                 .background(DarkBg)
                                 .border(1.dp, Slate800, RoundedCornerShape(12.dp))
                                 .clickable { dropdownExpanded = true }
-                                .padding(horizontal = 10.dp),
+                                .padding(horizontal = 12.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
                             Row(
@@ -219,26 +209,15 @@ fun VoiceManualInputPane(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
+                                Text(
+                                    text = selectedCategory.ifEmpty { "Категория" },
+                                    color = if (selectedCategory.isNotEmpty()) Color.White else Slate400,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f, fill = false)
-                                ) {
-                                    CategoryIconBadge(
-                                        categoryName = selectedCategory.ifEmpty { "Прочее" },
-                                        type = type,
-                                        size = 28.dp,
-                                        iconSize = 15.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = selectedCategory.ifEmpty { "Категория" },
-                                        color = if (selectedCategory.isNotEmpty()) Color.White else Slate400,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
+                                )
                                 if (selectedCategory == aiSuggestedCategory && !aiSuggestedCategory.isNullOrBlank()) {
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Box(
@@ -247,7 +226,7 @@ fun VoiceManualInputPane(
                                             .background(Indigo500.copy(alpha = 0.2f))
                                             .padding(horizontal = 4.dp, vertical = 2.dp)
                                     ) {
-                                        Text("✨ АВТО", color = Indigo500, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                        Text("✨ ИИ", color = Indigo500, fontSize = 8.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -260,18 +239,7 @@ fun VoiceManualInputPane(
                         ) {
                             filteredCategories.forEach { cat ->
                                 DropdownMenuItem(
-                                    text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            CategoryIconBadge(
-                                                categoryName = cat.name,
-                                                type = cat.type,
-                                                size = 24.dp,
-                                                iconSize = 13.dp
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(cat.name, color = Color.White)
-                                        }
-                                    },
+                                    text = { Text(cat.name, color = Color.White) },
                                     onClick = {
                                         selectedCategory = cat.name
                                         userManuallySelectedCategory = true
@@ -299,47 +267,7 @@ fun VoiceManualInputPane(
                 }
             }
 
-            if (filteredCategories.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(6.dp))
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(filteredCategories, key = { it.id }) { cat ->
-                        val isSelected = cat.name == selectedCategory
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = {
-                                selectedCategory = cat.name
-                                userManuallySelectedCategory = true
-                            },
-                            label = {
-                                Text(
-                                    text = cat.name,
-                                    fontSize = 11.sp,
-                                    maxLines = 1
-                                )
-                            },
-                            leadingIcon = {
-                                CategoryIconBadge(
-                                    categoryName = cat.name,
-                                    type = cat.type,
-                                    size = 18.dp,
-                                    iconSize = 11.dp
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Indigo500.copy(alpha = 0.25f),
-                                selectedLabelColor = NeonEmerald,
-                                containerColor = DarkBg,
-                                labelColor = Slate400
-                            )
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -384,21 +312,7 @@ fun VoiceManualInputPane(
 
             OutlinedTextField(
                 value = subcategory,
-                onValueChange = { newVal ->
-                    val cap = newVal.capitalizeFirstLetter()
-                    subcategory = cap
-                    if (!userManuallySelectedCategory) {
-                        val detected = detectCategoryAndTypeByTitle(cap, categories, type)
-                        if (detected != null) {
-                            val (detType, detCat) = detected
-                            if (detType != type) {
-                                type = detType
-                            }
-                            selectedCategory = detCat
-                            aiSuggestedCategory = detCat
-                        }
-                    }
-                },
+                onValueChange = { subcategory = it.capitalizeFirstLetter() },
                 placeholder = { Text("Например: Пятерочка, Такси, Зарплата", color = Slate400, fontSize = 12.sp) },
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 modifier = Modifier
@@ -416,8 +330,7 @@ fun VoiceManualInputPane(
                 singleLine = true
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
-
+            Spacer(modifier = Modifier.height(12.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),

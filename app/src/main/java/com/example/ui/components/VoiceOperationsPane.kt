@@ -158,10 +158,11 @@ fun VoiceOperationsPane(
             }
 
             AnimatedVisibility(visible = isListening || isAnalyzingVoice) {
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 10.dp, end = 16.dp)
+                        .height(48.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(DarkBg.copy(alpha = 0.65f))
                         .border(1.dp, Indigo500.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
@@ -170,8 +171,8 @@ fun VoiceOperationsPane(
                                 viewModel.stopVoiceRecordingAndProcess()
                             }
                         }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     if (isListening) {
                         Row(
@@ -182,12 +183,12 @@ fun VoiceOperationsPane(
                                 amplitude = normalizedAmplitude,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(28.dp)
+                                    .height(32.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             if (isAnalyzingVoice) {
                                 CircularProgressIndicator(
-                                    color = com.example.ui.theme.NeonEmerald,
+                                    color = Indigo500,
                                     strokeWidth = 2.dp,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -206,36 +207,28 @@ fun VoiceOperationsPane(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             CircularProgressIndicator(
-                                color = com.example.ui.theme.NeonEmerald,
+                                color = Indigo500,
                                 strokeWidth = 2.dp,
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "✨ Давид разбирает операции через Gemini...",
-                                color = com.example.ui.theme.NeonEmerald,
+                                text = "Gemini Live дослушивает фразу...",
+                                color = Indigo500,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    MovingNeonGlowVisualizer(
-                        isRecording = isListening,
-                        rmsLevel = rmsDb,
-                        modifier = Modifier.fillMaxWidth()
-                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            val totalAbsSum = editableList.sumOf { it.amount }
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp),
+                    .padding(top = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -255,33 +248,20 @@ fun VoiceOperationsPane(
                             Toast.makeText(context, "Нет операций для сохранения", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Emerald400.copy(alpha = 0.15f)),
                     shape = CircleShape,
                     modifier = Modifier
                         .weight(1f)
                         .height(56.dp)
-                        .background(
-                            brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                colors = listOf(com.example.ui.theme.NeonEmerald, com.example.ui.theme.NeonIndigo)
-                            ),
-                            shape = CircleShape
-                        )
+                        .border(1.dp, Emerald400.copy(alpha = 0.5f), CircleShape)
                         .testTag("confirm_voice_operations_button")
                 ) {
-                    Text(
-                        text = "Сохранить все (${editableList.size}) • ${formatRublesCompact(totalAbsSum)} ₽",
-                        color = DarkBg,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 13.sp,
-                        maxLines = 1
-                    )
+                    Text("Сохранить", color = Emerald400, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
 
                 Spacer(modifier = Modifier.width(28.dp))
                 Spacer(modifier = Modifier.size(56.dp))
             }
-
 
         } else {
             val targetIndex = currentEditingIndex

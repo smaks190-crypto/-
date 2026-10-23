@@ -45,16 +45,7 @@ sealed class ChatMessageType {
         val userPhrase: String = "",
         val isRead: Boolean = true
     ) : ChatMessageType()
-
-    /**
-     * Интерактивная карточка распознанной в чате операции с кнопками «Добавить» / «Отмена»
-     */
-    data class ParsedTransactionProposal(
-        val operation: com.example.data.repository.ParsedVoiceOperation,
-        val isAdded: Boolean = false
-    ) : ChatMessageType()
 }
-
 
 /**
  * Модель отдельного сообщения в диалоге
