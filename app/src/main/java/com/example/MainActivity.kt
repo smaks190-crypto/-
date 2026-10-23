@@ -114,7 +114,6 @@ import com.example.data.db.TransactionEntity
 import com.example.ui.components.AddGoalDialog
 import com.example.ui.components.dialogs.AddTransactionDialog
 import com.example.ui.components.GeminiConsentDialog
-import com.example.ui.components.ApiKeyDialog
 import com.example.ui.components.dialogs.CategoriesDialog
 import com.example.ui.components.GrowthChartSplashScreen
 import com.example.ui.screens.DebtsScreen
