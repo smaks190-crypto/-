@@ -6,7 +6,6 @@ import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,18 +15,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
@@ -47,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -62,6 +60,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.notifications.ReminderManager
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.GlassBorder
@@ -70,7 +69,6 @@ import com.example.ui.theme.Indigo500
 import com.example.ui.theme.ManropeFontFamily
 import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.Rose500
-import com.example.ui.theme.Slate200
 import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate800
@@ -90,15 +88,33 @@ fun VoiceAndAISettingsTab(
     var apiKeyText by remember { mutableStateOf(initialKey) }
     var isKeyVisible by remember { mutableStateOf(false) }
 
-    var selectedPromptMode by remember { mutableStateOf(currentPromptMode) }
-    var voiceSensitivity by remember { mutableFloatStateOf(0.8f) }
-    var autoRecognizeVoice by remember { mutableStateOf(true) }
+    var selectedStrictness by remember {
+        mutableStateOf(ReminderManager.getAuditorStrictness(context))
+    }
+    var croakAlertEnabled by remember {
+        mutableStateOf(ReminderManager.isCroakAlertEnabled(context))
+    }
+    var croakThresholdAmount by remember {
+        mutableIntStateOf(ReminderManager.getCroakThresholdAmount(context))
+    }
+    var impulseCategoriesWatch by remember {
+        mutableStateOf(ReminderManager.isImpulseCategoriesWatchEnabled(context))
+    }
+    var nightWatchEnabled by remember {
+        mutableStateOf(ReminderManager.isNightWatchEnabled(context))
+    }
 
-    var showPromptDropdown by remember { mutableStateOf(false) }
+    var voiceSensitivity by remember {
+        mutableFloatStateOf(ReminderManager.getVoiceSensitivity(context))
+    }
+    var autoRecognizeVoice by remember {
+        mutableStateOf(ReminderManager.isAutoRecognizeVoiceEnabled(context))
+    }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -146,7 +162,7 @@ fun VoiceAndAISettingsTab(
                 }
                 Column {
                     Text(
-                        text = "ГОЛОС И ИИ-ПОМОЩНИК",
+                        text = "ГОЛОС И ИИ-АУДИТОР",
                         color = Indigo400,
                         fontSize = 10.sp,
                         fontFamily = SpaceGroteskFontFamily,
@@ -154,7 +170,7 @@ fun VoiceAndAISettingsTab(
                         letterSpacing = 1.sp
                     )
                     Text(
-                        text = "Gemini API, промпты и голос",
+                        text = "Жёсткость Жабова, триггеры и API",
                         color = Color.White,
                         fontSize = 16.sp,
                         fontFamily = ManropeFontFamily,
@@ -184,7 +200,37 @@ fun VoiceAndAISettingsTab(
 
         HorizontalDivider(color = GlassBorder, thickness = 1.dp)
 
-        // 1. Gemini API Key Section
+        // 1. Auditor Strictness & Alert Triggers Section
+        AuditorStrictnessAndTriggersSection(
+            selectedStrictness = selectedStrictness,
+            onStrictnessChange = { newStrictness ->
+                selectedStrictness = newStrictness
+                ReminderManager.setAuditorStrictness(context, newStrictness)
+                onPromptModeChange(newStrictness.title)
+            },
+            croakAlertEnabled = croakAlertEnabled,
+            onCroakAlertEnabledChange = { enabled ->
+                croakAlertEnabled = enabled
+                ReminderManager.setCroakAlertEnabled(context, enabled)
+            },
+            croakThresholdAmount = croakThresholdAmount,
+            onCroakThresholdAmountChange = { amount ->
+                croakThresholdAmount = amount
+                ReminderManager.setCroakThresholdAmount(context, amount)
+            },
+            impulseCategoriesWatch = impulseCategoriesWatch,
+            onImpulseCategoriesWatchChange = { enabled ->
+                impulseCategoriesWatch = enabled
+                ReminderManager.setImpulseCategoriesWatchEnabled(context, enabled)
+            },
+            nightWatchEnabled = nightWatchEnabled,
+            onNightWatchEnabledChange = { enabled ->
+                nightWatchEnabled = enabled
+                ReminderManager.setNightWatchEnabled(context, enabled)
+            }
+        )
+
+        // 2. Gemini API Key Section
         Text(
             text = "GEMINI API КЛЮЧ",
             color = Slate400,
@@ -308,123 +354,6 @@ fun VoiceAndAISettingsTab(
             }
         }
 
-        // 2. ИИ-Промпт и Роль Ассистента
-        Text(
-            text = "РОЛЬ И ПРОМПТ ДАВИДА ЖАБОВА",
-            color = Slate400,
-            fontSize = 10.sp,
-            fontFamily = SpaceGroteskFontFamily,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp
-        )
-
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .clickable { showPromptDropdown = !showPromptDropdown },
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
-            border = BorderStroke(1.dp, GlassBorder)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Emerald400.copy(alpha = 0.14f))
-                                .border(1.dp, Emerald400.copy(alpha = 0.28f), RoundedCornerShape(12.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SmartToy,
-                                contentDescription = null,
-                                tint = Emerald400,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "Характер и промпт ассистента",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontFamily = ManropeFontFamily,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = selectedPromptMode,
-                                color = Emerald400,
-                                fontSize = 12.sp,
-                                fontFamily = ManropeFontFamily,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                    Icon(
-                        imageVector = if (showPromptDropdown) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                        contentDescription = null,
-                        tint = Slate400,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                if (showPromptDropdown) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    HorizontalDivider(color = GlassBorder, thickness = 1.dp)
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    val promptModes = listOf(
-                        "Финансовый эксперт (Стандарт)",
-                        "Строгий аудит накоплений",
-                        "Киберпанк финансовый советник",
-                        "Лаконичный формат (Короткие ответы)"
-                    )
-                    promptModes.forEach { mode ->
-                        val isSelected = mode == selectedPromptMode
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) Emerald400.copy(alpha = 0.12f) else Color.Transparent)
-                                .clickable {
-                                    selectedPromptMode = mode
-                                    onPromptModeChange(mode)
-                                    showPromptDropdown = false
-                                }
-                                .padding(vertical = 9.dp, horizontal = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = mode,
-                                color = if (isSelected) Emerald400 else Slate200,
-                                fontSize = 13.sp,
-                                fontFamily = ManropeFontFamily,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                            )
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = Emerald400,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // 3. Голосовой ввод
         Text(
             text = "ГОЛОСОВОЙ ВВОД ОПЕРАЦИЙ",
@@ -484,7 +413,10 @@ fun VoiceAndAISettingsTab(
                     }
                     Switch(
                         checked = autoRecognizeVoice,
-                        onCheckedChange = { autoRecognizeVoice = it },
+                        onCheckedChange = {
+                            autoRecognizeVoice = it
+                            ReminderManager.setAutoRecognizeVoiceEnabled(context, it)
+                        },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = DarkBg,
                             checkedTrackColor = Emerald400,
@@ -499,7 +431,7 @@ fun VoiceAndAISettingsTab(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Чувствительность микрофона",
+                    text = "Чувствительность микрофона (${(voiceSensitivity * 100).toInt()}%)",
                     color = Slate300,
                     fontSize = 12.sp,
                     fontFamily = ManropeFontFamily,
@@ -509,8 +441,10 @@ fun VoiceAndAISettingsTab(
                     value = voiceSensitivity,
                     onValueChange = {
                         voiceSensitivity = it
+                        ReminderManager.setVoiceSensitivity(context, it)
                         onVoiceSensitivityChange(it)
                     },
+                    valueRange = 0.1f..1.0f,
                     colors = SliderDefaults.colors(
                         thumbColor = Emerald400,
                         activeTrackColor = Emerald400,

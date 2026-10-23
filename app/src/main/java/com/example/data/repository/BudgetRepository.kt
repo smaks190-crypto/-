@@ -180,7 +180,28 @@ class BudgetRepository(
                 "     - При взятии/выдаче нового долга при наличии не закрытых старых обязательно выкажи возмущение этим безумием!\n" +
                 "- В остальных обычных текущих операциях НЕ упоминай долги и цели, а саркастично комментируй саму покупку или доход."
 
-        val systemPrompt = "Ты — Жабов Давид, саркастичный и безжалостный финансовый аудитор с циничным чувством юмора. " +
+        val strictness = com.example.notifications.ReminderManager.getAuditorStrictness(context)
+        val croakThreshold = com.example.notifications.ReminderManager.getCroakThresholdAmount(context)
+        val isCroakEnabled = com.example.notifications.ReminderManager.isCroakAlertEnabled(context)
+        val isImpulseTriggered = com.example.notifications.ReminderManager.isImpulseCategoriesWatchEnabled(context) &&
+            type == "expense" &&
+            com.example.notifications.ReminderManager.isImpulseCategory(category, subcategory)
+        val currentHour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        val isNightTriggered = com.example.notifications.ReminderManager.isNightWatchEnabled(context) &&
+            type == "expense" &&
+            (currentHour >= 23 || currentHour < 5)
+
+        val systemPrompt = "Ты — Жабов Давид 🐸, харизматичный финансовый аудитор.\n" +
+                "${strictness.systemPromptDirective}\n" +
+                (if (isCroakEnabled && type == "expense" && amount >= croakThreshold) {
+                    "ВНИМАНИЕ: Сумма траты ($amount ₽) ПРОБИЛА установленный пользователем «Порог кваканья» ($croakThreshold ₽)! Обязательно отреагируй на превышение порога в рамках своего режима жёсткости!\n"
+                } else "") +
+                (if (isImpulseTriggered) {
+                    "ТРИГГЕР ИМПУЛЬСИВНЫХ КАТЕГОРИЙ: Покупка входит в список дофаминовых/импульсивных трат ($category / $subcategory). Обрати на это особое внимание!\n"
+                } else "") +
+                (if (isNightTriggered) {
+                    "ТРИГГЕР «НОЧНОЙ ДОЗОР»: Операция совершена глубокой ночью (между 23:00 и 05:00). Обязательно упомяни ночной дожор или ночной шопинг!\n"
+                } else "") +
                 "ВАЖНОЕ ПРАВИЛО: Не упоминай долги и цели при каждой обычной бытовой операции! " +
                 "Упоминай текущие долги или цели ТОЛЬКО при необоснованно больших тратах на ненужное, при слишком частых тратах на одну категорию (фастфуд, кофе и т.д.), либо при прямой работе с целями и долгами. " +
                 "При создании цели ОБЯЗАТЕЛЬНО разделяй целевую сумму и первый взнос. " +
@@ -194,6 +215,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
+            "gemini-3.8-flash",
+            "gemini-3.6-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite"
         )
@@ -270,7 +293,8 @@ class BudgetRepository(
                 goalsContext +
                 "Проанализируй весь этот набор операций в совокупности. Напиши ОДИН общий, короткий, саркастичный, ироничный комментарий от лица циничного финансового аудитора Жабова Давида (до 20-25 слов, на русском языке, сочный юмор, мемы), высмеивающий или комментирующий эту общую картину его трат/доходов за раз. Относись к пользователю с иронией."
 
-        val systemPrompt = "Ты — Жабов Давид, саркастичный и безжалостный финансовый аудитор с циничным чувством юмора. Твоя задача — комментировать финансовые траты и доходы пользователя с едким юмором."
+        val strictness = com.example.notifications.ReminderManager.getAuditorStrictness(context)
+        val systemPrompt = "Ты — Жабов Давид 🐸, харизматичный финансовый аудитор. ${strictness.systemPromptDirective}"
 
         val request = GeminiRequest(
             contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = userQuery)))),
@@ -278,6 +302,8 @@ class BudgetRepository(
         )
 
         val modelsToTry = listOf(
+            "gemini-3.8-flash",
+            "gemini-3.6-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite"
         )
@@ -618,6 +644,19 @@ class BudgetRepository(
     suspend fun insertTransaction(transaction: TransactionEntity) {
         GlobalConsoleLogger.i("ROOM", "Insert Transaction: ${transaction.type.uppercase()} ${transaction.amount} ₽ (${transaction.category} / ${transaction.subcategory})")
         transactionDao.insertTransaction(transaction)
+        if (transaction.type.equals("expense", ignoreCase = true) &&
+            !transaction.category.equals("Сбережения", ignoreCase = true)
+        ) {
+            withContext(Dispatchers.Main) {
+                com.example.notifications.ReminderManager.evaluateAndTriggerCroakAlertIfNeeded(
+                    context = context,
+                    type = transaction.type,
+                    category = transaction.category,
+                    subcategory = transaction.subcategory,
+                    amount = transaction.amount
+                )
+            }
+        }
     }
 
     suspend fun deleteTransaction(id: String) {
@@ -932,7 +971,11 @@ class BudgetRepository(
                 "## Выводы и Рекомендации\n" +
                 "Краткий финальный совет, как перестать банкротить себя."
 
-        val systemPrompt = "Ты — искрометный, безжалостный и высокоэрудированный финансовый аудитор с циничным черным юмором. Твоя цель — провести жесткий аудит и прожарить пользователя за его финансовые грехи.\n\n" +
+        val strictness = com.example.notifications.ReminderManager.getAuditorStrictness(context)
+        val croakThreshold = com.example.notifications.ReminderManager.getCroakThresholdAmount(context)
+        val systemPrompt = "Ты — Давид Жабов 🐸, высокоэрудированный финансовый аудитор.\n" +
+                "${strictness.systemPromptDirective}\n" +
+                "Порог крупной разовой траты («Порог кваканья» пользователя): $croakThreshold ₽. Обращай особое внимание на операции выше этой суммы.\n\n" +
                 "Дели свой ответ на короткие, законченные по смыслу блоки (как отдельные СМС-сообщения). Разделяй каждый блок двумя переносами строк (\\n\\n). Не пиши всё одним монолитным текстом.\n\n" +
                 "РОЛЬ И СТИЛЬ:\n" +
                 "- Виртуозно миксуй 3 элемента:\n" +
@@ -953,6 +996,7 @@ class BudgetRepository(
 
         var lastExceptionMessage = ""
         val modelsToTry = listOf(
+            "gemini-3.8-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
             "gemini-2.5-flash"
@@ -1068,7 +1112,11 @@ class BudgetRepository(
                 "## Выводы и Рекомендации\n" +
                 "Краткий финальный совет, как перестать банкротить себя."
 
-        val systemPrompt = "Ты — искрометный, безжалостный и высокоэрудированный финансовый аудитор с циничным черным юмором. Твоя цель — провести жесткий аудит и прожарить пользователя за его финансовые грехи.\n\n" +
+        val strictness = com.example.notifications.ReminderManager.getAuditorStrictness(context)
+        val croakThreshold = com.example.notifications.ReminderManager.getCroakThresholdAmount(context)
+        val systemPrompt = "Ты — Давид Жабов 🐸, высокоэрудированный финансовый аудитор.\n" +
+                "${strictness.systemPromptDirective}\n" +
+                "Порог крупной разовой траты («Порог кваканья» пользователя): $croakThreshold ₽. Обращай особое внимание на операции выше этой суммы.\n\n" +
                 "РОЛЬ И СТИЛЬ:\n" +
                 "- Виртуозно миксуй 3 элемента:\n" +
                 "  а) популярные классические и самые актуальные интернет-мемы, тренды и вирусы поп-культуры (от культовых мемов прошлых лет до свежих трендов и забавных ситуаций),\n" +
@@ -1089,6 +1137,7 @@ class BudgetRepository(
         var lastExceptionMessage = ""
 
         val modelsToTry = listOf(
+            "gemini-3.8-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
             "gemini-2.5-flash"
@@ -1377,6 +1426,8 @@ class BudgetRepository(
         var lastError: String? = null
 
         val modelsToTry = listOf(
+            "gemini-3.5-flash",
+            "gemini-3.8-flash",
             "gemini-2.5-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite"

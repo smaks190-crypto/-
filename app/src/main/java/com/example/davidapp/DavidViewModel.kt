@@ -769,6 +769,18 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
                     amount = op.amount
                 )
             )
+            val appCtx = getApplication<Application>()
+            if (op.type == "expense" && com.example.notifications.ReminderManager.isCroakAlertEnabled(appCtx)) {
+                val baseThreshold = com.example.notifications.ReminderManager.getCroakThresholdAmount(appCtx)
+                if (op.amount >= baseThreshold) {
+                    com.example.notifications.ReminderManager.triggerCroakAlertNotification(
+                        context = appCtx,
+                        category = op.subcategory.ifBlank { op.title.ifBlank { op.category } },
+                        amount = op.amount.toInt(),
+                        overrideThreshold = baseThreshold
+                    )
+                }
+            }
             sessionMessages[index] = msg.copy(
                 type = proposal.copy(isAdded = true)
             )

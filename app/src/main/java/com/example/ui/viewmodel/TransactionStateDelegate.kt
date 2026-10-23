@@ -223,6 +223,39 @@ class TransactionStateDelegate(
         }
     }
 
+    private fun checkAndTriggerCroakAlert(
+        type: String,
+        category: String,
+        subcategory: String,
+        amount: Double
+    ) {
+        if (type != "expense") return
+        if (!com.example.notifications.ReminderManager.isCroakAlertEnabled(context)) return
+
+        val baseThreshold = com.example.notifications.ReminderManager.getCroakThresholdAmount(context)
+        val isImpulseWatch = com.example.notifications.ReminderManager.isImpulseCategoriesWatchEnabled(context) &&
+            com.example.notifications.ReminderManager.isImpulseCategory(category, subcategory)
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        val isNightWatch = com.example.notifications.ReminderManager.isNightWatchEnabled(context) &&
+            (hour >= 23 || hour < 5)
+
+        val effectiveThreshold = when {
+            isImpulseWatch && isNightWatch -> (baseThreshold * 0.6).toInt().coerceAtLeast(300)
+            isImpulseWatch || isNightWatch -> (baseThreshold * 0.75).toInt().coerceAtLeast(500)
+            else -> baseThreshold
+        }
+
+        if (amount >= effectiveThreshold) {
+            val label = subcategory.ifBlank { category }.ifBlank { "Расход" }
+            com.example.notifications.ReminderManager.triggerCroakAlertNotification(
+                context = context,
+                category = label,
+                amount = amount.toInt(),
+                overrideThreshold = baseThreshold
+            )
+        }
+    }
+
     fun addTransaction(type: String, date: String, category: String, subcategory: String, amount: Double, accountId: String? = null) {
         val currentBudgetId = selectedBudgetId.value ?: "default"
         com.example.utils.GlobalConsoleLogger.i("UI", "Добавление транзакции [$type]: $amount ₽ ($category / $subcategory), дата=$date")
@@ -239,6 +272,7 @@ class TransactionStateDelegate(
             )
             repository.insertTransaction(tx)
             toastMessage.emit("Операция добавлена!")
+            checkAndTriggerCroakAlert(type, category, subcategory, amount)
             isGeneratingReaction.value = true
 
             val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
@@ -379,6 +413,7 @@ class TransactionStateDelegate(
                     amount = op.amount
                 )
                 repository.insertTransaction(tx)
+                checkAndTriggerCroakAlert(op.type, finalCategory, finalSubcategory, op.amount)
                 com.example.utils.GlobalConsoleLogger.i("ROOM", "Сохранена транзакция в DB: ${tx.category} / ${tx.subcategory} (${tx.amount} ₽)")
 
                 val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
@@ -450,6 +485,7 @@ class TransactionStateDelegate(
                         amount = op.amount
                     )
                     repository.insertTransaction(tx)
+                    checkAndTriggerCroakAlert(op.type, finalCategory, finalSubcategory, op.amount)
                     
                     processedOps.add(op.copy(date = finalDate, category = finalCategory, subcategory = finalSubcategory))
                 }
