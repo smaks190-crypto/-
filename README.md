@@ -1,4 +1,4 @@
-# 🐸 David Finance — Умный личный бюджет с ИИ-аудитором Давидом Жабовым
+# 🐸 David Finance AI — Умный личный бюджет с ИИ-аудитором Давидом Жабовым
 
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)
 ![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)
@@ -6,7 +6,7 @@
 ![Gemini AI](https://img.shields.io/badge/Gemini_API-3.8_%2F_3.5_Flash-10B981?style=for-the-badge&logo=googlegemini&logoColor=white)
 ![Platform](https://img.shields.io/badge/Android-MinSDK_26+-0E131F?style=for-the-badge&logo=android&logoColor=2CE59B)
 
-**David Finance** — флагманское Android-приложение для ведения личного бюджета, контроля обязательств, накопления на финансовые цели и глубокого ИИ-аудита расходов. Выполнено в премиальной темной эстетике **Obsidian Neo-Bank** (в духе *Revolut Ultra*, *Т-Банк Pro* и *Wise Dark*) со встроенным харизматичным финансовым ревизором **Давидом Жабовым 🐸** на базе семейства моделей **Gemini Flash**.
+**David Finance AI** — флагманское Android-приложение для ведения личного бюджета, контроля обязательств, накопления на финансовые цели и глубокого ИИ-аудита расходов. Выполнено в премиальной темной эстетике **Obsidian Neo-Bank** (в духе *Revolut Ultra*, *Т-Банк Pro* и *Wise Dark*) со встроенным харизматичным финансовым ревизором **Давидом Жабовым 🐸** на базе семейства моделей **Gemini Flash**.
 
 ---
 

@@ -849,7 +849,7 @@ private fun SettingsHubMainContent(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "AI Личный Бюджет v${com.example.BuildConfig.VERSION_NAME}",
+                        text = "David Finance AI v${com.example.BuildConfig.VERSION_NAME}",
                         color = Slate400,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium

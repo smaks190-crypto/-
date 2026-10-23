@@ -23,6 +23,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Личный Бюджет AI"
+rootProject.name = "David Finance AI"
 
 include(":app")

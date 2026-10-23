@@ -8,7 +8,7 @@ import androidx.fragment.app.FragmentActivity
 object BiometricPromptHelper {
     fun showBiometricPrompt(
         activity: FragmentActivity,
-        title: String = "Вход в Личный Бюджет AI",
+        title: String = "Вход в David Finance AI",
         subtitle: String = "Подтвердите личность с помощью биометрии",
         negativeButtonText: String = "Ввести ПИН-код",
         onSuccess: () -> Unit,

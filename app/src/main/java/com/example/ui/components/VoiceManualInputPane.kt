@@ -174,39 +174,15 @@ fun VoiceManualInputPane(
             .graphicsLayer { alpha = contentAlpha }
             .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
-        // Header with title and ✕ close button
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Spacer(modifier = Modifier.size(34.dp))
-            Text(
-                text = "Добавить операцию",
-                color = Color.White,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f)
-            )
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(Slate800.copy(alpha = 0.85f))
-                    .border(1.dp, Slate700, CircleShape)
-                    .clickable(onClick = onDismiss)
-                    .testTag("close_manual_add_button"),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Закрыть",
-                    tint = Slate400,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
+        // Header with title only
+        Text(
+            text = "Добавить операцию",
+            color = Color.White,
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
 
         Spacer(modifier = Modifier.height(12.dp))
 
@@ -502,44 +478,68 @@ fun VoiceManualInputPane(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        Button(
-            onClick = {
-                if (isFormValid) {
-                    viewModel.addTransaction(
-                        type = type,
-                        date = date,
-                        category = selectedCategory.ifEmpty { "Прочее" },
-                        subcategory = subcategory.trim(),
-                        amount = parsedAmount
-                    )
-                    onDismiss()
-                }
-            },
-            enabled = isFormValid,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = currentContainerColor,
-                contentColor = currentContentColor,
-                disabledContainerColor = currentContainerColor,
-                disabledContentColor = currentContentColor
-            ),
-            shape = CircleShape,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .shadow(
-                    elevation = (visualNeonLevel * 14).dp,
-                    shape = CircleShape,
-                    ambientColor = Emerald400,
-                    spotColor = Emerald400
-                )
-                .border(
-                    width = 1.dp,
-                    color = currentBorderColor,
-                    shape = CircleShape
-                )
-                .testTag("save_transaction_button")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Сохранить", color = currentContentColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Button(
+                onClick = {
+                    if (isFormValid) {
+                        viewModel.addTransaction(
+                            type = type,
+                            date = date,
+                            category = selectedCategory.ifEmpty { "Прочее" },
+                            subcategory = subcategory.trim(),
+                            amount = parsedAmount
+                        )
+                        onDismiss()
+                    }
+                },
+                enabled = isFormValid,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = currentContainerColor,
+                    contentColor = currentContentColor,
+                    disabledContainerColor = currentContainerColor,
+                    disabledContentColor = currentContentColor
+                ),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp)
+                    .shadow(
+                        elevation = (visualNeonLevel * 14).dp,
+                        shape = RoundedCornerShape(16.dp),
+                        ambientColor = Emerald400,
+                        spotColor = Emerald400
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = currentBorderColor,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                    .testTag("save_transaction_button")
+            ) {
+                Text("Сохранить", color = currentContentColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Slate800)
+                    .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                    .clickable(onClick = onDismiss)
+                    .testTag("close_manual_add_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
+                    tint = Slate400,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }

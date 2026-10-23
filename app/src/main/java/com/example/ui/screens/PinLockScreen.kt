@@ -78,7 +78,7 @@ import kotlin.math.roundToInt
 
 @Composable
 fun PinLockScreen(
-    title: String = "Личный Бюджет AI",
+    title: String = "David Finance AI",
     subtitle: String = "Введите ПИН-код для доступа",
     isBiometricAvailable: Boolean = false,
     onVerifyPin: (String) -> Boolean,
