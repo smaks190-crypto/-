@@ -2,6 +2,7 @@ package com.example.davidapp
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -16,7 +17,16 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -26,21 +36,29 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.theme.DarkBg
+import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.ObsidianSurface
+import com.example.ui.theme.Slate400
+import com.example.ui.theme.Slate800
 
 /**
- * Основной экран чата с кибер-консультантом Давидом Жабовым.
- * Выполнен в стиле Dark Neon / Cyberpunk Minimalist.
- *
- * Архитектура верстки через Scaffold:
- * 1. topBar: шапка чата Давида с Modifier.statusBarsPadding().
- * 2. bottomBar: единый Column(modifier = Modifier.fillMaxWidth().background(DarkBg).navigationBarsPadding().imePadding()),
- *    внутри которого расположены DavidQuickActionsBar и DavidChatInputBar с отступом padding(bottom = 8.dp).
- * 3. content (innerPadding): LazyColumn(modifier = Modifier.fillMaxSize().padding(innerPadding)),
- *    чтобы список сообщений никогда не перекрывал и не выталкивал bottomBar.
+ * Основной экран чата с ИИ-аудитором Давидом Жабовым.
+ * Выполнен в единой эстетике Obsidian Neo-Bank (David Finance AI):
+ * - Шапка чата с живым статусом и быстрым переходом к ачивкам.
+ * - Единая трансформирующаяся полоса чипов (DavidSmartActionStrip), в которой нажатие на
+ *   «🔥 Разбор трат» плавно раскрывает инлайн-выбор периода (День, Неделя, Месяц, Год) без лишних окон и дублей.
+ * - Обтекаемая нижняя капсула ввода сообщения.
  */
 @Composable
 fun DavidChatScreen(
@@ -57,8 +75,16 @@ fun DavidChatScreen(
         soundManager ?: SoundManager(context.applicationContext)
     }
 
+    var isSelectingPeriod by remember { mutableStateOf(false) }
+
     if (onBack != null) {
-        BackHandler(onBack = onBack)
+        BackHandler {
+            if (isSelectingPeriod) {
+                isSelectingPeriod = false
+            } else {
+                onBack()
+            }
+        }
     }
 
     LaunchedEffect(budgetId, profileName, apiKey) {
@@ -83,7 +109,6 @@ fun DavidChatScreen(
     var showApiKeyDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
-    // Автоматическая плавная прокрутка к последнему элементу внизу списка
     LaunchedEffect(messages.size, messages.lastOrNull()?.id, isTyping, stage) {
         if (messages.isNotEmpty()) {
             val totalItems = messages.size + if (isTyping) 1 else 0
@@ -94,13 +119,16 @@ fun DavidChatScreen(
     Scaffold(
         modifier = modifier
             .fillMaxSize()
-            .background(DarkBackground),
-        containerColor = DarkBackground,
+            .background(DarkBg),
+        containerColor = DarkBg,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             DavidChatTopBar(
                 onBack = onBack,
-                onReset = { viewModel.resetSession(effectiveSoundManager) },
+                onReset = {
+                    isSelectingPeriod = false
+                    viewModel.resetSession(effectiveSoundManager)
+                },
                 onOpenAchievements = { showAchievementsDialog = true },
                 hasApiKey = hasApiKey,
                 onOpenApiKeyDialog = { showApiKeyDialog = true },
@@ -112,40 +140,44 @@ fun DavidChatScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(DarkBg)
+                    .background(DarkBg.copy(alpha = 0.96f))
                     .navigationBarsPadding()
                     .imePadding()
-                    .padding(horizontal = 12.dp)
-                    .padding(top = 6.dp, bottom = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                    .padding(horizontal = 14.dp)
+                    .padding(top = 8.dp, bottom = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Динамическая панель действий согласно текущему этапу ("Давид, сделай отчет", выбор периода PDF и др.)
-                DavidQuickActionsBar(
+                // Единая морфинг-полоса быстрых действий и выбора периода
+                DavidSmartActionStrip(
                     stage = stage,
-                    onActionClick = { action ->
-                        viewModel.handleAction(action, effectiveSoundManager)
+                    hasApiKey = hasApiKey,
+                    isSelectingPeriod = isSelectingPeriod,
+                    onTogglePeriodSelector = { open ->
+                        isSelectingPeriod = open
+                        if (!open && stage == DavidStage.FILE_SELECTION) {
+                            viewModel.cancelPeriodSelection()
+                        }
                     },
                     onPeriodSelect = { period ->
+                        isSelectingPeriod = false
                         viewModel.processFile(period, effectiveSoundManager)
                     },
-                    onExportPdf = {
-                        viewModel.exportPdf(effectiveSoundManager)
-                    }
-                )
-
-                // Горизонтальная лента быстрых подсказок (из David-finance-main-2)
-                DavidSuggestionChipsRow(
-                    hasApiKey = hasApiKey,
                     onSendPrompt = { prompt ->
+                        isSelectingPeriod = false
                         viewModel.sendTextMessage(prompt, effectiveSoundManager)
                     },
                     onActionClick = { action ->
+                        isSelectingPeriod = false
                         viewModel.handleAction(action, effectiveSoundManager)
+                    },
+                    onExportPdf = {
+                        isSelectingPeriod = false
+                        viewModel.exportPdf(effectiveSoundManager)
                     },
                     onOpenApiKeyDialog = { showApiKeyDialog = true }
                 )
 
-                // Поле ввода текста со скрепкой и кнопкой отправки
+                // Капсула ввода текста в стиле Obsidian Neo-Bank
                 DavidChatInputBar(
                     text = inputText,
                     onTextChange = { inputText = it },
@@ -153,11 +185,9 @@ fun DavidChatScreen(
                         if (inputText.isNotBlank()) {
                             val textToSend = inputText
                             inputText = ""
+                            isSelectingPeriod = false
                             viewModel.sendTextMessage(textToSend, effectiveSoundManager)
                         }
-                    },
-                    onAttach = {
-                        viewModel.handleAction("START", effectiveSoundManager)
                     }
                 )
             }
@@ -206,66 +236,96 @@ fun DavidChatScreen(
 
     if (showApiKeyDialog) {
         var keyText by remember { mutableStateOf("") }
-        val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
-        androidx.compose.material3.AlertDialog(
+        val clipboardManager = LocalClipboardManager.current
+        AlertDialog(
             onDismissRequest = { showApiKeyDialog = false },
-            containerColor = com.example.ui.theme.SurfaceCard,
+            containerColor = ObsidianSurface,
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.border(1.dp, GlassBorder, RoundedCornerShape(24.dp)),
             title = {
-                androidx.compose.material3.Text(
-                    "🔑 Gemini API Ключ",
-                    color = TextLight,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                Text(
+                    text = "🔑 Ключ Gemini API",
+                    color = Color.White,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp
                 )
             },
             text = {
                 Column {
-                    androidx.compose.material3.Text(
-                        "Введите ключ от Google AI Studio для активации Давида Жабова (Gemini 3.8) и голосового ввода.",
-                        color = TextMuted,
-                        fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp)
+                    Text(
+                        text = "Вставьте бесплатный ключ из Google AI Studio для работы Давида Жабова (Gemini 3.8) и умного голосового ввода.",
+                        color = Slate400,
+                        fontFamily = ManropeFontFamily,
+                        fontSize = 12.5.sp,
+                        lineHeight = 18.sp
                     )
                     Spacer(modifier = Modifier.height(12.dp))
-                    androidx.compose.material3.OutlinedTextField(
+                    OutlinedTextField(
                         value = keyText,
                         onValueChange = { keyText = it },
-                        label = { androidx.compose.material3.Text("API Key") },
+                        placeholder = { Text("AIzaSy...", color = Slate400, fontSize = 13.sp) },
                         singleLine = true,
-                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation('*'),
+                        visualTransformation = PasswordVisualTransformation('*'),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = DarkBg,
+                            unfocusedContainerColor = DarkBg,
+                            focusedBorderColor = Emerald400,
+                            unfocusedBorderColor = Slate800,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    androidx.compose.material3.OutlinedButton(
+                    OutlinedButton(
                         onClick = {
                             clipboardManager.getText()?.text?.let { pasted ->
                                 if (pasted.isNotBlank()) keyText = pasted.trim()
                             }
                         },
+                        shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        androidx.compose.material3.Text("📋 Вставить из буфера")
+                        Text(
+                            text = "📋 Вставить из буфера",
+                            color = Emerald400,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             },
             confirmButton = {
-                androidx.compose.material3.Button(
+                Button(
                     onClick = {
                         viewModel.saveApiKeyFromChat(keyText, effectiveSoundManager)
                         showApiKeyDialog = false
                     },
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                        containerColor = com.example.ui.theme.EmeraldPrimary,
-                        contentColor = DarkBackground
-                    )
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Emerald400,
+                        contentColor = DarkBg
+                    ),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    androidx.compose.material3.Text("Сохранить", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    Text(
+                        text = "Сохранить",
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.ExtraBold
+                    )
                 }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showApiKeyDialog = false }) {
-                    androidx.compose.material3.Text("Отмена", color = TextMuted)
+                TextButton(onClick = { showApiKeyDialog = false }) {
+                    Text(
+                        text = "Отмена",
+                        color = Slate400,
+                        fontFamily = ManropeFontFamily
+                    )
                 }
             }
         )
     }
 }
-

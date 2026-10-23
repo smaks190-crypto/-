@@ -1,28 +1,29 @@
 package com.example.davidapp
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -41,20 +43,23 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,35 +74,53 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.CategoryIconBadge
+import com.example.ui.components.MarkdownFormattedText
+import com.example.ui.components.formatRublesCompact
+import com.example.ui.theme.Amber400
+import com.example.ui.theme.DarkBg
+import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.GlassHighlight
+import com.example.ui.theme.Indigo400
+import com.example.ui.theme.Indigo500
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.ObsidianElevated
+import com.example.ui.theme.ObsidianSurface
+import com.example.ui.theme.Rose500
+import com.example.ui.theme.Slate400
+import com.example.ui.theme.Slate700
+import com.example.ui.theme.Slate800
+import com.example.ui.theme.SpaceGroteskFontFamily
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.Locale
 
-// --- Dark Neon & Cyberpunk Minimalist Palette ---
-val NeonEmerald = Color(0xFF34D399)
-val NeonIndigo = Color(0xFF6366F1)
-val NeonRose = Color(0xFFF43F5E)
-val NeonAmber = Color(0xFFF59E0B)
-val DarkBackground = Color(0xFF0B0F19)
-val DarkSurface = Color(0xFF0F172A)
-val DarkCard = Color(0xFF1E293B)
-val SlateBorder = Color(0xFF334155)
+// --- Obsidian Neo-Bank Design Tokens ---
+val NeonEmerald = Emerald400
+val NeonIndigo = Indigo500
+val NeonRose = Rose500
+val NeonAmber = Amber400
+val DarkBackground = DarkBg
+val DarkSurface = ObsidianSurface
+val DarkCard = ObsidianElevated
+val SlateBorder = Slate700
 val TextLight = Color(0xFFF8FAFC)
-val TextMuted = Color(0xFF94A3B8)
+val TextMuted = Slate400
 
 val CyberpunkGradient = Brush.linearGradient(
-    colors = listOf(NeonEmerald, NeonIndigo, NeonRose),
-    start = Offset(0f, 0f),
-    end = Offset(400f, 400f)
+    colors = listOf(Emerald400, Indigo500)
 )
 
 /**
- * Верхняя панель чата с неоновым аватаром Давида Жабова
+ * Верхняя панель чата Давида Жабова в стиле Obsidian Neo-Bank
  */
 @Composable
 fun DavidChatTopBar(
@@ -109,24 +132,24 @@ fun DavidChatTopBar(
     isTyping: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val infiniteTransition = rememberInfiniteTransition(label = "avatar_pulse")
     val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.4f,
-        targetValue = 0.9f,
+        initialValue = 0.25f,
+        targetValue = 0.65f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
+            animation = tween(1400, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "alpha"
+        label = "glow_alpha"
     )
 
     Surface(
-        color = DarkSurface.copy(alpha = 0.95f),
+        color = DarkBg.copy(alpha = 0.96f),
         modifier = modifier
             .fillMaxWidth()
             .drawBehind {
                 drawLine(
-                    color = SlateBorder.copy(alpha = 0.5f),
+                    color = GlassBorder,
                     start = Offset(0f, size.height),
                     end = Offset(size.width, size.height),
                     strokeWidth = 1.dp.toPx()
@@ -140,61 +163,74 @@ fun DavidChatTopBar(
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
             if (onBack != null) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.testTag("david_chat_back_button")
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(ObsidianSurface)
+                        .border(1.dp, GlassBorder, CircleShape)
+                        .clickable(onClick = onBack)
+                        .testTag("david_chat_back_button"),
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Назад",
-                        tint = TextLight
+                        tint = TextLight,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
-                Spacer(modifier = Modifier.width(4.dp))
+                Spacer(modifier = Modifier.width(10.dp))
             }
 
-            // Glowing Cyberpunk Avatar
+            // Obsidian Avatar with Emerald Glow
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(46.dp)
+                modifier = Modifier.size(44.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(44.dp)
                         .clip(CircleShape)
                         .background(
                             Brush.radialGradient(
-                                colors = listOf(NeonIndigo.copy(alpha = glowAlpha), Color.Transparent)
+                                colors = listOf(Emerald400.copy(alpha = glowAlpha), Color.Transparent)
                             )
                         )
                 )
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
-                        .background(DarkCard)
-                        .border(1.5.dp, CyberpunkGradient, CircleShape)
+                        .background(ObsidianSurface)
+                        .border(
+                            width = 1.5.dp,
+                            brush = Brush.linearGradient(
+                                listOf(Emerald400.copy(alpha = 0.85f), Indigo500.copy(alpha = 0.5f))
+                            ),
+                            shape = CircleShape
+                        )
                 ) {
-                    Text(text = "🐸", fontSize = 20.sp)
+                    Text(text = "🐸", fontSize = 19.sp)
                 }
 
-                // Online indicator
                 Box(
                     modifier = Modifier
                         .size(10.dp)
                         .clip(CircleShape)
-                        .background(NeonEmerald)
-                        .border(1.5.dp, DarkSurface, CircleShape)
+                        .background(if (hasApiKey) Emerald400 else Amber400)
+                        .border(1.5.dp, DarkBg, CircleShape)
                         .align(Alignment.BottomEnd)
                 )
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(10.dp))
 
             Column(
                 modifier = Modifier
                     .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
                     .then(
                         if (onOpenApiKeyDialog != null) {
                             Modifier.clickable { onOpenApiKeyDialog() }
@@ -202,44 +238,50 @@ fun DavidChatTopBar(
                             Modifier
                         }
                     )
+                    .padding(vertical = 2.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "Давид Жабов",
                         color = TextLight,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 15.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.ExtraBold
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(com.example.ui.theme.PurpleAccent.copy(alpha = 0.2f))
-                            .border(0.5.dp, com.example.ui.theme.PurpleAccent.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                            .background(Emerald400.copy(alpha = 0.14f))
+                            .border(0.5.dp, Emerald400.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "Gemini 3.8",
-                            color = com.example.ui.theme.PurpleLight,
+                            text = "AI Аудитор",
+                            color = Emerald400,
                             fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
+                Spacer(modifier = Modifier.height(1.dp))
                 Text(
                     text = when {
-                        isTyping -> "печатает..."
-                        hasApiKey -> "● Финансовый ревизор и критик трат"
-                        else -> "Требуется Gemini API ключ (нажмите)"
+                        isTyping -> "анализирует бюджет..."
+                        hasApiKey -> "Gemini 3.8 • Готов к разбору трат"
+                        else -> "Офлайн-режим • Нажмите для ввода ключа"
                     },
                     color = when {
-                        isTyping -> NeonIndigo
-                        hasApiKey -> com.example.ui.theme.EmeraldLight
-                        else -> com.example.ui.theme.WarningAmber
+                        isTyping -> Emerald400
+                        hasApiKey -> Slate400
+                        else -> Amber400
                     },
                     fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -247,42 +289,49 @@ fun DavidChatTopBar(
                 val achievementsList by AchievementManager.achievementsFlow.collectAsState()
                 val unlockedCount = achievementsList.count { it.isUnlocked }
 
-                IconButton(
-                    onClick = onOpenAchievements,
-                    modifier = Modifier.testTag("david_chat_achievements_button")
+                Box(
+                    modifier = Modifier
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ObsidianSurface)
+                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                        .clickable(onClick = onOpenAchievements)
+                        .padding(horizontal = 10.dp)
+                        .testTag("david_chat_achievements_button"),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(text = "🏆", fontSize = 18.sp)
-                        if (unlockedCount > 0) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .offset(x = 6.dp, y = (-4).dp)
-                                    .size(15.dp)
-                                    .clip(CircleShape)
-                                    .background(NeonAmber)
-                            ) {
-                                Text(
-                                    text = unlockedCount.toString(),
-                                    color = DarkBackground,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(text = "🏆", fontSize = 14.sp)
+                        Text(
+                            text = unlockedCount.toString(),
+                            color = Amber400,
+                            fontSize = 12.sp,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
+                Spacer(modifier = Modifier.width(6.dp))
             }
 
-            IconButton(
-                onClick = onReset,
-                modifier = Modifier.testTag("david_chat_reset_button")
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(ObsidianSurface)
+                    .border(1.dp, GlassBorder, CircleShape)
+                    .clickable(onClick = onReset)
+                    .testTag("david_chat_reset_button"),
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Refresh,
                     contentDescription = "Очистить чат",
-                    tint = TextMuted
+                    tint = Slate400,
+                    modifier = Modifier.size(17.dp)
                 )
             }
         }
@@ -305,7 +354,7 @@ fun DavidMessageItem(
         horizontalAlignment = alignment,
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 5.dp)
+            .padding(horizontal = 14.dp, vertical = 5.dp)
     ) {
         when (val type = message.type) {
             is ChatMessageType.Text -> {
@@ -333,8 +382,7 @@ fun DavidMessageItem(
             is ChatMessageType.Operation -> {
                 DavidOperationBubble(
                     operation = type,
-                    timestamp = message.timestamp,
-                    modifier = Modifier
+                    timestamp = message.timestamp
                 )
             }
             is ChatMessageType.ParsedTransactionProposal -> {
@@ -361,16 +409,16 @@ fun DavidParsedTransactionProposalBubble(
     val tx = proposal.operation
     val isExpense = tx.type == "expense"
     Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = com.example.ui.theme.SurfaceCard,
-        border = BorderStroke(1.dp, NeonEmerald.copy(alpha = 0.45f)),
+        shape = RoundedCornerShape(20.dp),
+        color = ObsidianSurface,
+        border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.45f)),
         modifier = modifier
-            .widthIn(min = 220.dp, max = 330.dp)
-            .shadow(4.dp, RoundedCornerShape(16.dp))
+            .widthIn(min = 240.dp, max = 340.dp)
+            .shadow(8.dp, RoundedCornerShape(20.dp))
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                com.example.ui.components.CategoryIconBadge(
+                CategoryIconBadge(
                     categoryName = tx.category,
                     type = tx.type,
                     size = 38.dp,
@@ -379,55 +427,71 @@ fun DavidParsedTransactionProposalBubble(
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (proposal.isAdded) "Операция сохранена" else "Распознана операция",
-                        color = if (proposal.isAdded) com.example.ui.theme.EmeraldLight else TextMuted,
+                        text = if (proposal.isAdded) "Операция сохранена" else "Быстрое добавление",
+                        color = if (proposal.isAdded) Emerald400 else Slate400,
                         fontSize = 11.sp,
+                        fontFamily = ManropeFontFamily,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
                         text = "${tx.subcategory.ifBlank { tx.title.ifBlank { tx.category } }} • ${tx.category}",
                         color = TextLight,
+                        fontFamily = ManropeFontFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp
                     )
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "${if (isExpense) "-" else "+"}${com.example.ui.components.formatRublesCompact(tx.amount)} ₽",
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 14.sp,
-                    color = if (isExpense) com.example.ui.theme.ExpenseRed else com.example.ui.theme.IncomeGreen
+                    text = "${if (isExpense) "-" else "+"}${formatRublesCompact(tx.amount)} ₽",
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = if (isExpense) Rose500 else Emerald400
                 )
             }
             if (!proposal.isAdded) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    androidx.compose.material3.TextButton(onClick = onDismiss) {
-                        Text("Отмена", color = TextMuted, fontSize = 12.sp)
+                    TextButton(onClick = onDismiss) {
+                        Text(
+                            text = "Отмена",
+                            color = Slate400,
+                            fontSize = 12.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    androidx.compose.material3.Button(
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Button(
                         onClick = onConfirm,
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                            containerColor = com.example.ui.theme.EmeraldPrimary,
-                            contentColor = DarkBackground
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Emerald400,
+                            contentColor = DarkBg
                         ),
-                        shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
                     ) {
-                        Text("Добавить", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text(
+                            text = "Записать",
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             } else {
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "✅ Записано в текущий бюджет",
-                    color = com.example.ui.theme.EmeraldLight,
+                    text = "✓ Добавлено в бюджет",
+                    color = Emerald400,
                     fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
@@ -435,7 +499,7 @@ fun DavidParsedTransactionProposalBubble(
 }
 
 /**
- * Карточка добавленной операции от пользователя
+ * Карточка добавленной операции от пользователя в стиле Obsidian Neo-Bank
  */
 @Composable
 fun DavidOperationBubble(
@@ -443,104 +507,109 @@ fun DavidOperationBubble(
     timestamp: String,
     modifier: Modifier = Modifier
 ) {
-    val bubbleShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp)
+    val bubbleShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp)
     val isExpense = operation.type == "expense"
-    val accentColor = if (isExpense) NeonRose else NeonEmerald
+    val accentColor = if (isExpense) Rose500 else Emerald400
     val amountPrefix = if (isExpense) "-" else "+"
 
     Surface(
         shape = bubbleShape,
-        color = Color.Transparent,
-        border = BorderStroke(1.dp, NeonIndigo.copy(alpha = 0.5f)),
+        color = ObsidianElevated,
+        border = BorderStroke(1.dp, GlassHighlight),
         modifier = modifier
-            .widthIn(min = 120.dp, max = 320.dp)
-            .shadow(4.dp, bubbleShape, ambientColor = NeonIndigo.copy(alpha = 0.2f))
+            .widthIn(min = 140.dp, max = 320.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(Color(0xFF1E293B), Color(0xFF283548))
-                    )
-                )
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            Column {
-                if (operation.userPhrase.isNotBlank()) {
-                    Text(
-                        text = operation.userPhrase,
-                        color = TextLight,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        lineHeight = 19.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
+            if (operation.userPhrase.isNotBlank()) {
+                Text(
+                    text = operation.userPhrase,
+                    color = TextLight,
+                    fontSize = 13.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 18.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
-                // Информационная плашка с категорией и суммой
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = DarkBackground.copy(alpha = 0.6f),
-                    border = BorderStroke(0.5.dp, SlateBorder.copy(alpha = 0.4f)),
-                    modifier = Modifier.fillMaxWidth()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkBg.copy(alpha = 0.65f))
+                    .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = operation.category,
-                                color = TextLight,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            if (operation.subcategory.isNotBlank() && operation.subcategory != operation.category) {
-                                Text(
-                                    text = operation.subcategory,
-                                    color = TextMuted,
-                                    fontSize = 10.sp
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
+                    CategoryIconBadge(
+                        categoryName = operation.category,
+                        type = operation.type,
+                        size = 28.dp,
+                        iconSize = 14.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
                         Text(
-                            text = "$amountPrefix${operation.amount.toInt()} ₽",
-                            color = accentColor,
-                            fontSize = 13.sp,
+                            text = operation.category,
+                            color = TextLight,
+                            fontSize = 12.sp,
+                            fontFamily = ManropeFontFamily,
                             fontWeight = FontWeight.Bold
                         )
+                        if (operation.subcategory.isNotBlank() && operation.subcategory != operation.category) {
+                            Text(
+                                text = operation.subcategory,
+                                color = Slate400,
+                                fontSize = 10.sp,
+                                fontFamily = ManropeFontFamily
+                            )
+                        }
                     }
                 }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "$amountPrefix${operation.amount.toInt()} ₽",
+                    color = accentColor,
+                    fontSize = 13.sp,
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            }
 
-                Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = timestamp,
-                        color = TextMuted,
-                        fontSize = 10.sp
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        imageVector = if (operation.isRead) Icons.Default.DoneAll else Icons.Default.CheckCircle,
-                        contentDescription = "Отправлено",
-                        tint = if (operation.isRead) NeonEmerald else TextMuted,
-                        modifier = Modifier.size(13.dp)
-                    )
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = timestamp,
+                    color = Slate400.copy(alpha = 0.75f),
+                    fontSize = 10.sp,
+                    fontFamily = ManropeFontFamily
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                    imageVector = if (operation.isRead) Icons.Default.DoneAll else Icons.Default.CheckCircle,
+                    contentDescription = "Отправлено",
+                    tint = if (operation.isRead) Emerald400 else Slate400,
+                    modifier = Modifier.size(12.dp)
+                )
             }
         }
     }
 }
 
 /**
- * Текстовое сообщение с неоновым акцентом
+ * Текстовое сообщение в эстетике Obsidian Neo-Bank
  */
 @Composable
 fun DavidTextBubble(
@@ -550,94 +619,81 @@ fun DavidTextBubble(
     modifier: Modifier = Modifier
 ) {
     val bubbleShape = if (isUser) {
-        RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 4.dp)
+        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp)
     } else {
-        RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 4.dp, bottomEnd = 16.dp)
+        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp)
     }
 
-    val bubbleBackground = if (isUser) {
-        Brush.linearGradient(
-            colors = listOf(Color(0xFF1E293B), Color(0xFF283548))
-        )
+    val containerColor = if (isUser) {
+        Indigo500.copy(alpha = 0.18f)
     } else {
-        Brush.linearGradient(
-            colors = listOf(Color(0xFF0F172A), Color(0xFF162032))
-        )
+        ObsidianSurface
     }
 
     val borderStroke = if (isUser) {
-        BorderStroke(1.dp, NeonIndigo.copy(alpha = 0.5f))
+        BorderStroke(1.dp, Indigo500.copy(alpha = 0.45f))
     } else {
-        BorderStroke(1.dp, SlateBorder.copy(alpha = 0.6f))
+        BorderStroke(1.dp, GlassBorder)
     }
 
     Surface(
         shape = bubbleShape,
-        color = Color.Transparent,
+        color = containerColor,
         border = borderStroke,
         modifier = modifier
-            .widthIn(min = 80.dp, max = if (isUser) 300.dp else 360.dp)
-            .shadow(4.dp, bubbleShape, ambientColor = if (isUser) NeonIndigo.copy(alpha = 0.2f) else Color.Transparent)
+            .widthIn(min = 80.dp, max = if (isUser) 305.dp else 355.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .background(bubbleBackground)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            Column {
-                if (!isUser) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(bottom = 6.dp)
-                    ) {
-                        Text(text = "🐸", fontSize = 13.sp)
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text(
-                            text = "Давид Жабов",
-                            color = NeonEmerald,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "• Аудитор",
-                            color = TextMuted,
-                            fontSize = 10.sp
-                        )
-                    }
-                }
-
-                if (!isUser && (content.contains("#") || content.contains("**") || content.contains("- "))) {
-                    com.example.ui.components.MarkdownFormattedText(
-                        markdownText = content,
-                        fontSize = 13.sp
-                    )
-                } else {
+            if (!isUser) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 5.dp)
+                ) {
+                    Text(text = "🐸", fontSize = 12.sp)
+                    Spacer(modifier = Modifier.width(5.dp))
                     Text(
-                        text = content,
-                        color = TextLight,
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
-                        fontWeight = FontWeight.Normal
+                        text = "Давид Жабов",
+                        color = Emerald400,
+                        fontSize = 11.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.ExtraBold
                     )
                 }
+            }
 
-                Spacer(modifier = Modifier.height(4.dp))
-
+            if (!isUser && (content.contains("#") || content.contains("**") || content.contains("- "))) {
+                MarkdownFormattedText(
+                    markdownText = content,
+                    fontSize = 13.sp
+                )
+            } else {
                 Text(
-                    text = timestamp,
-                    color = TextMuted.copy(alpha = 0.8f),
-                    fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.align(Alignment.End)
+                    text = content,
+                    color = TextLight,
+                    fontSize = 13.5.sp,
+                    fontFamily = ManropeFontFamily,
+                    lineHeight = 19.sp,
+                    fontWeight = FontWeight.Normal
                 )
             }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Text(
+                text = timestamp,
+                color = Slate400.copy(alpha = 0.7f),
+                fontSize = 10.sp,
+                fontFamily = ManropeFontFamily,
+                modifier = Modifier.align(Alignment.End)
+            )
         }
     }
 }
 
 /**
- * Карточка прикрепленного файла (отчет, выписка)
+ * Карточка выписки / отчета
  */
 @Composable
 fun DavidFileBubble(
@@ -648,39 +704,31 @@ fun DavidFileBubble(
     isUser: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val bubbleShape = RoundedCornerShape(14.dp)
+    val bubbleShape = RoundedCornerShape(18.dp)
 
     Surface(
         shape = bubbleShape,
-        color = DarkCard,
-        border = BorderStroke(1.dp, if (isUser) NeonIndigo.copy(alpha = 0.6f) else NeonEmerald.copy(alpha = 0.5f)),
-        modifier = modifier
-            .widthIn(max = 300.dp)
-            .shadow(6.dp, bubbleShape)
+        color = ObsidianSurface,
+        border = BorderStroke(1.dp, if (isUser) Indigo500.copy(alpha = 0.45f) else Emerald400.copy(alpha = 0.4f)),
+        modifier = modifier.widthIn(max = 310.dp)
     ) {
         Column(
-            modifier = Modifier
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(DarkCard, DarkSurface)
-                    )
-                )
-                .padding(12.dp)
+            modifier = Modifier.padding(12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(42.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(NeonRose.copy(alpha = 0.15f))
-                        .border(1.dp, NeonRose.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Emerald400.copy(alpha = 0.14f))
+                        .border(1.dp, Emerald400.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
                 ) {
                     Icon(
                         imageVector = Icons.Default.PictureAsPdf,
-                        contentDescription = "PDF File",
-                        tint = NeonRose,
-                        modifier = Modifier.size(24.dp)
+                        contentDescription = "PDF",
+                        tint = Emerald400,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
@@ -690,38 +738,33 @@ fun DavidFileBubble(
                     Text(
                         text = name,
                         color = TextLight,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1
+                        fontSize = 12.5.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(NeonIndigo.copy(alpha = 0.2f))
-                                .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = extension.uppercase(),
-                                color = NeonIndigo,
-                                fontSize = 9.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        Text(
+                            text = extension.uppercase(),
+                            color = Emerald400,
+                            fontSize = 10.sp,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontWeight = FontWeight.Bold
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = size,
-                            color = TextMuted,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace
+                            text = "• $size",
+                            color = Slate400,
+                            fontSize = 10.sp,
+                            fontFamily = ManropeFontFamily
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Row(
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -730,25 +773,26 @@ fun DavidFileBubble(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = if (isUser) Icons.Default.DoneAll else Icons.Default.CheckCircle,
-                        contentDescription = "Доставлено",
-                        tint = NeonEmerald,
-                        modifier = Modifier.size(14.dp)
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = Emerald400,
+                        modifier = Modifier.size(12.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = if (isUser) "Отправлено Давиду" else "Готово к аудиту",
-                        color = NeonEmerald,
+                        text = if (isUser) "Данные переданы на разбор" else "Отчет сформирован",
+                        color = Emerald400,
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
 
                 Text(
                     text = timestamp,
-                    color = TextMuted,
+                    color = Slate400.copy(alpha = 0.7f),
                     fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = ManropeFontFamily
                 )
             }
         }
@@ -756,7 +800,7 @@ fun DavidFileBubble(
 }
 
 /**
- * Интерактивная карточка с финансовым графиком и сводкой доходов/расходов
+ * Интерактивная карточка с финансовым графиком и сводкой доходов/расходов в стиле Obsidian Neo-Bank
  */
 @Composable
 fun DavidChartBubble(
@@ -764,44 +808,40 @@ fun DavidChartBubble(
     timestamp: String,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(22.dp)
     val rubleFormatter = DecimalFormat("#,###", DecimalFormatSymbols(Locale.GERMAN))
 
     Surface(
         shape = shape,
-        color = DarkCard,
-        border = BorderStroke(1.dp, CyberpunkGradient),
+        color = ObsidianSurface,
+        border = BorderStroke(1.dp, GlassHighlight),
         modifier = modifier
-            .widthIn(max = 330.dp)
-            .shadow(8.dp, shape, ambientColor = NeonIndigo.copy(alpha = 0.3f))
+            .widthIn(max = 345.dp)
+            .shadow(10.dp, shape)
     ) {
         Column(
-            modifier = Modifier
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color(0xFF1E293B), Color(0xFF0F172A))
-                    )
-                )
-                .padding(14.dp)
+            modifier = Modifier.padding(14.dp)
         ) {
-            // Header
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(28.dp)
+                            .size(30.dp)
                             .clip(CircleShape)
-                            .background(NeonEmerald.copy(alpha = 0.15f))
+                            .background(Emerald400.copy(alpha = 0.15f))
                     ) {
                         Icon(
                             imageVector = Icons.Default.AutoGraph,
                             contentDescription = "График",
-                            tint = NeonEmerald,
+                            tint = Emerald400,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -810,29 +850,34 @@ fun DavidChartBubble(
                         text = chartData.title,
                         color = TextLight,
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
+                val isPositiveDelta = chartData.deltaPercent >= 0
+                val deltaColor = if (isPositiveDelta) Emerald400 else Rose500
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(NeonEmerald.copy(alpha = 0.15f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(deltaColor.copy(alpha = 0.14f))
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.TrendingUp,
-                        contentDescription = "Рост",
-                        tint = NeonEmerald,
+                        contentDescription = null,
+                        tint = deltaColor,
                         modifier = Modifier.size(12.dp)
                     )
-                    Spacer(modifier = Modifier.width(2.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
                     Text(
-                        text = "+${chartData.deltaPercent}%",
-                        color = NeonEmerald,
+                        text = "${if (isPositiveDelta) "+" else ""}${chartData.deltaPercent}%",
+                        color = deltaColor,
                         fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = SpaceGroteskFontFamily,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -840,15 +885,15 @@ fun DavidChartBubble(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Neon Bézier Chart Canvas
+            // Smooth Obsidian Bézier Chart
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(90.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF0B0F19))
-                    .border(0.5.dp, SlateBorder.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                    .padding(8.dp)
+                    .height(92.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(DarkBg)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                    .padding(10.dp)
             ) {
                 Canvas(modifier = Modifier.matchParentSize()) {
                     val width = size.width
@@ -859,7 +904,6 @@ fun DavidChartBubble(
                     val maxVal = points.maxOrNull() ?: 100f
                     val minVal = points.minOrNull() ?: 0f
                     val range = (maxVal - minVal).coerceAtLeast(1f)
-
                     val stepX = width / (points.size - 1)
 
                     val path = Path()
@@ -894,35 +938,36 @@ fun DavidChartBubble(
                         }
                     }
 
-                    // Gradient fill under curve
                     drawPath(
                         path = fillPath,
                         brush = Brush.verticalGradient(
-                            colors = listOf(NeonEmerald.copy(alpha = 0.3f), NeonIndigo.copy(alpha = 0.05f), Color.Transparent)
+                            colors = listOf(
+                                Emerald400.copy(alpha = 0.28f),
+                                Indigo500.copy(alpha = 0.06f),
+                                Color.Transparent
+                            )
                         )
                     )
 
-                    // Glowing Stroke Line
                     drawPath(
                         path = path,
                         brush = Brush.horizontalGradient(
-                            colors = listOf(NeonEmerald, NeonIndigo, NeonRose)
+                            colors = listOf(Emerald400, Indigo400)
                         ),
                         style = Stroke(width = 2.5.dp.toPx())
                     )
 
-                    // Draw glowing end dot
                     val lastX = (points.size - 1) * stepX
                     val lastNorm = (points.last() - minVal) / range
                     val lastY = height - (lastNorm * (height - 12.dp.toPx()) + 6.dp.toPx())
 
                     drawCircle(
-                        color = NeonEmerald.copy(alpha = 0.4f),
+                        color = Emerald400.copy(alpha = 0.35f),
                         radius = 6.dp.toPx(),
                         center = Offset(lastX, lastY)
                     )
                     drawCircle(
-                        color = NeonEmerald,
+                        color = Emerald400,
                         radius = 3.5.dp.toPx(),
                         center = Offset(lastX, lastY)
                     )
@@ -931,53 +976,54 @@ fun DavidChartBubble(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Income / Expense Stats Row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF0F172A))
-                    .padding(8.dp),
-                horizontalArrangement = Arrangement.SpaceAround
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(DarkBg.copy(alpha = 0.65f))
+                    .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                    .padding(vertical = 8.dp, horizontal = 10.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "ДОХОДЫ",
-                        color = TextMuted,
+                        color = Slate400,
                         fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "+${rubleFormatter.format(chartData.income)} ₽",
-                        color = NeonEmerald,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
+                        color = Emerald400,
+                        fontSize = 13.sp,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
                 Box(
                     modifier = Modifier
                         .width(1.dp)
-                        .height(26.dp)
-                        .background(SlateBorder.copy(alpha = 0.5f))
+                        .height(24.dp)
+                        .background(GlassBorder)
                 )
 
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "РАСХОДЫ",
-                        color = TextMuted,
+                        color = Slate400,
                         fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "-${rubleFormatter.format(chartData.expense)} ₽",
-                        color = NeonRose,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace
+                        color = Rose500,
+                        fontSize = 13.sp,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -988,6 +1034,7 @@ fun DavidChartBubble(
                     text = chartData.summary,
                     color = TextLight,
                     fontSize = 12.sp,
+                    fontFamily = ManropeFontFamily,
                     lineHeight = 17.sp
                 )
             }
@@ -995,9 +1042,9 @@ fun DavidChartBubble(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = timestamp,
-                color = TextMuted,
+                color = Slate400.copy(alpha = 0.7f),
                 fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = ManropeFontFamily,
                 modifier = Modifier.align(Alignment.End)
             )
         }
@@ -1005,7 +1052,7 @@ fun DavidChartBubble(
 }
 
 /**
- * Индикатор печати Давида с анимированными неоновыми точками
+ * Индикатор печати Давида в стиле Obsidian Neo-Bank
  */
 @Composable
 fun DavidTypingBubble(modifier: Modifier = Modifier) {
@@ -1013,9 +1060,9 @@ fun DavidTypingBubble(modifier: Modifier = Modifier) {
 
     val dot1Offset by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = -6f,
+        targetValue = -5f,
         animationSpec = infiniteRepeatable(
-            animation = tween(400, easing = FastOutSlowInEasing),
+            animation = tween(380, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "dot1"
@@ -1023,9 +1070,9 @@ fun DavidTypingBubble(modifier: Modifier = Modifier) {
 
     val dot2Offset by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = -6f,
+        targetValue = -5f,
         animationSpec = infiniteRepeatable(
-            animation = tween(400, delayMillis = 150, easing = FastOutSlowInEasing),
+            animation = tween(380, delayMillis = 140, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "dot2"
@@ -1033,21 +1080,19 @@ fun DavidTypingBubble(modifier: Modifier = Modifier) {
 
     val dot3Offset by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = -6f,
+        targetValue = -5f,
         animationSpec = infiniteRepeatable(
-            animation = tween(400, delayMillis = 300, easing = FastOutSlowInEasing),
+            animation = tween(380, delayMillis = 280, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "dot3"
     )
 
     Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = DarkCard,
-        border = BorderStroke(1.dp, SlateBorder.copy(alpha = 0.5f)),
-        modifier = modifier
-            .padding(horizontal = 12.dp, vertical = 4.dp)
-            .shadow(4.dp, RoundedCornerShape(14.dp))
+        shape = RoundedCornerShape(18.dp),
+        color = ObsidianSurface,
+        border = BorderStroke(1.dp, GlassBorder),
+        modifier = modifier.padding(horizontal = 14.dp, vertical = 4.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -1056,34 +1101,35 @@ fun DavidTypingBubble(modifier: Modifier = Modifier) {
             Text(text = "🐸", fontSize = 12.sp)
             Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = "Давид думает",
-                color = TextMuted,
+                text = "Давид считает",
+                color = Slate400,
                 fontSize = 12.sp,
-                fontWeight = FontWeight.Medium
+                fontFamily = ManropeFontFamily,
+                fontWeight = FontWeight.SemiBold
             )
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(8.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Box(
                     modifier = Modifier
                         .offset(y = dot1Offset.dp)
-                        .size(6.dp)
+                        .size(5.dp)
                         .clip(CircleShape)
-                        .background(NeonEmerald)
+                        .background(Emerald400)
                 )
                 Box(
                     modifier = Modifier
                         .offset(y = dot2Offset.dp)
-                        .size(6.dp)
+                        .size(5.dp)
                         .clip(CircleShape)
-                        .background(NeonIndigo)
+                        .background(Emerald400.copy(alpha = 0.7f))
                 )
                 Box(
                     modifier = Modifier
                         .offset(y = dot3Offset.dp)
-                        .size(6.dp)
+                        .size(5.dp)
                         .clip(CircleShape)
-                        .background(NeonRose)
+                        .background(Indigo400)
                 )
             }
         }
@@ -1091,255 +1137,215 @@ fun DavidTypingBubble(modifier: Modifier = Modifier) {
 }
 
 /**
- * Динамические кнопки быстрых действий для разных этапов диалога
+ * Единая трансформирующаяся лента умных действий и выбора периода разбора (Morphing Smart Action Strip).
+ * Заменяет устаревшие дублирующиеся панели DavidQuickActionsBar + DavidSuggestionChipsRow:
+ * - В обычном режиме показывает единую горизонтальную ленту чипов в стиле Obsidian Neo-Bank.
+ * - При нажатии на «🔥 Разбор трат» эта же полоса плавно трансформируется в компактный селектор периода:
+ *   [✕] Период: [День] [Неделя] [Месяц] [Год].
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun DavidQuickActionsBar(
+fun DavidSmartActionStrip(
     stage: DavidStage,
-    onActionClick: (String) -> Unit,
+    hasApiKey: Boolean,
+    isSelectingPeriod: Boolean,
+    onTogglePeriodSelector: (Boolean) -> Unit,
     onPeriodSelect: (String) -> Unit,
+    onSendPrompt: (String) -> Unit,
+    onActionClick: (String) -> Unit,
     onExportPdf: () -> Unit,
+    onOpenApiKeyDialog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     AnimatedVisibility(
         visible = stage != DavidStage.PROCESSING,
-        enter = fadeIn() + slideInVertically(initialOffsetY = { it / 2 }),
-        exit = fadeOut(),
+        enter = fadeIn(tween(180)),
+        exit = fadeOut(tween(140)),
         modifier = modifier.fillMaxWidth()
     ) {
-        Box(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            when (stage) {
-                DavidStage.INITIAL -> {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        CyberpunkActionChip(
-                            text = "🐸 Давид, сделай отчет",
-                            gradient = CyberpunkGradient,
-                            onClick = { onActionClick("START") },
-                            modifier = Modifier.fillMaxWidth(),
-                            tag = "action_start_report"
-                        )
-                    }
-                }
-
-                DavidStage.FILE_SELECTION -> {
-                    Column {
-                        Text(
-                            text = "Выберите временной интервал для PDF-выписки:",
-                            color = TextMuted,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(bottom = 6.dp, start = 4.dp)
-                        )
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            val periods = listOf("День", "Неделя", "Месяц", "Год")
-                            periods.forEach { period ->
-                                CyberpunkPeriodChip(
-                                    text = period,
-                                    onClick = { onPeriodSelect(period) },
-                                    modifier = Modifier.weight(1f),
-                                    tag = "period_${period.lowercase()}"
+        AnimatedContent(
+            targetState = isSelectingPeriod || stage == DavidStage.FILE_SELECTION,
+            transitionSpec = {
+                (fadeIn(tween(200)) togetherWith fadeOut(tween(150)))
+                    .using(
+                        SizeTransform(
+                            clip = false,
+                            sizeAnimationSpec = { _, _ ->
+                                spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
                                 )
                             }
+                        )
+                    )
+            },
+            label = "david_smart_strip_morph"
+        ) { selectingPeriod ->
+            if (selectingPeriod) {
+                // Встроенная капсула выбора периода без лишних этажей и дублирования
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(ObsidianSurface)
+                        .border(1.dp, Emerald400.copy(alpha = 0.45f), RoundedCornerShape(20.dp))
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Slate800)
+                            .clickable { onTogglePeriodSelector(false) }
+                            .testTag("close_period_selector_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Отмена",
+                            tint = Slate400,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "Период:",
+                        color = Slate400,
+                        fontSize = 11.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 2.dp)
+                    )
+
+                    val periods = listOf("День", "Неделя", "Месяц", "Год")
+                    periods.forEach { period ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(30.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Emerald400.copy(alpha = 0.14f))
+                                .border(1.dp, Emerald400.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                                .clickable {
+                                    onTogglePeriodSelector(false)
+                                    onPeriodSelect(period)
+                                }
+                                .testTag("period_${period.lowercase()}"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = period,
+                                color = Emerald400,
+                                fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1
+                            )
                         }
                     }
                 }
+            } else {
+                // Единая горизонтальная лента быстрых чипов
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 1. Главный акцентный чип запуска разбора с выбором периода
+                    ObsidianQuickChip(
+                        text = "🔥 Разбор трат",
+                        isAccent = true,
+                        onClick = { onTogglePeriodSelector(true) },
+                        tag = "action_start_report"
+                    )
 
-                DavidStage.FOLLOW_UP -> {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        CyberpunkActionChip(
-                            text = "🔄 Новый запрос",
-                            gradient = Brush.horizontalGradient(listOf(DarkCard, Color(0xFF283548))),
-                            borderColor = SlateBorder,
-                            textColor = TextLight,
-                            onClick = { onActionClick("START") },
-                            modifier = Modifier.weight(1f),
-                            icon = Icons.Default.Refresh,
-                            tag = "action_new_report"
-                        )
-                        CyberpunkActionChip(
+                    // 2. Если аудит уже проведен — компактный чип экспорта в PDF прямо в этом же ряду
+                    if (stage == DavidStage.FOLLOW_UP) {
+                        ObsidianQuickChip(
                             text = "📄 Скачать PDF",
-                            gradient = Brush.horizontalGradient(listOf(NeonIndigo, NeonEmerald)),
+                            isAccent = false,
+                            borderColor = Indigo500.copy(alpha = 0.5f),
+                            textColor = Indigo400,
                             onClick = onExportPdf,
-                            modifier = Modifier.weight(1f),
-                            icon = Icons.Default.Download,
                             tag = "action_download_pdf"
                         )
                     }
-                }
 
-                DavidStage.PROCESSING -> {
-                    // Hidden
+                    // 3. Поиск утечек бюджета
+                    ObsidianQuickChip(
+                        text = "💡 Где утечки бюджета?",
+                        onClick = { onSendPrompt("На чём мне сэкономить и какие главные утечки бюджета?") }
+                    )
+
+                    // 4. Финансовые цели
+                    ObsidianQuickChip(
+                        text = "🎯 Статус целей",
+                        onClick = { onActionClick("GOALS") }
+                    )
+
+                    // 5. Сводка баланса и трендов
+                    ObsidianQuickChip(
+                        text = "📊 Баланс и тренды",
+                        onClick = { onSendPrompt("Покажи мой баланс и аналитику трендов") }
+                    )
+
+                    // 6. Настройка API ключа
+                    ObsidianQuickChip(
+                        text = if (hasApiKey) "🔑 API ключ" else "🔑 Подключить Gemini",
+                        borderColor = if (!hasApiKey) Amber400.copy(alpha = 0.55f) else GlassBorder,
+                        textColor = if (!hasApiKey) Amber400 else Slate400,
+                        onClick = onOpenApiKeyDialog
+                    )
                 }
             }
         }
     }
 }
 
-/**
- * Неоновая кнопка-чип для быстрых действий
- */
 @Composable
-fun CyberpunkActionChip(
-    text: String,
-    gradient: Brush,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    borderColor: Color? = null,
-    textColor: Color = Color.White,
-    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
-    tag: String = "cyberpunk_chip"
-) {
-    val shape = RoundedCornerShape(12.dp)
-
-    Surface(
-        shape = shape,
-        color = Color.Transparent,
-        border = BorderStroke(1.dp, borderColor ?: NeonIndigo.copy(alpha = 0.5f)),
-        modifier = modifier
-            .testTag(tag)
-            .shadow(4.dp, shape)
-            .clickable(onClick = onClick)
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .background(gradient)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (icon != null) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = textColor,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                }
-                Text(
-                    text = text,
-                    color = textColor,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-    }
-}
-
-/**
- * Кнопка выбора периода с иконкой PDF
- */
-@Composable
-fun CyberpunkPeriodChip(
+private fun ObsidianQuickChip(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    tag: String = "period_chip"
+    isAccent: Boolean = false,
+    borderColor: Color = if (isAccent) Emerald400.copy(alpha = 0.55f) else GlassBorder,
+    textColor: Color = if (isAccent) Emerald400 else TextLight,
+    tag: String = "obsidian_quick_chip"
 ) {
-    val shape = RoundedCornerShape(10.dp)
+    val containerColor = if (isAccent) {
+        Emerald400.copy(alpha = 0.14f)
+    } else {
+        ObsidianSurface
+    }
 
-    Surface(
-        shape = shape,
-        color = DarkCard,
-        border = BorderStroke(1.dp, NeonIndigo.copy(alpha = 0.4f)),
+    Box(
         modifier = modifier
-            .testTag(tag)
+            .height(36.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(containerColor)
+            .border(1.dp, borderColor, RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
+            .padding(horizontal = 13.dp)
+            .testTag(tag),
+        contentAlignment = Alignment.Center
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center,
-            modifier = Modifier
-                .background(DarkCard)
-                .padding(vertical = 10.dp, horizontal = 4.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.PictureAsPdf,
-                contentDescription = "PDF",
-                tint = NeonRose,
-                modifier = Modifier.size(13.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text(
-                text = text,
-                color = TextLight,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace
-            )
-        }
+        Text(
+            text = text,
+            color = textColor,
+            fontSize = 12.sp,
+            fontFamily = ManropeFontFamily,
+            fontWeight = if (isAccent) FontWeight.Bold else FontWeight.SemiBold,
+            maxLines = 1
+        )
     }
 }
 
 /**
- * Горизонтальная лента быстрых подсказок (SuggestionChips) в стиле David-finance-main-2
- */
-@Composable
-fun DavidSuggestionChipsRow(
-    hasApiKey: Boolean,
-    onSendPrompt: (String) -> Unit,
-    onActionClick: (String) -> Unit,
-    onOpenApiKeyDialog: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val suggestions = listOf(
-        "📊 Мой баланс и аналитика" to "PROMPT",
-        "💡 На чём сэкономить?" to "PROMPT",
-        "🐸 Жабий аудит трат" to "AUDIT",
-        "🎯 Мои финансовые цели" to "GOALS",
-        (if (hasApiKey) "🔑 Сменить API ключ" else "🔑 Ввести API ключ") to "API_KEY"
-    )
-
-    androidx.compose.foundation.lazy.LazyRow(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        items(suggestions.size) { index ->
-            val (label, kind) = suggestions[index]
-            androidx.compose.material3.SuggestionChip(
-                onClick = {
-                    when (kind) {
-                        "API_KEY" -> onOpenApiKeyDialog()
-                        "AUDIT" -> onActionClick("AUDIT")
-                        "GOALS" -> onActionClick("GOALS")
-                        else -> onSendPrompt(label)
-                    }
-                },
-                label = {
-                    Text(
-                        text = label,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                },
-                colors = androidx.compose.material3.SuggestionChipDefaults.suggestionChipColors(
-                    containerColor = com.example.ui.theme.SurfaceCard,
-                    labelColor = TextLight
-                ),
-                border = androidx.compose.material3.SuggestionChipDefaults.suggestionChipBorder(
-                    enabled = true,
-                    borderColor = SlateBorder.copy(alpha = 0.6f)
-                )
-            )
-        }
-    }
-}
-
-/**
- * Нижняя строка ввода текста с кнопкой отправки, вложениями и авто-маскировкой API-ключа
+ * Нижняя капсула ввода сообщения в едином стиле с MorphingBottomBar (Obsidian Neo-Bank)
  */
 @Composable
 fun DavidChatInputBar(
@@ -1354,98 +1360,86 @@ fun DavidChatInputBar(
         trimmedInput.startsWith("AQ.") ||
         (trimmedInput.length >= 25 && !trimmedInput.contains(" "))
 
-    Surface(
-        color = DarkSurface,
-        shape = RoundedCornerShape(24.dp),
-        border = BorderStroke(1.dp, SlateBorder.copy(alpha = 0.5f)),
-        modifier = modifier.fillMaxWidth()
+    val isEnabled = text.isNotBlank()
+    val borderColor by animateColorAsState(
+        targetValue = if (isEnabled) Emerald400.copy(alpha = 0.5f) else GlassHighlight,
+        animationSpec = tween(200),
+        label = "chat_input_border"
+    )
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(54.dp)
+            .shadow(16.dp, RoundedCornerShape(27.dp))
+            .clip(RoundedCornerShape(27.dp))
+            .background(ObsidianSurface.copy(alpha = 0.98f))
+            .border(1.dp, borderColor, RoundedCornerShape(27.dp))
+            .padding(start = 16.dp, end = 6.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 6.dp)
+        Box(
+            modifier = Modifier.weight(1f),
+            contentAlignment = Alignment.CenterStart
         ) {
-            IconButton(
-                onClick = onAttach,
-                modifier = Modifier
-                    .size(38.dp)
-                    .testTag("david_attach_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AttachFile,
-                    contentDescription = "Прикрепить",
-                    tint = TextMuted
+            if (text.isEmpty()) {
+                Text(
+                    text = "Спросите Давида или введите: Кофе 300...",
+                    color = Slate400,
+                    fontSize = 13.sp,
+                    fontFamily = ManropeFontFamily,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
-            // Input Field Card
-            Box(
+            BasicTextField(
+                value = text,
+                onValueChange = onTextChange,
+                textStyle = TextStyle(
+                    color = TextLight,
+                    fontSize = 14.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Medium
+                ),
+                singleLine = true,
+                visualTransformation = if (isSecretInput) {
+                    PasswordVisualTransformation('*')
+                } else {
+                    VisualTransformation.None
+                },
+                cursorBrush = SolidColor(Emerald400),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { onSend() }),
                 modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(DarkCard)
-                    .border(1.dp, SlateBorder.copy(alpha = 0.6f), RoundedCornerShape(22.dp))
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-            ) {
-                if (text.isEmpty()) {
-                    Text(
-                        text = "Спросите Давида или напишите: Такси 500...",
-                        color = TextMuted,
-                        fontSize = 13.sp,
-                        maxLines = 1
-                    )
-                }
+                    .fillMaxWidth()
+                    .testTag("david_text_input")
+            )
+        }
 
-                BasicTextField(
-                    value = text,
-                    onValueChange = onTextChange,
-                    textStyle = TextStyle(
-                        color = TextLight,
-                        fontSize = 14.sp
-                    ),
-                    visualTransformation = if (isSecretInput) {
-                        androidx.compose.ui.text.input.PasswordVisualTransformation('*')
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .background(
+                    if (isEnabled) {
+                        Brush.linearGradient(listOf(Emerald400, NeonEmerald))
                     } else {
-                        androidx.compose.ui.text.input.VisualTransformation.None
-                    },
-                    cursorBrush = SolidColor(NeonEmerald),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { onSend() }),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("david_text_input")
+                        Brush.linearGradient(listOf(Slate800, Slate800))
+                    }
                 )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Neon Send Button
-            val isEnabled = text.isNotBlank()
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isEnabled) CyberpunkGradient else Brush.linearGradient(listOf(DarkCard, DarkCard))
-                    )
-                    .border(
-                        1.dp,
-                        if (isEnabled) NeonEmerald.copy(alpha = 0.8f) else SlateBorder.copy(alpha = 0.4f),
-                        CircleShape
-                    )
-                    .clickable(enabled = isEnabled, onClick = onSend)
-                    .testTag("david_send_button")
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "Отправить",
-                    tint = if (isEnabled) Color.White else TextMuted,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+                .clickable(enabled = isEnabled, onClick = onSend)
+                .testTag("david_send_button")
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Send,
+                contentDescription = "Отправить",
+                tint = if (isEnabled) DarkBg else Slate400,
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }
-

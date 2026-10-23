@@ -137,8 +137,8 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
             id = "greeting_${currentBudgetId}",
             sender = "Давид Жабов 🐸",
             type = ChatMessageType.Text(
-                "Салют, $currentProfileName! Я **Давид Жабов** — твой персональный финансовый аудитор и безжалостный критик транжирства.\n\n" +
-                "Готов провести жесткий разбор трат, прожарить нелепые расходы и выдать сочные ачивки. Выбери период или нажми **«🐸 Давид, сделай отчет»**!"
+                "Салют, $currentProfileName! Я **Давид Жабов** — твой персональный финансовый ревизор.\n\n" +
+                "Нажми **«🔥 Разбор трат»** внизу, чтобы выбрать период аудита, спроси меня о бюджете или просто напиши расход прямо в чат (например: *«Кофе 300»*)."
             ),
             timestamp = "09:00",
             isUser = false,
@@ -871,6 +871,12 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
                 timestampMillis = System.currentTimeMillis()
             )
             addSessionMessage(pdfMsg)
+        }
+    }
+
+    fun cancelPeriodSelection() {
+        if (_stage.value == DavidStage.FILE_SELECTION) {
+            _stage.value = DavidStage.INITIAL
         }
     }
 
