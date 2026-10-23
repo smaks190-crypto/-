@@ -312,9 +312,9 @@ fun MorphingBottomBar(
 
     val cornerRadius by animateDpAsState(
         targetValue = when (bottomBarMode) {
-            BottomBarMode.NAV_TABS -> 22.dp
-            BottomBarMode.MANUAL_ADD -> 24.dp
-            BottomBarMode.VOICE_INPUT -> if (editableList.isNotEmpty() || showInlineConsent || showInlineApiKey) 24.dp else 22.dp
+            BottomBarMode.NAV_TABS -> 30.dp
+            BottomBarMode.MANUAL_ADD -> 26.dp
+            BottomBarMode.VOICE_INPUT -> if (editableList.isNotEmpty() || showInlineConsent || showInlineApiKey) 26.dp else 30.dp
         },
         animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
         label = "morph_bar_corner"
@@ -441,8 +441,8 @@ fun MorphingBottomBar(
                                         .width(tabWidth)
                                         .fillMaxHeight()
                                         .offset(x = tabWidth * animatedFraction)
-                                        .background(Emerald400.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
-                                        .border(1.dp, Emerald400.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                                        .background(Emerald400.copy(alpha = 0.15f), CircleShape)
+                                        .border(1.dp, Emerald400.copy(alpha = 0.4f), CircleShape)
                                 )
 
                                 Row(
@@ -496,7 +496,7 @@ fun MorphingBottomBar(
                                 }
                             }
 
-                            // Встроенная симметричная кнопка `+` внутри капсулы навигации (ТОЛЬКО на вкладке Период)
+                            // Встроенная кнопка `+` внутри капсулы навигации (ТОЛЬКО на вкладке Период)
                             AnimatedVisibility(
                                 visible = currentMainTab == 0,
                                 enter = expandHorizontally(
@@ -516,23 +516,28 @@ fun MorphingBottomBar(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .padding(start = 6.dp)
+                                    modifier = Modifier.padding(start = 6.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .fillMaxHeight()
-                                            .width(68.dp)
-                                            .clip(RoundedCornerShape(16.dp))
+                                            .height(48.dp)
+                                            .width(54.dp)
+                                            .shadow(
+                                                elevation = 10.dp,
+                                                shape = CircleShape,
+                                                ambientColor = NeonEmerald,
+                                                spotColor = NeonEmerald
+                                            )
+                                            .clip(CircleShape)
                                             .background(
-                                                color = NeonEmerald.copy(alpha = 0.16f),
-                                                shape = RoundedCornerShape(16.dp)
+                                                brush = Brush.linearGradient(
+                                                    colors = listOf(NeonEmerald, Emerald400)
+                                                )
                                             )
                                             .border(
                                                 width = 1.dp,
-                                                color = NeonEmerald.copy(alpha = 0.45f),
-                                                shape = RoundedCornerShape(16.dp)
+                                                color = Color.White.copy(alpha = 0.28f),
+                                                shape = CircleShape
                                             )
                                             .pointerInput(Unit) {
                                                 detectTapGestures(
@@ -549,26 +554,12 @@ fun MorphingBottomBar(
                                             .testTag("embedded_add_operation_button"),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Add,
-                                                contentDescription = "Добавить операцию (удерживайте для голосового ввода)",
-                                                tint = NeonEmerald,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Text(
-                                                text = "Добавить",
-                                                color = NeonEmerald,
-                                                fontSize = 10.sp,
-                                                fontFamily = ManropeFontFamily,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1
-                                            )
-                                        }
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Добавить операцию (удерживайте для голосового ввода)",
+                                            tint = DarkBg,
+                                            modifier = Modifier.size(24.dp)
+                                        )
                                     }
                                 }
                             }
@@ -853,7 +844,7 @@ private fun MorphNavTabButton(
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
