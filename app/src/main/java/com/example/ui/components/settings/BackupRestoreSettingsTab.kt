@@ -1,25 +1,58 @@
 package com.example.ui.components.settings
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.TableChart
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.components.dialogs.ConfirmResetDataDialog
-import com.example.ui.theme.*
+import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.Indigo400
+import com.example.ui.theme.Indigo500
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.ObsidianSurface
+import com.example.ui.theme.Rose500
+import com.example.ui.theme.Slate400
+import com.example.ui.theme.SpaceGroteskFontFamily
 
 @Composable
 fun BackupRestoreSettingsTab(
@@ -31,7 +64,7 @@ fun BackupRestoreSettingsTab(
     onBack: (() -> Unit)? = null,
     onClose: (() -> Unit)? = null
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     var showResetConfirm by remember { mutableStateOf(false) }
 
     if (showResetConfirm) {
@@ -48,10 +81,10 @@ fun BackupRestoreSettingsTab(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Header
+        // Obsidian Sub-screen Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -65,13 +98,15 @@ fun BackupRestoreSettingsTab(
                     IconButton(
                         onClick = onBack,
                         modifier = Modifier
-                            .size(32.dp)
-                            .background(Slate800.copy(alpha = 0.6f), CircleShape)
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(ObsidianSurface)
+                            .border(1.dp, GlassBorder, CircleShape)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Назад",
-                            tint = Slate200,
+                            tint = Color.White,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -81,28 +116,30 @@ fun BackupRestoreSettingsTab(
                         .size(38.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Indigo500.copy(alpha = 0.15f))
-                        .border(1.dp, Indigo500.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                        .border(1.dp, Indigo500.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Storage,
                         contentDescription = null,
-                        tint = Indigo500,
+                        tint = Indigo400,
                         modifier = Modifier.size(20.dp)
                     )
                 }
                 Column {
                     Text(
                         text = "БЭКАП И ВОССТАНОВЛЕНИЕ",
-                        color = Slate400,
-                        fontSize = 11.sp,
+                        color = Indigo400,
+                        fontSize = 10.sp,
+                        fontFamily = SpaceGroteskFontFamily,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
                     Text(
                         text = "Управление резервными копиями",
                         color = Color.White,
-                        fontSize = 15.sp,
+                        fontSize = 16.sp,
+                        fontFamily = ManropeFontFamily,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -112,8 +149,10 @@ fun BackupRestoreSettingsTab(
                 IconButton(
                     onClick = onClose,
                     modifier = Modifier
-                        .size(32.dp)
-                        .background(Slate800.copy(alpha = 0.6f), CircleShape)
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(ObsidianSurface)
+                        .border(1.dp, GlassBorder, CircleShape)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -125,13 +164,14 @@ fun BackupRestoreSettingsTab(
             }
         }
 
-        Divider(color = Slate800, thickness = 1.dp)
+        HorizontalDivider(color = GlassBorder, thickness = 1.dp)
 
         // 1. Export Section
         Text(
             text = "ЭКСПОРТ ДАННЫХ",
-            color = Emerald400,
-            fontSize = 11.sp,
+            color = Slate400,
+            fontSize = 10.sp,
+            fontFamily = SpaceGroteskFontFamily,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
         )
@@ -156,7 +196,7 @@ fun BackupRestoreSettingsTab(
                 title = "Экспорт CSV",
                 subtitle = "Для Excel и таблиц",
                 icon = Icons.Default.TableChart,
-                accentColor = Indigo500,
+                accentColor = Indigo400,
                 modifier = Modifier.weight(1f),
                 onClick = onExportCsv
             )
@@ -165,8 +205,9 @@ fun BackupRestoreSettingsTab(
         // 2. Import Section
         Text(
             text = "ИМПОРТ И ВОССТАНОВЛЕНИЕ",
-            color = Indigo500,
-            fontSize = 11.sp,
+            color = Slate400,
+            fontSize = 10.sp,
+            fontFamily = SpaceGroteskFontFamily,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
         )
@@ -177,7 +218,7 @@ fun BackupRestoreSettingsTab(
         ) {
             BackupActionCard(
                 title = "Импорт JSON",
-                subtitle = "Восстановление бекапа",
+                subtitle = "Восстановление бэкапа",
                 icon = Icons.Default.FileUpload,
                 accentColor = Emerald400,
                 modifier = Modifier.weight(1f),
@@ -188,19 +229,20 @@ fun BackupRestoreSettingsTab(
                 title = "Импорт CSV",
                 subtitle = "Загрузка из файла",
                 icon = Icons.Default.FileDownload,
-                accentColor = Indigo500,
+                accentColor = Indigo400,
                 modifier = Modifier.weight(1f),
                 onClick = onImportCsv
             )
         }
 
-        Divider(color = Slate800, thickness = 1.dp)
+        HorizontalDivider(color = GlassBorder, thickness = 1.dp)
 
         // 3. Danger Zone Section
         Text(
             text = "ОПАСНАЯ ЗОНА",
             color = Rose500,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
+            fontFamily = SpaceGroteskFontFamily,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
         )
@@ -208,10 +250,11 @@ fun BackupRestoreSettingsTab(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
                 .clickable { showResetConfirm = true },
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Rose500.copy(alpha = 0.1f)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Rose500.copy(alpha = 0.35f))
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = Rose500.copy(alpha = 0.08f)),
+            border = BorderStroke(1.dp, Rose500.copy(alpha = 0.35f))
         ) {
             Row(
                 modifier = Modifier
@@ -226,9 +269,10 @@ fun BackupRestoreSettingsTab(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Rose500.copy(alpha = 0.2f)),
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Rose500.copy(alpha = 0.16f))
+                            .border(1.dp, Rose500.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -243,12 +287,14 @@ fun BackupRestoreSettingsTab(
                             text = "Сброс базы данных",
                             color = Rose500,
                             fontSize = 14.sp,
+                            fontFamily = ManropeFontFamily,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
                             text = "Очистить транзакции, категории и настройки",
                             color = Slate400,
-                            fontSize = 11.sp
+                            fontSize = 11.sp,
+                            fontFamily = ManropeFontFamily
                         )
                     }
                 }
@@ -275,11 +321,11 @@ private fun BackupActionCard(
 ) {
     Card(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(18.dp))
             .clickable { onClick() },
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Slate900),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+        border = BorderStroke(1.dp, GlassBorder)
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -287,9 +333,10 @@ private fun BackupActionCard(
         ) {
             Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(accentColor.copy(alpha = 0.15f)),
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(accentColor.copy(alpha = 0.14f))
+                    .border(1.dp, accentColor.copy(alpha = 0.28f), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -304,6 +351,7 @@ private fun BackupActionCard(
                 text = title,
                 color = Color.White,
                 fontSize = 13.sp,
+                fontFamily = ManropeFontFamily,
                 fontWeight = FontWeight.Bold
             )
 
@@ -311,6 +359,7 @@ private fun BackupActionCard(
                 text = subtitle,
                 color = Slate400,
                 fontSize = 11.sp,
+                fontFamily = ManropeFontFamily,
                 lineHeight = 14.sp
             )
         }

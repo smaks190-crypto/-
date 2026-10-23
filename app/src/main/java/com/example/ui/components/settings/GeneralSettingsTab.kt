@@ -1,15 +1,43 @@
 package com.example.ui.components.settings
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AttachMoney
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -17,7 +45,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.*
+import com.example.ui.theme.DarkBg
+import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.Indigo400
+import com.example.ui.theme.Indigo500
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.ObsidianSurface
+import com.example.ui.theme.Rose500
+import com.example.ui.theme.Slate200
+import com.example.ui.theme.Slate400
+import com.example.ui.theme.SpaceGroteskFontFamily
 
 @Composable
 fun GeneralSettingsTab(
@@ -25,7 +63,7 @@ fun GeneralSettingsTab(
     onCurrencyChange: (String) -> Unit = {},
     currentLanguage: String = "Русский",
     onLanguageChange: (String) -> Unit = {},
-    currentTheme: String = "Dark Neon (По умолчанию)",
+    currentTheme: String = "Obsidian Neo-Bank (По умолчанию)",
     onThemeChange: (String) -> Unit = {},
     onOpenCategories: (() -> Unit)? = null,
     onResetData: (() -> Unit)? = null,
@@ -43,10 +81,10 @@ fun GeneralSettingsTab(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Header
+        // Obsidian Sub-screen Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -60,13 +98,15 @@ fun GeneralSettingsTab(
                     IconButton(
                         onClick = onBack,
                         modifier = Modifier
-                            .size(32.dp)
-                            .background(Slate800.copy(alpha = 0.6f), CircleShape)
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(ObsidianSurface)
+                            .border(1.dp, GlassBorder, CircleShape)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Назад",
-                            tint = Slate200,
+                            tint = Color.White,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -76,7 +116,7 @@ fun GeneralSettingsTab(
                         .size(38.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Emerald400.copy(alpha = 0.15f))
-                        .border(1.dp, Emerald400.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                        .border(1.dp, Emerald400.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -89,8 +129,9 @@ fun GeneralSettingsTab(
                 Column {
                     Text(
                         text = "ОСНОВНЫЕ НАСТРОЙКИ",
-                        color = Slate400,
-                        fontSize = 11.sp,
+                        color = Emerald400,
+                        fontSize = 10.sp,
+                        fontFamily = SpaceGroteskFontFamily,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
@@ -98,6 +139,7 @@ fun GeneralSettingsTab(
                         text = "Валюта, язык и оформление",
                         color = Color.White,
                         fontSize = 16.sp,
+                        fontFamily = ManropeFontFamily,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -107,8 +149,10 @@ fun GeneralSettingsTab(
                 IconButton(
                     onClick = onClose,
                     modifier = Modifier
-                        .size(32.dp)
-                        .background(Slate800.copy(alpha = 0.6f), CircleShape)
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(ObsidianSurface)
+                        .border(1.dp, GlassBorder, CircleShape)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -120,13 +164,14 @@ fun GeneralSettingsTab(
             }
         }
 
-        Divider(color = Slate800, thickness = 1.dp)
+        HorizontalDivider(color = GlassBorder, thickness = 1.dp)
 
         // 1. Валюта
         Text(
             text = "ОСНОВНАЯ ВАЛЮТА",
-            color = Emerald400,
-            fontSize = 11.sp,
+            color = Slate400,
+            fontSize = 10.sp,
+            fontFamily = SpaceGroteskFontFamily,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
         )
@@ -134,10 +179,11 @@ fun GeneralSettingsTab(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
                 .clickable { showCurrencyDropdown = !showCurrencyDropdown },
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+            border = BorderStroke(1.dp, GlassBorder)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Row(
@@ -151,9 +197,10 @@ fun GeneralSettingsTab(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Emerald400.copy(alpha = 0.15f)),
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Emerald400.copy(alpha = 0.14f))
+                                .border(1.dp, Emerald400.copy(alpha = 0.28f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -168,13 +215,15 @@ fun GeneralSettingsTab(
                                 text = "Валюта отображения",
                                 color = Color.White,
                                 fontSize = 14.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = selectedCurrency,
                                 color = Emerald400,
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
@@ -188,31 +237,34 @@ fun GeneralSettingsTab(
 
                 if (showCurrencyDropdown) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Divider(color = Slate800, thickness = 1.dp)
-                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     val currencies = listOf("RUB (₽)", "USD ($)", "EUR (€)", "KZT (₸)", "BYN (Br)")
                     currencies.forEach { curr ->
+                        val isSelected = curr == selectedCurrency
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) Emerald400.copy(alpha = 0.12f) else Color.Transparent)
                                 .clickable {
                                     selectedCurrency = curr
                                     onCurrencyChange(curr)
                                     showCurrencyDropdown = false
                                 }
-                                .padding(vertical = 8.dp, horizontal = 10.dp),
+                                .padding(vertical = 9.dp, horizontal = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = curr,
-                                color = if (curr == selectedCurrency) Emerald400 else Slate200,
+                                color = if (isSelected) Emerald400 else Slate200,
                                 fontSize = 13.sp,
-                                fontWeight = if (curr == selectedCurrency) FontWeight.Bold else FontWeight.Normal
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             )
-                            if (curr == selectedCurrency) {
+                            if (isSelected) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = null,
@@ -229,8 +281,9 @@ fun GeneralSettingsTab(
         // 2. Язык интерфейса
         Text(
             text = "ЯЗЫК ИНТЕРФЕЙСА",
-            color = Indigo500,
-            fontSize = 11.sp,
+            color = Slate400,
+            fontSize = 10.sp,
+            fontFamily = SpaceGroteskFontFamily,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
         )
@@ -238,10 +291,11 @@ fun GeneralSettingsTab(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
                 .clickable { showLanguageDropdown = !showLanguageDropdown },
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+            border = BorderStroke(1.dp, GlassBorder)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Row(
@@ -255,15 +309,16 @@ fun GeneralSettingsTab(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Indigo500.copy(alpha = 0.15f)),
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Indigo500.copy(alpha = 0.14f))
+                                .border(1.dp, Indigo500.copy(alpha = 0.28f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Language,
                                 contentDescription = null,
-                                tint = Indigo500,
+                                tint = Indigo400,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -272,12 +327,14 @@ fun GeneralSettingsTab(
                                 text = "Язык приложения",
                                 color = Color.White,
                                 fontSize = 14.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = selectedLanguage,
-                                color = Indigo500,
+                                color = Indigo400,
                                 fontSize = 12.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -292,35 +349,38 @@ fun GeneralSettingsTab(
 
                 if (showLanguageDropdown) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Divider(color = Slate800, thickness = 1.dp)
-                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     val languages = listOf("Русский", "English")
                     languages.forEach { lang ->
+                        val isSelected = lang == selectedLanguage
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) Indigo500.copy(alpha = 0.12f) else Color.Transparent)
                                 .clickable {
                                     selectedLanguage = lang
                                     onLanguageChange(lang)
                                     showLanguageDropdown = false
                                 }
-                                .padding(vertical = 8.dp, horizontal = 10.dp),
+                                .padding(vertical = 9.dp, horizontal = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = lang,
-                                color = if (lang == selectedLanguage) Indigo500 else Slate200,
+                                color = if (isSelected) Indigo400 else Slate200,
                                 fontSize = 13.sp,
-                                fontWeight = if (lang == selectedLanguage) FontWeight.Bold else FontWeight.Normal
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             )
-                            if (lang == selectedLanguage) {
+                            if (isSelected) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = null,
-                                    tint = Indigo500,
+                                    tint = Indigo400,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -333,8 +393,9 @@ fun GeneralSettingsTab(
         // 3. Визуальное оформление (Тема)
         Text(
             text = "ВИЗУАЛЬНОЕ ОФОРМЛЕНИЕ",
-            color = Rose500,
-            fontSize = 11.sp,
+            color = Slate400,
+            fontSize = 10.sp,
+            fontFamily = SpaceGroteskFontFamily,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
         )
@@ -342,10 +403,11 @@ fun GeneralSettingsTab(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
                 .clickable { showThemeDropdown = !showThemeDropdown },
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+            border = BorderStroke(1.dp, GlassBorder)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Row(
@@ -359,9 +421,10 @@ fun GeneralSettingsTab(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Rose500.copy(alpha = 0.15f)),
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Rose500.copy(alpha = 0.14f))
+                                .border(1.dp, Rose500.copy(alpha = 0.28f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -376,12 +439,14 @@ fun GeneralSettingsTab(
                                 text = "Тема и акценты",
                                 color = Color.White,
                                 fontSize = 14.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = selectedTheme,
                                 color = Rose500,
                                 fontSize = 12.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -396,36 +461,39 @@ fun GeneralSettingsTab(
 
                 if (showThemeDropdown) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Divider(color = Slate800, thickness = 1.dp)
-                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     val themes = listOf(
-                        "Dark Neon (По умолчанию)",
+                        "Obsidian Neo-Bank (По умолчанию)",
                         "Cyberpunk Indigo",
                         "Emerald Glow",
                         "Rose Quartz Neon"
                     )
                     themes.forEach { th ->
+                        val isSelected = th == selectedTheme
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) Rose500.copy(alpha = 0.12f) else Color.Transparent)
                                 .clickable {
                                     selectedTheme = th
                                     onThemeChange(th)
                                     showThemeDropdown = false
                                 }
-                                .padding(vertical = 8.dp, horizontal = 10.dp),
+                                .padding(vertical = 9.dp, horizontal = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = th,
-                                color = if (th == selectedTheme) Rose500 else Slate200,
+                                color = if (isSelected) Rose500 else Slate200,
                                 fontSize = 13.sp,
-                                fontWeight = if (th == selectedTheme) FontWeight.Bold else FontWeight.Normal
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             )
-                            if (th == selectedTheme) {
+                            if (isSelected) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = null,
@@ -444,10 +512,11 @@ fun GeneralSettingsTab(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
                     .clickable { onOpenCategories() },
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Slate900),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+                border = BorderStroke(1.dp, GlassBorder)
             ) {
                 Row(
                     modifier = Modifier
@@ -462,9 +531,10 @@ fun GeneralSettingsTab(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Emerald400.copy(alpha = 0.15f)),
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Emerald400.copy(alpha = 0.14f))
+                                .border(1.dp, Emerald400.copy(alpha = 0.28f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -479,12 +549,14 @@ fun GeneralSettingsTab(
                                 text = "Категории операций",
                                 color = Color.White,
                                 fontSize = 14.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = "Управление доходами и расходами",
                                 color = Slate400,
-                                fontSize = 11.sp
+                                fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily
                             )
                         }
                     }

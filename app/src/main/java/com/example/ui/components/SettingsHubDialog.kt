@@ -1,10 +1,7 @@
 package com.example.ui.components
 
-import com.example.ui.components.settings.GeneralSettingsTab
-import com.example.ui.components.settings.VoiceAndAISettingsTab
-import com.example.ui.components.settings.SecuritySettingsTab
-import com.example.ui.components.settings.BackupRestoreSettingsTab
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,124 +14,136 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import com.example.ui.theme.Slate700
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.SecurityManager
 import com.example.notifications.ReminderManager
+import com.example.ui.components.settings.BackupRestoreSettingsTab
+import com.example.ui.components.settings.GeneralSettingsTab
+import com.example.ui.components.settings.SecuritySettingsTab
+import com.example.ui.components.settings.VoiceAndAISettingsTab
+import com.example.ui.theme.Amber400
+import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.GlassHighlight
+import com.example.ui.theme.Indigo400
 import com.example.ui.theme.Indigo500
-import com.example.ui.theme.Indigo500
-import com.example.ui.theme.Rose500
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.ObsidianElevated
+import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate800
-import com.example.ui.theme.Slate900
-import com.example.ui.theme.DarkBg
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Remove
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.nativeCanvas
-import android.graphics.BitmapFactory
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.foundation.Image
-import androidx.compose.ui.layout.ContentScale
+import com.example.ui.theme.SpaceGroteskFontFamily
 import java.io.File
 
 @OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
-val LocalSharedTransitionScope = androidx.compose.runtime.compositionLocalOf<androidx.compose.animation.SharedTransitionScope?> { null }
+val LocalSharedTransitionScope = compositionLocalOf<androidx.compose.animation.SharedTransitionScope?> { null }
 
-val LocalAnimatedVisibilityScope = androidx.compose.runtime.compositionLocalOf<androidx.compose.animation.AnimatedVisibilityScope?> { null }
+val LocalAnimatedVisibilityScope = compositionLocalOf<androidx.compose.animation.AnimatedVisibilityScope?> { null }
 
 @OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
@@ -172,7 +181,7 @@ private const val REQUEST_CODE_POST_NOTIFICATIONS = 101
 
 @OptIn(
     androidx.compose.animation.ExperimentalSharedTransitionApi::class,
-    androidx.compose.material3.ExperimentalMaterial3Api::class
+    ExperimentalMaterial3Api::class
 )
 @Composable
 fun SettingsHubDialog(
@@ -195,21 +204,18 @@ fun SettingsHubDialog(
     onExitBudget: (() -> Unit)? = null
 ) {
     var currentScreen by remember { mutableStateOf(initialScreen) }
-
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
-        onDismissRequest = {
-            onDismiss()
-        },
+        onDismissRequest = { onDismiss() },
         sheetState = sheetState,
-        containerColor = Slate900,
+        containerColor = DarkBg,
         dragHandle = null
     ) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .defaultMinSize(minHeight = 340.dp)
+                .defaultMinSize(minHeight = 360.dp)
                 .padding(horizontal = 4.dp)
                 .navigationBarsPadding()
                 .animateContentSize(
@@ -218,37 +224,38 @@ fun SettingsHubDialog(
                         stiffness = Spring.StiffnessLow
                     )
                 )
-                .border(1.dp, Slate800, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)),
+                .border(1.dp, GlassBorder, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)),
             shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            colors = CardDefaults.cardColors(containerColor = Slate900)
+            colors = CardDefaults.cardColors(containerColor = DarkBg)
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Sleek Obsidian Drag Handle
                 Box(
                     modifier = Modifier
-                        .padding(top = 10.dp, bottom = 4.dp)
-                        .width(36.dp)
+                        .padding(top = 12.dp, bottom = 4.dp)
+                        .width(40.dp)
                         .height(4.dp)
                         .clip(CircleShape)
-                        .background(Slate700)
+                        .background(GlassHighlight)
                 )
                 androidx.compose.animation.SharedTransitionLayout {
-                    androidx.compose.runtime.CompositionLocalProvider(
+                    CompositionLocalProvider(
                         LocalSharedTransitionScope provides this
                     ) {
                         AnimatedContent(
                             targetState = currentScreen,
                             modifier = Modifier.fillMaxWidth(),
                             transitionSpec = {
-                                fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) togetherWith 
-                                fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing))
+                                fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) togetherWith
+                                    fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing))
                             },
                             contentAlignment = Alignment.TopStart,
                             label = "settings_transition"
                         ) { screen ->
-                            androidx.compose.runtime.CompositionLocalProvider(
+                            CompositionLocalProvider(
                                 LocalAnimatedVisibilityScope provides this
                             ) {
                                 when (screen) {
@@ -262,30 +269,14 @@ fun SettingsHubDialog(
                                             onRenameProfile = onRenameProfile,
                                             onResetAllData = onResetAllData,
                                             onDismiss = onDismiss,
-                                            onNavigateToGeneral = {
-                                                currentScreen = SettingsScreen.GENERAL
-                                            },
-                                            onNavigateToVoiceAI = {
-                                                currentScreen = SettingsScreen.VOICE_AI
-                                            },
-                                            onNavigateToSecurity = {
-                                                currentScreen = SettingsScreen.SECURITY
-                                            },
-                                            onNavigateToReminders = {
-                                                currentScreen = SettingsScreen.REMINDERS
-                                            },
-                                            onNavigateToApiKey = {
-                                                currentScreen = SettingsScreen.VOICE_AI
-                                            },
-                                            onNavigateToPrivacy = {
-                                                currentScreen = SettingsScreen.PRIVACY
-                                            },
-                                            onNavigateToBackup = {
-                                                currentScreen = SettingsScreen.BACKUP
-                                            },
-                                            onNavigateToCategories = {
-                                                onOpenCategories?.invoke()
-                                            },
+                                            onNavigateToGeneral = { currentScreen = SettingsScreen.GENERAL },
+                                            onNavigateToVoiceAI = { currentScreen = SettingsScreen.VOICE_AI },
+                                            onNavigateToSecurity = { currentScreen = SettingsScreen.SECURITY },
+                                            onNavigateToReminders = { currentScreen = SettingsScreen.REMINDERS },
+                                            onNavigateToApiKey = { currentScreen = SettingsScreen.VOICE_AI },
+                                            onNavigateToPrivacy = { currentScreen = SettingsScreen.PRIVACY },
+                                            onNavigateToBackup = { currentScreen = SettingsScreen.BACKUP },
+                                            onNavigateToCategories = { onOpenCategories?.invoke() },
                                             onExitBudget = onExitBudget
                                         )
                                     }
@@ -297,7 +288,7 @@ fun SettingsHubDialog(
                                             onClose = onDismiss
                                         )
                                     }
-                                    SettingsScreen.VOICE_AI, SettingsScreen.API_KEY -> {
+                                    SettingsScreen.VOICE_AI -> {
                                         VoiceAndAISettingsTab(
                                             initialKey = apiKey,
                                             onSaveApiKey = { newKey ->
@@ -472,193 +463,271 @@ private fun SettingsHubMainContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(20.dp)
+            .padding(horizontal = 20.dp, vertical = 14.dp)
     ) {
-        // --- HEADER WITH AVATAR ---
+        // --- TOP BAR: TITLE + SWITCH BUDGET + CLOSE ---
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            Column {
+                Text(
+                    text = "ЦЕНТР УПРАВЛЕНИЯ",
+                    color = Emerald400,
+                    fontSize = 10.sp,
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp
+                )
+                Text(
+                    text = "Настройки",
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Box(
+                if (onExitBudget != null) {
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable {
+                                onDismiss()
+                                onExitBudget()
+                            },
+                        shape = RoundedCornerShape(50),
+                        color = Indigo500.copy(alpha = 0.14f),
+                        border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.35f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ExitToApp,
+                                contentDescription = "Выйти в списки бюджетов",
+                                tint = Indigo400,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = "Бюджеты",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                IconButton(
+                    onClick = onDismiss,
                     modifier = Modifier
-                        .size(54.dp)
-                        .clickable { launcher.launch("image/*") },
-                    contentAlignment = Alignment.Center
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(ObsidianSurface)
+                        .border(1.dp, GlassBorder, CircleShape)
                 ) {
-                    // Neon Glow Background
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .background(
-                                Brush.radialGradient(
-                                    colors = listOf(
-                                        Indigo500.copy(alpha = 0.6f),
-                                        Indigo500.copy(alpha = 0.2f),
-                                        Color.Transparent
-                                    )
-                                ),
-                                CircleShape
-                            )
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Закрыть",
+                        tint = Slate400,
+                        modifier = Modifier.size(16.dp)
                     )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // --- OBSIDIAN BENTO PROFILE CARD ---
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(22.dp),
+            color = ObsidianSurface,
+            border = BorderStroke(1.dp, GlassBorder)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Emerald400.copy(alpha = 0.08f),
+                                Indigo500.copy(alpha = 0.05f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Avatar with Obsidian/Emerald ring
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(
-                                    colors = listOf(Emerald400, Indigo500, Rose500)
-                                )
-                            )
-                            .padding(2.dp),
+                            .size(56.dp)
+                            .clickable { launcher.launch("image/*") },
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxSize()
+                                .size(54.dp)
                                 .clip(CircleShape)
-                                .background(DarkBg),
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(Emerald400, Indigo500)
+                                    )
+                                )
+                                .padding(2.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (avatarBitmap != null) {
-                                Image(
-                                    bitmap = avatarBitmap,
-                                    contentDescription = "Аватар",
-                                    modifier = Modifier.fillMaxSize().clip(CircleShape),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Text(
-                                    text = initials,
-                                    color = Emerald400,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                                    .background(DarkBg),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (avatarBitmap != null) {
+                                    Image(
+                                        bitmap = avatarBitmap,
+                                        contentDescription = "Аватар",
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(CircleShape),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Text(
+                                        text = initials,
+                                        color = Emerald400,
+                                        fontSize = 16.sp,
+                                        fontFamily = SpaceGroteskFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
-                    }
-                    // Overlay edit badge
-                    Box(
-                        modifier = Modifier
-                            .size(16.dp)
-                            .align(Alignment.BottomEnd)
-                            .clip(CircleShape)
-                            .background(Indigo500)
-                            .border(1.dp, Slate900, CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Изменить фото",
-                            tint = Color.White,
-                            modifier = Modifier.size(10.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(14.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "Привет 👋",
-                            color = Slate400,
-                            fontSize = 11.sp
-                        )
-                        if (avatarBitmap != null) {
-                            Text(
-                                text = "Удалить фото",
-                                color = Rose500,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.clickable {
-                                    try {
-                                        val file = File(context.filesDir, "avatar_$profileId.jpg")
-                                        if (file.exists()) {
-                                            file.delete()
-                                        }
-                                        avatarUpdateTrigger++
-                                        onAvatarChanged()
-                                    } catch (e: Exception) {
-                                        e.printStackTrace()
-                                    }
-                                }
+                        // Overlay edit badge
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .align(Alignment.BottomEnd)
+                                .clip(CircleShape)
+                                .background(Emerald400)
+                                .border(1.5.dp, DarkBg, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Изменить фото",
+                                tint = DarkBg,
+                                modifier = Modifier.size(10.dp)
                             )
                         }
                     }
-                    Spacer(modifier = Modifier.height(2.dp))
-                    val focusManager = LocalFocusManager.current
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        BasicTextField(
-                            value = nameInput,
-                            onValueChange = {
-                                if (it.length <= 25) {
-                                    nameInput = it
-                                }
-                            },
-                            textStyle = TextStyle(
-                                color = Color.White,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            ),
-                            singleLine = true,
-                            cursorBrush = SolidColor(Emerald400),
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                            keyboardActions = KeyboardActions(
-                                onDone = {
-                                    onRenameProfile(nameInput)
-                                    focusManager.clearFocus()
-                                }
-                            ),
-                            modifier = Modifier
-                                .widthIn(min = 80.dp)
-                                .onFocusChanged { focusState ->
-                                    if (!focusState.isFocused && nameInput != currentProfileName) {
-                                        onRenameProfile(nameInput)
-                                    }
-                                }
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Редактировать",
-                            tint = Slate600,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
-            }
 
-            if (onExitBudget != null) {
-                IconButton(
-                    onClick = {
-                        onDismiss()
-                        onExitBudget()
-                    },
-                    modifier = Modifier
-                        .padding(start = 8.dp)
-                        .clip(CircleShape)
-                        .background(Rose500.copy(alpha = 0.12f))
-                        .border(1.dp, Rose500.copy(alpha = 0.4f), CircleShape)
-                        .size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ExitToApp,
-                        contentDescription = "Выйти в списки бюджетов",
-                        tint = Rose500,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "АКТИВНЫЙ ПРОФИЛЬ",
+                                color = Slate400,
+                                fontSize = 10.sp,
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp
+                            )
+                            if (avatarBitmap != null) {
+                                Text(
+                                    text = "Удалить фото",
+                                    color = Rose500,
+                                    fontSize = 10.sp,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.clickable {
+                                        try {
+                                            val file = File(context.filesDir, "avatar_$profileId.jpg")
+                                            if (file.exists()) {
+                                                file.delete()
+                                            }
+                                            avatarUpdateTrigger++
+                                            onAvatarChanged()
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        val focusManager = LocalFocusManager.current
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(DarkBg.copy(alpha = 0.65f))
+                                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+                                .padding(horizontal = 10.dp, vertical = 7.dp)
+                        ) {
+                            BasicTextField(
+                                value = nameInput,
+                                onValueChange = {
+                                    if (it.length <= 25) {
+                                        nameInput = it
+                                    }
+                                },
+                                textStyle = TextStyle(
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                singleLine = true,
+                                cursorBrush = SolidColor(Emerald400),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        onRenameProfile(nameInput)
+                                        focusManager.clearFocus()
+                                    }
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .widthIn(min = 80.dp)
+                                    .onFocusChanged { focusState ->
+                                        if (!focusState.isFocused && nameInput != currentProfileName) {
+                                            onRenameProfile(nameInput)
+                                        }
+                                    }
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Редактировать",
+                                tint = Slate400,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -670,10 +739,10 @@ private fun SettingsHubMainContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Section 0: Main
-            SettingsCategoryHeader(text = "ОСНОВНЫЕ")
+            SettingsCategoryHeader(text = "ОСНОВНЫЕ ПАРАМЕТРЫ")
 
             SettingsItemCard(
                 icon = Icons.Default.Tune,
@@ -697,87 +766,92 @@ private fun SettingsHubMainContent(
                 onClick = onNavigateToCategories
             )
 
-            // Section 1: Security
-            SettingsCategoryHeader(text = "БЕЗОПАСНОСТЬ И БЭКАП")
+            // Section 1: AI & Notifications
+            SettingsCategoryHeader(text = "ИИ ДАВИД И УВЕДОМЛЕНИЯ")
+
+            SettingsItemCard(
+                icon = Icons.Default.Mic,
+                iconTint = Indigo400,
+                title = "Голос и ИИ-Ассистент",
+                subtitle = if (apiKey.isNotBlank()) "Gemini API • Голосовой ввод и характер" else "Настройка голоса, ключей и промптов",
+                badgeText = if (apiKey.isNotBlank()) "Активен" else "Не задан",
+                badgeColor = if (apiKey.isNotBlank()) Emerald400 else Amber400,
+                testTag = "settings_voice_ai_item",
+                onClick = onNavigateToVoiceAI
+            )
+
+            val isReminderActive = ReminderManager.isReminderEnabled(context)
+            val (remHour, remMin) = ReminderManager.getReminderTime(context)
+            val remTone = ReminderManager.getReminderTone(context)
+            SettingsItemCard(
+                icon = Icons.Default.Notifications,
+                iconTint = Emerald400,
+                title = "Ежедневные напоминания",
+                subtitle = if (isReminderActive) {
+                    "${remTone.title} • в ${remHour.toString().padStart(2, '0')}:${remMin.toString().padStart(2, '0')}"
+                } else {
+                    "Умные триггеры и сводка расходов"
+                },
+                badgeText = if (isReminderActive) "Вкл" else "Выкл",
+                badgeColor = if (isReminderActive) Emerald400 else Slate400,
+                testTag = "settings_reminder_item",
+                onClick = onNavigateToReminders
+            )
+
+            // Section 2: Security & Backup
+            SettingsCategoryHeader(text = "БЕЗОПАСНОСТЬ И ДАННЫЕ")
 
             SettingsItemCard(
                 icon = Icons.Default.Lock,
                 iconTint = if (securityManager.isPinEnabled()) Emerald400 else Slate400,
                 title = "Защита приложения",
                 subtitle = if (securityManager.isPinEnabled()) {
-                    if (securityManager.isBiometricEnabled()) "ПИН-код + Биометрия" else "ПИН-код активен"
+                    buildString {
+                        append("ПИН-код")
+                        if (securityManager.isBiometricEnabled()) append(" + Биометрия")
+                        if (securityManager.isGuestPinEnabled()) append(" + Скрытый 🐸")
+                    }
                 } else "ПИН-код отключен",
                 badgeText = if (securityManager.isPinEnabled()) "Вкл" else "Выкл",
-                badgeColor = if (securityManager.isPinEnabled()) Emerald400 else Slate600,
+                badgeColor = if (securityManager.isPinEnabled()) Emerald400 else Slate400,
                 testTag = "settings_security_item",
                 onClick = onNavigateToSecurity
             )
 
             SettingsItemCard(
                 icon = Icons.Default.Storage,
-                iconTint = Indigo500,
+                iconTint = Indigo400,
                 title = "Бэкап и Восстановление",
-                subtitle = "Экспорт/импорт и резервные копии",
+                subtitle = "Экспорт и импорт JSON / CSV",
                 badgeText = null,
-                badgeColor = Indigo500,
+                badgeColor = Indigo400,
                 testTag = "settings_backup_item",
                 onClick = onNavigateToBackup
             )
-
-            // Section 2: Notifications
-            SettingsCategoryHeader(text = "УВЕДОМЛЕНИЯ")
-
-            SettingsItemCard(
-                icon = Icons.Default.Notifications,
-                iconTint = Emerald400,
-                title = "Ежедневные напоминания",
-                subtitle = "Время и текст напоминаний",
-                badgeText = null,
-                badgeColor = Emerald400,
-                testTag = "settings_reminder_item",
-                onClick = onNavigateToReminders
-            )
-
-            // Section 3: AI Assistant
-            SettingsCategoryHeader(text = "ИНТЕЛЛЕКТУАЛЬНЫЕ ФУНКЦИИ")
-
-            SettingsItemCard(
-                icon = Icons.Default.Mic,
-                iconTint = Indigo500,
-                title = "Голос и ИИ-Ассистент",
-                subtitle = if (apiKey.isNotBlank()) "Gemini API • Голосовой ввод и промпты" else "Настройка голоса, ключей и промптов",
-                badgeText = if (apiKey.isNotBlank()) "Активен" else "Не задан",
-                badgeColor = if (apiKey.isNotBlank()) Indigo500 else Slate600,
-                testTag = "settings_voice_ai_item",
-                onClick = onNavigateToVoiceAI
-            )
-
-            // Section 3.5: Privacy
-            SettingsCategoryHeader(text = "КОНФИДЕНЦИАЛЬНОСТЬ")
 
             SettingsItemCard(
                 icon = Icons.Default.Info,
                 iconTint = Slate400,
                 title = "Политика конфиденциальности",
-                subtitle = "Сводные данные о сборе и Gemini API",
+                subtitle = "Локальное хранение и работа с Gemini API",
                 badgeText = null,
                 badgeColor = Slate600,
                 testTag = "settings_privacy_item",
                 onClick = onNavigateToPrivacy
             )
 
-            // Section 3.9: Danger Zone
+            // Section 3: Danger Zone
             SettingsCategoryHeader(text = "ОПАСНАЯ ЗОНА")
 
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("settings_reset_data_item")
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(18.dp))
                     .clickable { showConfirmReset = true },
-                shape = RoundedCornerShape(16.dp),
-                color = Slate900,
-                border = androidx.compose.foundation.BorderStroke(1.dp, Rose500.copy(alpha = 0.8f))
+                shape = RoundedCornerShape(18.dp),
+                color = Rose500.copy(alpha = 0.08f),
+                border = BorderStroke(1.dp, Rose500.copy(alpha = 0.35f))
             ) {
                 Row(
                     modifier = Modifier
@@ -792,16 +866,17 @@ private fun SettingsHubMainContent(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(Rose500.copy(alpha = 0.15f)),
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Rose500.copy(alpha = 0.15f))
+                                .border(1.dp, Rose500.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Delete,
                                 contentDescription = null,
                                 tint = Rose500,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(19.dp)
                             )
                         }
 
@@ -812,46 +887,66 @@ private fun SettingsHubMainContent(
                                 text = "Сбросить данные к дефолтным",
                                 color = Rose500,
                                 fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "Полное удаление всех бюджетов и данных",
+                                text = "Полное удаление всех бюджетов и операций",
                                 color = Slate400,
                                 fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily,
                                 maxLines = 1,
                                 lineHeight = 15.sp
                             )
                         }
                     }
+
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = Rose500.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
 
-            // Section 4: App Info
-            Spacer(modifier = Modifier.height(6.dp))
+            // Section 4: App Info Footer
+            Spacer(modifier = Modifier.height(4.dp))
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
-                color = Slate800.copy(alpha = 0.4f),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+                color = ObsidianSurface.copy(alpha = 0.6f),
+                border = BorderStroke(1.dp, GlassBorder)
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = null,
-                        tint = Slate400,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = Emerald400,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "David Finance AI",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Text(
-                        text = "David Finance AI v${com.example.BuildConfig.VERSION_NAME}",
+                        text = "v${com.example.BuildConfig.VERSION_NAME} • Obsidian UI",
                         color = Slate400,
                         fontSize = 11.sp,
+                        fontFamily = SpaceGroteskFontFamily,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -870,6 +965,8 @@ private fun SettingsRemindersSubContent(
     val (savedHour, savedMinute) = remember { ReminderManager.getReminderTime(context) }
     var selectedHour by remember { mutableStateOf(savedHour) }
     var selectedMinute by remember { mutableStateOf(savedMinute) }
+    var selectedTone by remember { mutableStateOf(ReminderManager.getReminderTone(context)) }
+    var smartSummaryEnabled by remember { mutableStateOf(ReminderManager.isSmartSummaryEnabled(context)) }
 
     var hasPermission by remember {
         mutableStateOf(
@@ -923,60 +1020,92 @@ private fun SettingsRemindersSubContent(
         modifier = Modifier
             .fillMaxWidth()
             .padding(20.dp)
+            .verticalScroll(rememberScrollState())
     ) {
-        // Header
+        // Obsidian Sub-screen Header
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Start,
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(ObsidianSurface)
+                        .border(1.dp, GlassBorder, CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Назад",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Emerald400.copy(alpha = 0.15f))
+                        .border(1.dp, Emerald400.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Notifications,
+                        contentDescription = "Уведомления",
+                        tint = Emerald400,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Column {
+                    Text(
+                        text = "УМНЫЕ ТРИГГЕРЫ ДАВИДА",
+                        color = Emerald400,
+                        fontSize = 10.sp,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "Ежедневные напоминания",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onClose,
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(34.dp)
                     .clip(CircleShape)
-                    .background(Emerald400.copy(alpha = 0.15f))
-                    .border(1.dp, Emerald400.copy(alpha = 0.3f), CircleShape),
-                contentAlignment = Alignment.Center
+                    .background(ObsidianSurface)
+                    .border(1.dp, GlassBorder, CircleShape)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Notifications,
-                    contentDescription = "Уведомления",
-                    tint = Emerald400,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-                Text(
-                    text = "Ежедневные напоминания",
-                    color = Color.White,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Настройка времени и уведомлений",
-                    color = Slate400,
-                    fontSize = 11.sp
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
+                    tint = Slate400,
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Text(
-            text = "Напоминание о необходимости внести расходы и проверить бюджет.",
-            color = Slate400,
-            fontSize = 12.sp
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(DarkBg)
-                .border(1.dp, Slate800, RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(18.dp))
+                .background(ObsidianSurface)
+                .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
                 .clickable {
                     val nextState = !isEnabled
                     isEnabled = nextState
@@ -984,7 +1113,7 @@ private fun SettingsRemindersSubContent(
                         checkAndRequestPermission()
                     }
                 }
-                .padding(14.dp),
+                .padding(16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -993,13 +1122,20 @@ private fun SettingsRemindersSubContent(
                     .settingsSharedBounds(SettingsScreen.REMINDERS)
                     .weight(1f)
             ) {
-                Text("Включить уведомления", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Включить уведомления",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
                 Text(
                     if (isEnabled) {
-                        if (hasPermission) "Напоминание активно" else "Требуется разрешение"
+                        if (hasPermission) "Умный вечерний чек-ин активен" else "Требуется разрешение"
                     } else "Напоминания отключены",
                     color = if (isEnabled) (if (hasPermission) Emerald400 else Rose500) else Slate400,
-                    fontSize = 11.sp
+                    fontSize = 11.sp,
+                    fontFamily = ManropeFontFamily
                 )
             }
 
@@ -1025,63 +1161,253 @@ private fun SettingsRemindersSubContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Rose500.copy(alpha = 0.15f))
-                    .border(1.dp, Rose500.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Rose500.copy(alpha = 0.12f))
+                    .border(1.dp, Rose500.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
                     .clickable { checkAndRequestPermission() }
-                    .padding(10.dp),
+                    .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(Icons.Default.Warning, contentDescription = null, tint = Rose500, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Разрешение не предоставлено", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    Text("Нажмите, чтобы разрешить отправку уведомлений", color = Rose500, fontSize = 10.sp)
+                    Text(
+                        text = "Разрешение не предоставлено",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Нажмите, чтобы разрешить отправку уведомлений",
+                        color = Rose500,
+                        fontSize = 10.sp,
+                        fontFamily = ManropeFontFamily
+                    )
                 }
             }
         }
 
-        if (isEnabled) {
-            Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-            Text("Время напоминания (24ч):", color = Slate400, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        // --- DAVID PERSONA TONE SELECTOR ---
+        Text(
+            text = "ХАРАКТЕР ПУШЕЙ ОТ ДАВИДА 🐸",
+            color = Slate400,
+            fontSize = 10.sp,
+            fontFamily = SpaceGroteskFontFamily,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp
+        )
+        Spacer(modifier = Modifier.height(8.dp))
 
-            Spacer(modifier = Modifier.height(10.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.example.notifications.ReminderTone.entries.forEach { tone ->
+                val isSelected = selectedTone == tone
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable { selectedTone = tone },
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isSelected) Emerald400.copy(alpha = 0.10f) else ObsidianSurface,
+                    border = BorderStroke(
+                        1.dp,
+                        if (isSelected) Emerald400.copy(alpha = 0.5f) else GlassBorder
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = tone.title,
+                                    color = if (isSelected) Emerald400 else Color.White,
+                                    fontSize = 13.sp,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(
+                                            if (isSelected) Emerald400.copy(alpha = 0.2f) else Indigo500.copy(alpha = 0.14f)
+                                        )
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = tone.badge,
+                                        color = if (isSelected) Emerald400 else Indigo400,
+                                        fontSize = 9.sp,
+                                        fontFamily = SpaceGroteskFontFamily,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = tone.subtitle,
+                                color = Slate400,
+                                fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily,
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                WheelPicker(
-                    items = (0..23).map { it.toString().padStart(2, '0') },
-                    initialIndex = selectedHour.coerceIn(0, 23),
-                    onItemSelected = { hourIdx -> selectedHour = hourIdx },
-                    modifier = Modifier.width(90.dp),
-                    visibleItemsCount = 3,
-                    itemHeight = 42.dp
-                )
+        Spacer(modifier = Modifier.height(12.dp))
 
+        // Smart Evening Summary Toggle
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(ObsidianSurface)
+                .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                .clickable { smartSummaryEnabled = !smartSummaryEnabled }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = " : ",
+                    text = "Умная вечерняя сводка трат",
                     color = Color.White,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 10.dp)
+                    fontSize = 13.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Bold
                 )
+                Text(
+                    text = "Присылать итог расходов за день, даже если операции уже внесены",
+                    color = Slate400,
+                    fontSize = 11.sp,
+                    fontFamily = ManropeFontFamily
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Switch(
+                checked = smartSummaryEnabled,
+                onCheckedChange = { smartSummaryEnabled = it },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = Indigo500,
+                    uncheckedThumbColor = Slate400,
+                    uncheckedTrackColor = Slate800
+                )
+            )
+        }
 
-                WheelPicker(
-                    items = (0..59).map { it.toString().padStart(2, '0') },
-                    initialIndex = selectedMinute.coerceIn(0, 59),
-                    onItemSelected = { minIdx -> selectedMinute = minIdx },
-                    modifier = Modifier.width(90.dp),
-                    visibleItemsCount = 3,
-                    itemHeight = 42.dp
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Live Preview of the Push Notification
+        val (previewTitle, previewBody) = remember(selectedTone, smartSummaryEnabled) {
+            ReminderManager.buildMessagePreview(
+                tone = selectedTone,
+                todayExpenseCount = if (smartSummaryEnabled) 3 else 0,
+                todayExpenseSum = if (smartSummaryEnabled) 1450.0 else 0.0
+            )
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = DarkBg,
+            border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.35f))
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    text = "ПРЕДПРОСМОТР УВЕДОМЛЕНИЯ",
+                    color = Indigo400,
+                    fontSize = 9.sp,
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = previewTitle,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = previewBody,
+                    color = Slate400,
+                    fontSize = 11.sp,
+                    fontFamily = ManropeFontFamily,
+                    lineHeight = 15.sp
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        if (isEnabled) {
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = "ВРЕМЯ НАПОМИНАНИЯ (24Ч)",
+                color = Slate400,
+                fontSize = 10.sp,
+                fontFamily = SpaceGroteskFontFamily,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                color = ObsidianSurface,
+                border = BorderStroke(1.dp, GlassBorder)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    WheelPicker(
+                        items = (0..23).map { it.toString().padStart(2, '0') },
+                        initialIndex = selectedHour.coerceIn(0, 23),
+                        onItemSelected = { hourIdx -> selectedHour = hourIdx },
+                        modifier = Modifier.width(90.dp),
+                        visibleItemsCount = 3,
+                        itemHeight = 40.dp
+                    )
+
+                    Text(
+                        text = " : ",
+                        color = Emerald400,
+                        fontSize = 22.sp,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp)
+                    )
+
+                    WheelPicker(
+                        items = (0..59).map { it.toString().padStart(2, '0') },
+                        initialIndex = selectedMinute.coerceIn(0, 59),
+                        onItemSelected = { minIdx -> selectedMinute = minIdx },
+                        modifier = Modifier.width(90.dp),
+                        visibleItemsCount = 3,
+                        itemHeight = 40.dp
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1089,42 +1415,95 @@ private fun SettingsRemindersSubContent(
         ) {
             TextButton(
                 onClick = {
+                    val sampleCount = if (smartSummaryEnabled) 3 else 0
+                    val sampleSum = if (smartSummaryEnabled) 1450.0 else 0.0
                     if (!hasPermission) {
                         checkAndRequestPermission {
-                            ReminderManager.showNotification(context)
+                            ReminderManager.showNotification(
+                                context = context,
+                                todayExpenseCount = sampleCount,
+                                todayExpenseSum = sampleSum,
+                                overrideTone = selectedTone
+                            )
                         }
                     } else {
-                        ReminderManager.showNotification(context)
+                        ReminderManager.showNotification(
+                            context = context,
+                            todayExpenseCount = sampleCount,
+                            todayExpenseSum = sampleSum,
+                            overrideTone = selectedTone
+                        )
                     }
                 },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(ObsidianSurface)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
             ) {
-                Text("Тест уведомления", color = Indigo500, fontSize = 11.sp)
+                Text(
+                    text = "Тест пуша",
+                    color = Indigo400,
+                    fontSize = 12.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
             }
 
             Button(
                 onClick = {
                     if (isEnabled && !hasPermission) {
                         checkAndRequestPermission {
-                            ReminderManager.setReminderEnabled(context, isEnabled, selectedHour, selectedMinute)
-                            Toast.makeText(context, "Напоминание сохранено на ${selectedHour.toString().padStart(2, '0')}:${selectedMinute.toString().padStart(2, '0')}", Toast.LENGTH_SHORT).show()
+                            ReminderManager.setReminderEnabled(
+                                context = context,
+                                enabled = isEnabled,
+                                hour = selectedHour,
+                                minute = selectedMinute,
+                                tone = selectedTone,
+                                smartSummary = smartSummaryEnabled
+                            )
+                            Toast.makeText(
+                                context,
+                                "Напоминание сохранено (${selectedTone.title}) на ${selectedHour.toString().padStart(2, '0')}:${selectedMinute.toString().padStart(2, '0')}",
+                                Toast.LENGTH_SHORT
+                            ).show()
                             onBack()
                         }
                     } else {
-                        ReminderManager.setReminderEnabled(context, isEnabled, selectedHour, selectedMinute)
-                        Toast.makeText(context, if (isEnabled) "Напоминание сохранено на ${selectedHour.toString().padStart(2, '0')}:${selectedMinute.toString().padStart(2, '0')}" else "Напоминания отключены", Toast.LENGTH_SHORT).show()
+                        ReminderManager.setReminderEnabled(
+                            context = context,
+                            enabled = isEnabled,
+                            hour = selectedHour,
+                            minute = selectedMinute,
+                            tone = selectedTone,
+                            smartSummary = smartSummaryEnabled
+                        )
+                        Toast.makeText(
+                            context,
+                            if (isEnabled) "Напоминание сохранено (${selectedTone.title}) на ${selectedHour.toString().padStart(2, '0')}:${selectedMinute.toString().padStart(2, '0')}" else "Напоминания отключены",
+                            Toast.LENGTH_SHORT
+                        ).show()
                         onBack()
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Emerald400),
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f)
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp)
             ) {
-                Text("Сохранить", color = DarkBg, fontWeight = FontWeight.ExtraBold, fontSize = 12.sp)
+                Text(
+                    text = "Сохранить",
+                    color = DarkBg,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 13.sp
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End
@@ -1140,7 +1519,7 @@ private fun SettingsRemindersSubContent(
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Назад", color = Slate400, fontSize = 14.sp)
+                Text("Назад", color = Slate400, fontSize = 13.sp, fontFamily = ManropeFontFamily)
             }
         }
     }
@@ -1165,48 +1544,91 @@ private fun SettingsApiKeySubContent(
         // Header
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Start,
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(ObsidianSurface)
+                        .border(1.dp, GlassBorder, CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Назад",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Indigo500.copy(alpha = 0.15f))
+                        .border(1.dp, Indigo500.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = "ИИ-Помощник",
+                        tint = Indigo400,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Gemini API Ключ",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Emerald400.copy(alpha = 0.16f))
+                                .border(1.dp, Emerald400.copy(alpha = 0.35f), CircleShape)
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = "Free",
+                                color = Emerald400,
+                                fontSize = 9.sp,
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Интеллектуальный помощник",
+                        color = Slate400,
+                        fontSize = 11.sp,
+                        fontFamily = ManropeFontFamily
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onClose,
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(34.dp)
                     .clip(CircleShape)
-                    .background(Indigo500.copy(alpha = 0.15f))
-                    .border(1.dp, Indigo500.copy(alpha = 0.3f), CircleShape),
-                contentAlignment = Alignment.Center
+                    .background(ObsidianSurface)
+                    .border(1.dp, GlassBorder, CircleShape)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Star,
-                    contentDescription = "ИИ-Помощник",
-                    tint = Indigo500,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "Gemini API Ключ",
-                        color = Color.White,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(Emerald400.copy(alpha = 0.2f))
-                            .border(1.dp, Emerald400.copy(alpha = 0.3f), CircleShape)
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text("Free", color = Emerald400, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold)
-                    }
-                }
-                Text(
-                    text = "Интеллектуальный помощник",
-                    color = Slate400,
-                    fontSize = 11.sp
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
+                    tint = Slate400,
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -1216,25 +1638,32 @@ private fun SettingsApiKeySubContent(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(DarkBg)
-                .border(1.dp, Slate800, RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(18.dp))
+                .background(ObsidianSurface)
+                .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
                 .padding(14.dp)
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Info, contentDescription = null, tint = Indigo500, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Info, contentDescription = null, tint = Indigo400, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Как бесплатно получить API ключ:", color = Indigo500, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Как бесплатно получить API ключ:",
+                        color = Indigo400,
+                        fontSize = 12.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     "1. Перейдите на aistudio.google.com/app/apikey\n" +
-                            "2. Войдите под своим Google-аккаунтом\n" +
-                            "3. Нажмите «Create API key»\n" +
-                            "4. Скопируйте ключ и вставьте ниже",
+                        "2. Войдите под своим Google-аккаунтом\n" +
+                        "3. Нажмите «Create API key»\n" +
+                        "4. Скопируйте ключ и вставьте ниже",
                     color = Slate400,
                     fontSize = 11.sp,
+                    fontFamily = ManropeFontFamily,
                     lineHeight = 16.sp
                 )
 
@@ -1248,17 +1677,31 @@ private fun SettingsApiKeySubContent(
                         } catch (_: Exception) {}
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Indigo500),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().height(36.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(38.dp)
                 ) {
-                    Text("Получить API ключ в Google AI Studio ↗", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Получить API ключ в Google AI Studio ↗",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Text("ВАШ КЛЮЧ API", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = "ВАШ КЛЮЧ API",
+            color = Slate400,
+            fontSize = 10.sp,
+            fontFamily = SpaceGroteskFontFamily,
+            fontWeight = FontWeight.Bold
+        )
         Spacer(modifier = Modifier.height(4.dp))
         OutlinedTextField(
             value = apiKeyText,
@@ -1275,16 +1718,18 @@ private fun SettingsApiKeySubContent(
                     )
                 }
             },
-            modifier = Modifier.fillMaxWidth().testTag("api_key_input"),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("api_key_input"),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = DarkBg,
-                unfocusedContainerColor = DarkBg,
+                focusedContainerColor = ObsidianSurface,
+                unfocusedContainerColor = ObsidianSurface,
                 focusedBorderColor = Indigo500,
-                unfocusedBorderColor = Slate800,
+                unfocusedBorderColor = GlassBorder,
                 focusedTextColor = Color.White,
                 unfocusedTextColor = Color.White
             ),
-            shape = RoundedCornerShape(12.dp)
+            shape = RoundedCornerShape(14.dp)
         )
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -1292,16 +1737,28 @@ private fun SettingsApiKeySubContent(
         Button(
             onClick = {
                 onSave(apiKeyText)
-                Toast.makeText(context, if (apiKeyText.isNotBlank()) "API ключ сохранен" else "Ключ очищен", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    context,
+                    if (apiKeyText.isNotBlank()) "API ключ сохранен" else "Ключ очищен",
+                    Toast.LENGTH_SHORT
+                ).show()
             },
             colors = ButtonDefaults.buttonColors(containerColor = Emerald400),
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().height(44.dp)
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp)
         ) {
-            Text("Сохранить ключ", color = DarkBg, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text(
+                text = "Сохранить ключ",
+                color = DarkBg,
+                fontFamily = ManropeFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 13.sp
+            )
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(10.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End
@@ -1317,7 +1774,7 @@ private fun SettingsApiKeySubContent(
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Назад", color = Slate400, fontSize = 14.sp)
+                Text("Назад", color = Slate400, fontSize = 13.sp, fontFamily = ManropeFontFamily)
             }
         }
     }
@@ -1329,9 +1786,10 @@ private fun SettingsCategoryHeader(text: String) {
         text = text,
         color = Slate400,
         fontSize = 10.sp,
+        fontFamily = SpaceGroteskFontFamily,
         fontWeight = FontWeight.Bold,
-        letterSpacing = 1.sp,
-        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 2.dp)
+        letterSpacing = 1.1.sp,
+        modifier = Modifier.padding(start = 4.dp, top = 6.dp, bottom = 2.dp)
     )
 }
 
@@ -1352,16 +1810,16 @@ private fun SettingsItemCard(
             .settingsSharedBounds(screenKey)
             .fillMaxWidth()
             .testTag(testTag)
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(18.dp))
             .clickable { onClick() },
-        shape = RoundedCornerShape(16.dp),
-        color = Slate800.copy(alpha = 0.5f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+        shape = RoundedCornerShape(18.dp),
+        color = ObsidianSurface,
+        border = BorderStroke(1.dp, GlassBorder)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp),
+                .padding(horizontal = 14.dp, vertical = 13.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -1371,16 +1829,17 @@ private fun SettingsItemCard(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(iconTint.copy(alpha = 0.15f)),
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(iconTint.copy(alpha = 0.13f))
+                        .border(1.dp, iconTint.copy(alpha = 0.28f), RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = icon,
                         contentDescription = null,
                         tint = iconTint,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
 
@@ -1391,13 +1850,15 @@ private fun SettingsItemCard(
                         text = title,
                         color = Color.White,
                         fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = subtitle,
                         color = Slate400,
                         fontSize = 11.sp,
+                        fontFamily = ManropeFontFamily,
                         maxLines = 1,
                         lineHeight = 15.sp
                     )
@@ -1412,22 +1873,23 @@ private fun SettingsItemCard(
                 if (!badgeText.isNullOrBlank()) {
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(badgeColor.copy(alpha = 0.2f))
-                            .border(1.dp, badgeColor.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(badgeColor.copy(alpha = 0.16f))
+                            .border(1.dp, badgeColor.copy(alpha = 0.35f), RoundedCornerShape(50))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text(
                             text = badgeText,
                             color = badgeColor,
                             fontSize = 10.sp,
+                            fontFamily = SpaceGroteskFontFamily,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
 
                 Icon(
-                    imageVector = Icons.Default.ArrowForward,
+                    imageVector = Icons.Default.ChevronRight,
                     contentDescription = null,
                     tint = Slate400.copy(alpha = 0.7f),
                     modifier = Modifier.size(18.dp)
@@ -1450,36 +1912,73 @@ private fun SettingsPrivacySubContent(
         // Header
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Start,
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(ObsidianSurface)
+                        .border(1.dp, GlassBorder, CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Назад",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Indigo500.copy(alpha = 0.15f))
+                        .border(1.dp, Indigo500.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "Конфиденциальность",
+                        tint = Indigo400,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Column {
+                    Text(
+                        text = "Политика конфиденциальности",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Безопасность и обработка данных",
+                        color = Slate400,
+                        fontSize = 11.sp,
+                        fontFamily = ManropeFontFamily
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onClose,
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(34.dp)
                     .clip(CircleShape)
-                    .background(Indigo500.copy(alpha = 0.15f))
-                    .border(1.dp, Indigo500.copy(alpha = 0.3f), CircleShape),
-                contentAlignment = Alignment.Center
+                    .background(ObsidianSurface)
+                    .border(1.dp, GlassBorder, CircleShape)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Info,
-                    contentDescription = "Конфиденциальность",
-                    tint = Indigo500,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-                Text(
-                    text = "Политика конфиденциальности",
-                    color = Color.White,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Безопасность и обработка данных",
-                    color = Slate400,
-                    fontSize = 11.sp
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
+                    tint = Slate400,
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -1491,33 +1990,33 @@ private fun SettingsPrivacySubContent(
                 .fillMaxWidth()
                 .weight(1f, fill = false)
                 .heightIn(max = 350.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(DarkBg)
-                .border(1.dp, Slate800, RoundedCornerShape(16.dp))
-                .padding(14.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(ObsidianSurface)
+                .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
+                .padding(16.dp)
         ) {
             Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
+                modifier = Modifier.verticalScroll(rememberScrollState())
             ) {
                 Text(
                     text = "Сбор и хранение данных:\n" +
-                            "• Все финансовые записи, транзакции, категории, суммы, цели и настройки бюджета сохраняются исключительно локально в базе данных вашего устройства.\n" +
-                            "• Приложение не отправляет финансовую информацию на сервера разработчиков и не имеет общего сетевого хранилища.\n\n" +
-                            "Использование Gemini API (Google):\n" +
-                            "• Если вы указали API-ключ Gemini, данные сумм, категорий и описаний передаются в Google Gemini API напрямую со смартфона для анализа трат и формирования отчетов.\n" +
-                            "• Голосовой ввод передается в Gemini API для распознавания текста и распределения транзакций.\n" +
-                            "• Запросы отправляются со смартфона прямо на сервера Google, минуя промежуточные сервера разработчиков.\n\n" +
-                            "Контроль:\n" +
-                            "• Вы можете удалить свои данные или отозвать согласие в любой момент.",
+                        "• Все финансовые записи, транзакции, категории, суммы, цели и настройки бюджета сохраняются исключительно локально в базе данных вашего устройства.\n" +
+                        "• Приложение не отправляет финансовую информацию на сервера разработчиков и не имеет общего сетевого хранилища.\n\n" +
+                        "Использование Gemini API (Google):\n" +
+                        "• Если вы указали API-ключ Gemini, данные сумм, категорий и описаний передаются в Google Gemini API напрямую со смартфона для анализа трат и формирования отчетов.\n" +
+                        "• Голосовой ввод передается в Gemini API для распознавания текста и распределения транзакций.\n" +
+                        "• Запросы отправляются со смартфона прямо на сервера Google, минуя промежуточные сервера разработчиков.\n\n" +
+                        "Контроль:\n" +
+                        "• Вы можете удалить свои данные или отозвать согласие в любой момент.",
                     color = Slate400,
                     fontSize = 12.sp,
+                    fontFamily = ManropeFontFamily,
                     lineHeight = 18.sp
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1534,7 +2033,7 @@ private fun SettingsPrivacySubContent(
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Назад", color = Slate400, fontSize = 14.sp)
+                Text("Назад", color = Slate400, fontSize = 13.sp, fontFamily = ManropeFontFamily)
             }
         }
     }
@@ -1547,27 +2046,25 @@ fun AvatarCropDialog(
     onCropped: (android.graphics.Bitmap) -> Unit
 ) {
     var scale by remember { mutableStateOf(1f) }
-    var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
 
-    val density = androidx.compose.ui.platform.LocalDensity.current
+    val density = LocalDensity.current
     val containerSizeDp = 300.dp
     val viewportSizeDp = 240.dp
     val containerSizePx = with(density) { containerSizeDp.toPx() }
     val viewportSizePx = with(density) { viewportSizeDp.toPx() }
 
-    androidx.compose.ui.window.Dialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(
-            usePlatformDefaultWidth = false
-        )
+        properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        androidx.compose.material3.Surface(
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(24.dp)
-                .border(1.dp, Slate800, RoundedCornerShape(16.dp)),
-            color = Color(0xFF0B0F19),
-            shape = RoundedCornerShape(16.dp)
+                .border(1.dp, GlassBorder, RoundedCornerShape(24.dp)),
+            color = ObsidianElevated,
+            shape = RoundedCornerShape(24.dp)
         ) {
             Column(
                 modifier = Modifier
@@ -1583,13 +2080,14 @@ fun AvatarCropDialog(
                     Text(
                         text = "ОБРЕЗКА АВАТАРА",
                         color = Color.White,
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        fontFamily = SpaceGroteskFontFamily,
+                        letterSpacing = 1.sp
                     )
-                    androidx.compose.material3.IconButton(
+                    IconButton(
                         onClick = onDismiss,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
@@ -1600,17 +2098,17 @@ fun AvatarCropDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 Box(
                     modifier = Modifier
                         .size(containerSizeDp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF0F172A))
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(DarkBg)
                         .pointerInput(Unit) {
-                            detectTransformGestures { centroid, pan, zoom, rotation ->
+                            detectTransformGestures { _, pan, zoom, _ ->
                                 scale = (scale * zoom).coerceIn(1f, 4f)
-                                offset = androidx.compose.ui.geometry.Offset(
+                                offset = Offset(
                                     x = offset.x + pan.x,
                                     y = offset.y + pan.y
                                 )
@@ -1633,7 +2131,7 @@ fun AvatarCropDialog(
                         contentScale = ContentScale.Crop
                     )
 
-                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
                         val canvasWidth = size.width
                         val canvasHeight = size.height
                         val radius = viewportSizePx / 2f
@@ -1641,25 +2139,25 @@ fun AvatarCropDialog(
                         val centerY = canvasHeight / 2f
 
                         drawContext.canvas.nativeCanvas.saveLayer(null, null)
-                        
+
                         drawRect(color = Color.Black.copy(alpha = 0.75f))
 
                         drawCircle(
                             color = Color.Transparent,
                             radius = radius,
-                            center = androidx.compose.ui.geometry.Offset(centerX, centerY),
-                            blendMode = androidx.compose.ui.graphics.BlendMode.Clear
+                            center = Offset(centerX, centerY),
+                            blendMode = BlendMode.Clear
                         )
 
                         drawContext.canvas.nativeCanvas.restore()
 
                         drawCircle(
-                            brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                                colors = listOf(Emerald400, Indigo500, Rose500)
+                            brush = Brush.linearGradient(
+                                colors = listOf(Emerald400, Indigo500)
                             ),
                             radius = radius,
-                            center = androidx.compose.ui.geometry.Offset(centerX, centerY),
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5.dp.toPx())
+                            center = Offset(centerX, centerY),
+                            style = Stroke(width = 2.5.dp.toPx())
                         )
                     }
                 }
@@ -1668,7 +2166,9 @@ fun AvatarCropDialog(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Remove,
@@ -1678,16 +2178,18 @@ fun AvatarCropDialog(
                             .size(24.dp)
                             .clickable { scale = (scale - 0.15f).coerceAtLeast(1f) }
                     )
-                    androidx.compose.material3.Slider(
+                    Slider(
                         value = scale,
                         onValueChange = { scale = it },
                         valueRange = 1f..4f,
-                        colors = androidx.compose.material3.SliderDefaults.colors(
-                            activeTrackColor = Indigo500,
+                        colors = SliderDefaults.colors(
+                            activeTrackColor = Emerald400,
                             inactiveTrackColor = Slate800,
                             thumbColor = Emerald400
                         ),
-                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 12.dp)
                     )
                     Icon(
                         imageVector = Icons.Default.Add,
@@ -1701,32 +2203,38 @@ fun AvatarCropDialog(
 
                 Text(
                     text = "Используйте жест сведения пальцев или слайдер для масштабирования",
-                    color = Slate600,
-                    fontSize = 10.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    color = Slate400,
+                    fontSize = 11.sp,
+                    fontFamily = ManropeFontFamily,
+                    textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 8.dp)
                 )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    androidx.compose.material3.Button(
+                    Button(
                         onClick = onDismiss,
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                            containerColor = Color.Transparent
-                        ),
-                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = ObsidianSurface),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .border(1.dp, Slate800, RoundedCornerShape(8.dp))
+                            .height(46.dp)
+                            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
                     ) {
-                        Text("ОТМЕНА", color = Slate400, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Отмена",
+                            color = Slate400,
+                            fontSize = 13.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
 
-                    androidx.compose.material3.Button(
+                    Button(
                         onClick = {
                             val cropped = cropAvatar(
                                 source = bitmap,
@@ -1741,21 +2249,19 @@ fun AvatarCropDialog(
                                 onDismiss()
                             }
                         },
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                            containerColor = Indigo500
-                        ),
-                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Emerald400),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .border(
-                                width = 1.dp,
-                                brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                                    colors = listOf(Emerald400, Indigo500, Rose500)
-                                ),
-                                shape = RoundedCornerShape(8.dp)
-                            )
+                            .height(46.dp)
                     ) {
-                        Text("ПРИМЕНИТЬ", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Сохранить",
+                            color = DarkBg,
+                            fontSize = 13.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.ExtraBold
+                        )
                     }
                 }
             }
@@ -1766,44 +2272,48 @@ fun AvatarCropDialog(
 private fun cropAvatar(
     source: android.graphics.Bitmap,
     scale: Float,
-    offset: androidx.compose.ui.geometry.Offset,
+    offset: Offset,
     containerSizePx: Float,
     viewportSizePx: Float
 ): android.graphics.Bitmap? {
     return try {
         val resultSize = 512
-        val croppedBitmap = android.graphics.Bitmap.createBitmap(resultSize, resultSize, android.graphics.Bitmap.Config.ARGB_8888)
+        val croppedBitmap = android.graphics.Bitmap.createBitmap(
+            resultSize,
+            resultSize,
+            android.graphics.Bitmap.Config.ARGB_8888
+        )
         val canvas = android.graphics.Canvas(croppedBitmap)
-        
+
         canvas.drawColor(android.graphics.Color.TRANSPARENT)
-        
+
         val scaleX = containerSizePx / source.width.toFloat()
         val scaleY = containerSizePx / source.height.toFloat()
         val baseScale = maxOf(scaleX, scaleY)
-        
+
         val initialWidth = source.width * baseScale
         val initialHeight = source.height * baseScale
         val initialX = (containerSizePx - initialWidth) / 2f
         val initialY = (containerSizePx - initialHeight) / 2f
-        
+
         val viewportLeft = (containerSizePx - viewportSizePx) / 2f
         val viewportTop = (containerSizePx - viewportSizePx) / 2f
-        
+
         val matrix = android.graphics.Matrix()
-        
+
         matrix.postScale(baseScale, baseScale)
         matrix.postTranslate(initialX, initialY)
-        
+
         val viewportCenterX = containerSizePx / 2f
         val viewportCenterY = containerSizePx / 2f
         matrix.postScale(scale, scale, viewportCenterX, viewportCenterY)
-        
+
         matrix.postTranslate(offset.x, offset.y)
         matrix.postTranslate(-viewportLeft, -viewportTop)
-        
+
         val finalScale = resultSize.toFloat() / viewportSizePx
         matrix.postScale(finalScale, finalScale)
-        
+
         val paint = android.graphics.Paint().apply {
             isAntiAlias = true
             isFilterBitmap = true

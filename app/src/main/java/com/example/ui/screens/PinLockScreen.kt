@@ -10,6 +10,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,19 +33,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import kotlinx.coroutines.delay
-import com.example.data.SecurityManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -55,24 +52,32 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.SecurityManager
+import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.Indigo400
 import com.example.ui.theme.Indigo500
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.ObsidianElevated
+import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate600
-import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
-import com.example.ui.theme.Slate900
-import com.example.ui.theme.DarkBg
+import com.example.ui.theme.SpaceGroteskFontFamily
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -88,6 +93,7 @@ fun PinLockScreen(
     onForgotPinClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val securityManager = remember { SecurityManager(context) }
     var enteredPin by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -115,7 +121,9 @@ fun PinLockScreen(
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-                vibratorManager.defaultVibrator.vibrate(VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE))
+                vibratorManager.defaultVibrator.vibrate(
+                    VibrationEffect.createOneShot(150, VibrationEffect.DEFAULT_AMPLITUDE)
+                )
             } else {
                 @Suppress("DEPRECATION")
                 val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
@@ -131,6 +139,7 @@ fun PinLockScreen(
 
     fun onKeyPress(digit: String) {
         if (secondsRemaining > 0) return
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         if (enteredPin.length < 4) {
             val newPin = enteredPin + digit
             enteredPin = newPin
@@ -167,6 +176,7 @@ fun PinLockScreen(
 
     fun onBackspace() {
         if (secondsRemaining > 0) return
+        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         if (enteredPin.isNotEmpty()) {
             enteredPin = enteredPin.dropLast(1)
             errorMessage = null
@@ -185,35 +195,71 @@ fun PinLockScreen(
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
+        // Subtle Obsidian Vault Radial Ambient Glow
+        Box(
+            modifier = Modifier
+                .size(340.dp)
+                .align(Alignment.TopCenter)
+                .offset(y = 40.dp)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Emerald400.copy(alpha = 0.10f),
+                            Indigo500.copy(alpha = 0.05f),
+                            Color.Transparent
+                        )
+                    ),
+                    CircleShape
+                )
+        )
+
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.fillMaxWidth()
         ) {
-            // Header Icon
+            // Obsidian Vault Shield Icon
             Box(
                 modifier = Modifier
                     .size(72.dp)
-                    .clip(CircleShape)
-                    .background(Slate900)
-                    .border(2.dp, Emerald400.copy(alpha = 0.5f), CircleShape),
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(ObsidianSurface)
+                    .border(
+                        1.5.dp,
+                        Brush.linearGradient(
+                            colors = listOf(Emerald400.copy(alpha = 0.7f), Indigo500.copy(alpha = 0.5f))
+                        ),
+                        RoundedCornerShape(22.dp)
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Lock,
                     contentDescription = "Замок",
                     tint = Emerald400,
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(32.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "OBSIDIAN VAULT • ЗАЩИТА",
+                color = Emerald400,
+                fontSize = 10.sp,
+                fontFamily = SpaceGroteskFontFamily,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.4.sp
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
 
             Text(
                 text = title,
                 color = Color.White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold
+                fontSize = 23.sp,
+                fontFamily = ManropeFontFamily,
+                fontWeight = FontWeight.ExtraBold
             )
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -221,42 +267,53 @@ fun PinLockScreen(
             Text(
                 text = subtitle,
                 color = Slate400,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
+                fontFamily = ManropeFontFamily,
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
-            // PIN Dots Indicator with Shake Animation
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            // PIN Dots Indicator inside an Obsidian capsule with Shake Animation
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = ObsidianSurface,
+                border = BorderStroke(
+                    1.dp,
+                    if (errorMessage != null) Rose500.copy(alpha = 0.5f) else GlassBorder
+                ),
                 modifier = Modifier.offset { IntOffset(shakeOffsetX.value.roundToInt(), 0) }
             ) {
-                for (i in 0 until 4) {
-                    val isFilled = i < enteredPin.length
-                    val isError = errorMessage != null
-                    Box(
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clip(CircleShape)
-                            .background(
-                                when {
-                                    isError -> Rose500
-                                    isFilled -> Emerald400
-                                    else -> Slate900
-                                }
-                            )
-                            .border(
-                                1.5.dp,
-                                when {
-                                    isError -> Rose500
-                                    isFilled -> Emerald400
-                                    else -> Slate800
-                                },
-                                CircleShape
-                            )
-                    )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 26.dp, vertical = 14.dp)
+                ) {
+                    for (i in 0 until 4) {
+                        val isFilled = i < enteredPin.length
+                        val isError = errorMessage != null
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        isError -> Rose500
+                                        isFilled -> Emerald400
+                                        else -> DarkBg
+                                    }
+                                )
+                                .border(
+                                    1.5.dp,
+                                    when {
+                                        isError -> Rose500
+                                        isFilled -> Emerald400
+                                        else -> GlassBorder
+                                    },
+                                    CircleShape
+                                )
+                        )
+                    }
                 }
             }
 
@@ -267,7 +324,7 @@ fun PinLockScreen(
                 modifier = Modifier.height(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                androidx.compose.animation.AnimatedVisibility(
+                AnimatedVisibility(
                     visible = errorMessage != null,
                     enter = fadeIn(),
                     exit = fadeOut()
@@ -275,13 +332,14 @@ fun PinLockScreen(
                     Text(
                         text = errorMessage ?: "",
                         color = Rose500,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
+                        fontSize = 12.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Numeric Keypad
             Column(
@@ -296,7 +354,7 @@ fun PinLockScreen(
 
                 for (row in padRows) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(22.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         for (digit in row) {
@@ -311,30 +369,33 @@ fun PinLockScreen(
 
                 // Bottom row: Biometric / 0 / Backspace
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(22.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (isBiometricAvailable) {
                         Surface(
-                            onClick = onBiometricClick,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onBiometricClick()
+                            },
                             shape = CircleShape,
-                            color = Slate900,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Indigo500.copy(alpha = 0.4f)),
+                            color = Indigo500.copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.4f)),
                             modifier = Modifier
-                                .size(68.dp)
+                                .size(70.dp)
                                 .testTag("pin_key_biometric")
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.Face,
                                     contentDescription = "Отпечаток пальца",
-                                    tint = Indigo500,
-                                    modifier = Modifier.size(30.dp)
+                                    tint = Indigo400,
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
                         }
                     } else {
-                        Spacer(modifier = Modifier.size(68.dp))
+                        Spacer(modifier = Modifier.size(70.dp))
                     }
 
                     KeypadButton(
@@ -346,10 +407,10 @@ fun PinLockScreen(
                     Surface(
                         onClick = { onBackspace() },
                         shape = CircleShape,
-                        color = Slate900,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Slate800),
+                        color = ObsidianSurface,
+                        border = BorderStroke(1.dp, GlassBorder),
                         modifier = Modifier
-                            .size(68.dp)
+                            .size(70.dp)
                             .testTag("pin_key_backspace")
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -364,7 +425,7 @@ fun PinLockScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
             TextButton(
                 onClick = { showResetDialog = true },
@@ -374,7 +435,8 @@ fun PinLockScreen(
                     text = "Забыли ПИН-код?",
                     color = Slate400,
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
@@ -388,23 +450,33 @@ fun PinLockScreen(
                 resetInputText = ""
             }
         ) {
-            androidx.compose.material3.Surface(
+            Surface(
                 shape = RoundedCornerShape(24.dp),
-                color = Slate900,
-                border = androidx.compose.foundation.BorderStroke(1.dp, Slate800),
-                modifier = Modifier.fillMaxWidth().padding(16.dp)
+                color = ObsidianElevated,
+                border = BorderStroke(1.dp, GlassBorder),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    Text("Сброс защиты приложения", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    
+                    Text(
+                        text = "Сброс защиты приложения",
+                        color = Color.White,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 19.sp
+                    )
+
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
                             text = "⚠️ Внимание: В целях защиты вашей конфиденциальности при сбросе ПИН-кода все данные операций, транзакций и бюджетов будут безвозвратно удалены.\n\nДля сброса ПИН-кода подтвердите личность с помощью биометрии/пароля устройства или введите слово «СБРОС».",
                             color = Slate400,
-                            fontSize = 13.sp
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
                         )
                         if (onForgotPinClick != null) {
                             OutlinedButton(
@@ -414,17 +486,24 @@ fun PinLockScreen(
                                     onForgotPinClick()
                                 },
                                 modifier = Modifier.fillMaxWidth(),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Indigo500),
-                                shape = RoundedCornerShape(12.dp)
+                                border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(14.dp)
                             ) {
-                                Icon(Icons.Default.Face, contentDescription = null, tint = Indigo500)
+                                Icon(Icons.Default.Face, contentDescription = null, tint = Indigo400)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Подтвердить через устройство", color = Indigo500, fontSize = 13.sp)
+                                Text(
+                                    text = "Подтвердить через устройство",
+                                    color = Indigo400,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
                             }
                             Text(
                                 text = "Или введите «СБРОС» для ручного сброса:",
                                 color = Slate400,
                                 fontSize = 12.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.Medium
                             )
                         } else {
@@ -432,6 +511,7 @@ fun PinLockScreen(
                                 text = "Для подтверждения ручного сброса введите «СБРОС»:",
                                 color = Slate400,
                                 fontSize = 12.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.Medium
                             )
                         }
@@ -441,12 +521,14 @@ fun PinLockScreen(
                             placeholder = { Text("СБРОС", color = Slate600) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = ObsidianSurface,
+                                unfocusedContainerColor = ObsidianSurface,
                                 focusedBorderColor = Rose500,
-                                unfocusedBorderColor = Slate700,
+                                unfocusedBorderColor = GlassBorder,
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White
                             ),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -456,11 +538,13 @@ fun PinLockScreen(
                         horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(onClick = {
-                            showResetDialog = false
-                            resetInputText = ""
-                        }) {
-                            Text("Отмена", color = Slate400)
+                        TextButton(
+                            onClick = {
+                                showResetDialog = false
+                                resetInputText = ""
+                            }
+                        ) {
+                            Text("Отмена", color = Slate400, fontFamily = ManropeFontFamily)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
@@ -474,9 +558,14 @@ fun PinLockScreen(
                                 containerColor = Rose500,
                                 disabledContainerColor = Slate800
                             ),
-                            shape = RoundedCornerShape(12.dp)
+                            shape = RoundedCornerShape(14.dp)
                         ) {
-                            Text("Сбросить защиту", color = Color.White)
+                            Text(
+                                text = "Сбросить защиту",
+                                color = Color.White,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -494,16 +583,17 @@ private fun KeypadButton(
     Surface(
         onClick = onClick,
         shape = CircleShape,
-        color = Slate900,
-        border = androidx.compose.foundation.BorderStroke(1.dp, Slate800),
-        modifier = modifier.size(68.dp)
+        color = ObsidianSurface,
+        border = BorderStroke(1.dp, GlassBorder),
+        modifier = modifier.size(70.dp)
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = text,
                 color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.SemiBold
+                fontSize = 25.sp,
+                fontFamily = SpaceGroteskFontFamily,
+                fontWeight = FontWeight.Bold
             )
         }
     }

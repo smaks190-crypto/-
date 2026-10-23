@@ -1,15 +1,21 @@
 package com.example.ui.screens
 
-import android.content.Context
+import android.graphics.BitmapFactory
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
@@ -18,98 +24,114 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import com.example.ui.components.capitalizeFirstLetter
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.ui.platform.LocalContext
-import com.example.ui.theme.Slate600
-import com.example.ui.theme.Slate700
-import com.example.ui.theme.Indigo500
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.example.data.db.BudgetProfileEntity
-import com.example.ui.components.SwipeToRevealBox
 import com.example.ui.components.SwipeDirection
+import com.example.ui.components.SwipeToRevealBox
+import com.example.ui.components.SwipeToRevealController
+import com.example.ui.components.capitalizeFirstLetter
+import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.GlassHighlight
+import com.example.ui.theme.Indigo400
 import com.example.ui.theme.Indigo500
-import com.example.ui.theme.Indigo500
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.NeonEmerald
+import com.example.ui.theme.ObsidianElevated
+import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.Rose500
-import com.example.ui.theme.Rose500
-import com.example.ui.theme.Slate100
-import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
+import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
-import com.example.ui.theme.DarkBg
+import com.example.ui.theme.SpaceGroteskFontFamily
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun BudgetSelectionScreen(
@@ -136,14 +158,24 @@ fun BudgetSelectionScreen(
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
     var animatingOutId by remember { mutableStateOf<String?>(null) }
 
-    // Delayed deletion handler
+    BackHandler(enabled = isCreatingNew || editingProfileId != null) {
+        if (isCreatingNew) {
+            isCreatingNew = false
+            newBudgetNameText = ""
+        }
+        if (editingProfileId != null) {
+            editingProfileId = null
+        }
+    }
+
+    // Delayed deletion handler (3.5s undo window)
     LaunchedEffect(pendingDeleteId) {
         val idToDelete = pendingDeleteId
         if (idToDelete != null) {
-            delay(3500L) // 3.5s window to allow user to tap "Вернуть"
+            delay(3500L)
             if (pendingDeleteId == idToDelete) {
                 animatingOutId = idToDelete
-                delay(300L) // smooth collapse & fadeOut
+                delay(300L)
                 onDeleteBudget(idToDelete)
                 animatingOutId = null
                 pendingDeleteId = null
@@ -151,14 +183,13 @@ fun BudgetSelectionScreen(
         }
     }
 
-    // Launchers for Importing (Opening JSON file)
     fun extractNameHint(uri: Uri): String? {
         var fileName: String? = null
         if (uri.scheme == "content") {
             try {
                 context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) {
-                        val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                         if (idx >= 0) {
                             fileName = cursor.getString(idx)
                         }
@@ -204,33 +235,30 @@ fun BudgetSelectionScreen(
         }
     }
 
-    val getContentLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            try {
-                val json = context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                    inputStream.bufferedReader().use { it.readText() }
-                }
-                if (!json.isNullOrBlank()) {
-                    val nameHint = extractNameHint(uri)
-                    onImportFromBackup(json, nameHint)
-                } else {
-                    Toast.makeText(context, "Выбранный файл пуст", Toast.LENGTH_SHORT).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(context, "Ошибка чтения файла: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val focusManager = LocalFocusManager.current
 
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .background(DarkBg)
+            .drawBehind {
+                // Деликатное неоновое свечение в верхней части экрана в стиле Obsidian Neo-Bank
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Emerald400.copy(alpha = 0.08f),
+                            Indigo500.copy(alpha = 0.04f),
+                            Color.Transparent
+                        ),
+                        center = Offset(size.width * 0.2f, 120f),
+                        radius = size.width * 0.85f
+                    ),
+                    center = Offset(size.width * 0.2f, 120f),
+                    radius = size.width * 0.85f
+                )
+            }
             .clickable(
-                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) {
                 focusManager.clearFocus()
@@ -240,34 +268,83 @@ fun BudgetSelectionScreen(
                 }
                 editingProfileId = null
                 confirmDeleteId = null
-                com.example.ui.components.SwipeToRevealController.requestCollapseAll()
+                SwipeToRevealController.requestCollapseAll()
             }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
-            // Header Title & Action Bar
+            // --- OBSIDIAN NEO-BANK TOP HEADER ---
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Профили бюджетов",
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    Text(
-                        text = "Выберите профиль или создайте новый",
-                        color = Slate400,
-                        fontSize = 12.sp
-                    )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(ObsidianSurface)
+                            .border(
+                                width = 1.dp,
+                                brush = Brush.linearGradient(
+                                    listOf(Emerald400.copy(alpha = 0.7f), Indigo500.copy(alpha = 0.4f))
+                                ),
+                                shape = RoundedCornerShape(14.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(text = "🐸", fontSize = 20.sp)
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "David Finance",
+                                color = Color.White,
+                                fontSize = 19.sp,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Emerald400.copy(alpha = 0.15f))
+                                    .border(0.5.dp, Emerald400.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "AI",
+                                    color = Emerald400,
+                                    fontSize = 10.sp,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Выберите пространство бюджета",
+                            color = Slate400,
+                            fontSize = 11.5.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
 
+                // Кнопки быстрых действий в шапке (Защита и Импорт из копии)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -275,26 +352,29 @@ fun BudgetSelectionScreen(
                     if (onOpenSecurityModal != null) {
                         Surface(
                             onClick = { onOpenSecurityModal() },
-                            shape = RoundedCornerShape(12.dp),
-                            color = Slate900,
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Emerald400.copy(alpha = 0.5f)),
-                            modifier = Modifier.testTag("open_security_button")
+                            shape = RoundedCornerShape(14.dp),
+                            color = ObsidianSurface,
+                            border = BorderStroke(1.dp, GlassBorder),
+                            modifier = Modifier
+                                .height(38.dp)
+                                .testTag("open_security_button")
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                modifier = Modifier.padding(horizontal = 11.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Lock,
                                     contentDescription = "Защита",
                                     tint = Emerald400,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
                                 Text(
                                     text = "Защита",
-                                    color = Emerald400,
-                                    fontSize = 12.sp,
+                                    color = Color.White,
+                                    fontSize = 11.5.sp,
+                                    fontFamily = ManropeFontFamily,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -309,26 +389,29 @@ fun BudgetSelectionScreen(
                                 Toast.makeText(context, "Не удалось открыть проводник: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        shape = RoundedCornerShape(12.dp),
-                        color = Slate900,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Indigo500.copy(alpha = 0.5f)),
-                        modifier = Modifier.testTag("import_copy_button")
+                        shape = RoundedCornerShape(14.dp),
+                        color = ObsidianSurface,
+                        border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.45f)),
+                        modifier = Modifier
+                            .height(38.dp)
+                            .testTag("import_copy_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 11.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Add,
+                                imageVector = Icons.Default.FileOpen,
                                 contentDescription = "Из копии",
-                                tint = Indigo500,
-                                modifier = Modifier.size(16.dp)
+                                tint = Indigo400,
+                                modifier = Modifier.size(15.dp)
                             )
                             Text(
-                                text = "Из копии",
-                                color = Indigo500,
-                                fontSize = 12.sp,
+                                text = "Импорт",
+                                color = Indigo400,
+                                fontSize = 11.5.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -336,7 +419,35 @@ fun BudgetSelectionScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Информационная плашка-подсказка со счетчиком профилей
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "ВАШИ БЮДЖЕТЫ (${profiles.size})",
+                    color = Slate400,
+                    fontSize = 10.5.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                if (profiles.isNotEmpty()) {
+                    Text(
+                        text = "← свайп для бэкапа и правки →",
+                        color = Slate400.copy(alpha = 0.65f),
+                        fontSize = 10.5.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             if (profiles.isEmpty() && !isCreatingNew) {
                 Box(
@@ -345,43 +456,50 @@ fun BudgetSelectionScreen(
                         .weight(1f),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("У вас пока нет сохраненных профилей", color = Slate400, fontSize = 14.sp)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(ObsidianSurface)
+                            .border(1.dp, GlassBorder, RoundedCornerShape(28.dp))
+                            .padding(horizontal = 24.dp, vertical = 36.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(CircleShape)
+                                .background(Emerald400.copy(alpha = 0.12f))
+                                .border(1.dp, Emerald400.copy(alpha = 0.35f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = "🐸", fontSize = 30.sp)
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = "Нет активных бюджетов",
+                            color = Color.White,
+                            fontSize = 17.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Bold
+                        )
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text("Нажмите + внизу справа, чтобы создать профиль", color = Slate400.copy(alpha = 0.6f), fontSize = 12.sp)
+                        Text(
+                            text = "Создайте личный, семейный или проектный бюджет внизу экрана либо восстановите данные из резервной копии.",
+                            color = Slate400,
+                            fontSize = 12.5.sp,
+                            fontFamily = ManropeFontFamily,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 18.sp
+                        )
                     }
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(bottom = 110.dp)
                 ) {
-                    if (isCreatingNew) {
-                        item(key = "inline_create_budget") {
-                            AnimatedVisibility(
-                                visible = isCreatingNew,
-                                enter = fadeIn(tween(300)) + expandVertically(tween(300)),
-                                exit = fadeOut(tween(300)) + shrinkVertically(tween(300))
-                            ) {
-                                InlineCreateBudgetCard(
-                                    value = newBudgetNameText,
-                                    onValueChange = { newBudgetNameText = it },
-                                    onCreate = {
-                                        if (newBudgetNameText.isNotBlank()) {
-                                            onCreateBudget(newBudgetNameText.trim())
-                                            isCreatingNew = false
-                                            newBudgetNameText = ""
-                                        }
-                                    },
-                                    onCancel = {
-                                        isCreatingNew = false
-                                        newBudgetNameText = ""
-                                    }
-                                )
-                            }
-                        }
-                    }
-
                     items(profiles, key = { it.id }) { profile ->
                         val isConfirmingDelete = confirmDeleteId == profile.id
                         val isPendingDelete = pendingDeleteId == profile.id
@@ -390,8 +508,8 @@ fun BudgetSelectionScreen(
 
                         AnimatedVisibility(
                             visible = !isAnimatingOut,
-                            enter = fadeIn(tween(300)) + expandVertically(tween(300)),
-                            exit = fadeOut(tween(300)) + shrinkVertically(tween(300))
+                            enter = fadeIn(tween(260)) + expandVertically(tween(260)),
+                            exit = fadeOut(tween(220)) + shrinkVertically(tween(220))
                         ) {
                             BudgetProfileCard(
                                 profile = profile,
@@ -454,29 +572,159 @@ fun BudgetSelectionScreen(
                             )
                         }
                     }
-
-                    item {
-                        Spacer(modifier = Modifier.height(80.dp))
-                    }
                 }
             }
         }
 
-        // FAB to add budget
-        FloatingActionButton(
-            onClick = {
-                isCreatingNew = true
-                newBudgetNameText = ""
-            },
-            containerColor = Emerald400,
-            contentColor = DarkBg,
-            shape = CircleShape,
+        // --- НИЖНЯЯ МОРФИНГ-КАПСУЛА СОЗДАНИЯ НОВОГО БЮДЖЕТА ---
+        Box(
             modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(24.dp)
-                .testTag("create_budget_fab")
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Создать профиль")
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .shadow(
+                        elevation = 20.dp,
+                        shape = RoundedCornerShape(if (isCreatingNew) 26.dp else 30.dp),
+                        ambientColor = Emerald400,
+                        spotColor = Emerald400
+                    )
+                    .clip(RoundedCornerShape(if (isCreatingNew) 26.dp else 30.dp))
+                    .background(
+                        if (isCreatingNew) Slate900.copy(alpha = 0.98f)
+                        else ObsidianSurface.copy(alpha = 0.96f)
+                    )
+                    .border(
+                        width = 1.dp,
+                        brush = Brush.linearGradient(
+                            if (isCreatingNew) {
+                                listOf(Emerald400.copy(alpha = 0.65f), Indigo500.copy(alpha = 0.45f))
+                            } else {
+                                listOf(Emerald400.copy(alpha = 0.45f), GlassHighlight)
+                            }
+                        ),
+                        shape = RoundedCornerShape(if (isCreatingNew) 26.dp else 30.dp)
+                    )
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    )
+                    .animateContentSize(
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+            ) {
+                AnimatedContent(
+                    targetState = isCreatingNew,
+                    transitionSpec = {
+                        (fadeIn(tween(200)) togetherWith fadeOut(tween(150)))
+                            .using(
+                                SizeTransform(
+                                    clip = false,
+                                    sizeAnimationSpec = { _, _ ->
+                                        spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    }
+                                )
+                            )
+                    },
+                    label = "create_budget_morph"
+                ) { creating ->
+                    if (!creating) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(58.dp)
+                                .clickable {
+                                    isCreatingNew = true
+                                    newBudgetNameText = ""
+                                }
+                                .padding(horizontal = 16.dp)
+                                .testTag("create_budget_fab"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(Emerald400.copy(alpha = 0.16f))
+                                        .border(1.dp, Emerald400.copy(alpha = 0.4f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = null,
+                                        tint = Emerald400,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Создать новый бюджет",
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontFamily = ManropeFontFamily,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Личный, семейный или целевой профиль",
+                                        color = Slate400,
+                                        fontSize = 11.sp,
+                                        fontFamily = ManropeFontFamily
+                                    )
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .height(38.dp)
+                                    .width(46.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        Brush.linearGradient(listOf(NeonEmerald, Emerald400))
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Создать профиль",
+                                    tint = DarkBg,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        InlineCreateBudgetCard(
+                            value = newBudgetNameText,
+                            onValueChange = { newBudgetNameText = it },
+                            onCreate = {
+                                if (newBudgetNameText.isNotBlank()) {
+                                    onCreateBudget(newBudgetNameText.trim())
+                                    isCreatingNew = false
+                                    newBudgetNameText = ""
+                                }
+                            },
+                            onCancel = {
+                                isCreatingNew = false
+                                newBudgetNameText = ""
+                            }
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -490,6 +738,7 @@ fun InlineCreateBudgetCard(
 ) {
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val presets = listOf("Личный бюджет", "Семейный", "Бизнес / ИП", "Накопления", "Отпуск")
 
     LaunchedEffect(Unit) {
         delay(100)
@@ -497,86 +746,142 @@ fun InlineCreateBudgetCard(
         keyboardController?.show()
     }
 
-    Card(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .testTag("inline_create_budget_card"),
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = Slate900),
-        border = androidx.compose.foundation.BorderStroke(1.5.dp, Emerald400)
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .testTag("inline_create_budget_card")
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            Text(
+                text = "Новый профиль бюджета",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontFamily = ManropeFontFamily,
+                fontWeight = FontWeight.Bold
+            )
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Emerald400.copy(alpha = 0.2f))
-                    .border(1.dp, Emerald400.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Slate800)
+                    .border(1.dp, Slate700, CircleShape)
+                    .clickable(onClick = onCancel),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = null,
-                    tint = Emerald400,
-                    modifier = Modifier.size(22.dp)
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Отмена",
+                    tint = Slate400,
+                    modifier = Modifier.size(16.dp)
                 )
             }
+        }
 
-            OutlinedTextField(
-                value = value,
-                onValueChange = { onValueChange(it.capitalizeFirstLetter()) },
-                placeholder = { Text("Название профиля", color = Slate400, fontSize = 14.sp) },
-                singleLine = true,
-                modifier = Modifier
-                    .weight(1f)
-                    .focusRequester(focusRequester),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = DarkBg,
-                    unfocusedContainerColor = DarkBg,
-                    focusedBorderColor = Emerald400,
-                    unfocusedBorderColor = Slate800,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                shape = RoundedCornerShape(12.dp),
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences,
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Done
-                ),
-                keyboardActions = androidx.compose.foundation.text.KeyboardActions(
-                    onDone = { onCreate() }
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Быстрые шаблоны названий профилей в 1 тап
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            presets.forEach { preset ->
+                val isSelected = value.equals(preset, ignoreCase = true)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            if (isSelected) Emerald400.copy(alpha = 0.2f)
+                            else DarkBg
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isSelected) Emerald400 else Slate800,
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                        .clickable { onValueChange(preset) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = preset,
+                        color = if (isSelected) Emerald400 else Slate400,
+                        fontSize = 11.5.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        OutlinedTextField(
+            value = value,
+            onValueChange = { onValueChange(it.capitalizeFirstLetter()) },
+            placeholder = {
+                Text(
+                    text = "Например: Личный бюджет",
+                    color = Slate400,
+                    fontSize = 13.5.sp,
+                    fontFamily = ManropeFontFamily
                 )
+            },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = DarkBg,
+                unfocusedContainerColor = DarkBg,
+                focusedBorderColor = Emerald400,
+                unfocusedBorderColor = Slate800,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            shape = RoundedCornerShape(14.dp),
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+                imeAction = ImeAction.Done
+            ),
+            keyboardActions = KeyboardActions(
+                onDone = { onCreate() }
             )
+        )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                IconButton(
-                    onClick = onCreate,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "Сохранить",
-                        tint = Emerald400
-                    )
-                }
-                IconButton(
-                    onClick = onCancel,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Отмена",
-                        tint = Slate400
-                    )
-                }
-            }
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Button(
+            onClick = onCreate,
+            enabled = value.isNotBlank(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Emerald400,
+                contentColor = DarkBg,
+                disabledContainerColor = Slate800,
+                disabledContentColor = Slate400
+            ),
+            shape = CircleShape,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "Сохранить",
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "Создать и войти",
+                fontFamily = ManropeFontFamily,
+                fontWeight = FontWeight.ExtraBold,
+                fontSize = 14.sp
+            )
         }
     }
 }
@@ -598,6 +903,31 @@ fun BudgetProfileCard(
     onRename: () -> Unit,
     onExport: () -> Unit
 ) {
+    val context = LocalContext.current
+
+    val avatarBitmap = remember(profile.id) {
+        val file = File(context.filesDir, "avatar_${profile.id}.jpg")
+        if (file.exists()) {
+            try {
+                BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+    }
+
+    val initials = remember(profile.name) {
+        val clean = profile.name.trim().uppercase()
+        if (clean.isEmpty()) "Б"
+        else {
+            val parts = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
+            if (parts.size >= 2) "${parts[0].first()}${parts[1].first()}"
+            else "${parts[0].first()}"
+        }
+    }
+
     if (isEditingName) {
         val focusRequester = remember { FocusRequester() }
         val keyboardController = LocalSoftwareKeyboardController.current
@@ -620,32 +950,33 @@ fun BudgetProfileCard(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(24.dp))
                 .testTag("budget_rename_card"),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = androidx.compose.foundation.BorderStroke(1.5.dp, Emerald400)
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+            border = BorderStroke(1.5.dp, Emerald400)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(12.dp),
+                    .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Indigo500.copy(alpha = 0.2f))
-                        .border(1.dp, Indigo500.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Emerald400.copy(alpha = 0.16f))
+                        .border(1.dp, Emerald400.copy(alpha = 0.4f), RoundedCornerShape(14.dp)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null,
-                        tint = Indigo500,
-                        modifier = Modifier.size(22.dp)
+                    Text(
+                        text = initials,
+                        color = Emerald400,
+                        fontSize = 15.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.ExtraBold
                     )
                 }
 
@@ -669,34 +1000,42 @@ fun BudgetProfileCard(
                         unfocusedTextColor = Color.White
                     ),
                     shape = RoundedCornerShape(12.dp),
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Sentences,
-                        imeAction = androidx.compose.ui.text.input.ImeAction.Done
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Sentences,
+                        imeAction = ImeAction.Done
                     ),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                    keyboardActions = KeyboardActions(
                         onDone = { onSaveRename() }
                     )
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     IconButton(
                         onClick = onSaveRename,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Emerald400.copy(alpha = 0.15f))
                     ) {
                         Icon(
                             imageVector = Icons.Default.Check,
                             contentDescription = "Сохранить",
-                            tint = Emerald400
+                            tint = Emerald400,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                     IconButton(
                         onClick = onCancelRename,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(Slate800)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Отмена",
-                            tint = Slate400
+                            tint = Slate400,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -727,42 +1066,18 @@ fun BudgetProfileCard(
         targetValue = when {
             isPendingDelete -> Rose500.copy(alpha = 0.85f)
             isConfirmingDelete -> Rose500
-            else -> Slate900
+            else -> ObsidianSurface
         },
-        animationSpec = tween(durationMillis = 350),
+        animationSpec = tween(durationMillis = 300),
         label = "containerColor"
     )
     val borderColor by animateColorAsState(
         targetValue = when {
             isPendingDelete || isConfirmingDelete -> Rose500
-            else -> Slate800
+            else -> GlassHighlight
         },
-        animationSpec = tween(durationMillis = 350),
+        animationSpec = tween(durationMillis = 300),
         label = "borderColor"
-    )
-    val iconBgColor by animateColorAsState(
-        targetValue = when {
-            isPendingDelete || isConfirmingDelete -> Color.White.copy(alpha = 0.25f)
-            else -> Indigo500.copy(alpha = 0.2f)
-        },
-        animationSpec = tween(durationMillis = 350),
-        label = "iconBgColor"
-    )
-    val iconBorderColor by animateColorAsState(
-        targetValue = when {
-            isPendingDelete || isConfirmingDelete -> Color.White.copy(alpha = 0.4f)
-            else -> Indigo500.copy(alpha = 0.4f)
-        },
-        animationSpec = tween(durationMillis = 350),
-        label = "iconBorderColor"
-    )
-    val iconTint by animateColorAsState(
-        targetValue = when {
-            isPendingDelete || isConfirmingDelete -> Color.White
-            else -> Indigo500
-        },
-        animationSpec = tween(durationMillis = 350),
-        label = "iconTint"
     )
 
     SwipeToRevealBox(
@@ -771,12 +1086,12 @@ fun BudgetProfileCard(
         onDelete = if (isConfirmingDelete || isPendingDelete) null else onRequestDelete,
         swipeDirection = SwipeDirection.Both,
         resetSwipe = isConfirmingDelete || isPendingDelete,
-        shape = RoundedCornerShape(20.dp)
+        shape = RoundedCornerShape(24.dp)
     ) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(24.dp))
                 .drawBehind {
                     if (isPendingDelete) {
                         val progress = deleteProgress.value.coerceIn(0f, 1f)
@@ -784,14 +1099,14 @@ fun BudgetProfileCard(
                         if (redEndFraction >= 0.99f) {
                             drawRect(Rose500.copy(alpha = 0.85f))
                         } else if (redEndFraction <= 0.01f) {
-                            drawRect(Slate900)
+                            drawRect(ObsidianSurface)
                         } else {
                             val brush = Brush.horizontalGradient(
                                 colorStops = arrayOf(
                                     0f to Rose500.copy(alpha = 0.85f),
                                     redEndFraction to Rose500.copy(alpha = 0.85f),
-                                    (redEndFraction + 0.03f).coerceAtMost(1f) to Slate900,
-                                    1f to Slate900
+                                    (redEndFraction + 0.03f).coerceAtMost(1f) to ObsidianSurface,
+                                    1f to ObsidianSurface
                                 )
                             )
                             drawRect(brush = brush)
@@ -806,16 +1121,16 @@ fun BudgetProfileCard(
                         else -> "budget_profile_card"
                     }
                 ),
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(
                 containerColor = if (isPendingDelete) Color.Transparent else containerColor
             ),
-            border = androidx.compose.foundation.BorderStroke(1.dp, borderColor)
+            border = BorderStroke(1.dp, borderColor)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(horizontal = 16.dp, vertical = 15.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -823,18 +1138,36 @@ fun BudgetProfileCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
+                    // Аватар профиля (кастомное фото или стильная неоновая монограмма)
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(iconBgColor)
-                            .border(1.dp, iconBorderColor, RoundedCornerShape(14.dp))
-                            .then(
-                                if (isConfirmingDelete) {
-                                    Modifier.clickable { onClick() }
+                            .size(50.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                if (isPendingDelete || isConfirmingDelete) {
+                                    Brush.linearGradient(listOf(Color.White.copy(alpha = 0.25f), Color.White.copy(alpha = 0.15f)))
                                 } else {
-                                    Modifier
+                                    Brush.linearGradient(
+                                        listOf(
+                                            Emerald400.copy(alpha = 0.18f),
+                                            Indigo500.copy(alpha = 0.18f)
+                                        )
+                                    )
                                 }
+                            )
+                            .border(
+                                width = 1.dp,
+                                brush = if (isPendingDelete || isConfirmingDelete) {
+                                    Brush.linearGradient(listOf(Color.White.copy(alpha = 0.4f), Color.White.copy(alpha = 0.4f)))
+                                } else {
+                                    Brush.linearGradient(
+                                        listOf(
+                                            Emerald400.copy(alpha = 0.55f),
+                                            Indigo500.copy(alpha = 0.4f)
+                                        )
+                                    )
+                                },
+                                shape = RoundedCornerShape(16.dp)
                             ),
                         contentAlignment = Alignment.Center
                     ) {
@@ -845,20 +1178,35 @@ fun BudgetProfileCard(
                                 else -> "normal"
                             },
                             transitionSpec = {
-                                fadeIn(animationSpec = tween(250)) togetherWith fadeOut(animationSpec = tween(250))
+                                fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
                             },
                             label = "iconContent"
                         ) { state ->
-                            val icon = when (state) {
-                                "pending", "confirming" -> Icons.Default.Delete
-                                else -> Icons.Default.Person
+                            if (state == "pending" || state == "confirming") {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Удалить",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            } else if (avatarBitmap != null) {
+                                Image(
+                                    bitmap = avatarBitmap,
+                                    contentDescription = profile.name,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(16.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                            } else {
+                                Text(
+                                    text = initials,
+                                    color = Emerald400,
+                                    fontSize = 16.sp,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
                             }
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = if (state == "confirming") "Удалить" else null,
-                                tint = iconTint,
-                                modifier = Modifier.size(24.dp)
-                            )
                         }
                     }
 
@@ -871,7 +1219,7 @@ fun BudgetProfileCard(
                             else -> "normal"
                         },
                         transitionSpec = {
-                            fadeIn(animationSpec = tween(250)) togetherWith fadeOut(animationSpec = tween(250))
+                            fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
                         },
                         label = "textContent",
                         modifier = Modifier.weight(1f)
@@ -880,47 +1228,81 @@ fun BudgetProfileCard(
                             Text(
                                 text = "⚠️ Нажмите для подтверждения",
                                 color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         } else {
                             Column {
                                 val titleText = when (state) {
-                                    "pending" -> "Удалено"
+                                    "pending" -> "Профиль удаляется..."
                                     else -> profile.name
                                 }
                                 val subtitleText = when (state) {
                                     "pending" -> "Нажмите «Вернуть» для отмены"
-                                    else -> "Создан: $dateStr"
+                                    else -> "Создан $dateStr"
                                 }
 
                                 Text(
                                     text = titleText,
                                     color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.5.sp,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.ExtraBold,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = subtitleText,
-                                    color = if (state != "normal") Color.White.copy(alpha = 0.9f) else Slate400,
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (state == "normal") {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(6.dp)
+                                                .clip(CircleShape)
+                                                .background(Emerald400)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+                                    Text(
+                                        text = subtitleText,
+                                        color = if (state != "normal") Color.White.copy(alpha = 0.9f) else Slate400,
+                                        fontSize = 11.5.sp,
+                                        fontFamily = ManropeFontFamily,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
                 }
 
+                // Правая часть карточки: стрелка входа или кнопки отмены удаления
+                if (!isPendingDelete && !isConfirmingDelete) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(ObsidianElevated)
+                            .border(1.dp, GlassBorder, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Войти в бюджет",
+                            tint = Emerald400,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
                 AnimatedVisibility(
                     visible = isPendingDelete,
-                    enter = fadeIn(tween(250)) + expandHorizontally(),
-                    exit = fadeOut(tween(250)) + shrinkHorizontally()
+                    enter = fadeIn(tween(220)) + expandHorizontally(),
+                    exit = fadeOut(tween(220)) + shrinkHorizontally()
                 ) {
                     Button(
                         onClick = onUndoDelete,
@@ -943,6 +1325,7 @@ fun BudgetProfileCard(
                                 text = "Вернуть",
                                 color = Rose500,
                                 fontSize = 12.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -951,8 +1334,8 @@ fun BudgetProfileCard(
 
                 AnimatedVisibility(
                     visible = isConfirmingDelete && !isPendingDelete,
-                    enter = fadeIn(tween(250)) + expandHorizontally(),
-                    exit = fadeOut(tween(250)) + shrinkHorizontally()
+                    enter = fadeIn(tween(220)) + expandHorizontally(),
+                    exit = fadeOut(tween(220)) + shrinkHorizontally()
                 ) {
                     IconButton(
                         onClick = onCancelDelete,
@@ -969,4 +1352,3 @@ fun BudgetProfileCard(
         }
     }
 }
-

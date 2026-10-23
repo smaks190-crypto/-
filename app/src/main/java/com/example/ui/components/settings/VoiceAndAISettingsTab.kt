@@ -3,17 +3,53 @@ package com.example.ui.components.settings
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,7 +62,19 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.*
+import com.example.ui.theme.DarkBg
+import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.Indigo400
+import com.example.ui.theme.Indigo500
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.ObsidianSurface
+import com.example.ui.theme.Rose500
+import com.example.ui.theme.Slate200
+import com.example.ui.theme.Slate300
+import com.example.ui.theme.Slate400
+import com.example.ui.theme.Slate800
+import com.example.ui.theme.SpaceGroteskFontFamily
 
 @Composable
 fun VoiceAndAISettingsTab(
@@ -51,10 +99,10 @@ fun VoiceAndAISettingsTab(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Header
+        // Obsidian Sub-screen Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -68,13 +116,15 @@ fun VoiceAndAISettingsTab(
                     IconButton(
                         onClick = onBack,
                         modifier = Modifier
-                            .size(32.dp)
-                            .background(Slate800.copy(alpha = 0.6f), CircleShape)
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(ObsidianSurface)
+                            .border(1.dp, GlassBorder, CircleShape)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Назад",
-                            tint = Slate200,
+                            tint = Color.White,
                             modifier = Modifier.size(16.dp)
                         )
                     }
@@ -84,28 +134,30 @@ fun VoiceAndAISettingsTab(
                         .size(38.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Indigo500.copy(alpha = 0.15f))
-                        .border(1.dp, Indigo500.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                        .border(1.dp, Indigo500.copy(alpha = 0.35f), RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Mic,
                         contentDescription = null,
-                        tint = Indigo500,
+                        tint = Indigo400,
                         modifier = Modifier.size(20.dp)
                     )
                 }
                 Column {
                     Text(
                         text = "ГОЛОС И ИИ-ПОМОЩНИК",
-                        color = Slate400,
-                        fontSize = 11.sp,
+                        color = Indigo400,
+                        fontSize = 10.sp,
+                        fontFamily = SpaceGroteskFontFamily,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp
                     )
                     Text(
-                        text = "Gemini API, промпты и голосовой ассистент",
+                        text = "Gemini API, промпты и голос",
                         color = Color.White,
-                        fontSize = 15.sp,
+                        fontSize = 16.sp,
+                        fontFamily = ManropeFontFamily,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -115,8 +167,10 @@ fun VoiceAndAISettingsTab(
                 IconButton(
                     onClick = onClose,
                     modifier = Modifier
-                        .size(32.dp)
-                        .background(Slate800.copy(alpha = 0.6f), CircleShape)
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(ObsidianSurface)
+                        .border(1.dp, GlassBorder, CircleShape)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -128,37 +182,40 @@ fun VoiceAndAISettingsTab(
             }
         }
 
-        Divider(color = Slate800, thickness = 1.dp)
+        HorizontalDivider(color = GlassBorder, thickness = 1.dp)
 
         // 1. Gemini API Key Section
         Text(
             text = "GEMINI API КЛЮЧ",
-            color = Indigo500,
-            fontSize = 11.sp,
+            color = Slate400,
+            fontSize = 10.sp,
+            fontFamily = SpaceGroteskFontFamily,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
         )
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+            border = BorderStroke(1.dp, GlassBorder)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
                     text = "Как бесплатно получить API ключ:",
-                    color = Indigo500,
+                    color = Indigo400,
                     fontSize = 12.sp,
+                    fontFamily = ManropeFontFamily,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "1. Перейдите на aistudio.google.com/app/apikey\n" +
-                            "2. Войдите в Google аккаунт\n" +
-                            "3. Нажмите «Create API key»",
+                        "2. Войдите в Google аккаунт\n" +
+                        "3. Нажмите «Create API key»",
                     color = Slate300,
                     fontSize = 11.sp,
+                    fontFamily = ManropeFontFamily,
                     lineHeight = 16.sp
                 )
                 Spacer(modifier = Modifier.height(10.dp))
@@ -168,14 +225,17 @@ fun VoiceAndAISettingsTab(
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/app/apikey"))
                         context.startActivity(intent)
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp),
+                    shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Indigo500)
                 ) {
                     Text(
                         text = "Получить API ключ в Google AI Studio ↗",
                         color = Color.White,
                         fontSize = 12.sp,
+                        fontFamily = ManropeFontFamily,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -185,6 +245,7 @@ fun VoiceAndAISettingsTab(
                     text = "ВАШ КЛЮЧ API",
                     color = Slate400,
                     fontSize = 10.sp,
+                    fontFamily = SpaceGroteskFontFamily,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(6.dp))
@@ -207,12 +268,12 @@ fun VoiceAndAISettingsTab(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("api_key_input"),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(14.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = DarkBg,
                         unfocusedContainerColor = DarkBg,
                         focusedBorderColor = Indigo500,
-                        unfocusedBorderColor = Slate800,
+                        unfocusedBorderColor = GlassBorder,
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White
                     ),
@@ -230,15 +291,18 @@ fun VoiceAndAISettingsTab(
                             Toast.LENGTH_SHORT
                         ).show()
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Emerald400)
                 ) {
                     Text(
                         text = "Сохранить API ключ",
                         color = DarkBg,
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.ExtraBold
                     )
                 }
             }
@@ -246,9 +310,10 @@ fun VoiceAndAISettingsTab(
 
         // 2. ИИ-Промпт и Роль Ассистента
         Text(
-            text = "РОЛЬ И ПРОМПТ ИИ-ПОМОЩНИКА",
-            color = Emerald400,
-            fontSize = 11.sp,
+            text = "РОЛЬ И ПРОМПТ ДАВИДА ЖАБОВА",
+            color = Slate400,
+            fontSize = 10.sp,
+            fontFamily = SpaceGroteskFontFamily,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
         )
@@ -256,10 +321,11 @@ fun VoiceAndAISettingsTab(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
                 .clickable { showPromptDropdown = !showPromptDropdown },
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+            border = BorderStroke(1.dp, GlassBorder)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Row(
@@ -273,9 +339,10 @@ fun VoiceAndAISettingsTab(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Emerald400.copy(alpha = 0.15f)),
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Emerald400.copy(alpha = 0.14f))
+                                .border(1.dp, Emerald400.copy(alpha = 0.28f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -290,12 +357,14 @@ fun VoiceAndAISettingsTab(
                                 text = "Характер и промпт ассистента",
                                 color = Color.White,
                                 fontSize = 14.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = selectedPromptMode,
                                 color = Emerald400,
                                 fontSize = 12.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -310,8 +379,8 @@ fun VoiceAndAISettingsTab(
 
                 if (showPromptDropdown) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Divider(color = Slate800, thickness = 1.dp)
-                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = GlassBorder, thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     val promptModes = listOf(
                         "Финансовый эксперт (Стандарт)",
@@ -320,26 +389,29 @@ fun VoiceAndAISettingsTab(
                         "Лаконичный формат (Короткие ответы)"
                     )
                     promptModes.forEach { mode ->
+                        val isSelected = mode == selectedPromptMode
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSelected) Emerald400.copy(alpha = 0.12f) else Color.Transparent)
                                 .clickable {
                                     selectedPromptMode = mode
                                     onPromptModeChange(mode)
                                     showPromptDropdown = false
                                 }
-                                .padding(vertical = 8.dp, horizontal = 10.dp),
+                                .padding(vertical = 9.dp, horizontal = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
                                 text = mode,
-                                color = if (mode == selectedPromptMode) Emerald400 else Slate200,
+                                color = if (isSelected) Emerald400 else Slate200,
                                 fontSize = 13.sp,
-                                fontWeight = if (mode == selectedPromptMode) FontWeight.Bold else FontWeight.Normal
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             )
-                            if (mode == selectedPromptMode) {
+                            if (isSelected) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = null,
@@ -353,20 +425,21 @@ fun VoiceAndAISettingsTab(
             }
         }
 
-        // 3. Голосовой ввода
+        // 3. Голосовой ввод
         Text(
             text = "ГОЛОСОВОЙ ВВОД ОПЕРАЦИЙ",
-            color = Rose500,
-            fontSize = 11.sp,
+            color = Slate400,
+            fontSize = 10.sp,
+            fontFamily = SpaceGroteskFontFamily,
             fontWeight = FontWeight.Bold,
             letterSpacing = 1.sp
         )
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+            border = BorderStroke(1.dp, GlassBorder)
         ) {
             Column(modifier = Modifier.padding(14.dp)) {
                 Row(
@@ -380,9 +453,10 @@ fun VoiceAndAISettingsTab(
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Rose500.copy(alpha = 0.15f)),
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Rose500.copy(alpha = 0.14f))
+                                .border(1.dp, Rose500.copy(alpha = 0.28f), RoundedCornerShape(12.dp)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -397,12 +471,14 @@ fun VoiceAndAISettingsTab(
                                 text = "Автораспределение речи",
                                 color = Color.White,
                                 fontSize = 14.sp,
+                                fontFamily = ManropeFontFamily,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = if (autoRecognizeVoice) "Распознавание и разделение включено" else "Отключено",
                                 color = Slate400,
-                                fontSize = 11.sp
+                                fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily
                             )
                         }
                     }
@@ -410,8 +486,8 @@ fun VoiceAndAISettingsTab(
                         checked = autoRecognizeVoice,
                         onCheckedChange = { autoRecognizeVoice = it },
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Indigo500,
+                            checkedThumbColor = DarkBg,
+                            checkedTrackColor = Emerald400,
                             uncheckedThumbColor = Slate400,
                             uncheckedTrackColor = Slate800
                         )
@@ -419,13 +495,14 @@ fun VoiceAndAISettingsTab(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-                Divider(color = Slate800, thickness = 1.dp)
+                HorizontalDivider(color = GlassBorder, thickness = 1.dp)
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
                     text = "Чувствительность микрофона",
                     color = Slate300,
                     fontSize = 12.sp,
+                    fontFamily = ManropeFontFamily,
                     fontWeight = FontWeight.SemiBold
                 )
                 Slider(
@@ -435,8 +512,8 @@ fun VoiceAndAISettingsTab(
                         onVoiceSensitivityChange(it)
                     },
                     colors = SliderDefaults.colors(
-                        thumbColor = Indigo500,
-                        activeTrackColor = Indigo500,
+                        thumbColor = Emerald400,
+                        activeTrackColor = Emerald400,
                         inactiveTrackColor = Slate800
                     )
                 )

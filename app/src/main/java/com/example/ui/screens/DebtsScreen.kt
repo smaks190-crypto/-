@@ -1,10 +1,15 @@
 package com.example.ui.screens
 
+import android.widget.Toast
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,18 +24,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import com.example.ui.components.capitalizeFirstLetter
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -47,6 +47,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -59,12 +60,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -75,13 +81,14 @@ import com.example.data.db.NotificationEntity
 import com.example.data.db.TransactionEntity
 import com.example.ui.components.RollingCurrencyText
 import com.example.ui.components.SwipeToDismissDialog
+import com.example.ui.components.capitalizeFirstLetter
 import com.example.ui.components.formatAmountTextFieldValue
-import com.example.ui.components.formatFullCurrency
 import com.example.ui.components.formatDayHeaderLabel
+import com.example.ui.components.formatFullCurrency
+import com.example.ui.components.formatShortCurrency
 import com.example.ui.components.parseAmountInput
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Emerald500
 import com.example.ui.theme.GlassBorder
 import com.example.ui.theme.GlassHighlight
 import com.example.ui.theme.Indigo400
@@ -93,9 +100,8 @@ import com.example.ui.theme.Rose400
 import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
-import com.example.ui.theme.Slate700
+import com.example.ui.theme.Slate500
 import com.example.ui.theme.Slate800
-import com.example.ui.theme.Slate900
 import com.example.ui.theme.SpaceGroteskFontFamily
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -113,8 +119,11 @@ fun DebtsScreen(
 ) {
     var showAddDebtModal by remember { mutableStateOf(false) }
     var selectedDebtForDetails by remember { mutableStateOf<AccountEntity?>(null) }
+    var selectedFilter by remember { mutableStateOf("all") } // "all", "we_owe", "owes_us"
 
     val focusManager = LocalFocusManager.current
+    val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
 
     // Compute remaining debt balance for each entity
     fun getDebtRemainingBalance(debt: AccountEntity): Double {
@@ -132,18 +141,28 @@ fun DebtsScreen(
         }
     }
 
+    val weOweList = remember(accounts) { accounts.filter { it.type != "owes_us" } }
+    val owesUsList = remember(accounts) { accounts.filter { it.type == "owes_us" } }
+
+    val filteredAccounts = remember(accounts, selectedFilter) {
+        when (selectedFilter) {
+            "we_owe" -> weOweList
+            "owes_us" -> owesUsList
+            else -> accounts
+        }
+    }
+
     // Calculate total summary of we_owe and owes_us debts
     val totalWeOwe = remember(accounts, transactions) {
-        accounts.filter { it.type != "owes_us" }.sumOf { getDebtRemainingBalance(it).coerceAtLeast(0.0) }
+        weOweList.sumOf { getDebtRemainingBalance(it).coerceAtLeast(0.0) }
     }
     val totalOwesUs = remember(accounts, transactions) {
-        accounts.filter { it.type == "owes_us" }.sumOf { getDebtRemainingBalance(it).coerceAtLeast(0.0) }
+        owesUsList.sumOf { getDebtRemainingBalance(it).coerceAtLeast(0.0) }
     }
 
     // Priority obligation for David's Smart Snowball strategy (smallest positive "we_owe" debt to close first)
     val nextSnowballDebt = remember(accounts, transactions) {
-        accounts
-            .filter { it.type != "owes_us" }
+        weOweList
             .map { it to getDebtRemainingBalance(it) }
             .filter { it.second > 0.0 }
             .minByOrNull { it.second }
@@ -159,7 +178,7 @@ fun DebtsScreen(
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // 1. OBSIDIAN NEO-BANK HEADER CARD
             Card(
@@ -202,7 +221,10 @@ fun DebtsScreen(
                         }
 
                         Button(
-                            onClick = { showAddDebtModal = true },
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                showAddDebtModal = true
+                            },
                             colors = ButtonDefaults.buttonColors(containerColor = Indigo500),
                             shape = RoundedCornerShape(14.dp),
                             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
@@ -236,7 +258,15 @@ fun DebtsScreen(
                                 .weight(1f)
                                 .clip(RoundedCornerShape(18.dp))
                                 .background(ObsidianElevated)
-                                .border(1.dp, Rose500.copy(alpha = 0.32f), RoundedCornerShape(18.dp))
+                                .border(
+                                    width = 1.dp,
+                                    color = if (selectedFilter == "we_owe") Rose500 else Rose500.copy(alpha = 0.32f),
+                                    shape = RoundedCornerShape(18.dp)
+                                )
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedFilter = if (selectedFilter == "we_owe") "all" else "we_owe"
+                                }
                                 .padding(14.dp)
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -283,7 +313,15 @@ fun DebtsScreen(
                                 .weight(1f)
                                 .clip(RoundedCornerShape(18.dp))
                                 .background(ObsidianElevated)
-                                .border(1.dp, Emerald400.copy(alpha = 0.32f), RoundedCornerShape(18.dp))
+                                .border(
+                                    width = 1.dp,
+                                    color = if (selectedFilter == "owes_us") Emerald400 else Emerald400.copy(alpha = 0.32f),
+                                    shape = RoundedCornerShape(18.dp)
+                                )
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedFilter = if (selectedFilter == "owes_us") "all" else "owes_us"
+                                }
                                 .padding(14.dp)
                         ) {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -356,8 +394,74 @@ fun DebtsScreen(
                 }
             }
 
+            // Segmented Filter Pills (when accounts exist)
+            if (accounts.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ObsidianSurface)
+                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val tabs = listOf(
+                        Triple("all", "Все", accounts.size),
+                        Triple("we_owe", "Я должен", weOweList.size),
+                        Triple("owes_us", "Мне должны", owesUsList.size)
+                    )
+                    tabs.forEach { (key, title, count) ->
+                        val isSelected = selectedFilter == key
+                        val tabAccent = when (key) {
+                            "we_owe" -> Rose500
+                            "owes_us" -> Emerald400
+                            else -> Indigo400
+                        }
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (isSelected) tabAccent.copy(alpha = 0.18f) else Color.Transparent
+                                )
+                                .border(
+                                    width = if (isSelected) 1.dp else 0.dp,
+                                    color = if (isSelected) tabAccent.copy(alpha = 0.45f) else Color.Transparent,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    selectedFilter = key
+                                }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Text(
+                                    text = title,
+                                    color = if (isSelected) Color.White else Slate400,
+                                    fontFamily = ManropeFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "$count",
+                                    color = if (isSelected) tabAccent else Slate500,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // 2. DEBTS LIST
-            if (accounts.isEmpty()) {
+            if (filteredAccounts.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -384,7 +488,7 @@ fun DebtsScreen(
                             )
                         }
                         Text(
-                            text = "Долгов и активных займов нет",
+                            text = if (accounts.isEmpty()) "Долгов и активных займов нет" else "В этой категории нет обязательств",
                             color = Color.White,
                             fontFamily = ManropeFontFamily,
                             fontSize = 15.sp,
@@ -404,13 +508,26 @@ fun DebtsScreen(
                     contentPadding = PaddingValues(bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(accounts, key = { it.id }) { debt ->
+                    items(filteredAccounts, key = { it.id }) { debt ->
                         val remaining = getDebtRemainingBalance(debt)
                         DebtCard(
                             debt = debt,
                             remainingBalance = remaining,
                             onDelete = { onDeleteDebt(debt.id) },
-                            onClick = { selectedDebtForDetails = debt }
+                            onClick = { selectedDebtForDetails = debt },
+                            onQuickRepay = { payAmount ->
+                                val isWeOwe = debt.type != "owes_us"
+                                val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                                val txType = if (isWeOwe) "expense" else "income"
+                                val subcat = if (isWeOwe) "Гашение: ${debt.name}" else "Возврат долга: ${debt.name}"
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onAddDebtTransaction(txType, today, "Долги", subcat, payAmount, debt.id)
+                                Toast.makeText(
+                                    context,
+                                    "🐸 Зафиксирован платеж ${formatFullCurrency(payAmount)} по «${debt.name}»",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
                         )
                     }
                 }
@@ -449,7 +566,8 @@ fun DebtCard(
     debt: AccountEntity,
     remainingBalance: Double,
     onDelete: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onQuickRepay: ((Double) -> Unit)? = null
 ) {
     val isWeOwe = debt.type != "owes_us"
     val accentColor = if (isWeOwe) Rose500 else Emerald400
@@ -462,6 +580,11 @@ fun DebtCard(
     val repaidFraction = if (debt.balance > 0.0) {
         (repaidAmount / safeInitial).toFloat().coerceIn(0f, 1f)
     } else if (safeRemaining <= 0.0) 1f else 0f
+    val animatedRepaidFraction by animateFloatAsState(
+        targetValue = repaidFraction,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "debt_repaid_fraction"
+    )
     val repaidPercent = (repaidFraction * 100f).roundToInt().coerceIn(0, 100)
 
     Card(
@@ -626,7 +749,7 @@ fun DebtCard(
                     )
                 }
 
-                // Repayment Progress Bar
+                // Glowing Repayment Progress Bar
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -636,13 +759,66 @@ fun DebtCard(
                 ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(repaidFraction)
+                            .fillMaxWidth(animatedRepaidFraction)
                             .height(6.dp)
+                            .shadow(
+                                elevation = 4.dp,
+                                shape = RoundedCornerShape(3.dp),
+                                ambientColor = accentColor,
+                                spotColor = accentColor
+                            )
                             .clip(RoundedCornerShape(3.dp))
                             .background(
                                 if (remainingBalance <= 0.0) Emerald400 else accentColor
                             )
                     )
+                }
+
+                // 1-Tap Quick Repayment Chips directly on active DebtCard
+                if (safeRemaining > 0.0 && onQuickRepay != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val quickOptions = remember(safeRemaining) {
+                            buildList {
+                                if (safeRemaining > 1000.0) add(1000.0 to "+1 000 ₽")
+                                if (safeRemaining > 5000.0) add(5000.0 to "+5 000 ₽")
+                                add(safeRemaining to "Закрыть 100% (${formatShortCurrency(safeRemaining)})")
+                            }
+                        }
+                        quickOptions.forEach { (amt, label) ->
+                            val isFullClose = amt >= safeRemaining
+                            Surface(
+                                modifier = Modifier
+                                    .weight(if (isFullClose) 1.4f else 1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { onQuickRepay(amt) },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isFullClose) Emerald400.copy(alpha = 0.14f) else DarkBg,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isFullClose) Emerald400.copy(alpha = 0.4f) else GlassBorder
+                                )
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(vertical = 6.dp, horizontal = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = label,
+                                        color = if (isFullClose) Emerald400 else Slate300,
+                                        fontFamily = SpaceGroteskFontFamily,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -661,184 +837,307 @@ fun AddDebtDialog(
 
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val accentColor = if (selectedType == "we_owe") Rose500 else Emerald400
+
+    val commentPresets = remember {
+        listOf("До зарплаты", "До конца месяца", "Кредитка / Грейс", "Без процентов")
+    }
 
     SwipeToDismissDialog(onDismissRequest = onDismiss) {
-        Card(
+        Surface(
             modifier = Modifier
-                .fillMaxWidth(0.92f)
-                .padding(16.dp),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = ObsidianSurface,
+            border = BorderStroke(
+                width = 1.dp,
+                brush = Brush.verticalGradient(listOf(GlassHighlight, GlassBorder))
+            )
         ) {
-            Column(
-                modifier = Modifier
-                    .padding(20.dp)
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { focusManager.clearFocus() })
-                    },
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Новое обязательство",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Закрыть", tint = Slate400)
-                    }
-                }
-
-                // Segmented Type Selector
-                Row(
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .background(DarkBg, RoundedCornerShape(12.dp))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .size(160.dp)
+                        .align(Alignment.TopEnd)
+                        .offset(x = 40.dp, y = (-40).dp)
+                        .background(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    accentColor.copy(alpha = 0.18f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+
+                Column(
+                    modifier = Modifier
+                        .padding(22.dp)
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = { focusManager.clearFocus() })
+                        },
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    val types = listOf(
-                        "we_owe" to "Я должен",
-                        "owes_us" to "Мне должны"
-                    )
-                    types.forEach { (typeKey, label) ->
-                        val isSelected = selectedType == typeKey
-                        val activeColor = if (typeKey == "we_owe") Rose500 else Emerald400
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) activeColor.copy(alpha = 0.2f) else Color.Transparent)
-                                .border(
-                                    width = if (isSelected) 1.dp else 0.dp,
-                                    color = if (isSelected) activeColor else Color.Transparent,
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                                .clickable { selectedType = typeKey }
-                                .padding(vertical = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
+                                .width(40.dp)
+                                .height(4.dp)
+                                .clip(CircleShape)
+                                .background(GlassHighlight)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
                             Text(
-                                text = label,
-                                color = if (isSelected) activeColor else Slate400,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
+                                text = "УЧЕТ ОБЯЗАТЕЛЬСТВ",
+                                color = accentColor,
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.2.sp
+                            )
+                            Text(
+                                text = "Новое обязательство",
+                                color = Color.White,
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                        IconButton(
+                            onClick = onDismiss,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(ObsidianElevated)
+                                .border(1.dp, GlassBorder, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Закрыть",
+                                tint = Slate400,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
-                }
 
-                // Name input
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Имя кредитора / дебитора", color = Slate400, fontSize = 11.sp)
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it.capitalizeFirstLetter() },
-                        placeholder = { Text("например: Иван, Сбербанк", color = Slate700) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Sentences,
-                            imeAction = ImeAction.Next
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = DarkBg,
-                            unfocusedContainerColor = DarkBg,
-                            focusedBorderColor = if (selectedType == "we_owe") Rose500 else Emerald400,
-                            unfocusedBorderColor = Slate800,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-
-                // Amount input
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Сумма долга (₽)", color = Slate400, fontSize = 11.sp)
-                    OutlinedTextField(
-                        value = amountText,
-                        onValueChange = { amountText = formatAmountTextFieldValue(amountText, it) },
-                        placeholder = { Text("0", color = Slate700) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            imeAction = ImeAction.Next
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = DarkBg,
-                            unfocusedContainerColor = DarkBg,
-                            focusedBorderColor = if (selectedType == "we_owe") Rose500 else Emerald400,
-                            unfocusedBorderColor = Slate800,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-
-                // Comment / Deadline input
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Срок / Комментарий", color = Slate400, fontSize = 11.sp)
-                    OutlinedTextField(
-                        value = comment,
-                        onValueChange = { comment = it.capitalizeFirstLetter() },
-                        placeholder = { Text("например: до конца декабря", color = Slate700) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Sentences,
-                            imeAction = ImeAction.Done
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = DarkBg,
-                            unfocusedContainerColor = DarkBg,
-                            focusedBorderColor = if (selectedType == "we_owe") Rose500 else Emerald400,
-                            unfocusedBorderColor = Slate800,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-
-                val isFormValid = name.isNotBlank() && parseAmountInput(amountText.text) > 0.0
-                val accentColor = if (selectedType == "we_owe") Rose500 else Emerald400
-
-                Button(
-                    onClick = {
-                        val amt = parseAmountInput(amountText.text)
-                        if (isFormValid) {
-                            keyboardController?.hide()
-                            onConfirm(name.trim(), amt, selectedType, comment.trim())
+                    // Segmented Type Selector
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(DarkBg, RoundedCornerShape(14.dp))
+                            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val types = listOf(
+                            "we_owe" to "Я должен",
+                            "owes_us" to "Мне должны"
+                        )
+                        types.forEach { (typeKey, label) ->
+                            val isSelected = selectedType == typeKey
+                            val activeColor = if (typeKey == "we_owe") Rose500 else Emerald400
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSelected) activeColor.copy(alpha = 0.2f) else Color.Transparent)
+                                    .border(
+                                        width = if (isSelected) 1.dp else 0.dp,
+                                        color = if (isSelected) activeColor else Color.Transparent,
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    .clickable { selectedType = typeKey }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    color = if (isSelected) Color.White else Slate400,
+                                    fontFamily = ManropeFontFamily,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
                         }
-                    },
-                    enabled = isFormValid,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .shadow(
-                            elevation = if (isFormValid) 10.dp else 0.dp,
-                            shape = RoundedCornerShape(12.dp),
-                            ambientColor = accentColor,
-                            spotColor = accentColor
-                        ),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = accentColor,
-                        disabledContainerColor = Slate800,
-                        contentColor = Color.White,
-                        disabledContentColor = Slate400
-                    )
-                ) {
-                    Text("Создать обязательство", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
+                    // Name input
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "ИМЯ КРЕДИТОРА / ДЕБИТОРА",
+                            color = Slate400,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                        OutlinedTextField(
+                            value = name,
+                            onValueChange = { name = it.capitalizeFirstLetter() },
+                            placeholder = { Text("например: Иван, Т-Банк", color = Slate500) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Sentences,
+                                imeAction = ImeAction.Next
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = DarkBg,
+                                unfocusedContainerColor = DarkBg,
+                                focusedBorderColor = accentColor,
+                                unfocusedBorderColor = GlassBorder,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                    }
+
+                    // Amount input
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "СУММА ДОЛГА (₽)",
+                            color = Slate400,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                        OutlinedTextField(
+                            value = amountText,
+                            onValueChange = { amountText = formatAmountTextFieldValue(amountText, it) },
+                            placeholder = { Text("0", color = Slate500) },
+                            suffix = {
+                                Text(
+                                    text = "₽",
+                                    color = accentColor,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Next
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = DarkBg,
+                                unfocusedContainerColor = DarkBg,
+                                focusedBorderColor = accentColor,
+                                unfocusedBorderColor = GlassBorder,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                    }
+
+                    // Comment / Deadline input + 1-Tap Presets
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "СРОК / КОММЕНТАРИЙ",
+                            color = Slate400,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            commentPresets.forEach { preset ->
+                                Surface(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { comment = preset },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = ObsidianElevated,
+                                    border = BorderStroke(1.dp, GlassBorder)
+                                ) {
+                                    Text(
+                                        text = preset,
+                                        color = Slate300,
+                                        fontFamily = ManropeFontFamily,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                    )
+                                }
+                            }
+                        }
+                        OutlinedTextField(
+                            value = comment,
+                            onValueChange = { comment = it.capitalizeFirstLetter() },
+                            placeholder = { Text("например: до конца декабря", color = Slate500) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.Sentences,
+                                imeAction = ImeAction.Done
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = DarkBg,
+                                unfocusedContainerColor = DarkBg,
+                                focusedBorderColor = accentColor,
+                                unfocusedBorderColor = GlassBorder,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                    }
+
+                    val isFormValid = name.isNotBlank() && parseAmountInput(amountText.text) > 0.0
+
+                    Button(
+                        onClick = {
+                            val amt = parseAmountInput(amountText.text)
+                            if (isFormValid) {
+                                keyboardController?.hide()
+                                onConfirm(name.trim(), amt, selectedType, comment.trim())
+                            }
+                        },
+                        enabled = isFormValid,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .shadow(
+                                elevation = if (isFormValid) 10.dp else 0.dp,
+                                shape = RoundedCornerShape(14.dp),
+                                ambientColor = accentColor,
+                                spotColor = accentColor
+                            ),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = accentColor,
+                            disabledContainerColor = ObsidianElevated,
+                            contentColor = if (selectedType == "owes_us") DarkBg else Color.White,
+                            disabledContentColor = Slate500
+                        )
+                    ) {
+                        Text(
+                            text = "Создать обязательство",
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp
+                        )
+                    }
                 }
             }
         }
@@ -857,25 +1156,26 @@ fun DebtDetailsDialog(
     val accentColor = if (isWeOwe) Rose500 else Emerald400
 
     var paymentAmountText by remember { mutableStateOf(TextFieldValue("")) }
-    var selectedOperationAction by remember { mutableStateOf(if (isWeOwe) "repay" else "they_repaid") } // "repay"/"borrow_more" or "they_repaid"/"lend_more"
+    var selectedOperationAction by remember { mutableStateOf(if (isWeOwe) "repay" else "they_repaid") }
 
     val keyboardController = LocalSoftwareKeyboardController.current
-
-    val dateFormat = remember { SimpleDateFormat("d MMMM yyyy, HH:mm", Locale("ru")) }
+    val safeRemaining = remainingBalance.coerceAtLeast(0.0)
 
     SwipeToDismissDialog(onDismissRequest = onDismiss) {
-        Card(
+        Surface(
             modifier = Modifier
-                .fillMaxWidth(0.95f)
-                .padding(16.dp),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Slate900),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = ObsidianSurface,
+            border = BorderStroke(
+                width = 1.dp,
+                brush = Brush.verticalGradient(listOf(GlassHighlight, GlassBorder))
+            )
         ) {
             Column(
-                modifier = Modifier
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // Header
                 Row(
@@ -883,35 +1183,62 @@ fun DebtDetailsDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(debt.name, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (isWeOwe) "Я должен: " + formatFullCurrency(remainingBalance.coerceAtLeast(0.0))
-                                   else "Мне должны: " + formatFullCurrency(remainingBalance.coerceAtLeast(0.0)),
+                            text = if (isWeOwe) "ДЕТАЛИ ДОЛГА • Я ДОЛЖЕН" else "ДЕТАЛИ ЗАЙМА • МНЕ ДОЛЖНЫ",
                             color = accentColor,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = debt.name,
+                            color = Color.White,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = "Остаток: " + formatFullCurrency(safeRemaining),
+                            color = accentColor,
+                            fontFamily = SpaceGroteskFontFamily,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
-                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                        Icon(imageVector = Icons.Default.Close, contentDescription = "Закрыть", tint = Slate400)
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(ObsidianElevated)
+                            .border(1.dp, GlassBorder, CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Закрыть",
+                            tint = Slate400,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
 
                 // Form: Register Transaction (Repayment / Adjustment)
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkBg),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = ObsidianElevated),
+                    border = BorderStroke(1.dp, GlassBorder)
                 ) {
                     Column(
                         modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Text(
                             text = "НОВАЯ ОПЕРАЦИЯ ПО ДОЛГУ",
                             color = Slate400,
+                            fontFamily = SpaceGroteskFontFamily,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.sp
@@ -921,68 +1248,86 @@ fun DebtDetailsDialog(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Slate900, RoundedCornerShape(8.dp))
-                                .padding(2.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .background(DarkBg, RoundedCornerShape(10.dp))
+                                .border(1.dp, GlassBorder, RoundedCornerShape(10.dp))
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            if (isWeOwe) {
-                                val actions = listOf(
+                            val actions = if (isWeOwe) {
+                                listOf(
                                     "repay" to "Погасить (Расход)",
                                     "borrow_more" to "Взять еще (Доход)"
                                 )
-                                actions.forEach { (actionKey, label) ->
-                                    val isSelected = selectedOperationAction == actionKey
-                                    val localColor = if (actionKey == "repay") Emerald400 else Rose500
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (isSelected) localColor.copy(alpha = 0.15f) else Color.Transparent)
-                                            .border(
-                                                width = if (isSelected) 1.dp else 0.dp,
-                                                color = if (isSelected) localColor else Color.Transparent,
-                                                shape = RoundedCornerShape(6.dp)
-                                            )
-                                            .clickable { selectedOperationAction = actionKey }
-                                            .padding(vertical = 8.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = label,
-                                            color = if (isSelected) localColor else Slate400,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
                             } else {
-                                val actions = listOf(
+                                listOf(
                                     "they_repaid" to "Вернули (Доход)",
                                     "lend_more" to "Дать еще (Расход)"
                                 )
-                                actions.forEach { (actionKey, label) ->
-                                    val isSelected = selectedOperationAction == actionKey
-                                    val localColor = if (actionKey == "they_repaid") Emerald400 else Rose500
-                                    Box(
+                            }
+                            actions.forEach { (actionKey, label) ->
+                                val isSelected = selectedOperationAction == actionKey
+                                val isPositiveReduction = actionKey == "repay" || actionKey == "they_repaid"
+                                val localColor = if (isPositiveReduction) Emerald400 else Rose500
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isSelected) localColor.copy(alpha = 0.16f) else Color.Transparent)
+                                        .border(
+                                            width = if (isSelected) 1.dp else 0.dp,
+                                            color = if (isSelected) localColor else Color.Transparent,
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable { selectedOperationAction = actionKey }
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = label,
+                                        color = if (isSelected) localColor else Slate400,
+                                        fontFamily = ManropeFontFamily,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+
+                        // Quick Percentage Fill Chips (25%, 50%, 100%)
+                        if (safeRemaining > 0.0) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(0.25 to "25%", 0.5 to "50%", 1.0 to "100% остатка").forEach { (fraction, label) ->
+                                    val calcAmt = kotlin.math.ceil(safeRemaining * fraction).toLong()
+                                    Surface(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(if (isSelected) localColor.copy(alpha = 0.15f) else Color.Transparent)
-                                            .border(
-                                                width = if (isSelected) 1.dp else 0.dp,
-                                                color = if (isSelected) localColor else Color.Transparent,
-                                                shape = RoundedCornerShape(6.dp)
-                                            )
-                                            .clickable { selectedOperationAction = actionKey }
-                                            .padding(vertical = 8.dp),
-                                        contentAlignment = Alignment.Center
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable {
+                                                val formatted = String.format(Locale.US, "%,d", calcAmt).replace(',', ' ')
+                                                paymentAmountText = TextFieldValue(
+                                                    text = formatted,
+                                                    selection = TextRange(formatted.length)
+                                                )
+                                            },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = DarkBg,
+                                        border = BorderStroke(1.dp, GlassBorder)
                                     ) {
-                                        Text(
-                                            text = label,
-                                            color = if (isSelected) localColor else Slate400,
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
+                                        Box(
+                                            modifier = Modifier.padding(vertical = 5.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = Emerald400,
+                                                fontFamily = SpaceGroteskFontFamily,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -997,7 +1342,7 @@ fun DebtDetailsDialog(
                             OutlinedTextField(
                                 value = paymentAmountText,
                                 onValueChange = { paymentAmountText = formatAmountTextFieldValue(paymentAmountText, it) },
-                                placeholder = { Text("Сумма в ₽", color = Slate700, fontSize = 12.sp) },
+                                placeholder = { Text("Сумма в ₽", color = Slate500, fontSize = 12.sp) },
                                 modifier = Modifier.weight(1f),
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(
@@ -1005,14 +1350,14 @@ fun DebtDetailsDialog(
                                     imeAction = ImeAction.Done
                                 ),
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedContainerColor = Slate900,
-                                    unfocusedContainerColor = Slate900,
+                                    focusedContainerColor = DarkBg,
+                                    unfocusedContainerColor = DarkBg,
                                     focusedBorderColor = accentColor,
-                                    unfocusedBorderColor = Slate800,
+                                    unfocusedBorderColor = GlassBorder,
                                     focusedTextColor = Color.White,
                                     unfocusedTextColor = Color.White
                                 ),
-                                shape = RoundedCornerShape(10.dp)
+                                shape = RoundedCornerShape(12.dp)
                             )
 
                             val enteredAmount = parseAmountInput(paymentAmountText.text)
@@ -1023,8 +1368,7 @@ fun DebtDetailsDialog(
                                     if (isAmtValid) {
                                         keyboardController?.hide()
                                         val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                                        
-                                        // Determine transaction type and subcategory text
+
                                         val (txType, subcat) = when (selectedOperationAction) {
                                             "repay" -> Pair("expense", "Гашение: ${debt.name}")
                                             "borrow_more" -> Pair("income", "Взял еще в долг: ${debt.name}")
@@ -1040,16 +1384,27 @@ fun DebtDetailsDialog(
                                 enabled = isAmtValid,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = accentColor,
-                                    disabledContainerColor = Slate800
+                                    disabledContainerColor = DarkBg
                                 ),
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
-                                    .height(48.dp)
+                                    .height(52.dp)
                                     .testTag("submit_debt_tx_button")
                             ) {
-                                Icon(imageVector = Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Внести", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Icon(
+                                    imageVector = Icons.Default.Payments,
+                                    contentDescription = null,
+                                    tint = if (isWeOwe) Color.White else DarkBg,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Внести",
+                                    color = if (isWeOwe) Color.White else DarkBg,
+                                    fontFamily = ManropeFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
                             }
                         }
                     }
@@ -1059,7 +1414,8 @@ fun DebtDetailsDialog(
                 Text(
                     text = "ИСТОРИЯ ПЛАТЕЖЕЙ И ИЗМЕНЕНИЙ",
                     color = Slate400,
-                    fontSize = 11.sp,
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp
                 )
@@ -1071,7 +1427,12 @@ fun DebtDetailsDialog(
                             .padding(vertical = 24.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Нет истории платежей по этому обязательству", color = Slate400, fontSize = 13.sp)
+                        Text(
+                            text = "Нет истории платежей по этому обязательству",
+                            color = Slate400,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 13.sp
+                        )
                     }
                 } else {
                     LazyColumn(
@@ -1082,10 +1443,6 @@ fun DebtDetailsDialog(
                     ) {
                         items(transactions) { tx ->
                             val isIncome = tx.type == "income"
-                            
-                            // Color representation: 
-                            // - If we owe: reducing it (expense) is positive outcome (Emerald), borrowing more (income) is negative outcome (Rose)
-                            // - If they owe us: paying back to us (income) is positive outcome (Emerald), lending more (expense) is negative (Rose)
                             val outcomeColor = if (isWeOwe) {
                                 if (tx.type == "expense") Emerald400 else Rose500
                             } else {
@@ -1094,9 +1451,9 @@ fun DebtDetailsDialog(
 
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = DarkBg),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+                                shape = RoundedCornerShape(14.dp),
+                                colors = CardDefaults.cardColors(containerColor = ObsidianElevated),
+                                border = BorderStroke(1.dp, GlassBorder)
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -1107,12 +1464,13 @@ fun DebtDetailsDialog(
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        modifier = Modifier.weight(1f)
                                     ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(28.dp)
-                                                .clip(CircleShape)
+                                                .size(30.dp)
+                                                .clip(RoundedCornerShape(9.dp))
                                                 .background(outcomeColor.copy(alpha = 0.15f)),
                                             contentAlignment = Alignment.Center
                                         ) {
@@ -1120,20 +1478,24 @@ fun DebtDetailsDialog(
                                                 imageVector = Icons.Default.History,
                                                 contentDescription = null,
                                                 tint = outcomeColor,
-                                                modifier = Modifier.size(14.dp)
+                                                modifier = Modifier.size(15.dp)
                                             )
                                         }
 
-                                        Column {
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = tx.subcategory.ifBlank { tx.category },
                                                 color = Color.White,
+                                                fontFamily = ManropeFontFamily,
                                                 fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                             Text(
                                                 text = formatDayHeaderLabel(tx.date),
                                                 color = Slate400,
+                                                fontFamily = ManropeFontFamily,
                                                 fontSize = 10.sp
                                             )
                                         }
@@ -1141,8 +1503,9 @@ fun DebtDetailsDialog(
 
                                     Text(
                                         text = (if (isIncome) "+ " else "- ") + formatFullCurrency(tx.amount),
-                                        color = if (isIncome) Emerald400 else Rose500,
-                                        fontSize = 12.sp,
+                                        color = outcomeColor,
+                                        fontFamily = SpaceGroteskFontFamily,
+                                        fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                 }

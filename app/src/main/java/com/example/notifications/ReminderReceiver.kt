@@ -3,7 +3,12 @@ package com.example.notifications
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -14,13 +19,19 @@ class ReminderReceiver : BroadcastReceiver() {
             }
         } else if (intent.action == ReminderManager.ACTION_DAILY_REMINDER) {
             val pendingResult = goAsync()
-            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            CoroutineScope(Dispatchers.IO).launch {
                 try {
-                    val todayIso = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+                    val todayIso = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                     val db = com.example.data.db.AppDatabase.getDatabase(context)
                     val expenseCount = db.transactionDao().getExpenseCountForDate(todayIso)
-                    if (expenseCount == 0) {
-                        ReminderManager.showNotification(context)
+                    val expenseSum = db.transactionDao().getExpenseSumForDate(todayIso)
+
+                    if (expenseCount == 0 || ReminderManager.isSmartSummaryEnabled(context)) {
+                        ReminderManager.showNotification(
+                            context = context,
+                            todayExpenseCount = expenseCount,
+                            todayExpenseSum = expenseSum
+                        )
                     }
                 } catch (_: Exception) {
                     ReminderManager.showNotification(context)

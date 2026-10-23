@@ -82,15 +82,74 @@ class SecurityManager(context: Context) {
     fun removePin() {
         prefs.edit()
             .remove(KEY_PIN_HASH)
+            .remove(KEY_GUEST_PIN_HASH)
             .putBoolean(KEY_PIN_ENABLED, false)
+            .putBoolean(KEY_GUEST_PIN_ENABLED, false)
+            .putBoolean(KEY_GUEST_SESSION_ACTIVE, false)
             .putBoolean(KEY_BIOMETRIC_ENABLED, false)
             .putInt(KEY_FAILED_ATTEMPTS, 0)
             .putLong(KEY_BLOCKED_UNTIL, 0L)
             .apply()
     }
 
+    // --- Guest / Decoy PIN support ---
+    fun isGuestPinEnabled(): Boolean {
+        return isPinEnabled() &&
+            prefs.getBoolean(KEY_GUEST_PIN_ENABLED, false) &&
+            getGuestPinHash().isNotEmpty()
+    }
+
+    fun setGuestPin(pin: String) {
+        val salt = generateSalt()
+        val hash = hashPinWithSalt(pin, salt)
+        prefs.edit()
+            .putString(KEY_GUEST_PIN_HASH, hash)
+            .putBoolean(KEY_GUEST_PIN_ENABLED, true)
+            .apply()
+    }
+
+    fun removeGuestPin() {
+        prefs.edit()
+            .remove(KEY_GUEST_PIN_HASH)
+            .putBoolean(KEY_GUEST_PIN_ENABLED, false)
+            .putBoolean(KEY_GUEST_SESSION_ACTIVE, false)
+            .apply()
+    }
+
+    fun isGuestSessionActive(): Boolean {
+        return prefs.getBoolean(KEY_GUEST_SESSION_ACTIVE, false)
+    }
+
+    fun setGuestSessionActive(active: Boolean) {
+        prefs.edit().putBoolean(KEY_GUEST_SESSION_ACTIVE, active).apply()
+    }
+
+    fun verifyGuestPin(pin: String): Boolean {
+        if (!isGuestPinEnabled()) return false
+        val storedGuestHash = getGuestPinHash()
+        return verifyHash(pin, storedGuestHash)
+    }
+
     fun verifyPin(pin: String): Boolean {
         val storedHash = getPinHash()
+        if (storedHash.isEmpty()) return false
+
+        // 1. Check primary PIN
+        if (verifyHash(pin, storedHash, upgradeLegacy = true)) {
+            setGuestSessionActive(false)
+            return true
+        }
+
+        // 2. Check Guest / Decoy PIN if enabled
+        if (verifyGuestPin(pin)) {
+            setGuestSessionActive(true)
+            return true
+        }
+
+        return false
+    }
+
+    private fun verifyHash(pin: String, storedHash: String, upgradeLegacy: Boolean = false): Boolean {
         if (storedHash.isEmpty()) return false
 
         // 1. Check if stored hash uses modern PBKDF2 format
@@ -104,7 +163,10 @@ class SecurityManager(context: Context) {
                     val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
                     val actualHashBytes = factory.generateSecret(spec).encoded
                     val actualHash = Base64.encodeToString(actualHashBytes, Base64.NO_WRAP)
-                    return MessageDigest.isEqual(expectedHash.toByteArray(Charsets.UTF_8), actualHash.toByteArray(Charsets.UTF_8))
+                    return MessageDigest.isEqual(
+                        expectedHash.toByteArray(Charsets.UTF_8),
+                        actualHash.toByteArray(Charsets.UTF_8)
+                    )
                 } catch (e: Exception) {
                     return false
                 }
@@ -113,9 +175,11 @@ class SecurityManager(context: Context) {
 
         // 2. Backward compatibility with legacy SHA-256
         val legacy = legacySha256(pin)
-        val matches = MessageDigest.isEqual(storedHash.toByteArray(Charsets.UTF_8), legacy.toByteArray(Charsets.UTF_8))
-        if (matches) {
-            // Automatically upgrade legacy hash to PBKDF2 with salt
+        val matches = MessageDigest.isEqual(
+            storedHash.toByteArray(Charsets.UTF_8),
+            legacy.toByteArray(Charsets.UTF_8)
+        )
+        if (matches && upgradeLegacy) {
             setPin(pin)
         }
         return matches
@@ -123,6 +187,10 @@ class SecurityManager(context: Context) {
 
     private fun getPinHash(): String {
         return prefs.getString(KEY_PIN_HASH, "") ?: ""
+    }
+
+    private fun getGuestPinHash(): String {
+        return prefs.getString(KEY_GUEST_PIN_HASH, "") ?: ""
     }
 
     fun isBiometricEnabled(): Boolean {
@@ -136,7 +204,7 @@ class SecurityManager(context: Context) {
     fun isBiometricHardwareAvailable(context: Context): Boolean {
         val biometricManager = BiometricManager.from(context)
         val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                BiometricManager.Authenticators.BIOMETRIC_WEAK
+            BiometricManager.Authenticators.BIOMETRIC_WEAK
         return biometricManager.canAuthenticate(authenticators) == BiometricManager.BIOMETRIC_SUCCESS
     }
 
@@ -182,7 +250,7 @@ class SecurityManager(context: Context) {
     fun handleFailedAttempt() {
         val currentAttempts = getFailedAttempts() + 1
         val editor = prefs.edit().putInt(KEY_FAILED_ATTEMPTS, currentAttempts)
-        
+
         if (currentAttempts >= 5) {
             val delayMs = when (currentAttempts) {
                 5 -> 30000L      // 30 seconds
@@ -204,6 +272,9 @@ class SecurityManager(context: Context) {
     companion object {
         private const val KEY_PIN_ENABLED = "key_pin_enabled"
         private const val KEY_PIN_HASH = "key_pin_hash"
+        private const val KEY_GUEST_PIN_ENABLED = "key_guest_pin_enabled"
+        private const val KEY_GUEST_PIN_HASH = "key_guest_pin_hash"
+        private const val KEY_GUEST_SESSION_ACTIVE = "key_guest_session_active"
         private const val KEY_BIOMETRIC_ENABLED = "key_biometric_enabled"
         private const val KEY_FAILED_ATTEMPTS = "key_failed_attempts"
         private const val KEY_BLOCKED_UNTIL = "key_blocked_until"

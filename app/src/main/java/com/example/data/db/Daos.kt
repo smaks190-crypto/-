@@ -44,6 +44,9 @@ interface TransactionDao {
     @Query("SELECT COUNT(*) FROM transactions WHERE date = :dateStr AND type = 'expense'")
     suspend fun getExpenseCountForDate(dateStr: String): Int
 
+    @Query("SELECT COALESCE(SUM(amount), 0.0) FROM transactions WHERE date = :dateStr AND type = 'expense'")
+    suspend fun getExpenseSumForDate(dateStr: String): Double
+
     @Query("SELECT COUNT(*) FROM transactions WHERE date = :dateStr AND type = 'expense'")
     fun getExpenseCountForDateSync(dateStr: String): Int
 
