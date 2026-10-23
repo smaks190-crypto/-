@@ -13,15 +13,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -44,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -51,6 +57,7 @@ import com.example.data.db.CategoryEntity
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.Indigo500
+import com.example.ui.theme.NeonEmerald
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
 import com.example.ui.theme.Slate700
@@ -61,12 +68,6 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import com.example.ui.theme.NeonEmerald
 
 @Composable
 fun VoiceManualInputPane(
@@ -80,7 +81,10 @@ fun VoiceManualInputPane(
 ) {
     var type by remember { mutableStateOf(initialType) }
     var date by remember {
-        mutableStateOf(if (selectedDate.isNotBlank()) selectedDate else SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()))
+        mutableStateOf(
+            if (selectedDate.isNotBlank()) selectedDate
+            else SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        )
     }
     var selectedCategory by remember {
         mutableStateOf(categories.filter { it.type == type }.firstOrNull()?.name ?: "")
@@ -96,11 +100,9 @@ fun VoiceManualInputPane(
     var isFlickerFinished by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        // Initial bright solid glow
         neonFlickerValue = 1f
         kotlinx.coroutines.delay(1300)
-        
-        // Realistic rapid burnout flicker sequence (like a failing neon tube from the video reference)
+
         val sequence = listOf(
             0.1f to 70L,
             0.9f to 90L,
@@ -114,15 +116,14 @@ fun VoiceManualInputPane(
             0.4f to 50L,
             0.0f to 200L
         )
-        
+
         for (step in sequence) {
             neonFlickerValue = step.first
             kotlinx.coroutines.delay(step.second)
         }
-        
+
         isFlickerFinished = true
-        
-        // Continuous background loop for occasional realistic micro-sparks/buzzing of the burnt neon!
+
         while (true) {
             kotlinx.coroutines.delay((3000..6500).random().toLong())
             val sparkSequence = listOf(
@@ -145,7 +146,6 @@ fun VoiceManualInputPane(
         if (trimmed.length >= 3) {
             kotlinx.coroutines.delay(600)
             if (subcategory.trim() == trimmed) {
-                // Only call remote AI suggestion if 0ms local semantic detector didn't already match
                 val instantMatch = detectCategoryAndTypeByTitle(trimmed, categories, type)
                 if (instantMatch == null) {
                     isAiSuggesting = true
@@ -172,299 +172,315 @@ fun VoiceManualInputPane(
         modifier = modifier
             .fillMaxWidth()
             .graphicsLayer { alpha = contentAlpha }
-            .padding(start = 16.dp, top = 12.dp, end = 0.dp, bottom = 12.dp)
+            .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(end = 16.dp)
+        // Header with title and ✕ close button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            Spacer(modifier = Modifier.size(34.dp))
+            Text(
+                text = "Добавить операцию",
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f)
+            )
             Box(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(Slate800.copy(alpha = 0.85f))
+                    .border(1.dp, Slate700, CircleShape)
+                    .clickable(onClick = onDismiss)
+                    .testTag("close_manual_add_button"),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "Добавить операцию",
-                    color = Color.White,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
+                    tint = Slate400,
+                    modifier = Modifier.size(18.dp)
                 )
             }
+        }
 
-            Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Top
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("КАТЕГОРИЯ", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(DarkBg)
-                                .border(1.dp, Slate800, RoundedCornerShape(12.dp))
-                                .clickable { dropdownExpanded = true }
-                                .padding(horizontal = 10.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f, fill = false)
-                                ) {
-                                    CategoryIconBadge(
-                                        categoryName = selectedCategory.ifEmpty { "Прочее" },
-                                        type = type,
-                                        size = 28.dp,
-                                        iconSize = 15.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = selectedCategory.ifEmpty { "Категория" },
-                                        color = if (selectedCategory.isNotEmpty()) Color.White else Slate400,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                                if (selectedCategory == aiSuggestedCategory && !aiSuggestedCategory.isNullOrBlank()) {
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .background(Indigo500.copy(alpha = 0.2f))
-                                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                                    ) {
-                                        Text("✨ АВТО", color = Indigo500, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
-                        }
-
-                        DropdownMenu(
-                            expanded = dropdownExpanded,
-                            onDismissRequest = { dropdownExpanded = false },
-                            modifier = Modifier.background(Slate900)
-                        ) {
-                            filteredCategories.forEach { cat ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            CategoryIconBadge(
-                                                categoryName = cat.name,
-                                                type = cat.type,
-                                                size = 24.dp,
-                                                iconSize = 13.dp
-                                            )
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(cat.name, color = Color.White)
-                                        }
-                                    },
-                                    onClick = {
-                                        selectedCategory = cat.name
-                                        userManuallySelectedCategory = true
-                                        dropdownExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Column {
-                    Text("ТИП", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    PlusMinusMorphToggle(
-                        type = type,
-                        onToggle = {
-                            val newType = if (type == "expense") "income" else "expense"
-                            type = newType
-                            userManuallySelectedCategory = false
-                            selectedCategory = categories.filter { it.type == newType }.firstOrNull()?.name ?: ""
-                            aiSuggestedCategory = null
-                        }
-                    )
-                }
-            }
-
-            if (filteredCategories.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(6.dp))
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(filteredCategories, key = { it.id }) { cat ->
-                        val isSelected = cat.name == selectedCategory
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = {
-                                selectedCategory = cat.name
-                                userManuallySelectedCategory = true
-                            },
-                            label = {
-                                Text(
-                                    text = cat.name,
-                                    fontSize = 11.sp,
-                                    maxLines = 1
-                                )
-                            },
-                            leadingIcon = {
-                                CategoryIconBadge(
-                                    categoryName = cat.name,
-                                    type = cat.type,
-                                    size = 18.dp,
-                                    iconSize = 11.dp
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Indigo500.copy(alpha = 0.25f),
-                                selectedLabelColor = NeonEmerald,
-                                containerColor = DarkBg,
-                                labelColor = Slate400
-                            )
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("ОПИСАНИЕ / НАЗВАНИЕ ОПЕРАЦИИ", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Indigo500.copy(alpha = 0.2f))
-                        .clickable {
-                            if (subcategory.isNotBlank() && !isAiSuggesting) {
-                                coroutineScope.launch {
-                                    isAiSuggesting = true
-                                    val catNames = categories.filter { it.type == type }.map { it.name }
-                                    val suggested = viewModel.suggestCategory(subcategory.trim(), type, catNames)
-                                    isAiSuggesting = false
-                                    if (suggested.isNotBlank()) {
-                                        aiSuggestedCategory = suggested
-                                        selectedCategory = suggested
-                                        userManuallySelectedCategory = true
-                                    }
-                                }
-                            }
-                        }
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Star,
-                        contentDescription = null,
-                        tint = Indigo500,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text("ИИ Категория", color = Indigo500, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            OutlinedTextField(
-                value = subcategory,
-                onValueChange = { newVal ->
-                    val cap = newVal.capitalizeFirstLetter()
-                    subcategory = cap
-                    if (!userManuallySelectedCategory) {
-                        val detected = detectCategoryAndTypeByTitle(cap, categories, type)
-                        if (detected != null) {
-                            val (detType, detCat) = detected
-                            if (detType != type) {
-                                type = detType
-                            }
-                            selectedCategory = detCat
-                            aiSuggestedCategory = detCat
-                        }
-                    }
-                },
-                placeholder = { Text("Например: Пятерочка, Такси, Зарплата", color = Slate400, fontSize = 12.sp) },
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("transaction_description_input"),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = DarkBg,
-                    unfocusedContainerColor = DarkBg,
-                    focusedBorderColor = Emerald400,
-                    unfocusedBorderColor = Slate800,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                shape = RoundedCornerShape(12.dp),
-                singleLine = true
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.Top
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("СУММА (₽)", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = amountText,
-                        onValueChange = { amountText = formatAmountTextFieldValue(amountText, it) },
-                        placeholder = { Text("0", color = Slate400, fontSize = 13.sp) },
-                        suffix = { Text("₽", color = Emerald400, fontWeight = FontWeight.Bold, fontSize = 13.sp) },
-                        singleLine = true,
-                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = Color.White),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("КАТЕГОРИЯ", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp)
-                            .testTag("transaction_amount_input"),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = DarkBg,
-                            unfocusedContainerColor = DarkBg,
-                            focusedBorderColor = Emerald400,
-                            unfocusedBorderColor = Slate800,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DarkBg)
+                            .border(1.dp, Slate800, RoundedCornerShape(12.dp))
+                            .clickable { dropdownExpanded = true }
+                            .padding(horizontal = 10.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
+                                CategoryIconBadge(
+                                    categoryName = selectedCategory.ifEmpty { "Прочее" },
+                                    type = type,
+                                    size = 28.dp,
+                                    iconSize = 15.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = selectedCategory.ifEmpty { "Категория" },
+                                    color = if (selectedCategory.isNotEmpty()) Color.White else Slate400,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            if (selectedCategory == aiSuggestedCategory && !aiSuggestedCategory.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Indigo500.copy(alpha = 0.2f))
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Text("✨ АВТО", color = Indigo500, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
 
-                Column {
-                    Text("ДАТА", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    CompactDatePickerField(
-                        value = date,
-                        onDateSelected = { date = it }
+                    DropdownMenu(
+                        expanded = dropdownExpanded,
+                        onDismissRequest = { dropdownExpanded = false },
+                        modifier = Modifier.background(Slate900)
+                    ) {
+                        filteredCategories.forEach { cat ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CategoryIconBadge(
+                                            categoryName = cat.name,
+                                            type = cat.type,
+                                            size = 24.dp,
+                                            iconSize = 13.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(cat.name, color = Color.White)
+                                    }
+                                },
+                                onClick = {
+                                    selectedCategory = cat.name
+                                    userManuallySelectedCategory = true
+                                    dropdownExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Column {
+                Text("ТИП", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                PlusMinusMorphToggle(
+                    type = type,
+                    onToggle = {
+                        val newType = if (type == "expense") "income" else "expense"
+                        type = newType
+                        userManuallySelectedCategory = false
+                        selectedCategory = categories.filter { it.type == newType }.firstOrNull()?.name ?: ""
+                        aiSuggestedCategory = null
+                    }
+                )
+            }
+        }
+
+        if (filteredCategories.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(filteredCategories, key = { it.id }) { cat ->
+                    val isSelected = cat.name == selectedCategory
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = {
+                            selectedCategory = cat.name
+                            userManuallySelectedCategory = true
+                        },
+                        label = {
+                            Text(
+                                text = cat.name,
+                                fontSize = 11.sp,
+                                maxLines = 1
+                            )
+                        },
+                        leadingIcon = {
+                            CategoryIconBadge(
+                                categoryName = cat.name,
+                                type = cat.type,
+                                size = 18.dp,
+                                iconSize = 11.dp
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Indigo500.copy(alpha = 0.25f),
+                            selectedLabelColor = NeonEmerald,
+                            containerColor = DarkBg,
+                            labelColor = Slate400
+                        )
                     )
                 }
             }
         }
 
-        // Validation logic for required fields
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("ОПИСАНИЕ / НАЗВАНИЕ ОПЕРАЦИИ", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Indigo500.copy(alpha = 0.2f))
+                    .clickable {
+                        if (subcategory.isNotBlank() && !isAiSuggesting) {
+                            coroutineScope.launch {
+                                isAiSuggesting = true
+                                val catNames = categories.filter { it.type == type }.map { it.name }
+                                val suggested = viewModel.suggestCategory(subcategory.trim(), type, catNames)
+                                isAiSuggesting = false
+                                if (suggested.isNotBlank()) {
+                                    aiSuggestedCategory = suggested
+                                    selectedCategory = suggested
+                                    userManuallySelectedCategory = true
+                                }
+                            }
+                        }
+                    }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = null,
+                    tint = Indigo500,
+                    modifier = Modifier.size(12.dp)
+                )
+                Spacer(modifier = Modifier.width(3.dp))
+                Text("ИИ Категория", color = Indigo500, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        OutlinedTextField(
+            value = subcategory,
+            onValueChange = { newVal ->
+                val cap = newVal.capitalizeFirstLetter()
+                subcategory = cap
+                if (!userManuallySelectedCategory) {
+                    val detected = detectCategoryAndTypeByTitle(cap, categories, type)
+                    if (detected != null) {
+                        val (detType, detCat) = detected
+                        if (detType != type) {
+                            type = detType
+                        }
+                        selectedCategory = detCat
+                        aiSuggestedCategory = detCat
+                    }
+                }
+            },
+            placeholder = { Text("Например: Пятерочка, Такси, Зарплата", color = Slate400, fontSize = 12.sp) },
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("transaction_description_input"),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = DarkBg,
+                unfocusedContainerColor = DarkBg,
+                focusedBorderColor = Emerald400,
+                unfocusedBorderColor = Slate800,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            shape = RoundedCornerShape(12.dp),
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("СУММА (₽)", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { amountText = formatAmountTextFieldValue(amountText, it) },
+                    placeholder = { Text("0", color = Slate400, fontSize = 13.sp) },
+                    suffix = { Text("₽", color = Emerald400, fontWeight = FontWeight.Bold, fontSize = 13.sp) },
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = Color.White),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("transaction_amount_input"),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = DarkBg,
+                        unfocusedContainerColor = DarkBg,
+                        focusedBorderColor = Emerald400,
+                        unfocusedBorderColor = Slate800,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+
+            Column {
+                Text("ДАТА", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                CompactDatePickerField(
+                    value = date,
+                    onDateSelected = { date = it }
+                )
+            }
+        }
+
         val parsedAmount = remember(amountText.text) { parseAmountInput(amountText.text) }
-        val isFormValid = parsedAmount > 0 && selectedCategory.trim().isNotBlank() && subcategory.trim().isNotBlank() && date.trim().isNotBlank()
+        val isFormValid = parsedAmount > 0 &&
+            selectedCategory.trim().isNotBlank() &&
+            subcategory.trim().isNotBlank() &&
+            date.trim().isNotBlank()
 
         val visualNeonLevel = if (isFormValid) 1f else neonFlickerValue
 
@@ -484,56 +500,46 @@ fun VoiceManualInputPane(
             visualNeonLevel
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        Row(
+        Button(
+            onClick = {
+                if (isFormValid) {
+                    viewModel.addTransaction(
+                        type = type,
+                        date = date,
+                        category = selectedCategory.ifEmpty { "Прочее" },
+                        subcategory = subcategory.trim(),
+                        amount = parsedAmount
+                    )
+                    onDismiss()
+                }
+            },
+            enabled = isFormValid,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = currentContainerColor,
+                contentColor = currentContentColor,
+                disabledContainerColor = currentContainerColor,
+                disabledContentColor = currentContentColor
+            ),
+            shape = CircleShape,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .height(52.dp)
+                .shadow(
+                    elevation = (visualNeonLevel * 14).dp,
+                    shape = CircleShape,
+                    ambientColor = Emerald400,
+                    spotColor = Emerald400
+                )
+                .border(
+                    width = 1.dp,
+                    color = currentBorderColor,
+                    shape = CircleShape
+                )
+                .testTag("save_transaction_button")
         ) {
-            Button(
-                onClick = {
-                    if (isFormValid) {
-                        viewModel.addTransaction(
-                            type = type,
-                            date = date,
-                            category = selectedCategory.ifEmpty { "Прочее" },
-                            subcategory = subcategory.trim(),
-                            amount = parsedAmount
-                        )
-                        onDismiss()
-                    }
-                },
-                enabled = isFormValid,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = currentContainerColor,
-                    contentColor = currentContentColor,
-                    disabledContainerColor = currentContainerColor,
-                    disabledContentColor = currentContentColor
-                ),
-                shape = CircleShape,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(56.dp)
-                    .shadow(
-                        elevation = (visualNeonLevel * 14).dp,
-                        shape = CircleShape,
-                        ambientColor = Emerald400,
-                        spotColor = Emerald400
-                    )
-                    .border(
-                        width = 1.dp,
-                        color = currentBorderColor,
-                        shape = CircleShape
-                    )
-                    .testTag("save_transaction_button")
-            ) {
-                Text("Сохранить", color = currentContentColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-            }
-
-            Spacer(modifier = Modifier.width(28.dp))
-            Spacer(modifier = Modifier.size(56.dp))
+            Text("Сохранить", color = currentContentColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
         }
     }
 }

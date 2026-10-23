@@ -81,7 +81,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
-import com.example.ui.components.VoiceRecordingOverlay
+import com.example.ui.components.MorphingBottomBar
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
@@ -948,7 +948,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 )
             }
 
-            // --- FLOATING OBSIDIAN BOTTOM NAVIGATION DOCK & UNIFIED VOICE/ADD FAB ---
+            // --- UNIFIED MORPHING BOTTOM BAR (NAV TABS + EMBEDDED '+' + MANUAL/VOICE MORPH) ---
             val parsedVoiceOperations by viewModel.parsedVoiceOperations.collectAsState()
             var isVoiceOverlayActive by remember { mutableStateOf(false) }
             val isVoicePipelineActive = isVoiceActive || isAnalyzingVoice || !parsedVoiceOperations.isNullOrEmpty() || showAddTxModal || isVoiceOverlayActive
@@ -956,118 +956,27 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             val isImeVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
             val isAnyModalOpen = showSettingsHubModal || showCategoriesModal || showAddGoalModal || showConsentDialog || showReportDialog
             val currentMainTab = mainPagerState.currentPage
-            val dockEndPadding by animateDpAsState(
-                targetValue = if (currentMainTab == 0) 84.dp else 16.dp,
-                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                label = "dock_end_padding"
-            )
-
-            // Floating Obsidian Glass Bottom Navigation Dock
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .navigationBarsPadding()
-                    .padding(start = 16.dp, end = dockEndPadding, bottom = 16.dp),
-                contentAlignment = Alignment.BottomStart
-            ) {
-                AnimatedVisibility(
-                    visible = selectedBudgetId != null && !isImeVisible && !isAnyModalOpen && !isVoicePipelineActive,
-                    enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.92f, animationSpec = tween(220)),
-                    exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.92f, animationSpec = tween(150))
-                ) {
-                    BoxWithConstraints(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .shadow(
-                                elevation = 20.dp,
-                                shape = CircleShape,
-                                ambientColor = Color.Black,
-                                spotColor = Color.Black
-                            )
-                            .clip(CircleShape)
-                            .background(com.example.ui.theme.ObsidianSurface.copy(alpha = 0.95f))
-                            .border(1.dp, com.example.ui.theme.GlassHighlight, CircleShape)
-                            .padding(4.dp)
-                    ) {
-                        val barWidth = maxWidth
-                        val tabCount = 4
-                        val tabWidth = barWidth / tabCount
-
-                        val animatedFraction by animateFloatAsState(
-                            targetValue = currentMainTab.toFloat(),
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                stiffness = Spring.StiffnessMedium
-                            ),
-                            label = "bottom_nav_pill"
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .width(tabWidth)
-                                .fillMaxHeight()
-                                .offset(x = tabWidth * animatedFraction)
-                                .background(Emerald400.copy(alpha = 0.15f), CircleShape)
-                                .border(1.dp, Emerald400.copy(alpha = 0.4f), CircleShape)
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            NavTabButton(
-                                text = "Период",
-                                icon = androidx.compose.material.icons.Icons.Default.GridView,
-                                isSelected = currentMainTab == 0,
-                                modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_period"),
-                                onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(0) } }
-                            )
-
-                            NavTabButton(
-                                text = "Долги",
-                                icon = androidx.compose.material.icons.Icons.Default.CreditCard,
-                                isSelected = currentMainTab == 1,
-                                modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_debts"),
-                                onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(1) } }
-                            )
-
-                            NavTabButton(
-                                text = "Цели",
-                                icon = androidx.compose.material.icons.Icons.Default.EmojiEvents,
-                                isSelected = currentMainTab == 2,
-                                modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_goals"),
-                                onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(2) } }
-                            )
-
-                            NavTabButton(
-                                text = "Отчет",
-                                icon = androidx.compose.material.icons.Icons.Default.PieChart,
-                                isSelected = currentMainTab == 3,
-                                modifier = Modifier.weight(1f).fillMaxHeight().testTag("tab_annual"),
-                                onClick = { coroutineScope.launch { mainPagerState.animateScrollToPage(3) } }
-                            )
-                        }
-                    }
-                }
-            }
 
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .navigationBarsPadding()
-                    .imePadding()
-                    .padding(bottom = 16.dp, end = 16.dp),
-                contentAlignment = Alignment.BottomEnd
+                    .imePadding(),
+                contentAlignment = Alignment.BottomCenter
             ) {
                 AnimatedVisibility(
-                    visible = (isVoicePipelineActive || (!isImeVisible && selectedBudgetId != null && mainPagerState.currentPage == 0)) && !isAnyModalOpen,
-                    enter = fadeIn(animationSpec = tween(300)) + scaleIn(animationSpec = spring(stiffness = Spring.StiffnessMediumLow), transformOrigin = TransformOrigin(1f, 0.5f)),
-                    exit = fadeOut(animationSpec = tween(200)) + scaleOut(animationSpec = tween(200), transformOrigin = TransformOrigin(1f, 0.5f))
+                    visible = selectedBudgetId != null && !isAnyModalOpen && (isVoicePipelineActive || !isImeVisible),
+                    enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.95f, animationSpec = tween(220)),
+                    exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.95f, animationSpec = tween(150))
                 ) {
-                    VoiceRecordingOverlay(
+                    MorphingBottomBar(
                         viewModel = viewModel,
+                        currentMainTab = currentMainTab,
+                        onSelectTab = { targetPage ->
+                            coroutineScope.launch {
+                                mainPagerState.animateScrollToPage(targetPage)
+                            }
+                        },
                         selectedDate = selectedDateDay,
                         showManualInput = showAddTxModal,
                         onDismissManualInput = { showAddTxModal = false },

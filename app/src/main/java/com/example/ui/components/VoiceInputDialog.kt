@@ -1,15 +1,20 @@
 package com.example.ui.components
 
+import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
@@ -19,70 +24,79 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
-import kotlin.math.sin
-import kotlin.math.PI
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CreditCard
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PieChart
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TileMode
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -90,936 +104,1013 @@ import androidx.core.content.ContextCompat
 import com.example.data.repository.ParsedVoiceOperation
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassHighlight
 import com.example.ui.theme.Indigo500
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.NeonCyan
+import com.example.ui.theme.NeonEmerald
+import com.example.ui.theme.NeonIndigo
+import com.example.ui.theme.NeonRose
+import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate400
+import com.example.ui.theme.Slate700
+import com.example.ui.theme.Slate800
+import com.example.ui.theme.Slate900
 import com.example.ui.viewmodel.BudgetViewModel
-import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.sin
 
-enum class OverlayState { CONSENT, API_KEY, MANUAL_INPUT, VOICE_OPERATIONS, COLLAPSED }
+enum class BottomBarMode {
+    NAV_TABS,
+    MANUAL_ADD,
+    VOICE_INPUT
+}
 
+private enum class VoiceSubState {
+    RECORDING,
+    CONSENT,
+    API_KEY,
+    OPERATIONS
+}
+
+/**
+ * Единая трансформирующаяся нижняя капсула (Morphing Bottom Bar):
+ * - В режиме `BottomBarMode.NAV_TABS`: отображает 4 вкладки (`Период`, `Долги`, `Цели`, `Отчет`)
+ *   и встроенную внутрь рамки кнопку `+` справа (только на вкладке `Период`).
+ * - Короткое нажатие на `+` (`onTap`) -> переводит капсулу в `BottomBarMode.MANUAL_ADD`
+ *   и плавно раскрывает рамку вверх в форму «Добавить операцию».
+ * - Долгое нажатие на `+` (`onLongPress`) -> вызывает `HapticFeedbackType.LongPress`,
+ *   переводит капсулу в `BottomBarMode.VOICE_INPUT`, показывает живой голосовой бар с микрофоном,
+ *   распознаваемым текстом («Слушаю вас...»), `MovingNeonGlow` и крестиком `✕`, а по мере
+ *   распознавания операций плавно вырастает вверх со списком операций и кнопкой «Сохранить».
+ */
 @Composable
-fun VoiceRecordingOverlay(
+fun MorphingBottomBar(
     viewModel: BudgetViewModel,
+    currentMainTab: Int,
+    onSelectTab: (Int) -> Unit,
     selectedDate: String,
-    showManualInput: Boolean = false,
-    onDismissManualInput: () -> Unit = {},
-    onOpenManualInput: () -> Unit = {},
+    showManualInput: Boolean,
+    onDismissManualInput: () -> Unit,
+    onOpenManualInput: () -> Unit,
     initialType: String = "expense",
-    modifier: Modifier = Modifier,
-    onOverlayActiveChanged: ((Boolean) -> Unit)? = null
+    onOverlayActiveChanged: (Boolean) -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val voiceManager = viewModel.voiceInputManager
-
-    val isConsentGiven by viewModel.isGeminiConsentGiven.collectAsState()
-    val apiKey by viewModel.apiKey.collectAsState()
-    var showConsentRequested by remember { mutableStateOf(false) }
-    var showApiKeyRequested by remember { mutableStateOf(false) }
-    var tempApiKeyText by remember { mutableStateOf(apiKey) }
-
-    var isRecordingLocked by remember { mutableStateOf(false) }
-
-    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            isRecordingLocked = true
-            viewModel.startVoiceRecording(context)
-        } else {
-            viewModel.setVoiceActive(false)
-        }
-    }
-
     val isListening by voiceManager.isListening.collectAsState()
     val recognizedText by voiceManager.recognizedText.collectAsState()
     val partialText by voiceManager.partialText.collectAsState()
     val rmsDb by voiceManager.rmsDb.collectAsState()
-    val normalizedAmplitude = remember(rmsDb) {
-        (rmsDb / 12f).coerceIn(0f, 1f)
-    }
+    val errorState by voiceManager.errorState.collectAsState()
 
     val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
-    val manualText by viewModel.manualText.collectAsState()
+    val parsedOperations by viewModel.parsedVoiceOperations.collectAsState()
+    val categories by viewModel.categories.collectAsState(initial = emptyList())
+    val isConsentGiven by viewModel.isGeminiConsentGiven.collectAsState()
+    val apiKey by viewModel.apiKey.collectAsState()
 
-    val parsedVoiceOperations by viewModel.parsedVoiceOperations.collectAsState()
-    val categories by viewModel.categories.collectAsState()
+    var bottomBarMode by remember { mutableStateOf(BottomBarMode.NAV_TABS) }
+    var showInlineConsent by remember { mutableStateOf(false) }
+    var showInlineApiKey by remember { mutableStateOf(false) }
+    var editingIndex by remember { mutableStateOf<Int?>(null) }
 
-    val activeText = when {
-        partialText.isNotBlank() -> partialText
-        recognizedText.isNotBlank() -> recognizedText
-        else -> manualText
-    }
+    val editableList = remember { mutableStateListOf<ParsedVoiceOperation>() }
 
-    val isVoiceActiveFromModel by viewModel.isVoiceActive.collectAsState()
-    val isVoiceActive = isVoiceActiveFromModel || isListening || isAnalyzingVoice
-
-    val isConsentNeeded = !isConsentGiven && (showManualInput || showConsentRequested || isVoiceActive)
-    val isApiKeyNeeded = isConsentGiven && (showApiKeyRequested || (apiKey.isBlank() && (showManualInput || isVoiceActive)))
-
-    LaunchedEffect(isVoiceActive, isConsentGiven, apiKey) {
-        if (isVoiceActive && (!isConsentGiven || apiKey.isBlank())) {
-            viewModel.cancelVoiceRecording()
-            if (!isConsentGiven) {
-                showConsentRequested = true
-            } else {
-                showApiKeyRequested = true
+    LaunchedEffect(parsedOperations) {
+        val ops = parsedOperations
+        if (ops != null) {
+            if (editableList.isEmpty()) {
+                editableList.addAll(ops)
+            } else if (ops.size > editableList.size) {
+                val newItems = ops.subList(editableList.size, ops.size)
+                editableList.addAll(newItems)
             }
-        } else if (!isVoiceActive) {
-            isRecordingLocked = false
+            if (ops.isNotEmpty()) {
+                bottomBarMode = BottomBarMode.VOICE_INPUT
+            }
+        } else {
+            editableList.clear()
+            editingIndex = null
         }
     }
 
-    val fabGestureModifier = Modifier.pointerInput(context, isConsentGiven, apiKey, showManualInput, showConsentRequested, showApiKeyRequested) {
-        awaitEachGesture {
-            val down = awaitFirstDown(requireUnconsumed = false)
-            if (!isConsentGiven) {
-                down.consume()
-                val longPressTimeout = 220L
-                val dragLockThreshold = 60.dp.toPx()
-                val startY = down.position.y
-
-                val longPressTriggered = withTimeoutOrNull(longPressTimeout) {
-                    var currentDown = down
-                    while (currentDown.pressed) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed) {
-                            return@withTimeoutOrNull false
-                        }
-                        val deltaY = startY - change.position.y
-                        if (deltaY > dragLockThreshold) {
-                            return@withTimeoutOrNull true
-                        }
-                        currentDown = change
-                    }
-                    false
-                }
-
-                if (longPressTriggered == false) {
-                    if (showConsentRequested) {
-                        showConsentRequested = false
-                        if (showManualInput) onDismissManualInput()
-                    } else {
-                        showConsentRequested = true
-                    }
-                } else {
-                    showConsentRequested = true
-                    try { haptic.performHapticFeedback(HapticFeedbackType.LongPress) } catch (_: Throwable) {}
-                }
-                return@awaitEachGesture
-            } else if (apiKey.isBlank()) {
-                down.consume()
-                val longPressTimeout = 220L
-                val dragLockThreshold = 60.dp.toPx()
-                val startY = down.position.y
-
-                val longPressTriggered = withTimeoutOrNull(longPressTimeout) {
-                    var currentDown = down
-                    while (currentDown.pressed) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed) {
-                            return@withTimeoutOrNull false
-                        }
-                        val deltaY = startY - change.position.y
-                        if (deltaY > dragLockThreshold) {
-                            return@withTimeoutOrNull true
-                        }
-                        currentDown = change
-                    }
-                    false
-                }
-
-                if (longPressTriggered == false) {
-                    if (showApiKeyRequested) {
-                        showApiKeyRequested = false
-                        if (showManualInput) onDismissManualInput()
-                    } else {
-                        tempApiKeyText = ""
-                        showApiKeyRequested = true
-                    }
-                } else {
-                    tempApiKeyText = ""
-                    showApiKeyRequested = true
-                    try { haptic.performHapticFeedback(HapticFeedbackType.LongPress) } catch (_: Throwable) {}
-                }
-                return@awaitEachGesture
-            }
-            val startY = down.position.y
-            val dragLockThreshold = 60.dp.toPx()
-            val longPressTimeout = 220L
-
-            if (isRecordingLocked) {
-                down.consume()
-                viewModel.cancelVoiceRecording()
-                isRecordingLocked = false
-                return@awaitEachGesture
-            }
-
-            var isRecordingStarted = false
-            var isLocked = false
-
-            val longPressTriggered = withTimeoutOrNull(longPressTimeout) {
-                var currentDown = down
-                while (currentDown.pressed) {
-                    val event = awaitPointerEvent()
-                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                    if (!change.pressed) {
-                        return@withTimeoutOrNull false
-                    }
-                    val deltaY = startY - change.position.y
-                    if (deltaY > dragLockThreshold) {
-                        return@withTimeoutOrNull true
-                    }
-                    currentDown = change
-                }
-                false
-            }
-
-            if (longPressTriggered == false) {
-                when {
-                    !parsedVoiceOperations.isNullOrEmpty() -> {
-                        viewModel.cancelVoiceRecording()
-                        viewModel.clearParsedVoiceOperations()
-                        viewModel.setVoiceActive(false)
-                    }
-                    isVoiceActive -> {
-                        viewModel.cancelVoiceRecording()
-                    }
-                    else -> {
-                        onOpenManualInput()
-                    }
-                }
-            } else {
-                val hasPerm = try {
-                    ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                } catch (_: Throwable) { false }
-
-                if (hasPerm) {
-                    try { haptic.performHapticFeedback(HapticFeedbackType.LongPress) } catch (_: Throwable) {}
-                    viewModel.startVoiceRecording(context)
-                    isRecordingStarted = true
-                } else {
-                    viewModel.setVoiceActive(true)
-                    recordAudioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                }
-
-                if (isRecordingStarted) {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id }
-                        if (change == null || !change.pressed) {
-                            if (!isLocked) {
-                                viewModel.stopVoiceRecordingAndProcess()
-                            }
-                            break
-                        }
-
-                        val deltaY = startY - change.position.y
-                        if (deltaY > dragLockThreshold && !isLocked) {
-                            isLocked = true
-                            isRecordingLocked = true
-                            try { haptic.performHapticFeedback(HapticFeedbackType.LongPress) } catch (_: Throwable) {}
-                        }
-                        change.consume()
-                    }
-                }
-            }
-        }
-    }
-    val isEditingOperations = !parsedVoiceOperations.isNullOrEmpty()
-    val isExpandedCard = isConsentNeeded || isApiKeyNeeded || showManualInput || isEditingOperations || isVoiceActive
-
-    LaunchedEffect(isExpandedCard) {
-        onOverlayActiveChanged?.invoke(isExpandedCard)
-    }
-
-    val fabRotation by animateFloatAsState(
-        targetValue = if (isExpandedCard) 45f else 0f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow),
-        label = "fab_rotation"
-    )
-
-    var isClosingContentFade by remember { mutableStateOf(false) }
-
-    var editingIndex by remember(parsedVoiceOperations) { mutableStateOf<Int?>(null) }
-
-    val cardWidthAnim = remember { Animatable(56f) }
-    val cardHeightAnim = remember { Animatable(56f) }
-
-    val configuration = LocalConfiguration.current
-    val screenWidthDp = configuration.screenWidthDp.toFloat()
-    val screenHeightDp = configuration.screenHeightDp.toFloat()
-
-    val desiredWidth = when {
-        isConsentNeeded || isApiKeyNeeded -> (screenWidthDp - 32f).coerceAtLeast(300f)
-        showManualInput || isEditingOperations -> (screenWidthDp - 32f).coerceAtLeast(300f)
-        isVoiceActive -> (screenWidthDp - 48f).coerceAtLeast(280f)
-        else -> 56f
-    }
-
-    val editableList = remember(parsedVoiceOperations) {
-        mutableStateListOf<ParsedVoiceOperation>().apply {
-            parsedVoiceOperations?.let { addAll(it) }
+    // Синхронизация внешнего флага showManualInput с режимом капсулы
+    LaunchedEffect(showManualInput) {
+        if (showManualInput) {
+            bottomBarMode = BottomBarMode.MANUAL_ADD
+        } else if (bottomBarMode == BottomBarMode.MANUAL_ADD) {
+            bottomBarMode = BottomBarMode.NAV_TABS
         }
     }
 
-    val desiredHeight = when {
-        isConsentNeeded -> 230f.coerceAtMost(screenHeightDp - 60f)
-        isApiKeyNeeded -> 430f.coerceAtMost(screenHeightDp - 60f)
-        showManualInput -> 490f.coerceAtMost(screenHeightDp - 60f)
-        isEditingOperations -> {
-            if (editingIndex != null) {
-                505f.coerceAtMost(screenHeightDp - 60f)
-            } else {
-                val count = editableList.size
-                val liveExtra = if (isListening || isAnalyzingVoice) 72f else 0f
-                val baseHeight = 175f + count * 78f + liveExtra
-                baseHeight.coerceIn(245f, screenHeightDp - 60f)
-            }
-        }
-        isVoiceActive -> 64f
-        else -> 56f
-    }
-
-    val showAsExpanded = (cardWidthAnim.value > 57f || cardHeightAnim.value > 57f)
-    val isHorizontallyExpanded = (cardWidthAnim.value > 57f)
-    val isVerticallyExpanded = (cardHeightAnim.value > 57f)
-
-    val coroutineScope = rememberCoroutineScope()
-
-    LaunchedEffect(desiredWidth, desiredHeight, isClosingContentFade, isConsentNeeded, isApiKeyNeeded, showManualInput, isEditingOperations, isVoiceActive) {
-        if (!isClosingContentFade) {
-            val animSpec = spring<Float>(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessMediumLow
-            )
-            val isTargetExpanded = isConsentNeeded || isApiKeyNeeded || showManualInput || isEditingOperations || isVoiceActive
-            if (isTargetExpanded) {
-                cardWidthAnim.animateTo(desiredWidth, animSpec)
-                cardHeightAnim.animateTo(desiredHeight, animSpec)
-            } else {
-                cardHeightAnim.animateTo(56f, animSpec)
-                cardWidthAnim.animateTo(56f, animSpec)
-            }
-        }
-    }
-
-    val handleDismissManualInput = {
-        if (!isClosingContentFade) {
-            coroutineScope.launch {
-                isClosingContentFade = true
-                kotlinx.coroutines.delay(140)
-
-                val collapseSpec = spring<Float>(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-
-                cardHeightAnim.animateTo(56f, collapseSpec)
-                cardWidthAnim.animateTo(56f, collapseSpec)
-
-                onDismissManualInput()
-                isClosingContentFade = false
-            }
-        }
-    }
-
-    val handleDismissVoiceOperations = {
-        if (!isClosingContentFade) {
-            coroutineScope.launch {
-                isClosingContentFade = true
-                kotlinx.coroutines.delay(140)
-
-                val collapseSpec = spring<Float>(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
-                )
-
-                cardHeightAnim.animateTo(56f, collapseSpec)
-                cardWidthAnim.animateTo(56f, collapseSpec)
-
-                viewModel.cancelVoiceRecording()
-                viewModel.clearParsedVoiceOperations()
-                viewModel.setVoiceActive(false)
-                isClosingContentFade = false
-            }
-        }
-    }
-
-    val surfaceColor by animateColorAsState(
-        targetValue = if (showAsExpanded) DarkBg.copy(alpha = 0.92f) else Indigo500,
-        animationSpec = tween(300),
-        label = "surface_color"
-    )
-
-    val contentAlpha by animateFloatAsState(
-        targetValue = if ((isVoiceActive || cardHeightAnim.value > 120f) && !isClosingContentFade) 1f else 0f,
-        animationSpec = tween(180, easing = FastOutSlowInEasing),
-        label = "content_alpha"
-    )
-
-    val isDetailEditing = isEditingOperations && editingIndex != null
-
-    val fabIcon = if (isDetailEditing) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Add
-    val fabContentDescription = when {
-        isDetailEditing -> "Назад"
-        showAsExpanded -> "Отмена"
-        isVoiceActive -> "Отмена записи"
-        else -> "Добавить"
-    }
-    val fabRotationAngle = if (isDetailEditing) 0f else fabRotation
-    val fabTint = when {
-        isVoiceActive -> Rose500
-        !showAsExpanded -> DarkBg
-        isDetailEditing -> Slate400
-        else -> Rose500
-    }
-    val fabTestTag = when {
-        !showAsExpanded -> "fab_add_button"
-        showManualInput -> "close_manual_input_fab"
-        isEditingOperations -> "close_voice_operations_fab"
-        else -> "unified_fab"
-    }
-
-    val handleFabClick = {
-        when {
-            isConsentNeeded -> {
-                showConsentRequested = false
-                if (showManualInput) handleDismissManualInput()
-            }
-            isApiKeyNeeded -> {
-                showApiKeyRequested = false
-                if (showManualInput) handleDismissManualInput()
-            }
-            showManualInput -> handleDismissManualInput()
-            isEditingOperations -> {
-                if (editingIndex != null) {
-                    editingIndex = null
-                } else {
-                    handleDismissVoiceOperations()
-                }
-            }
-            isVoiceActive -> viewModel.cancelVoiceRecording()
-            else -> {
-                if (!isConsentGiven) {
-                    showConsentRequested = true
-                } else if (apiKey.isBlank()) {
-                    tempApiKeyText = ""
-                    showApiKeyRequested = true
-                } else {
-                    onOpenManualInput()
-                }
-            }
-        }
-    }
-
-    val isManualOrEditing = isConsentNeeded || isApiKeyNeeded || showManualInput || isEditingOperations
-
-    val fabPaddingEnd by animateDpAsState(
-        targetValue = if (isHorizontallyExpanded && isVerticallyExpanded && isManualOrEditing) 16.dp else 0.dp,
-        animationSpec = tween(300),
-        label = "fab_padding_end"
-    )
-    val fabPaddingBottom by animateDpAsState(
-        targetValue = if (isVerticallyExpanded && isManualOrEditing) 12.dp else 0.dp,
-        animationSpec = tween(300),
-        label = "fab_padding_bottom"
-    )
-    val boxEndPadding by animateDpAsState(
-        targetValue = if (isHorizontallyExpanded && isManualOrEditing) 0.dp else 16.dp,
-        animationSpec = tween(300),
-        label = "box_end_padding"
-    )
-    val boxBottomPadding by animateDpAsState(
-        targetValue = if (isVerticallyExpanded && isManualOrEditing) 0.dp else 12.dp,
-        animationSpec = tween(300),
-        label = "box_bottom_padding"
-    )
-
-    val borderAlpha by animateFloatAsState(
-        targetValue = if (showAsExpanded) 1f else 0f,
-        animationSpec = tween(400, easing = LinearOutSlowInEasing),
-        label = "border_alpha"
-    )
-
-    val infiniteTransition = rememberInfiniteTransition(label = "border_gradient")
-    val offset by infiniteTransition.animateFloat(
-        initialValue = 0f, targetValue = 600f,
-        animationSpec = infiniteRepeatable(tween(4000, easing = LinearEasing), RepeatMode.Restart),
-        label = "offset"
-    )
-    val dynamicGradient = Brush.linearGradient(
-        colors = listOf(
-            Indigo500.copy(alpha = borderAlpha),
-            Emerald400.copy(alpha = borderAlpha),
-            Rose500.copy(alpha = borderAlpha),
-            Indigo500.copy(alpha = borderAlpha)
-        ),
-        start = Offset(offset, offset), end = Offset(offset + 600f, offset + 600f),
-        tileMode = TileMode.Repeated
-    )
-
-    val progress = offset / 600f
-    val getGradientColor = { p: Float ->
-        val norm = p % 1f
-        val phase = if (norm < 0f) norm + 1f else norm
-        when {
-            phase < 0.3333f -> {
-                val t = phase / 0.3333f
-                lerp(Indigo500, Emerald400, t)
-            }
-            phase < 0.6666f -> {
-                val t = (phase - 0.3333f) / 0.3333f
-                lerp(Emerald400, Rose500, t)
-            }
-            else -> {
-                val t = (phase - 0.6666f) / 0.3334f
-                lerp(Rose500, Indigo500, t)
-            }
-        }
-    }
-
-    val neonColor1 = getGradientColor(progress)
-    val neonColor2 = getGradientColor(progress + 0.6666f)
-
-    val currentOverlayState = when {
-        isConsentNeeded -> OverlayState.CONSENT
-        isApiKeyNeeded -> OverlayState.API_KEY
-        showManualInput -> OverlayState.MANUAL_INPUT
-        isEditingOperations -> OverlayState.VOICE_OPERATIONS
-        else -> OverlayState.COLLAPSED
-    }
-
-    @Composable
-    fun FABContainer(
-        modifier: Modifier = Modifier,
-        fabIcon: androidx.compose.ui.graphics.vector.ImageVector,
-        fabIconRotation: Float,
-        fabTint: Color,
-        fabContentDescription: String?,
-        surfaceColor: Color,
-        isClickable: Boolean
-    ) {
-        Box(
-            modifier = modifier
-                .size(56.dp)
-                .clip(CircleShape)
-                .background(surfaceColor)
-                .then(
-                    if (showAsExpanded) {
-                        Modifier.border(
-                            width = 1.dp,
-                            color = if (isDetailEditing) Slate400.copy(alpha = 0.4f) else Rose500.copy(alpha = 0.4f),
-                            shape = CircleShape
-                        )
-                    } else if (isVoiceActive) {
-                        Modifier.border(
-                            width = 1.dp,
-                            color = Rose500.copy(alpha = 0.4f),
-                            shape = CircleShape
-                        )
-                    } else {
-                        Modifier
-                    }
-                )
-                .then(
-                    if (isClickable) {
-                        Modifier.clickable { handleFabClick() }
-                    } else {
-                        fabGestureModifier
-                    }
-                )
-                .testTag(fabTestTag),
-            contentAlignment = Alignment.Center
+    // Если голосовой ввод завершился без распознанных операций и без открытых под-окон — возвращаемся к вкладкам
+    LaunchedEffect(isListening, isAnalyzingVoice, editableList.size, showInlineConsent, showInlineApiKey) {
+        if (bottomBarMode == BottomBarMode.VOICE_INPUT &&
+            !isListening &&
+            !isAnalyzingVoice &&
+            editableList.isEmpty() &&
+            !showInlineConsent &&
+            !showInlineApiKey
         ) {
-            Icon(
-                imageVector = fabIcon,
-                contentDescription = fabContentDescription,
-                tint = fabTint,
-                modifier = Modifier.rotate(fabIconRotation)
-            )
+            bottomBarMode = BottomBarMode.NAV_TABS
+            viewModel.setVoiceActive(false)
         }
+    }
+
+    val isExpandedOrVoice = bottomBarMode != BottomBarMode.NAV_TABS
+    LaunchedEffect(isExpandedOrVoice) {
+        onOverlayActiveChanged(isExpandedOrVoice)
+    }
+
+    fun startLiveRecordingSession() {
+        viewModel.startVoiceRecording(context)
+    }
+
+    fun cancelAndCollapseToNav() {
+        viewModel.cancelVoiceRecording()
+        showInlineConsent = false
+        showInlineApiKey = false
+        editingIndex = null
+        editableList.clear()
+        if (showManualInput) {
+            onDismissManualInput()
+        }
+        bottomBarMode = BottomBarMode.NAV_TABS
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            bottomBarMode = BottomBarMode.VOICE_INPUT
+            startLiveRecordingSession()
+        } else {
+            Toast.makeText(
+                context,
+                "Для голосового ввода необходим доступ к микрофону",
+                Toast.LENGTH_SHORT
+            ).show()
+            cancelAndCollapseToNav()
+        }
+    }
+
+    fun triggerVoiceMode() {
+        if (showManualInput) {
+            onDismissManualInput()
+        }
+        bottomBarMode = BottomBarMode.VOICE_INPUT
+        if (!isConsentGiven) {
+            showInlineConsent = true
+            return
+        }
+        if (apiKey.isBlank()) {
+            showInlineApiKey = true
+            return
+        }
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasPermission) {
+            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else {
+            startLiveRecordingSession()
+        }
+    }
+
+    LaunchedEffect(errorState) {
+        errorState?.let { err ->
+            Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
+            viewModel.setVoiceActive(false)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (voiceManager.isListening.value) {
+                voiceManager.onAudioChunkReady = null
+                voiceManager.stopListening()
+            }
+        }
+    }
+
+    // Системная кнопка «Назад» плавно складывает морфинг-капсулу обратно в режим вкладок
+    BackHandler(enabled = bottomBarMode != BottomBarMode.NAV_TABS) {
+        if (bottomBarMode == BottomBarMode.VOICE_INPUT && editingIndex != null) {
+            editingIndex = null
+        } else {
+            cancelAndCollapseToNav()
+        }
+    }
+
+    val cornerRadius by animateDpAsState(
+        targetValue = when (bottomBarMode) {
+            BottomBarMode.NAV_TABS -> 30.dp
+            BottomBarMode.MANUAL_ADD -> 26.dp
+            BottomBarMode.VOICE_INPUT -> if (editableList.isNotEmpty() || showInlineConsent || showInlineApiKey) 26.dp else 30.dp
+        },
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "morph_bar_corner"
+    )
+
+    val borderBrush = when (bottomBarMode) {
+        BottomBarMode.NAV_TABS -> Brush.horizontalGradient(listOf(GlassHighlight, GlassHighlight))
+        BottomBarMode.MANUAL_ADD -> Brush.linearGradient(
+            listOf(Emerald400.copy(alpha = 0.55f), Indigo500.copy(alpha = 0.45f))
+        )
+        BottomBarMode.VOICE_INPUT -> Brush.linearGradient(
+            listOf(NeonEmerald.copy(alpha = 0.7f), NeonIndigo.copy(alpha = 0.7f))
+        )
     }
 
     Box(
-        modifier = modifier
-            .padding(bottom = boxBottomPadding, end = boxEndPadding),
-        contentAlignment = Alignment.BottomEnd
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.BottomCenter
     ) {
-        Box(
-            modifier = Modifier
-                .width(cardWidthAnim.value.dp)
-                .height(cardHeightAnim.value.dp)
-                .shadow(
-                    elevation = if (showAsExpanded) (24 * borderAlpha).dp else 24.dp,
-                    shape = RoundedCornerShape(28.dp),
-                    clip = false,
-                    ambientColor = if (showAsExpanded) neonColor1.copy(alpha = borderAlpha) else Indigo500.copy(alpha = 0.8f),
-                    spotColor = if (showAsExpanded) neonColor2.copy(alpha = borderAlpha) else Indigo500.copy(alpha = 0.8f)
-                )
-                .background(surfaceColor, RoundedCornerShape(28.dp))
-                .border(
-                    width = 2.dp,
-                    brush = dynamicGradient,
-                    shape = RoundedCornerShape(28.dp)
-                )
-                .clip(RoundedCornerShape(28.dp)),
-            contentAlignment = Alignment.BottomEnd
+        // Полупрозрачный фон-затемнение при раскрытом окне ручного ввода или списка распознанных операций
+        val showScrim = bottomBarMode == BottomBarMode.MANUAL_ADD ||
+            (bottomBarMode == BottomBarMode.VOICE_INPUT && (editableList.isNotEmpty() || showInlineConsent || showInlineApiKey))
+
+        AnimatedVisibility(
+            visible = showScrim,
+            enter = fadeIn(tween(220)),
+            exit = fadeOut(tween(180))
         ) {
             Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.BottomEnd
-            ) {
-                AnimatedContent(
-                    targetState = currentOverlayState,
-                    label = "overlay_content",
-                    transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) }
-                ) { overlayState ->
-                    when (overlayState) {
-                        OverlayState.CONSENT -> {
-                            VoiceConsentPane(
-                                onAccept = {
-                                    viewModel.setGeminiConsentGiven(true)
-                                    showConsentRequested = false
-                                    tempApiKeyText = apiKey
-                                    showApiKeyRequested = true
-                                },
-                                    dynamicGradient = dynamicGradient
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        cancelAndCollapseToNav()
+                    }
+            )
+        }
+
+        // Сама нижняя морфинг-рамка (остается на своем месте внизу экрана с теми же боковыми отступами 16.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .shadow(
+                    elevation = 22.dp,
+                    shape = RoundedCornerShape(cornerRadius),
+                    ambientColor = if (bottomBarMode == BottomBarMode.VOICE_INPUT) NeonEmerald else Color.Black,
+                    spotColor = if (bottomBarMode == BottomBarMode.VOICE_INPUT) NeonIndigo else Color.Black
+                )
+                .clip(RoundedCornerShape(cornerRadius))
+                .background(
+                    if (bottomBarMode == BottomBarMode.NAV_TABS) ObsidianSurface.copy(alpha = 0.96f)
+                    else Slate900.copy(alpha = 0.98f)
+                )
+                .border(
+                    width = 1.dp,
+                    brush = borderBrush,
+                    shape = RoundedCornerShape(cornerRadius)
+                )
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {}
+                )
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
+        ) {
+            AnimatedContent(
+                targetState = bottomBarMode,
+                transitionSpec = {
+                    (fadeIn(animationSpec = tween(220)) togetherWith
+                        fadeOut(animationSpec = tween(160)))
+                        .using(
+                            SizeTransform(
+                                clip = false,
+                                sizeAnimationSpec = { _, _ ->
+                                    spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                }
+                            )
+                        )
+                },
+                label = "bottom_bar_mode_morph"
+            ) { mode ->
+                when (mode) {
+                    BottomBarMode.NAV_TABS -> {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(58.dp)
+                                .padding(horizontal = 5.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // 4 вкладки навигации, которые плавно занимают всю доступную ширину
+                            BoxWithConstraints(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                            ) {
+                                val barWidth = maxWidth
+                                val tabCount = 4
+                                val tabWidth = barWidth / tabCount
+
+                                val animatedFraction by animateFloatAsState(
+                                    targetValue = currentMainTab.toFloat(),
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    ),
+                                    label = "bottom_nav_pill"
                                 )
-                            }
-                            OverlayState.API_KEY -> {
-                                VoiceApiKeyPane(
-                                    initialApiKey = tempApiKeyText,
-                                    onSaveKey = { keyToSave ->
-                                        viewModel.saveApiKey(keyToSave)
-                                        showApiKeyRequested = false
-                                        onOpenManualInput()
-                                    }
-                                )
-                            }
-                            OverlayState.MANUAL_INPUT -> {
-                                VoiceManualInputPane(
-                                    viewModel = viewModel,
-                                    categories = categories,
-                                    selectedDate = selectedDate,
-                                    initialType = initialType,
-                                    contentAlpha = contentAlpha,
-                                    onDismiss = { handleDismissManualInput() }
-                                )
-                            }
-                            OverlayState.VOICE_OPERATIONS -> {
-                                VoiceOperationsPane(
-                                    viewModel = viewModel,
-                                    editableList = editableList,
-                                    categories = categories,
-                                    selectedDate = selectedDate,
-                                    contentAlpha = contentAlpha,
-                                    editingIndex = editingIndex,
-                                    onEditingIndexChanged = { editingIndex = it },
-                                    onDismissVoiceOperations = { handleDismissVoiceOperations() }
-                                )
-                            }
-                            OverlayState.COLLAPSED -> {
+
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(64.dp),
-                                    contentAlignment = Alignment.CenterEnd
+                                        .width(tabWidth)
+                                        .fillMaxHeight()
+                                        .offset(x = tabWidth * animatedFraction)
+                                        .background(Emerald400.copy(alpha = 0.15f), CircleShape)
+                                        .border(1.dp, Emerald400.copy(alpha = 0.4f), CircleShape)
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    AnimatedVisibility(
-                                        visible = isVoiceActive,
-                                        enter = fadeIn(animationSpec = tween(250, easing = FastOutSlowInEasing)) + slideInHorizontally(animationSpec = tween(250)) { -it / 4 },
-                                        exit = fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing)) + slideOutHorizontally(animationSpec = tween(150)) { -it / 4 },
+                                    MorphNavTabButton(
+                                        text = "Период",
+                                        icon = Icons.Default.GridView,
+                                        isSelected = currentMainTab == 0,
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(start = 10.dp, end = 62.dp)
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(64.dp)
-                                                .clickable { viewModel.stopVoiceRecordingAndProcess() },
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            // Left pulsing radial neon Mic button / AI spinner (from David-finance-main-2)
-                                            Box(
-                                                modifier = Modifier.size(44.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                if (isListening) {
-                                                    val pulseScale by animateFloatAsState(
-                                                        targetValue = 1f + (rmsDb / 14f).coerceIn(0f, 0.45f),
-                                                        animationSpec = tween(100),
-                                                        label = "mic_pulse"
-                                                    )
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size((36 * pulseScale).dp)
-                                                            .clip(CircleShape)
-                                                            .background(
-                                                                Brush.radialGradient(
-                                                                    colors = listOf(
-                                                                        com.example.ui.theme.NeonCyan.copy(alpha = 0.55f),
-                                                                        com.example.ui.theme.NeonEmerald.copy(alpha = 0.25f),
-                                                                        Color.Transparent
-                                                                    )
-                                                                )
-                                                            )
-                                                    )
-                                                }
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .testTag("tab_period"),
+                                        onClick = { onSelectTab(0) }
+                                    )
 
-                                                if (isAnalyzingVoice && !isListening) {
-                                                    CircularProgressIndicator(
-                                                        color = com.example.ui.theme.NeonEmerald,
-                                                        strokeWidth = 2.5.dp,
-                                                        modifier = Modifier.size(28.dp)
-                                                    )
-                                                } else {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(38.dp)
-                                                            .clip(CircleShape)
-                                                            .background(
-                                                                if (isListening) com.example.ui.theme.NeonCyan else com.example.ui.theme.EmeraldPrimary
-                                                            ),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = if (isRecordingLocked) Icons.Default.Lock else Icons.Default.Mic,
-                                                            contentDescription = "Голосовой ввод",
-                                                            tint = DarkBg,
-                                                            modifier = Modifier.size(18.dp)
-                                                        )
+                                    MorphNavTabButton(
+                                        text = "Долги",
+                                        icon = Icons.Default.CreditCard,
+                                        isSelected = currentMainTab == 1,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .testTag("tab_debts"),
+                                        onClick = { onSelectTab(1) }
+                                    )
+
+                                    MorphNavTabButton(
+                                        text = "Цели",
+                                        icon = Icons.Default.EmojiEvents,
+                                        isSelected = currentMainTab == 2,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .testTag("tab_goals"),
+                                        onClick = { onSelectTab(2) }
+                                    )
+
+                                    MorphNavTabButton(
+                                        text = "Отчет",
+                                        icon = Icons.Default.PieChart,
+                                        isSelected = currentMainTab == 3,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .testTag("tab_annual"),
+                                        onClick = { onSelectTab(3) }
+                                    )
+                                }
+                            }
+
+                            // Встроенная кнопка `+` внутри капсулы навигации (ТОЛЬКО на вкладке Период)
+                            AnimatedVisibility(
+                                visible = currentMainTab == 0,
+                                enter = expandHorizontally(
+                                    expandFrom = Alignment.End,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                ) + fadeIn(animationSpec = tween(200)),
+                                exit = shrinkHorizontally(
+                                    shrinkTowards = Alignment.End,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                ) + fadeOut(animationSpec = tween(150))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(start = 6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .height(48.dp)
+                                            .width(54.dp)
+                                            .shadow(
+                                                elevation = 10.dp,
+                                                shape = CircleShape,
+                                                ambientColor = NeonEmerald,
+                                                spotColor = NeonEmerald
+                                            )
+                                            .clip(CircleShape)
+                                            .background(
+                                                brush = Brush.linearGradient(
+                                                    colors = listOf(NeonEmerald, Emerald400)
+                                                )
+                                            )
+                                            .border(
+                                                width = 1.dp,
+                                                color = Color.White.copy(alpha = 0.28f),
+                                                shape = CircleShape
+                                            )
+                                            .pointerInput(Unit) {
+                                                detectTapGestures(
+                                                    onTap = {
+                                                        bottomBarMode = BottomBarMode.MANUAL_ADD
+                                                        onOpenManualInput()
+                                                    },
+                                                    onLongPress = {
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        triggerVoiceMode()
                                                     }
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.width(8.dp))
-
-                                            Column(
-                                                modifier = Modifier.weight(1f),
-                                                verticalArrangement = Arrangement.Center
-                                            ) {
-                                                val displayLine = when {
-                                                    isAnalyzingVoice && !isListening -> "✨ Давид разбирает операции через Gemini..."
-                                                    activeText.isNotBlank() -> activeText
-                                                    isListening -> "Слушаю вас... (нажмите для отправки)"
-                                                    else -> "Нажмите для записи"
-                                                }
-                                                Text(
-                                                    text = displayLine,
-                                                    color = if (isAnalyzingVoice) com.example.ui.theme.NeonEmerald else Color.White,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-
-                                                Spacer(modifier = Modifier.height(3.dp))
-
-                                                Neon32BandVoiceVisualizer(
-                                                    amplitude = normalizedAmplitude,
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .height(20.dp)
-                                                )
-
-                                                Spacer(modifier = Modifier.height(2.dp))
-
-                                                MovingNeonGlowVisualizer(
-                                                    isRecording = isListening,
-                                                    rmsLevel = rmsDb,
-                                                    modifier = Modifier.fillMaxWidth()
                                                 )
                                             }
-                                        }
+                                            .testTag("embedded_add_operation_button"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Добавить операцию (удерживайте для голосового ввода)",
+                                            tint = DarkBg,
+                                            modifier = Modifier.size(24.dp)
+                                        )
                                     }
                                 }
                             }
                         }
                     }
 
+                    BottomBarMode.MANUAL_ADD -> {
+                        val scrollState = rememberScrollState()
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 520.dp)
+                                .verticalScroll(scrollState)
+                        ) {
+                            VoiceManualInputPane(
+                                viewModel = viewModel,
+                                categories = categories,
+                                selectedDate = selectedDate,
+                                initialType = initialType,
+                                contentAlpha = 1f,
+                                onDismiss = {
+                                    onDismissManualInput()
+                                    bottomBarMode = BottomBarMode.NAV_TABS
+                                }
+                            )
+                        }
+                    }
 
+                    BottomBarMode.VOICE_INPUT -> {
+                        val voiceSubState = when {
+                            showInlineConsent -> VoiceSubState.CONSENT
+                            showInlineApiKey -> VoiceSubState.API_KEY
+                            editableList.isNotEmpty() -> VoiceSubState.OPERATIONS
+                            else -> VoiceSubState.RECORDING
+                        }
 
-                    // Single Unified FAB Button
-                    FABContainer(
-                        modifier = Modifier.padding(bottom = fabPaddingBottom, end = fabPaddingEnd),
-                        fabIcon = fabIcon,
-                        fabIconRotation = fabRotationAngle,
-                        fabTint = fabTint,
-                        fabContentDescription = fabContentDescription,
-                        surfaceColor = surfaceColor,
-                        isClickable = isConsentNeeded || isApiKeyNeeded || showManualInput || isDetailEditing
-                    )
+                        AnimatedContent(
+                            targetState = voiceSubState,
+                            transitionSpec = {
+                                (fadeIn(tween(200)) togetherWith fadeOut(tween(140)))
+                                    .using(
+                                        SizeTransform(
+                                            clip = false,
+                                            sizeAnimationSpec = { _, _ ->
+                                                spring(
+                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow
+                                                )
+                                            }
+                                        )
+                                    )
+                            },
+                            label = "voice_substate_morph"
+                        ) { subState ->
+                            when (subState) {
+                                VoiceSubState.CONSENT -> {
+                                    VoiceConsentPane(
+                                        contentAlpha = 1f,
+                                        onAccept = {
+                                            viewModel.setGeminiConsentGiven(true)
+                                            showInlineConsent = false
+                                            if (apiKey.isBlank()) {
+                                                showInlineApiKey = true
+                                            } else {
+                                                triggerVoiceMode()
+                                            }
+                                        },
+                                        onDecline = {
+                                            viewModel.setGeminiConsentGiven(false)
+                                            cancelAndCollapseToNav()
+                                        }
+                                    )
+                                }
+
+                                VoiceSubState.API_KEY -> {
+                                    VoiceApiKeyPane(
+                                        currentKey = apiKey,
+                                        contentAlpha = 1f,
+                                        onSaveKey = { newKey ->
+                                            viewModel.saveApiKey(newKey)
+                                            showInlineApiKey = false
+                                            triggerVoiceMode()
+                                        },
+                                        onCancel = {
+                                            cancelAndCollapseToNav()
+                                        }
+                                    )
+                                }
+
+                                VoiceSubState.RECORDING -> {
+                                    // Компактный интерфейс записи голоса внутри нижней капсулы:
+                                    // Слева — микрофон, по центру — живой текст («Слушаю вас...») + MovingNeonGlow, справа — ✕
+                                    val liveStatusText = when {
+                                        isAnalyzingVoice && !isListening -> "✨ Давид разбирает операции..."
+                                        recognizedText.isNotBlank() -> recognizedText
+                                        partialText.isNotBlank() && partialText != "Говорите..." -> partialText
+                                        else -> "Слушаю вас..."
+                                    }
+
+                                    val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
+                                    val micPulse by infiniteTransition.animateFloat(
+                                        initialValue = 0.94f,
+                                        targetValue = 1.08f,
+                                        animationSpec = infiniteRepeatable(
+                                            animation = tween(750, easing = FastOutSlowInEasing),
+                                            repeatMode = RepeatMode.Reverse
+                                        ),
+                                        label = "mic_pulse_scale"
+                                    )
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(64.dp)
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Слева — иконка микрофона (нажатие завершает запись и отправляет на разбор)
+                                        Box(
+                                            modifier = Modifier
+                                                .size(44.dp)
+                                                .graphicsLayer {
+                                                    val s = if (isListening) micPulse else 1f
+                                                    scaleX = s
+                                                    scaleY = s
+                                                }
+                                                .shadow(
+                                                    elevation = 10.dp,
+                                                    shape = CircleShape,
+                                                    ambientColor = NeonEmerald,
+                                                    spotColor = NeonEmerald
+                                                )
+                                                .clip(CircleShape)
+                                                .background(
+                                                    brush = Brush.linearGradient(
+                                                        colors = listOf(NeonEmerald, NeonIndigo)
+                                                    )
+                                                )
+                                                .clickable {
+                                                    if (isListening) {
+                                                        viewModel.stopVoiceRecordingAndProcess()
+                                                    }
+                                                }
+                                                .testTag("voice_bar_mic_button"),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isAnalyzingVoice && !isListening) {
+                                                CircularProgressIndicator(
+                                                    color = DarkBg,
+                                                    strokeWidth = 2.5.dp,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Default.Mic,
+                                                    contentDescription = "Остановить запись",
+                                                    tint = DarkBg,
+                                                    modifier = Modifier.size(22.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Spacer(modifier = Modifier.width(12.dp))
+
+                                        // По центру — живой распознаваемый текст («Слушаю вас...») и переливающееся неоновое свечение (MovingNeonGlow)
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable {
+                                                    if (isListening) {
+                                                        viewModel.stopVoiceRecordingAndProcess()
+                                                    }
+                                                },
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Text(
+                                                    text = liveStatusText,
+                                                    color = Color.White,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                if (isAnalyzingVoice) {
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = "ИИ...",
+                                                        color = NeonEmerald,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.ExtraBold
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            MovingNeonGlowVisualizer(
+                                                isRecording = isListening || isAnalyzingVoice,
+                                                rmsLevel = if (isListening) rmsDb else 4f,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(12.dp))
+
+                                        // Справа — крестик ✕ для отмены/завершения
+                                        Box(
+                                            modifier = Modifier
+                                                .size(38.dp)
+                                                .clip(CircleShape)
+                                                .background(Slate800.copy(alpha = 0.9f))
+                                                .border(1.dp, Slate700, CircleShape)
+                                                .clickable { cancelAndCollapseToNav() }
+                                                .testTag("voice_bar_cancel_button"),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Отменить голосовой ввод",
+                                                tint = Slate400,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                VoiceSubState.OPERATIONS -> {
+                                    // Когда речь распознана и разобрана — эта же нижняя рамка плавно вырастает вверх,
+                                    // отображая список распознанных операций и кнопку «Сохранить»
+                                    val scrollState = rememberScrollState()
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 520.dp)
+                                            .verticalScroll(scrollState)
+                                    ) {
+                                        VoiceOperationsPane(
+                                            viewModel = viewModel,
+                                            editableList = editableList,
+                                            categories = categories,
+                                            selectedDate = selectedDate,
+                                            contentAlpha = 1f,
+                                            editingIndex = editingIndex,
+                                            onEditingIndexChanged = { editingIndex = it },
+                                            onDismissVoiceOperations = {
+                                                cancelAndCollapseToNav()
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+}
 
-/**
- * 32-полосный непрерывный визуализатор голоса с неоновым свечением.
- * Отрисовывает плавную синусоидально-гармоническую световую волну по 32 спектральным узлам
- * без дискретных столбцов (seamless neon audio wave / glow).
- */
+@Composable
+private fun MorphNavTabButton(
+    text: String,
+    icon: ImageVector,
+    isSelected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val contentColor by animateColorAsState(
+        targetValue = if (isSelected) Emerald400 else Slate400,
+        animationSpec = tween(220),
+        label = "nav_tab_color"
+    )
+    val iconScale by animateFloatAsState(
+        targetValue = if (isSelected) 1.12f else 1.0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium),
+        label = "nav_tab_scale"
+    )
+
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = text,
+                tint = contentColor,
+                modifier = Modifier
+                    .size(18.dp)
+                    .graphicsLayer {
+                        scaleX = iconScale
+                        scaleY = iconScale
+                    }
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = text,
+                color = contentColor,
+                fontSize = 10.sp,
+                fontFamily = ManropeFontFamily,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun VoiceConsentPane(
+    contentAlpha: Float,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer { alpha = contentAlpha }
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Indigo500.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Star, contentDescription = null, tint = Indigo500, modifier = Modifier.size(18.dp))
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "ИИ-ассистент Gemini",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(Slate800.copy(alpha = 0.85f))
+                    .border(1.dp, Slate700, CircleShape)
+                    .clickable(onClick = onDecline),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
+                    tint = Slate400,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = "Для автоматического распознавания категорий и сумм из вашего голоса данные отправляются в Google Gemini API.",
+            color = Slate400,
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+            onClick = onAccept,
+            colors = ButtonDefaults.buttonColors(containerColor = Emerald400.copy(alpha = 0.15f)),
+            shape = CircleShape,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .border(1.dp, Emerald400.copy(alpha = 0.5f), CircleShape)
+                .testTag("accept_voice_consent_button")
+        ) {
+            Text("Разрешить ИИ", color = Emerald400, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        }
+    }
+}
+
+@Composable
+private fun VoiceApiKeyPane(
+    currentKey: String,
+    contentAlpha: Float,
+    onSaveKey: (String) -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var keyText by remember(currentKey) { mutableStateOf(currentKey) }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer { alpha = contentAlpha }
+            .padding(horizontal = 16.dp, vertical = 14.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Ключ Gemini API",
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Получить ключ ↗",
+                    color = Indigo500,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/app/apikey"))
+                        context.startActivity(intent)
+                    }
+                )
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Slate800.copy(alpha = 0.85f))
+                        .border(1.dp, Slate700, CircleShape)
+                        .clickable(onClick = onCancel),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Закрыть",
+                        tint = Slate400,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Для работы голосового ввода вставьте ваш бесплатный ключ из Google AI Studio:",
+            color = Slate400,
+            fontSize = 11.sp,
+            lineHeight = 15.sp
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        OutlinedTextField(
+            value = keyText,
+            onValueChange = { keyText = it },
+            placeholder = { Text("AIzaSy...", color = Slate400, fontSize = 13.sp) },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("voice_api_key_input"),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = DarkBg,
+                unfocusedContainerColor = DarkBg,
+                focusedBorderColor = Indigo500,
+                unfocusedBorderColor = Slate800,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            shape = RoundedCornerShape(12.dp)
+        )
+        Spacer(modifier = Modifier.height(14.dp))
+        Button(
+            onClick = {
+                if (keyText.isNotBlank()) {
+                    onSaveKey(keyText.trim())
+                } else {
+                    Toast.makeText(context, "Введите API ключ", Toast.LENGTH_SHORT).show()
+                }
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = Indigo500),
+            shape = CircleShape,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+                .testTag("save_voice_api_key_button")
+        ) {
+            Text("Сохранить и начать", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        }
+    }
+}
+
 @Composable
 fun Neon32BandVoiceVisualizer(
     amplitude: Float,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    barCount: Int = 32
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "voice_visualizer_anim")
+    val infiniteTransition = rememberInfiniteTransition(label = "voice_32_wave")
     val phase by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = (2 * PI).toFloat(),
+        targetValue = (2f * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = LinearEasing),
+            animation = tween(durationMillis = 650, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "phase"
+        label = "wave_phase"
     )
-    val secondaryPhase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (-2 * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(1700, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
+
+    val smoothedAmp by animateFloatAsState(
+        targetValue = amplitude.coerceIn(0.05f, 1f),
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMediumLow
         ),
-        label = "secondaryPhase"
+        label = "smoothed_amp"
     )
 
-    val animatedAmp by animateFloatAsState(
-        targetValue = amplitude.coerceIn(0.08f, 1f),
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
-        label = "animated_amplitude"
-    )
+    val barBrush = remember {
+        Brush.verticalGradient(
+            colors = listOf(NeonEmerald, NeonCyan, NeonIndigo)
+        )
+    }
 
-    Canvas(
-        modifier = modifier
-    ) {
-        val width = size.width
-        val height = size.height
-        val centerY = height / 2f
-        val maxWaveHeight = (height * 0.42f) * animatedAmp.coerceIn(0.15f, 1f)
+    Canvas(modifier = modifier) {
+        val totalWidth = size.width
+        val totalHeight = size.height
+        val spacing = (totalWidth / (barCount * 2.4f)).coerceAtLeast(1.5f)
+        val barWidth = ((totalWidth - spacing * (barCount - 1)) / barCount).coerceAtLeast(2f)
+        val centerIndex = (barCount - 1) / 2f
 
-        val bandCount = 32
-        val stepX = width / (bandCount - 1).toFloat()
+        for (i in 0 until barCount) {
+            val normalizedDist = abs(i - centerIndex) / centerIndex
+            val bellEnvelope = exp(-2.4f * normalizedDist * normalizedDist)
+            val harmonic = 0.55f + 0.45f * sin(phase + i * 0.55f)
+            val heightFraction = (0.14f + smoothedAmp * bellEnvelope * harmonic * 0.86f).coerceIn(0.12f, 1f)
+            val barHeight = totalHeight * heightFraction
+            val x = i * (barWidth + spacing)
+            val y = (totalHeight - barHeight) / 2f
 
-        val points = FloatArray(bandCount)
-        for (i in 0 until bandCount) {
-            val t = i.toFloat() / (bandCount - 1)
-            // Hann window function to smoothly fade ends to the baseline
-            val window = sin(PI * t).toFloat()
-            val h1 = sin(phase + i * 0.42f).toFloat()
-            val h2 = sin(secondaryPhase + i * 0.88f).toFloat() * 0.45f
-            val h3 = sin(phase * 1.6f + i * 1.3f).toFloat() * 0.25f
-
-            val displacement = (h1 + h2 + h3) * maxWaveHeight * window
-            points[i] = displacement
-        }
-
-        val wavePath = Path()
-        val glowFillPath = Path()
-        val mirrorPath = Path()
-
-        wavePath.moveTo(0f, centerY + points[0])
-        glowFillPath.moveTo(0f, centerY)
-        glowFillPath.lineTo(0f, centerY + points[0])
-
-        for (i in 0 until bandCount - 1) {
-            val x0 = i * stepX
-            val y0 = centerY + points[i]
-            val x1 = (i + 1) * stepX
-            val y1 = centerY + points[i + 1]
-
-            val cx = (x0 + x1) / 2f
-            wavePath.cubicTo(cx, y0, cx, y1, x1, y1)
-            glowFillPath.cubicTo(cx, y0, cx, y1, x1, y1)
-        }
-        glowFillPath.lineTo(width, centerY)
-        glowFillPath.close()
-
-        mirrorPath.moveTo(0f, centerY - points[0] * 0.65f)
-        for (i in 0 until bandCount - 1) {
-            val x0 = i * stepX
-            val y0 = centerY - points[i] * 0.65f
-            val x1 = (i + 1) * stepX
-            val y1 = centerY - points[i + 1] * 0.65f
-
-            val cx = (x0 + x1) / 2f
-            mirrorPath.cubicTo(cx, y0, cx, y1, x1, y1)
-        }
-
-        val neonGradient = Brush.horizontalGradient(
-            colors = listOf(
-                Emerald400,
-                Indigo500,
-                Rose500,
-                Indigo500,
-                Emerald400
+            drawRoundRect(
+                brush = barBrush,
+                topLeft = Offset(x, y),
+                size = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
             )
-        )
-
-        // 1. Soft glowing fill under the wave
-        drawPath(
-            path = glowFillPath,
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    Indigo500.copy(alpha = 0.22f * animatedAmp),
-                    Color.Transparent
-                ),
-                startY = centerY - maxWaveHeight,
-                endY = centerY + maxWaveHeight
-            )
-        )
-
-        // 2. Wide outer neon glow
-        drawPath(
-            path = wavePath,
-            brush = neonGradient,
-            style = Stroke(
-                width = 6.dp.toPx(),
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round
-            ),
-            alpha = 0.35f * animatedAmp.coerceIn(0.5f, 1f)
-        )
-
-        // 3. Mid neon glow aura
-        drawPath(
-            path = wavePath,
-            brush = neonGradient,
-            style = Stroke(
-                width = 3.dp.toPx(),
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round
-            ),
-            alpha = 0.85f
-        )
-
-        // 4. White-hot core filament
-        drawPath(
-            path = wavePath,
-            color = Color.White.copy(alpha = 0.95f),
-            style = Stroke(
-                width = 1.2.dp.toPx(),
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round
-            )
-        )
-
-        // 5. Mirrored secondary subtle wave
-        drawPath(
-            path = mirrorPath,
-            brush = neonGradient,
-            style = Stroke(
-                width = 1.5.dp.toPx(),
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round
-            ),
-            alpha = 0.4f
-        )
+        }
     }
 }
 
