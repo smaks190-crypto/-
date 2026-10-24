@@ -226,76 +226,41 @@ fun AddTransactionDialog(
     val filteredCategories = remember(categories, type) { categories.filter { it.type == type } }
 
     val scrollState = rememberScrollState()
-    val swipeEnabledState = LocalDialogSwipeEnabled.current
-    LaunchedEffect(scrollState.isScrollInProgress) {
-        swipeEnabledState.value = !scrollState.isScrollInProgress
-    }
 
-    SwipeToDismissDialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = Slate900,
-            border = BorderStroke(2.dp, dynamicGradient),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(20.dp)
+            .verticalScroll(scrollState)
+    ) {
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-                .shadow(
-                    elevation = 24.dp,
-                    shape = RoundedCornerShape(24.dp),
-                    clip = false,
-                    ambientColor = neonColor1.copy(alpha = 0.8f),
-                    spotColor = neonColor2.copy(alpha = 0.8f)
-                )
+                .padding(bottom = 10.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Column(
+            Box(
                 modifier = Modifier
-                    .padding(20.dp)
-                    .verticalScroll(scrollState)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .width(36.dp)
-                            .height(4.dp)
-                            .clip(CircleShape)
-                            .background(Slate700)
-                    )
-                }
+                    .width(36.dp)
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(Slate700)
+            )
+        }
 
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (editingTransaction != null) "Редактировать операцию" else "Добавить операцию",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Rose500.copy(alpha = 0.15f))
-                            .border(1.dp, Rose500.copy(alpha = 0.4f), CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Закрыть",
-                            tint = Rose500,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(
+                text = if (editingTransaction != null) "Редактировать операцию" else "Добавить операцию",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
 
-                Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
                 // Row 1: Category (Left) and Type toggle (Right)
                 Row(
@@ -641,7 +606,7 @@ fun AddTransactionDialog(
                         .fillMaxWidth()
                         .padding(top = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     // Emerald400 glowing save button
                     Button(
@@ -658,27 +623,44 @@ fun AddTransactionDialog(
                             disabledContainerColor = currentContainerColor,
                             disabledContentColor = currentContentColor
                         ),
-                        shape = CircleShape,
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
+                            .weight(1f)
+                            .height(52.dp)
                             .shadow(
                                 elevation = (visualNeonLevel * 14).dp,
-                                shape = CircleShape,
+                                shape = RoundedCornerShape(16.dp),
                                 ambientColor = Emerald400,
                                 spotColor = Emerald400
                             )
                             .border(
                                 width = 1.dp,
                                 color = currentBorderColor,
-                                shape = CircleShape
+                                shape = RoundedCornerShape(16.dp)
                             )
                             .testTag("save_transaction_button")
                     ) {
                         Text("Сохранить", color = currentContentColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     }
+
+                    // Bottom-right square ✕ close button under the thumb
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Slate800)
+                            .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                            .clickable { onDismiss() }
+                            .testTag("close_edit_transaction_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Закрыть",
+                            tint = Slate400,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
-        }
-    }
 }

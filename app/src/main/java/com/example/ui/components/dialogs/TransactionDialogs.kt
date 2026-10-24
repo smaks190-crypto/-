@@ -250,148 +250,131 @@ fun AllTransactionsDialog(
         label = "header_drag_offset"
     )
 
-    SwipeToDismissDialog(
-        onDismissRequest = onDismiss,
-        isAtTop = { lazyListState.firstVisibleItemIndex == 0 },
-        contentPadding = PaddingValues(start = 0.dp, end = 0.dp, top = 12.dp, bottom = 0.dp)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .offset { IntOffset(x = 0, y = animatedHeaderDragOffsetY.roundToInt()) }
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .navigationBarsPadding(),
-            contentAlignment = Alignment.BottomCenter
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.96f)
-                    .offset { IntOffset(x = 0, y = animatedHeaderDragOffsetY.roundToInt()) },
-                color = DarkBg,
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    AllTransactionsDragHandleAndHeaderBar(
-                        headerDragOffsetY = headerDragOffsetY,
-                        onUpdateHeaderDragOffsetY = { headerDragOffsetY = it },
-                        onDismiss = onDismiss,
-                        shownCount = sortedList.size,
-                        totalCount = transactions.size
-                    )
+            AllTransactionsDragHandleAndHeaderBar(
+                headerDragOffsetY = headerDragOffsetY,
+                onUpdateHeaderDragOffsetY = { headerDragOffsetY = it },
+                onDismiss = onDismiss,
+                shownCount = sortedList.size,
+                totalCount = transactions.size
+            )
 
-                    // Pinned Collapsible / Morphing Header or Full-Size Components
-                    AllTransactionsCollapsibleHeader(
-                        showCompactHeader = isScrolled && filterType != "all",
-                        filterType = filterType,
-                        onFilterTypeChange = { filterType = it },
-                        totalExpenseAmt = totalExpenseAmt,
-                        totalIncomeAmt = totalIncomeAmt,
-                        currentActiveCategoryTotals = currentActiveCategoryTotals,
-                        selectedCategoryFilter = selectedCategoryFilter,
-                        onSelectCategoryFilter = { selectedCategoryFilter = it },
-                        isDrilledDownToMixed = isDrilledDownToMixed,
-                        onSetDrilledDownToMixed = { isDrilledDownToMixed = it },
-                        remainingCategoryNames = remainingCategoryNames,
-                        selectedPeriod = selectedPeriod,
-                        onSelectPeriod = { selectedPeriod = it },
-                        currentOffsetInt = currentOffsetInt,
-                        transactions = transactions,
-                        visibleDateStr = visibleDateStr.value,
-                        dynamicMonthLabel = dynamicMonthLabel,
-                        chartViewMode = chartViewMode,
-                        onSelectChartViewMode = { chartViewMode = it },
-                        stableAnchorDateStr = stableAnchorDateStr,
-                        categoryTotalsMap = categoryTotalsMap,
-                        shouldGroup = shouldGroup,
-                        getFilteredListForOffset = ::getFilteredListForOffset,
-                        getCategoryTotalsForOffset = ::getCategoryTotalsForOffset,
-                        getCategoryColor = ::getCategoryColor,
-                        onSwipePeriodOffset = { delta ->
-                            when (selectedPeriod) {
-                                "week" -> swipeWeekOffset += delta
-                                "month" -> swipeMonthOffset += delta
-                                "year" -> swipeYearOffset += delta
-                                else -> {
-                                    customStartStr = null
-                                    customEndStr = null
-                                    customLabelStr = null
-                                    selectedPeriod = "month"
-                                    swipeMonthOffset += delta
-                                }
-                            }
-                        },
-                        onOpenMixedCategoriesDialog = { showMixedCategoriesDialog = true }
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Pinned Sticky Sorting Options Row (outside LazyColumn)
-                    TransactionSortAndSearchBar(
-                        isSearchExpandedInPlace = isSearchExpandedInPlace,
-                        onSetSearchExpandedInPlace = { isSearchExpandedInPlace = it },
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = { searchQuery = it },
-                        focusRequester = focusRequester,
-                        selectedCategoryFilter = selectedCategoryFilter,
-                        isDrilledDownToMixed = isDrilledDownToMixed,
-                        remainingCategoryNames = remainingCategoryNames,
-                        onClearCategoryFilter = {
-                            selectedCategoryFilter = null
-                            isDrilledDownToMixed = false
-                        },
-                        getCategoryColor = ::getCategoryColor,
-                        selectedPeriod = selectedPeriod,
-                        customStartStr = customStartStr,
-                        dynamicMonthLabel = dynamicMonthLabel,
-                        onOpenDatePickerModal = { showDatePickerModal = true },
-                        onResetPeriodToAll = {
-                            selectedPeriod = "all"
+            // Pinned Collapsible / Morphing Header or Full-Size Components
+            AllTransactionsCollapsibleHeader(
+                showCompactHeader = isScrolled && filterType != "all",
+                filterType = filterType,
+                onFilterTypeChange = { filterType = it },
+                totalExpenseAmt = totalExpenseAmt,
+                totalIncomeAmt = totalIncomeAmt,
+                currentActiveCategoryTotals = currentActiveCategoryTotals,
+                selectedCategoryFilter = selectedCategoryFilter,
+                onSelectCategoryFilter = { selectedCategoryFilter = it },
+                isDrilledDownToMixed = isDrilledDownToMixed,
+                onSetDrilledDownToMixed = { isDrilledDownToMixed = it },
+                remainingCategoryNames = remainingCategoryNames,
+                selectedPeriod = selectedPeriod,
+                onSelectPeriod = { selectedPeriod = it },
+                currentOffsetInt = currentOffsetInt,
+                transactions = transactions,
+                visibleDateStr = visibleDateStr.value,
+                dynamicMonthLabel = dynamicMonthLabel,
+                chartViewMode = chartViewMode,
+                onSelectChartViewMode = { chartViewMode = it },
+                stableAnchorDateStr = stableAnchorDateStr,
+                categoryTotalsMap = categoryTotalsMap,
+                shouldGroup = shouldGroup,
+                getFilteredListForOffset = ::getFilteredListForOffset,
+                getCategoryTotalsForOffset = ::getCategoryTotalsForOffset,
+                getCategoryColor = ::getCategoryColor,
+                onSwipePeriodOffset = { delta ->
+                    when (selectedPeriod) {
+                        "week" -> swipeWeekOffset += delta
+                        "month" -> swipeMonthOffset += delta
+                        "year" -> swipeYearOffset += delta
+                        else -> {
                             customStartStr = null
                             customEndStr = null
                             customLabelStr = null
-                        },
-                        sortOption = sortOption,
-                        onSortOptionChange = { sortOption = it },
-                        isScrolled = isScrolled
-                    )
+                            selectedPeriod = "month"
+                            swipeMonthOffset += delta
+                        }
+                    }
+                },
+                onOpenMixedCategoriesDialog = { showMixedCategoriesDialog = true }
+            )
 
-                    Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
-                    TransactionListSection(
-                        lazyListState = lazyListState,
-                        searchQuery = searchQuery,
-                        onSearchQueryChange = { searchQuery = it },
-                        sortedList = sortedList,
-                        groupedByDate = groupedByDate,
-                        filterType = filterType,
-                        allTransactions = transactions,
-                        onDeleteTransaction = onDeleteTransaction,
-                        onRestoreTransaction = onRestoreTransaction,
-                        onEditTransaction = onEditTransaction,
-                        coroutineScope = coroutineScope,
-                        snackbarHostState = snackbarHostState
-                    )
-                }
-            }
+            // Pinned Sticky Sorting Options Row (outside LazyColumn)
+            TransactionSortAndSearchBar(
+                isSearchExpandedInPlace = isSearchExpandedInPlace,
+                onSetSearchExpandedInPlace = { isSearchExpandedInPlace = it },
+                searchQuery = searchQuery,
+                onSearchQueryChange = { searchQuery = it },
+                focusRequester = focusRequester,
+                selectedCategoryFilter = selectedCategoryFilter,
+                isDrilledDownToMixed = isDrilledDownToMixed,
+                remainingCategoryNames = remainingCategoryNames,
+                onClearCategoryFilter = {
+                    selectedCategoryFilter = null
+                    isDrilledDownToMixed = false
+                },
+                getCategoryColor = ::getCategoryColor,
+                selectedPeriod = selectedPeriod,
+                customStartStr = customStartStr,
+                dynamicMonthLabel = dynamicMonthLabel,
+                onOpenDatePickerModal = { showDatePickerModal = true },
+                onResetPeriodToAll = {
+                    selectedPeriod = "all"
+                    customStartStr = null
+                    customEndStr = null
+                    customLabelStr = null
+                },
+                sortOption = sortOption,
+                onSortOptionChange = { sortOption = it },
+                isScrolled = isScrolled
+            )
 
-            SnackbarHost(
-                hostState = snackbarHostState,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-            ) { snackbarData ->
-                Snackbar(
-                    snackbarData = snackbarData,
-                    containerColor = Slate900,
-                    contentColor = Color.White,
-                    actionColor = Emerald400,
-                    shape = RoundedCornerShape(16.dp)
-                )
-            }
+            Spacer(modifier = Modifier.height(6.dp))
+
+            TransactionListSection(
+                lazyListState = lazyListState,
+                searchQuery = searchQuery,
+                onSearchQueryChange = { searchQuery = it },
+                sortedList = sortedList,
+                groupedByDate = groupedByDate,
+                filterType = filterType,
+                allTransactions = transactions,
+                onDeleteTransaction = onDeleteTransaction,
+                onRestoreTransaction = onRestoreTransaction,
+                onEditTransaction = onEditTransaction,
+                coroutineScope = coroutineScope,
+                snackbarHostState = snackbarHostState
+            )
+        }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(16.dp)
+        ) { snackbarData ->
+            Snackbar(
+                snackbarData = snackbarData,
+                containerColor = Slate900,
+                contentColor = Color.White,
+                actionColor = Emerald400,
+                shape = RoundedCornerShape(16.dp)
+            )
         }
 
         // Date Range Selection Dialog Modal

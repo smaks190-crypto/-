@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -86,92 +87,64 @@ fun AddGoalDialog(
     val remainingPreview = (parsedTarget - parsedCurrent).coerceAtLeast(0.0)
     val dailyPacePreview = if (remainingPreview > 0) kotlin.math.ceil(remainingPreview / 90.0) else 0.0
 
-    SwipeToDismissDialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = ObsidianSurface,
-            border = BorderStroke(
-                width = 1.dp,
-                brush = Brush.verticalGradient(listOf(GlassHighlight, GlassBorder))
-            ),
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .size(160.dp)
+                .align(Alignment.TopEnd)
+                .offset(x = 40.dp, y = (-40).dp)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Emerald400.copy(alpha = 0.18f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
+        Column(
+            modifier = Modifier
+                .padding(22.dp)
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Box(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
                 Box(
                     modifier = Modifier
-                        .size(160.dp)
-                        .align(Alignment.TopEnd)
-                        .offset(x = 40.dp, y = (-40).dp)
-                        .background(
-                            brush = Brush.radialGradient(
-                                colors = listOf(
-                                    Emerald400.copy(alpha = 0.18f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(GlassHighlight)
                 )
+            }
 
-                Column(
-                    modifier = Modifier
-                        .padding(22.dp)
-                        .verticalScroll(scrollState),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(40.dp)
-                                .height(4.dp)
-                                .clip(CircleShape)
-                                .background(GlassHighlight)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "НОВАЯ КОПИЛКА",
-                                color = Emerald400,
-                                fontFamily = SpaceGroteskFontFamily,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.2.sp
-                            )
-                            Text(
-                                text = "Финансовая цель",
-                                color = Color.White,
-                                fontFamily = ManropeFontFamily,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(ObsidianElevated)
-                                .border(1.dp, GlassBorder, CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Закрыть",
-                                tint = Slate400,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "НОВАЯ КОПИЛКА",
+                        color = Emerald400,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp
+                    )
+                    Text(
+                        text = "Финансовая цель",
+                        color = Color.White,
+                        fontFamily = ManropeFontFamily,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
 
                     // 1-Tap Goal Presets from David Zhabov
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -351,34 +324,56 @@ fun AddGoalDialog(
 
                     val canCreate = name.isNotBlank() && parsedTarget > 0
 
-                    Button(
-                        onClick = {
-                            if (canCreate) {
-                                onSave(name.trim(), parsedTarget, parsedCurrent)
-                                onDismiss()
-                            }
-                        },
-                        enabled = canCreate,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Emerald400,
-                            disabledContainerColor = ObsidianElevated
-                        ),
-                        shape = RoundedCornerShape(16.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Создать",
-                            color = if (canCreate) DarkBg else Slate500,
-                            fontFamily = ManropeFontFamily,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 15.sp
-                        )
+                        Button(
+                            onClick = {
+                                if (canCreate) {
+                                    onSave(name.trim(), parsedTarget, parsedCurrent)
+                                    onDismiss()
+                                }
+                            },
+                            enabled = canCreate,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Emerald400,
+                                disabledContainerColor = ObsidianElevated
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Text(
+                                text = "Создать",
+                                color = if (canCreate) DarkBg else Slate500,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 15.sp
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Slate800)
+                                .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                                .clickable { onDismiss() }
+                                .testTag("close_add_goal_button"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Закрыть",
+                                tint = Slate400,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
-        }
-    }
 }
 

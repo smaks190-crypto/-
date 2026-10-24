@@ -229,27 +229,32 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     val aiAuditLoading by viewModel.aiAuditLoading.collectAsState()
     val isGeneratingReaction by viewModel.isGeneratingReaction.collectAsState()
     val savedAiAudit by viewModel.savedAiAudit.collectAsState()
+    val activeModal by viewModel.activeModal.collectAsState()
 
-    // Dialog state handlers
-    var showConsentDialog by remember { mutableStateOf(false) }
-    var consentDialogMessage by remember { mutableStateOf<String?>(null) }
-    var showAddTxModal by remember { mutableStateOf(false) }
-    var editingTransaction by remember { mutableStateOf<TransactionEntity?>(null) }
     var triggerAuditAfterKeySave by remember { mutableStateOf(false) }
-    var showCategoriesModal by remember { mutableStateOf(false) }
-    var showAddGoalModal by remember { mutableStateOf(false) }
-    var showSettingsHubModal by remember { mutableStateOf(false) }
-    var showReportDialog by remember { mutableStateOf(false) }
-    var showRecentTransactionsScreen by remember { mutableStateOf(false) }
-    var reportDialogTab by remember { mutableStateOf(0) }
-    var settingsInitialScreen by remember { mutableStateOf(com.example.ui.components.SettingsScreen.HUB) }
 
-    LaunchedEffect(showSettingsHubModal, showCategoriesModal, showAddGoalModal, showAddTxModal, showReportDialog) {
-        if (showSettingsHubModal) com.example.utils.GlobalConsoleLogger.i("UI", "Dialog: SettingsHub opened")
-        if (showCategoriesModal) com.example.utils.GlobalConsoleLogger.i("UI", "Dialog: Categories opened")
-        if (showAddGoalModal) com.example.utils.GlobalConsoleLogger.i("UI", "Dialog: AddGoal opened")
-        if (showAddTxModal) com.example.utils.GlobalConsoleLogger.i("UI", "Dialog: AddTransaction opened")
-        if (showReportDialog) com.example.utils.GlobalConsoleLogger.i("UI", "Dialog: DavidChat/Report opened")
+    LaunchedEffect(activeModal) {
+        when (activeModal) {
+            is com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub ->
+                com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: SettingsHub opened")
+            is com.example.ui.viewmodel.BottomCapsuleModal.Categories ->
+                com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: Categories opened")
+            is com.example.ui.viewmodel.BottomCapsuleModal.AddGoal ->
+                com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: AddGoal opened")
+            is com.example.ui.viewmodel.BottomCapsuleModal.ManualAddTransaction,
+            is com.example.ui.viewmodel.BottomCapsuleModal.EditTransaction ->
+                com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: Add/EditTransaction opened")
+            is com.example.ui.viewmodel.BottomCapsuleModal.DavidChat ->
+                com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: DavidChat opened")
+            is com.example.ui.viewmodel.BottomCapsuleModal.AllTransactions ->
+                com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: AllTransactions opened")
+            is com.example.ui.viewmodel.BottomCapsuleModal.CategoryLimits ->
+                com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: CategoryLimits opened")
+            is com.example.ui.viewmodel.BottomCapsuleModal.AddDebt,
+            is com.example.ui.viewmodel.BottomCapsuleModal.DebtDetails ->
+                com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: Debt dialog opened")
+            else -> {}
+        }
     }
 
     val securityManager = remember { com.example.data.SecurityManager(context) }
@@ -306,7 +311,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
         }
     }
 
-    // Consent dialog is now triggered on demand when pressing the FAB (+) button on the Period tab or using AI features.
     var pendingExportJson by remember { mutableStateOf<String?>(null) }
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
@@ -465,17 +469,28 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                             onExportBudget = { budgetId -> triggerDirectExport(budgetId) },
                             onImportFromBackup = { json, nameHint -> viewModel.importBackupAsNewBudget(json, nameHint) },
                             onOpenApiKeyModal = {
-                                settingsInitialScreen = com.example.ui.components.SettingsScreen.API_KEY
-                                showSettingsHubModal = true
+                                viewModel.openModal(
+                                    com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(
+                                        com.example.ui.components.SettingsScreen.API_KEY
+                                    )
+                                )
                             },
-                            onOpenCategoriesModal = { showCategoriesModal = true },
+                            onOpenCategoriesModal = {
+                                viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.Categories)
+                            },
                             onOpenReminderModal = {
-                                settingsInitialScreen = com.example.ui.components.SettingsScreen.REMINDERS
-                                showSettingsHubModal = true
+                                viewModel.openModal(
+                                    com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(
+                                        com.example.ui.components.SettingsScreen.REMINDERS
+                                    )
+                                )
                             },
                             onOpenSecurityModal = {
-                                settingsInitialScreen = com.example.ui.components.SettingsScreen.SECURITY
-                                showSettingsHubModal = true
+                                viewModel.openModal(
+                                    com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(
+                                        com.example.ui.components.SettingsScreen.SECURITY
+                                    )
+                                )
                             }
                         )
                     } else {
@@ -512,8 +527,11 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             }
                                             lastAvatarTapTime = now
 
-                                            settingsInitialScreen = com.example.ui.components.SettingsScreen.HUB
-                                            showSettingsHubModal = true
+                                            viewModel.openModal(
+                                                com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(
+                                                    com.example.ui.components.SettingsScreen.HUB
+                                                )
+                                            )
                                         }
                                         .padding(end = 8.dp)
                                 ) {
@@ -588,7 +606,8 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     val context = androidx.compose.ui.platform.LocalContext.current
                                     val pName = currentProfile?.name ?: "default"
                                     val prefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
-                                    val hasOpenedChatBefore = remember(showReportDialog, pName) { prefs.getBoolean("has_opened_david_chat_before_$pName", false) }
+                                    val isDavidChatOpen = activeModal is com.example.ui.viewmodel.BottomCapsuleModal.DavidChat
+                                    val hasOpenedChatBefore = remember(isDavidChatOpen, pName) { prefs.getBoolean("has_opened_david_chat_before_$pName", false) }
                                     val hasUnread = unreadNotificationsCount > 0 || !hasOpenedChatBefore
                                     val shouldShowMessage = showWelcomeBubble || (hasUnread && unreadNotificationsCount > 0)
                                     val iconNeonColor = Emerald400
@@ -656,8 +675,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             .clickable {
                                                 showWelcomeBubble = false
                                                 isExpandedByNeon = false
-                                                reportDialogTab = 0
-                                                showReportDialog = true
+                                                viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.DavidChat)
                                             }
                                             .padding(horizontal = 12.dp, vertical = 6.dp),
                                         contentAlignment = Alignment.Center
@@ -790,7 +808,11 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             viewModel.requestAiAudit(filteredTransactions)
                                         },
                                         onDeleteTransaction = { viewModel.deleteTransaction(it) },
-                                        onEditTransaction = { editingTransaction = it }
+                                        onEditTransaction = { tx ->
+                                            viewModel.openModal(
+                                                com.example.ui.viewmodel.BottomCapsuleModal.EditTransaction(tx)
+                                            )
+                                        }
                                     )
 
                                     1 -> DebtsScreen(
@@ -805,12 +827,20 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                         },
                                         onAddDebtTransaction = { type, date, category, subcategory, amount, debtId ->
                                             viewModel.addTransaction(type, date, category, subcategory, amount, debtId)
+                                        },
+                                        onOpenAddDebtModal = {
+                                            viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.AddDebt)
+                                        },
+                                        onOpenDebtDetailsModal = { debt ->
+                                            viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.DebtDetails(debt))
                                         }
                                     )
 
                                     2 -> GoalsScreen(
                                         goals = goals,
-                                        onOpenAddGoalModal = { showAddGoalModal = true },
+                                        onOpenAddGoalModal = {
+                                            viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.AddGoal)
+                                        },
                                         onAddGoalProgress = { goalId, amount -> viewModel.addGoalProgress(goalId, amount) },
                                         onDeleteGoal = { viewModel.deleteGoal(it) },
                                         completedGoalName = completedGoalName,
@@ -829,131 +859,12 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 }
             }
 
-            // --- MODALS AND DIALOGS ---
-
-            if (editingTransaction != null) {
-                AddTransactionDialog(
-                    initialType = if (activeSubTab == "income") "income" else "expense",
-                    categories = categories,
-                    onDismiss = { editingTransaction = null },
-                    onSave = { type, date, category, subcategory, amount ->
-                        val txToEdit = editingTransaction
-                        if (txToEdit != null) {
-                            viewModel.updateTransaction(txToEdit.id, type, date, category, subcategory, amount)
-                        }
-                        editingTransaction = null
-                    },
-                    onSuggestCategory = { txName, type, catList ->
-                        viewModel.suggestCategory(txName, type, catList)
-                    },
-                    editingTransaction = editingTransaction
-                )
-            }
-
-            if (showCategoriesModal) {
-                CategoriesDialog(
-                    categories = categories,
-                    onDismiss = { showCategoriesModal = false },
-                    onAddCategory = { type, name -> viewModel.addCategory(type, name) },
-                    onDeleteCategory = { id -> viewModel.deleteCategory(id) }
-                )
-            }
-
-            if (showAddGoalModal) {
-                AddGoalDialog(
-                    onDismiss = { showAddGoalModal = false },
-                    onSave = { name, target, current -> viewModel.saveNewGoal(name, target, current) }
-                )
-            }
-
-            if (showSettingsHubModal) {
-                com.example.ui.components.SettingsHubDialog(
-                    securityManager = securityManager,
-                    apiKey = apiKey,
-                    currentProfileName = currentProfile?.name ?: "",
-                    profileId = currentProfile?.id ?: "default",
-                    onAvatarChanged = { avatarUpdateKey++ },
-                    onRenameProfile = { newName ->
-                        currentProfile?.let { viewModel.renameBudget(it.id, newName) }
-                    },
-                    onResetAllData = {
-                        viewModel.clearAllDataAndResetSecurity(securityManager)
-                        showSettingsHubModal = false
-                    },
-                    initialScreen = settingsInitialScreen,
-                    onDismiss = {
-                        showSettingsHubModal = false
-                        triggerAuditAfterKeySave = false
-                    },
-                    onSaveApiKey = { newKey ->
-                        viewModel.saveApiKey(newKey)
-                        if (triggerAuditAfterKeySave && newKey.isNotBlank()) {
-                            triggerAuditAfterKeySave = false
-                            viewModel.requestAiAudit(filteredTransactions)
-                        }
-                    },
-                    onSecurityUpdated = {
-                        if (!securityManager.isPinEnabled()) {
-                            isAppLocked = false
-                        }
-                    },
-                    onOpenSecurity = {},
-                    onOpenReminders = {},
-                    onOpenApiKey = {},
-                    onOpenCategories = { showCategoriesModal = true },
-                    onExitBudget = {
-                        viewModel.selectBudget(null)
-                        showSettingsHubModal = false
-                    }
-                )
-            }
-
-            if (showConsentDialog) {
-                GeminiConsentDialog(
-                    messageOverride = consentDialogMessage ?: "Для использования ИИ-функций требуется ваше согласие на обработку данных.",
-                    currentApiKey = apiKey,
-                    onSaveApiKey = { newKey -> viewModel.saveApiKey(newKey) },
-                    onAccept = {
-                        viewModel.setGeminiConsentGiven(true)
-                        showConsentDialog = false
-                        if (apiKey.isBlank()) {
-                            triggerAuditAfterKeySave = true
-                            settingsInitialScreen = com.example.ui.components.SettingsScreen.API_KEY
-                            showSettingsHubModal = true
-                        } else {
-                            viewModel.requestAiAudit(filteredTransactions)
-                        }
-                    },
-                    onDecline = {
-                        viewModel.setGeminiConsentGiven(false)
-                        showConsentDialog = false
-                    }
-                )
-            }
-
-            if (showReportDialog) {
-                val context = androidx.compose.ui.platform.LocalContext.current
-                val profileKey = currentProfile?.name ?: "default"
-                val appPrefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
-                com.example.davidapp.DavidChatScreen(
-                    budgetId = currentProfile?.id ?: "default",
-                    profileName = currentProfile?.name ?: "Максим",
-                    apiKey = apiKey,
-                    onBack = {
-                        showReportDialog = false
-                        appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
-                        viewModel.markNotificationsAsRead()
-                    }
-                )
-            }
-
-            // --- UNIFIED MORPHING BOTTOM BAR (NAV TABS + EMBEDDED '+' + MANUAL/VOICE MORPH) ---
+            // --- UNIFIED MORPHING BOTTOM BAR (ALL MODALS + NAV TABS + EMBEDDED '+' + VOICE MORPH) ---
             val parsedVoiceOperations by viewModel.parsedVoiceOperations.collectAsState()
             var isVoiceOverlayActive by remember { mutableStateOf(false) }
-            val isVoicePipelineActive = isVoiceActive || isAnalyzingVoice || !parsedVoiceOperations.isNullOrEmpty() || showAddTxModal || isVoiceOverlayActive
+            val isVoicePipelineActive = isVoiceActive || isAnalyzingVoice || !parsedVoiceOperations.isNullOrEmpty() || isVoiceOverlayActive || activeModal != com.example.ui.viewmodel.BottomCapsuleModal.None
 
             val isImeVisible = WindowInsets.ime.asPaddingValues().calculateBottomPadding() > 0.dp
-            val isAnyModalOpen = showSettingsHubModal || showCategoriesModal || showAddGoalModal || showConsentDialog || showReportDialog
             val currentMainTab = mainPagerState.currentPage
 
             Box(
@@ -964,7 +875,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 contentAlignment = Alignment.BottomCenter
             ) {
                 AnimatedVisibility(
-                    visible = selectedBudgetId != null && !isAnyModalOpen && (isVoicePipelineActive || !isImeVisible),
+                    visible = (selectedBudgetId != null || activeModal != com.example.ui.viewmodel.BottomCapsuleModal.None) && (isVoicePipelineActive || !isImeVisible),
                     enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.95f, animationSpec = tween(220)),
                     exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.95f, animationSpec = tween(150))
                 ) {
@@ -977,12 +888,216 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                             }
                         },
                         selectedDate = selectedDateDay,
-                        showManualInput = showAddTxModal,
-                        onDismissManualInput = { showAddTxModal = false },
-                        onOpenManualInput = { showAddTxModal = true },
+                        showManualInput = activeModal is com.example.ui.viewmodel.BottomCapsuleModal.ManualAddTransaction,
+                        onDismissManualInput = { viewModel.closeModal() },
+                        onOpenManualInput = {
+                            val type = if (activeSubTab == "income") "income" else "expense"
+                            viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.ManualAddTransaction(type))
+                        },
                         initialType = if (activeSubTab == "income") "income" else "expense",
+                        showNavigationTabs = selectedBudgetId != null,
                         onOverlayActiveChanged = { active ->
                             isVoiceOverlayActive = active
+                        },
+                        modalContent = { modal ->
+                            when (modal) {
+                                is com.example.ui.viewmodel.BottomCapsuleModal.EditTransaction -> {
+                                    AddTransactionDialog(
+                                        initialType = modal.transaction.type,
+                                        categories = categories,
+                                        onDismiss = { viewModel.closeModal() },
+                                        onSave = { type, date, category, subcategory, amount ->
+                                            viewModel.updateTransaction(
+                                                modal.transaction.id,
+                                                type,
+                                                date,
+                                                category,
+                                                subcategory,
+                                                amount
+                                            )
+                                            viewModel.closeModal()
+                                        },
+                                        onSuggestCategory = { txName, type, catList ->
+                                            viewModel.suggestCategory(txName, type, catList)
+                                        },
+                                        editingTransaction = modal.transaction
+                                    )
+                                }
+
+                                is com.example.ui.viewmodel.BottomCapsuleModal.AllTransactions -> {
+                                    AllTransactionsDialog(
+                                        transactions = transactions,
+                                        initialFilterType = modal.initialFilterType,
+                                        initialDate = modal.initialDate,
+                                        onDismiss = { viewModel.closeModal() },
+                                        onEditTransaction = { tx ->
+                                            viewModel.openModal(
+                                                com.example.ui.viewmodel.BottomCapsuleModal.EditTransaction(tx)
+                                            )
+                                        },
+                                        onDeleteTransaction = { txId ->
+                                            viewModel.deleteTransaction(txId)
+                                        },
+                                        onRestoreTransaction = { tx ->
+                                            viewModel.restoreTransaction(tx)
+                                        }
+                                    )
+                                }
+
+                                is com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub -> {
+                                    com.example.ui.components.SettingsHubDialog(
+                                        securityManager = securityManager,
+                                        apiKey = apiKey,
+                                        currentProfileName = currentProfile?.name ?: "",
+                                        profileId = currentProfile?.id ?: "default",
+                                        onAvatarChanged = { avatarUpdateKey++ },
+                                        onRenameProfile = { newName ->
+                                            currentProfile?.let { viewModel.renameBudget(it.id, newName) }
+                                        },
+                                        onResetAllData = {
+                                            viewModel.clearAllDataAndResetSecurity(securityManager)
+                                            viewModel.closeModal()
+                                        },
+                                        initialScreen = modal.initialScreen,
+                                        onDismiss = {
+                                            viewModel.closeModal()
+                                            triggerAuditAfterKeySave = false
+                                        },
+                                        onSaveApiKey = { newKey ->
+                                            viewModel.saveApiKey(newKey)
+                                            if (triggerAuditAfterKeySave && newKey.isNotBlank()) {
+                                                triggerAuditAfterKeySave = false
+                                                viewModel.requestAiAudit(filteredTransactions)
+                                            }
+                                        },
+                                        onSecurityUpdated = {
+                                            if (!securityManager.isPinEnabled()) {
+                                                isAppLocked = false
+                                            }
+                                        },
+                                        onOpenSecurity = {},
+                                        onOpenReminders = {},
+                                        onOpenApiKey = {},
+                                        onOpenCategories = {
+                                            viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.Categories)
+                                        },
+                                        onExitBudget = {
+                                            viewModel.selectBudget(null)
+                                            viewModel.closeModal()
+                                        }
+                                    )
+                                }
+
+                                is com.example.ui.viewmodel.BottomCapsuleModal.CategoryLimits -> {
+                                    CategoryLimitsDialog(
+                                        categories = categories,
+                                        transactions = filteredTransactions,
+                                        onUpdateLimit = { catName, limit ->
+                                            viewModel.updateCategoryLimit(
+                                                categoryName = catName,
+                                                type = "expense",
+                                                newLimit = limit
+                                            )
+                                        },
+                                        onDismiss = { viewModel.closeModal() }
+                                    )
+                                }
+
+                                is com.example.ui.viewmodel.BottomCapsuleModal.Categories -> {
+                                    CategoriesDialog(
+                                        categories = categories,
+                                        onDismiss = { viewModel.closeModal() },
+                                        onAddCategory = { type, name -> viewModel.addCategory(type, name) },
+                                        onDeleteCategory = { id -> viewModel.deleteCategory(id) }
+                                    )
+                                }
+
+                                is com.example.ui.viewmodel.BottomCapsuleModal.AddGoal -> {
+                                    AddGoalDialog(
+                                        onDismiss = { viewModel.closeModal() },
+                                        onSave = { name, target, current ->
+                                            viewModel.saveNewGoal(name, target, current)
+                                            viewModel.closeModal()
+                                        }
+                                    )
+                                }
+
+                                is com.example.ui.viewmodel.BottomCapsuleModal.AddDebt -> {
+                                    com.example.ui.screens.AddDebtDialog(
+                                        onDismiss = { viewModel.closeModal() },
+                                        onConfirm = { name, amount, type, comment ->
+                                            viewModel.addAccount(name, amount, type, comment)
+                                            viewModel.closeModal()
+                                        }
+                                    )
+                                }
+
+                                is com.example.ui.viewmodel.BottomCapsuleModal.DebtDetails -> {
+                                    val liveDebt = accounts.find { it.id == modal.debt.id } ?: modal.debt
+                                    val debtTransactions = transactions.filter { it.accountId == liveDebt.id }
+                                    val isWeOwe = liveDebt.type != "owes_us"
+                                    val paidSoFar = debtTransactions.sumOf { tx ->
+                                        val matchesRepayment = if (isWeOwe) tx.type == "expense" else tx.type == "income"
+                                        if (matchesRepayment) tx.amount else -tx.amount
+                                    }
+                                    val remaining = (liveDebt.balance - paidSoFar).coerceAtLeast(0.0)
+                                    com.example.ui.screens.DebtDetailsDialog(
+                                        debt = liveDebt,
+                                        remainingBalance = remaining,
+                                        transactions = debtTransactions,
+                                        onDismiss = { viewModel.closeModal() },
+                                        onAddPayment = { type, date, amt, subcat ->
+                                            viewModel.addTransaction(type, date, "Долги", subcat, amt, liveDebt.id)
+                                        }
+                                    )
+                                }
+
+                                is com.example.ui.viewmodel.BottomCapsuleModal.GeminiConsent -> {
+                                    GeminiConsentDialog(
+                                        messageOverride = modal.messageOverride ?: "Для использования ИИ-функций требуется ваше согласие на обработку данных.",
+                                        currentApiKey = apiKey,
+                                        onSaveApiKey = { newKey -> viewModel.saveApiKey(newKey) },
+                                        onAccept = {
+                                            viewModel.setGeminiConsentGiven(true)
+                                            if (apiKey.isBlank()) {
+                                                triggerAuditAfterKeySave = modal.triggerAuditAfterAccept
+                                                viewModel.openModal(
+                                                    com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(
+                                                        com.example.ui.components.SettingsScreen.API_KEY
+                                                    )
+                                                )
+                                            } else {
+                                                viewModel.closeModal()
+                                                if (modal.triggerAuditAfterAccept) {
+                                                    viewModel.requestAiAudit(filteredTransactions)
+                                                }
+                                            }
+                                        },
+                                        onDecline = {
+                                            viewModel.setGeminiConsentGiven(false)
+                                            viewModel.closeModal()
+                                        }
+                                    )
+                                }
+
+                                is com.example.ui.viewmodel.BottomCapsuleModal.DavidChat -> {
+                                    val profileKey = currentProfile?.name ?: "default"
+                                    val appPrefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
+                                    com.example.davidapp.DavidChatScreen(
+                                        budgetId = currentProfile?.id ?: "default",
+                                        profileName = currentProfile?.name ?: "Максим",
+                                        apiKey = apiKey,
+                                        isEmbeddedInCapsule = true,
+                                        onBack = {
+                                            viewModel.closeModal()
+                                            appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
+                                            viewModel.markNotificationsAsRead()
+                                        }
+                                    )
+                                }
+
+                                else -> {}
+                            }
                         }
                     )
                 }

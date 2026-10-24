@@ -154,6 +154,7 @@ import com.example.ui.theme.Slate900
 import com.example.ui.theme.DarkBg
 import com.example.ui.viewmodel.PeriodType
 import com.example.ui.viewmodel.BudgetViewModel
+import com.example.ui.viewmodel.BottomCapsuleModal
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.NorthEast
 import androidx.compose.material.icons.filled.SouthWest
@@ -408,7 +409,13 @@ fun PeriodBudgetScreen(
                     .clip(RoundedCornerShape(14.dp))
                     .background(ObsidianSurface)
                     .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
-                    .clickable { showCategoryLimitsDialog = true }
+                    .clickable {
+                        if (viewModel != null) {
+                            viewModel.openModal(BottomCapsuleModal.CategoryLimits)
+                        } else {
+                            showCategoryLimitsDialog = true
+                        }
+                    }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -606,8 +613,12 @@ fun PeriodBudgetScreen(
                             .weight(1f)
                             .clip(RoundedCornerShape(18.dp))
                             .clickable {
-                                initialAllTransactionsFilter = "income"
-                                showAllTransactionsDialog = true
+                                if (viewModel != null) {
+                                    viewModel.openModal(BottomCapsuleModal.AllTransactions("income", monthStart))
+                                } else {
+                                    initialAllTransactionsFilter = "income"
+                                    showAllTransactionsDialog = true
+                                }
                             }
                             .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(18.dp))
                             .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
@@ -656,8 +667,12 @@ fun PeriodBudgetScreen(
                             .weight(1f)
                             .clip(RoundedCornerShape(18.dp))
                             .clickable {
-                                initialAllTransactionsFilter = "expense"
-                                showAllTransactionsDialog = true
+                                if (viewModel != null) {
+                                    viewModel.openModal(BottomCapsuleModal.AllTransactions("expense", monthStart))
+                                } else {
+                                    initialAllTransactionsFilter = "expense"
+                                    showAllTransactionsDialog = true
+                                }
                             }
                             .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(18.dp))
                             .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
@@ -751,7 +766,13 @@ fun PeriodBudgetScreen(
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { showCategoryLimitsDialog = true }
+                        .clickable {
+                            if (viewModel != null) {
+                                viewModel.openModal(BottomCapsuleModal.CategoryLimits)
+                            } else {
+                                showCategoryLimitsDialog = true
+                            }
+                        }
                         .padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
@@ -827,7 +848,13 @@ fun PeriodBudgetScreen(
                         }
 
                         Card(
-                            onClick = { showCategoryLimitsDialog = true },
+                            onClick = {
+                                if (viewModel != null) {
+                                    viewModel.openModal(BottomCapsuleModal.CategoryLimits)
+                                } else {
+                                    showCategoryLimitsDialog = true
+                                }
+                            },
                             colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
                             border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder),
                             shape = RoundedCornerShape(20.dp),
@@ -926,7 +953,13 @@ fun PeriodBudgetScreen(
                     // Fill 2nd slot of last row with "+ Все категории / Лимиты" card
                     if (rowItems.size == 1) {
                         Card(
-                            onClick = { showCategoryLimitsDialog = true },
+                            onClick = {
+                                if (viewModel != null) {
+                                    viewModel.openModal(BottomCapsuleModal.CategoryLimits)
+                                } else {
+                                    showCategoryLimitsDialog = true
+                                }
+                            },
                             colors = CardDefaults.cardColors(containerColor = ObsidianSurface.copy(alpha = 0.6f)),
                             border = androidx.compose.foundation.BorderStroke(1.dp, Emerald400.copy(alpha = 0.25f)),
                             shape = RoundedCornerShape(20.dp),
@@ -1097,8 +1130,17 @@ fun PeriodBudgetScreen(
                             color = Color.White.copy(alpha = 0.05f),
                             border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder),
                             modifier = Modifier.clickable {
-                                initialAllTransactionsFilter = "all"
-                                showAllTransactionsDialog = true
+                                val targetDate = if (periodType == PeriodType.DAY || periodType == PeriodType.WEEK) {
+                                    selectedDateDay
+                                } else {
+                                    monthStart
+                                }
+                                if (viewModel != null) {
+                                    viewModel.openModal(BottomCapsuleModal.AllTransactions("all", targetDate))
+                                } else {
+                                    initialAllTransactionsFilter = "all"
+                                    showAllTransactionsDialog = true
+                                }
                             }
                         ) {
                             Text(

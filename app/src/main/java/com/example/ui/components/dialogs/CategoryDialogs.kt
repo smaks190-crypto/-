@@ -87,6 +87,7 @@ import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
+import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.SpaceGroteskFontFamily
 
@@ -152,126 +153,7 @@ fun CategoriesDialog(
         label = "category_dialog_accent"
     )
 
-    // Obsidian Neo-Bank Delete Confirmation Modal
-    categoryToDelete?.let { cat ->
-        val (catColor, catIcon) = getCategoryColorAndIcon(cat.name, "")
-        SwipeToDismissDialog(onDismissRequest = { categoryToDelete = null }) {
-            Surface(
-                shape = RoundedCornerShape(28.dp),
-                color = ObsidianSurface,
-                border = BorderStroke(
-                    width = 1.dp,
-                    brush = Brush.verticalGradient(listOf(Rose500.copy(alpha = 0.45f), GlassBorder))
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(22.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(catColor.copy(alpha = 0.16f))
-                                .border(1.dp, catColor.copy(alpha = 0.4f), RoundedCornerShape(14.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = catIcon,
-                                contentDescription = null,
-                                tint = catColor,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "УДАЛЕНИЕ КАТЕГОРИИ",
-                                color = Rose400,
-                                fontFamily = SpaceGroteskFontFamily,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.sp
-                            )
-                            Text(
-                                text = "Удалить «${cat.name}»?",
-                                color = Color.White,
-                                fontFamily = ManropeFontFamily,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = "Категория исчезнет из списка быстрого выбора при создании новых операций. Уже созданные операции в истории сохранятся.",
-                        color = Slate300,
-                        fontFamily = ManropeFontFamily,
-                        fontSize = 13.sp,
-                        lineHeight = 18.sp
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        TextButton(
-                            onClick = { categoryToDelete = null },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
-                        ) {
-                            Text(
-                                text = "Отмена",
-                                color = Slate400,
-                                fontFamily = ManropeFontFamily,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Button(
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onDeleteCategory(cat.id)
-                                categoryToDelete = null
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Rose500),
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .weight(1.3f)
-                                .height(46.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Удалить",
-                                color = Color.White,
-                                fontFamily = ManropeFontFamily,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     val scrollState = rememberScrollState()
-    val swipeEnabledState = LocalDialogSwipeEnabled.current
-    LaunchedEffect(scrollState.isScrollInProgress) {
-        swipeEnabledState.value = !scrollState.isScrollInProgress
-    }
 
     val submitNewCategory = {
         val clean = newName.trim()
@@ -283,60 +165,103 @@ fun CategoriesDialog(
         }
     }
 
-    SwipeToDismissDialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(28.dp),
-            color = ObsidianSurface,
-            border = BorderStroke(
-                width = 1.dp,
-                brush = Brush.verticalGradient(listOf(GlassHighlight, GlassBorder))
-            ),
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // Ambient Radial Glow in top-right corner
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .size(180.dp)
+                .align(Alignment.TopEnd)
+                .offset(x = 45.dp, y = (-45).dp)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            activeAccent.copy(alpha = 0.18f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Box(modifier = Modifier.fillMaxWidth()) {
-                // Ambient Radial Glow in top-right corner
+            // Drag Handle
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
                 Box(
                     modifier = Modifier
-                        .size(180.dp)
-                        .align(Alignment.TopEnd)
-                        .offset(x = 45.dp, y = (-45).dp)
-                        .background(
-                            brush = Brush.radialGradient(
-                                colors = listOf(
-                                    activeAccent.copy(alpha = 0.18f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(GlassHighlight)
                 )
+            }
 
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 20.dp, vertical = 18.dp)
-                        .verticalScroll(scrollState),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+            // Header Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Drag Handle
                     Box(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(13.dp))
+                            .background(activeAccent.copy(alpha = 0.15f))
+                            .border(1.dp, activeAccent.copy(alpha = 0.35f), RoundedCornerShape(13.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .width(40.dp)
-                                .height(4.dp)
-                                .clip(CircleShape)
-                                .background(GlassHighlight)
+                        Icon(
+                            imageVector = Icons.Default.List,
+                            contentDescription = null,
+                            tint = activeAccent,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
+                    Column {
+                        Text(
+                            text = "СТРУКТУРА БЮДЖЕТА",
+                            color = activeAccent,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.2.sp
+                        )
+                        Text(
+                            text = "Категории операций",
+                            color = Color.White,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 19.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
 
-                    // Header Row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+            // Inline Obsidian Neo-Bank Delete Confirmation Card (if active)
+            categoryToDelete?.let { cat ->
+                val (catColor, catIcon) = getCategoryColorAndIcon(cat.name, "")
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = ObsidianElevated,
+                    border = BorderStroke(
+                        width = 1.dp,
+                        brush = Brush.verticalGradient(listOf(Rose500.copy(alpha = 0.55f), GlassBorder))
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -344,54 +269,94 @@ fun CategoriesDialog(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(RoundedCornerShape(13.dp))
-                                    .background(activeAccent.copy(alpha = 0.15f))
-                                    .border(1.dp, activeAccent.copy(alpha = 0.35f), RoundedCornerShape(13.dp)),
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(catColor.copy(alpha = 0.16f))
+                                    .border(1.dp, catColor.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.List,
+                                    imageVector = catIcon,
                                     contentDescription = null,
-                                    tint = activeAccent,
+                                    tint = catColor,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "СТРУКТУРА БЮДЖЕТА",
-                                    color = activeAccent,
+                                    text = "УДАЛЕНИЕ КАТЕГОРИИ",
+                                    color = Rose400,
                                     fontFamily = SpaceGroteskFontFamily,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.2.sp
+                                    letterSpacing = 1.sp
                                 )
                                 Text(
-                                    text = "Категории операций",
+                                    text = "Удалить «${cat.name}»?",
                                     color = Color.White,
                                     fontFamily = ManropeFontFamily,
-                                    fontSize = 19.sp,
+                                    fontSize = 16.sp,
                                     fontWeight = FontWeight.ExtraBold
                                 )
                             }
                         }
 
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(ObsidianElevated)
-                                .border(1.dp, GlassBorder, CircleShape)
+                        Text(
+                            text = "Категория исчезнет из списка быстрого выбора при создании новых операций. Уже созданные операции в истории сохранятся.",
+                            color = Slate300,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Закрыть",
-                                tint = Slate400,
-                                modifier = Modifier.size(16.dp)
-                            )
+                            TextButton(
+                                onClick = { categoryToDelete = null },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                            ) {
+                                Text(
+                                    text = "Отмена",
+                                    color = Slate400,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Button(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onDeleteCategory(cat.id)
+                                    categoryToDelete = null
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Rose500),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .weight(1.3f)
+                                    .height(44.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Удалить",
+                                    color = Color.White,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                            }
                         }
                     }
+                }
+            }
 
                     // Segmented Type Selector (Расходы / Доходы)
                     Row(
@@ -737,8 +702,56 @@ fun CategoriesDialog(
                             }
                         }
                     }
-                }
-            }
+
+                    // Unified bottom action row with primary Save/Done button on left and 52.dp square ✕ button on right
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                if (newName.isNotBlank()) {
+                                    submitNewCategory()
+                                } else {
+                                    onDismiss()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (newName.isNotBlank()) activeAccent else ObsidianElevated
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                        ) {
+                            Text(
+                                text = if (newName.isNotBlank()) "Добавить категорию" else "Готово",
+                                color = if (newName.isNotBlank() && newType == "income") DarkBg else Color.White,
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Slate800)
+                                .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                                .clickable { onDismiss() }
+                                .testTag("close_categories_button"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Закрыть",
+                                tint = Slate400,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
         }
     }
 }

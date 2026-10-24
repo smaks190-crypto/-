@@ -97,7 +97,7 @@ fun AllTransactionsDragHandleAndHeaderBar(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 12.dp),
-        horizontalArrangement = Arrangement.Start,
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
@@ -143,6 +143,22 @@ fun AllTransactionsDragHandleAndHeaderBar(
                     fontSize = 11.sp
                 )
             }
+        }
+
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Slate800)
+                .border(1.dp, Slate700, RoundedCornerShape(12.dp))
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Закрыть",
+                tint = Slate400,
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }

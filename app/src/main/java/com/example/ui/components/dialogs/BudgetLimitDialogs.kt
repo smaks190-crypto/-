@@ -74,91 +74,65 @@ fun CategoryLimitsDialog(
 
     val totalSpent = remember(categoryTotals) { categoryTotals.values.sum() }
 
-    SwipeToDismissDialog(
-        onDismissRequest = onDismiss,
-        contentPadding = PaddingValues(start = 0.dp, end = 0.dp, top = 12.dp, bottom = 0.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(top = 12.dp, bottom = 16.dp, start = 20.dp, end = 20.dp)
     ) {
-        Surface(
+        // Drag handle
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding(),
-            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-            color = DarkSlate,
-            border = androidx.compose.foundation.BorderStroke(1.dp, Slate800)
+                .align(Alignment.CenterHorizontally)
+                .width(40.dp)
+                .height(4.dp)
+                .clip(CircleShape)
+                .background(Slate500.copy(alpha = 0.6f))
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp, bottom = 16.dp, start = 20.dp, end = 20.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Drag handle
                 Box(
                     modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .width(40.dp)
-                        .height(4.dp)
-                        .clip(CircleShape)
-                        .background(Slate500.copy(alpha = 0.6f))
-                )
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Indigo500.copy(alpha = 0.15f))
+                        .border(1.dp, Indigo500.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Indigo500.copy(alpha = 0.15f))
-                                .border(1.dp, Indigo500.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.PieChart,
-                                contentDescription = null,
-                                tint = Indigo500,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "КАТЕГОРИИ И ЛИМИТЫ",
-                                color = Slate400,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                letterSpacing = 1.sp
-                            )
-                            Text(
-                                text = "Траты: ${formatLimitCurrency(totalSpent)}",
-                                color = Slate100,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .size(32.dp)
-                            .background(Slate800.copy(alpha = 0.6f), CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Закрыть",
-                            tint = Slate400,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
+                    Icon(
+                        imageVector = Icons.Default.PieChart,
+                        contentDescription = null,
+                        tint = Indigo500,
+                        modifier = Modifier.size(22.dp)
+                    )
                 }
+                Column {
+                    Text(
+                        text = "КАТЕГОРИИ И ЛИМИТЫ",
+                        color = Slate400,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "Траты: ${formatLimitCurrency(totalSpent)}",
+                        color = Slate100,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -241,7 +215,7 @@ fun CategoryLimitsDialog(
                 }
 
                 LazyColumn(
-                    modifier = Modifier.weight(1f, fill = false),
+                    modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(allCategoryNames) { catName ->
@@ -268,8 +242,59 @@ fun CategoryLimitsDialog(
                         )
                     }
                 }
-            }
-        }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Unified bottom row with primary Save/Done button on left and 52.dp square ✕ button on right
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = {
+                            val currentCat = editingCategory
+                            if (currentCat != null) {
+                                val valLimit = limitInputText.toDoubleOrNull()
+                                onUpdateLimit(currentCat.name, valLimit)
+                                editingCategory = null
+                            } else {
+                                onDismiss()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (editingCategory != null) Emerald400 else Indigo500
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                    ) {
+                        Text(
+                            text = if (editingCategory != null) "Сохранить лимит" else "Готово",
+                            color = if (editingCategory != null) DarkBg else Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Slate800)
+                            .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                            .clickable { onDismiss() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Закрыть",
+                            tint = Slate400,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
     }
 }
 

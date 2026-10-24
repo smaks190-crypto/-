@@ -49,39 +49,13 @@ fun GeminiConsentDialog(
     var tempApiKeyText by remember { mutableStateOf(currentApiKey) }
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
 
-    val neonGradient = Brush.linearGradient(
-        colors = listOf(Emerald400, Indigo500, Rose500)
-    )
-
-    Dialog(
-        onDismissRequest = { /* Не закрывается кликом снаружи */ },
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            dismissOnBackPress = false,
-            dismissOnClickOutside = false
-        )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("gemini_consent_dialog_card")
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.7f))
-                .padding(horizontal = 14.dp)
-                .padding(bottom = 44.dp, top = 16.dp),
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 360.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .testTag("gemini_consent_dialog_card"),
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
-                border = BorderStroke(1.2.dp, neonGradient),
-                elevation = CardDefaults.cardElevation(defaultElevation = 12.dp)
-            ) {
-                if (showApiKeyStep) {
-                    var isPasswordVisible by remember { mutableStateOf(false) }
+        if (showApiKeyStep) {
+            var isPasswordVisible by remember { mutableStateOf(false) }
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -215,34 +189,40 @@ fun GeminiConsentDialog(
 
                         Spacer(modifier = Modifier.height(20.dp))
 
-                        Button(
-                            onClick = {
-                                onSaveApiKey?.invoke(tempApiKeyText)
-                                onAccept()
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Emerald400),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.fillMaxWidth().height(44.dp)
-                        ) {
-                            Text("Сохранить ключ", color = DarkBg, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            TextButton(
-                                onClick = { onAccept() }
+                            Button(
+                                onClick = {
+                                    onSaveApiKey?.invoke(tempApiKeyText)
+                                    onAccept()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Emerald400),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(52.dp)
+                            ) {
+                                Text("Сохранить ключ", color = DarkBg, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Slate800)
+                                    .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                                    .clickable { onAccept() },
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Назад",
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Закрыть",
                                     tint = Slate400,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Назад", color = Slate400, fontSize = 13.sp)
                             }
                         }
                     }
@@ -356,7 +336,8 @@ fun GeminiConsentDialog(
                         // Action Buttons on ONE level (Row)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Button(
                                 onClick = {
@@ -368,13 +349,13 @@ fun GeminiConsentDialog(
                                 },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(50.dp)
+                                    .height(52.dp)
                                     .testTag("gemini_consent_accept_button"),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = Emerald400,
                                     contentColor = DarkBg
                                 ),
-                                shape = CircleShape,
+                                shape = RoundedCornerShape(16.dp),
                                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
                             ) {
                                 Text(
@@ -386,14 +367,12 @@ fun GeminiConsentDialog(
                             }
 
                             if (showDeclineButton) {
-                                Spacer(modifier = Modifier.width(12.dp))
-
                                 Box(
                                     modifier = Modifier
-                                        .size(50.dp)
-                                        .clip(CircleShape)
-                                        .background(DarkBg)
-                                        .border(1.dp, Rose500.copy(alpha = 0.5f), CircleShape)
+                                        .size(52.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(Slate800)
+                                        .border(1.dp, Slate700, RoundedCornerShape(16.dp))
                                         .clickable { onDecline() }
                                         .testTag("gemini_consent_decline_button"),
                                     contentAlignment = Alignment.Center
@@ -401,7 +380,7 @@ fun GeminiConsentDialog(
                                     Icon(
                                         imageVector = Icons.Default.Close,
                                         contentDescription = "Отказаться",
-                                        tint = Rose500,
+                                        tint = Slate400,
                                         modifier = Modifier.size(20.dp)
                                     )
                                 }
@@ -409,8 +388,6 @@ fun GeminiConsentDialog(
                         }
                     }
                 }
-            }
-        }
     }
 }
 

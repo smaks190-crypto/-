@@ -50,19 +50,12 @@ fun ReportDetailsDialog(
         davidViewModel.bindProfile(budgetId, profileName, apiKey)
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
-    ) {
-        DavidChatScreen(
-            budgetId = budgetId,
-            profileName = profileName,
-            apiKey = apiKey,
-            viewModel = davidViewModel,
-            onBack = onDismiss
-        )
-    }
+    DavidChatScreen(
+        budgetId = budgetId,
+        profileName = profileName,
+        apiKey = apiKey,
+        viewModel = davidViewModel,
+        isEmbeddedInCapsule = true,
+        onBack = onDismiss
+    )
 }

@@ -123,6 +123,10 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.sin
 
+import androidx.compose.foundation.layout.wrapContentHeight
+import com.example.ui.theme.DarkCard
+import com.example.ui.viewmodel.BottomCapsuleModal
+
 enum class BottomBarMode {
     NAV_TABS,
     MANUAL_ADD,
@@ -138,14 +142,15 @@ private enum class VoiceSubState {
 
 /**
  * Единая трансформирующаяся нижняя капсула (Morphing Bottom Bar):
- * - В режиме `BottomBarMode.NAV_TABS`: отображает 4 вкладки (`Период`, `Долги`, `Цели`, `Отчет`)
- *   и встроенную внутрь рамки кнопку `+` справа (только на вкладке `Период`).
- * - Короткое нажатие на `+` (`onTap`) -> переводит капсулу в `BottomBarMode.MANUAL_ADD`
- *   и плавно раскрывает рамку вверх в форму «Добавить операцию».
- * - Долгое нажатие на `+` (`onLongPress`) -> вызывает `HapticFeedbackType.LongPress`,
- *   переводит капсулу в `BottomBarMode.VOICE_INPUT`, показывает живой голосовой бар с микрофоном,
- *   распознаваемым текстом («Слушаю вас...»), `MovingNeonGlow` и крестиком `✕`, а по мере
- *   распознавания операций плавно вырастает вверх со списком операций и кнопкой «Сохранить».
+ * - Когда `activeModal == BottomCapsuleModal.None`: отображает 4 вкладки (`Период`, `Долги`, `Цели`, `Отчет`)
+ *   и встроенную внутрь рамки кнопку `+ Добавить` справа (на вкладке `Период`).
+ * - Когда открыто любое модальное окно (`BottomCapsuleModal`):
+ *   фоновый экран плавно затемняется полупрозрачным скримом (`Color.Black.copy(alpha = 0.65f)` с `animateFloatAsState`),
+ *   иконки нижней навигации растворяются (`fadeOut`), а карточка нижней капсулы (`RoundedCornerShape(28.dp)`,
+ *   темный фон `DarkCard`/`Slate900`, неоновая обводка `MovingNeonGlow`) с пружинной физикой
+ *   `spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow)` вырастает снизу вверх:
+ *   - Компактные формы (`wrapContentHeight()`)
+ *   - Большие экраны со списками (`fillMaxHeight(0.88f)`)
  */
 @Composable
 fun MorphingBottomBar(
@@ -153,11 +158,13 @@ fun MorphingBottomBar(
     currentMainTab: Int,
     onSelectTab: (Int) -> Unit,
     selectedDate: String,
-    showManualInput: Boolean,
-    onDismissManualInput: () -> Unit,
-    onOpenManualInput: () -> Unit,
+    showManualInput: Boolean = false,
+    onDismissManualInput: () -> Unit = {},
+    onOpenManualInput: () -> Unit = {},
     initialType: String = "expense",
+    showNavigationTabs: Boolean = true,
     onOverlayActiveChanged: (Boolean) -> Unit = {},
+    modalContent: @Composable (BottomCapsuleModal) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -174,8 +181,8 @@ fun MorphingBottomBar(
     val categories by viewModel.categories.collectAsState(initial = emptyList())
     val isConsentGiven by viewModel.isGeminiConsentGiven.collectAsState()
     val apiKey by viewModel.apiKey.collectAsState()
+    val activeModal by viewModel.activeModal.collectAsState()
 
-    var bottomBarMode by remember { mutableStateOf(BottomBarMode.NAV_TABS) }
     var showInlineConsent by remember { mutableStateOf(false) }
     var showInlineApiKey by remember { mutableStateOf(false) }
     var editingIndex by remember { mutableStateOf<Int?>(null) }
@@ -192,7 +199,7 @@ fun MorphingBottomBar(
                 editableList.addAll(newItems)
             }
             if (ops.isNotEmpty()) {
-                bottomBarMode = BottomBarMode.VOICE_INPUT
+                viewModel.openModal(BottomCapsuleModal.VoiceInput)
             }
         } else {
             editableList.clear()
@@ -200,30 +207,30 @@ fun MorphingBottomBar(
         }
     }
 
-    // Синхронизация внешнего флага showManualInput с режимом капсулы
+    // Синхронизация внешнего флага showManualInput с единым состоянием капсулы
     LaunchedEffect(showManualInput) {
-        if (showManualInput) {
-            bottomBarMode = BottomBarMode.MANUAL_ADD
-        } else if (bottomBarMode == BottomBarMode.MANUAL_ADD) {
-            bottomBarMode = BottomBarMode.NAV_TABS
+        if (showManualInput && activeModal == BottomCapsuleModal.None) {
+            viewModel.openModal(BottomCapsuleModal.ManualAddTransaction(initialType))
+        } else if (!showManualInput && activeModal is BottomCapsuleModal.ManualAddTransaction) {
+            viewModel.closeModal()
         }
     }
 
     // Если голосовой ввод завершился без распознанных операций и без открытых под-окон — возвращаемся к вкладкам
-    LaunchedEffect(isListening, isAnalyzingVoice, editableList.size, showInlineConsent, showInlineApiKey) {
-        if (bottomBarMode == BottomBarMode.VOICE_INPUT &&
+    LaunchedEffect(isListening, isAnalyzingVoice, editableList.size, showInlineConsent, showInlineApiKey, activeModal) {
+        if (activeModal is BottomCapsuleModal.VoiceInput &&
             !isListening &&
             !isAnalyzingVoice &&
             editableList.isEmpty() &&
             !showInlineConsent &&
             !showInlineApiKey
         ) {
-            bottomBarMode = BottomBarMode.NAV_TABS
+            viewModel.closeModal()
             viewModel.setVoiceActive(false)
         }
     }
 
-    val isExpandedOrVoice = bottomBarMode != BottomBarMode.NAV_TABS
+    val isExpandedOrVoice = activeModal != BottomCapsuleModal.None
     LaunchedEffect(isExpandedOrVoice) {
         onOverlayActiveChanged(isExpandedOrVoice)
     }
@@ -241,14 +248,14 @@ fun MorphingBottomBar(
         if (showManualInput) {
             onDismissManualInput()
         }
-        bottomBarMode = BottomBarMode.NAV_TABS
+        viewModel.closeModal()
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            bottomBarMode = BottomBarMode.VOICE_INPUT
+            viewModel.openModal(BottomCapsuleModal.VoiceInput)
             startLiveRecordingSession()
         } else {
             Toast.makeText(
@@ -264,7 +271,7 @@ fun MorphingBottomBar(
         if (showManualInput) {
             onDismissManualInput()
         }
-        bottomBarMode = BottomBarMode.VOICE_INPUT
+        viewModel.openModal(BottomCapsuleModal.VoiceInput)
         if (!isConsentGiven) {
             showInlineConsent = true
             return
@@ -302,51 +309,86 @@ fun MorphingBottomBar(
     }
 
     // Системная кнопка «Назад» плавно складывает морфинг-капсулу обратно в режим вкладок
-    BackHandler(enabled = bottomBarMode != BottomBarMode.NAV_TABS) {
-        if (bottomBarMode == BottomBarMode.VOICE_INPUT && editingIndex != null) {
+    BackHandler(enabled = activeModal != BottomCapsuleModal.None) {
+        if (activeModal is BottomCapsuleModal.VoiceInput && editingIndex != null) {
             editingIndex = null
         } else {
             cancelAndCollapseToNav()
         }
     }
 
+    val isFullHeightModal = when (activeModal) {
+        is BottomCapsuleModal.AllTransactions,
+        is BottomCapsuleModal.SettingsHub,
+        is BottomCapsuleModal.CategoryLimits,
+        is BottomCapsuleModal.DavidChat -> true
+        else -> false
+    }
+
+    val isCompactVoiceBar = activeModal is BottomCapsuleModal.VoiceInput &&
+        editableList.isEmpty() && !showInlineConsent && !showInlineApiKey
+
     val cornerRadius by animateDpAsState(
-        targetValue = when (bottomBarMode) {
-            BottomBarMode.NAV_TABS -> 22.dp
-            BottomBarMode.MANUAL_ADD -> 24.dp
-            BottomBarMode.VOICE_INPUT -> if (editableList.isNotEmpty() || showInlineConsent || showInlineApiKey) 24.dp else 22.dp
+        targetValue = when {
+            activeModal == BottomCapsuleModal.None -> 22.dp
+            isCompactVoiceBar -> 22.dp
+            else -> 28.dp
         },
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
         label = "morph_bar_corner"
     )
 
-    val borderBrush = when (bottomBarMode) {
-        BottomBarMode.NAV_TABS -> Brush.horizontalGradient(listOf(GlassHighlight, GlassHighlight))
-        BottomBarMode.MANUAL_ADD -> Brush.linearGradient(
-            listOf(Emerald400.copy(alpha = 0.55f), Indigo500.copy(alpha = 0.45f))
+    // Неоновое переливающееся свечение рамки (MovingNeonGlow)
+    val glowTransition = rememberInfiniteTransition(label = "capsule_neon_glow")
+    val glowPhase by glowTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2600, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "capsule_neon_phase"
+    )
+
+    val borderBrush = when (activeModal) {
+        BottomCapsuleModal.None -> Brush.horizontalGradient(listOf(GlassHighlight, GlassHighlight))
+        is BottomCapsuleModal.VoiceInput -> Brush.linearGradient(
+            colors = listOf(NeonEmerald.copy(alpha = 0.8f), NeonCyan.copy(alpha = 0.65f), NeonIndigo.copy(alpha = 0.8f)),
+            start = Offset(0f, 0f),
+            end = Offset(600f * (0.4f + glowPhase * 0.6f), 600f)
         )
-        BottomBarMode.VOICE_INPUT -> Brush.linearGradient(
-            listOf(NeonEmerald.copy(alpha = 0.7f), NeonIndigo.copy(alpha = 0.7f))
+        else -> Brush.linearGradient(
+            colors = listOf(
+                Emerald400.copy(alpha = 0.65f),
+                NeonCyan.copy(alpha = 0.45f),
+                Indigo500.copy(alpha = 0.55f)
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(800f * (0.35f + glowPhase * 0.65f), 800f)
         )
+    }
+
+    // Плавное затемнение фонового экрана (Color.Black.copy(alpha = 0.65f) с animateFloatAsState)
+    val showScrim = activeModal != BottomCapsuleModal.None && !isCompactVoiceBar
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (showScrim) 0.65f else 0f,
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
+        label = "morph_scrim_alpha"
+    )
+
+    if (!showNavigationTabs && activeModal == BottomCapsuleModal.None) {
+        return
     }
 
     Box(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.BottomCenter
     ) {
-        // Полупрозрачный фон-затемнение при раскрытом окне ручного ввода или списка распознанных операций
-        val showScrim = bottomBarMode == BottomBarMode.MANUAL_ADD ||
-            (bottomBarMode == BottomBarMode.VOICE_INPUT && (editableList.isNotEmpty() || showInlineConsent || showInlineApiKey))
-
-        AnimatedVisibility(
-            visible = showScrim,
-            enter = fadeIn(tween(220)),
-            exit = fadeOut(tween(180))
-        ) {
+        if (scrimAlpha > 0.005f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.55f))
+                    .background(Color.Black.copy(alpha = scrimAlpha))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
@@ -356,24 +398,31 @@ fun MorphingBottomBar(
             )
         }
 
-        // Сама нижняя морфинг-рамка (остается на своем месте внизу экрана с теми же боковыми отступами 16.dp)
+        // Сама нижняя морфинг-капсула
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(
+                    if (isFullHeightModal) {
+                        Modifier.fillMaxHeight(0.88f)
+                    } else {
+                        Modifier.wrapContentHeight()
+                    }
+                )
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .shadow(
-                    elevation = 22.dp,
+                    elevation = if (activeModal == BottomCapsuleModal.None) 18.dp else 26.dp,
                     shape = RoundedCornerShape(cornerRadius),
-                    ambientColor = if (bottomBarMode == BottomBarMode.VOICE_INPUT) NeonEmerald else Color.Black,
-                    spotColor = if (bottomBarMode == BottomBarMode.VOICE_INPUT) NeonIndigo else Color.Black
+                    ambientColor = if (activeModal != BottomCapsuleModal.None) NeonEmerald else Color.Black,
+                    spotColor = if (activeModal != BottomCapsuleModal.None) NeonIndigo else Color.Black
                 )
                 .clip(RoundedCornerShape(cornerRadius))
                 .background(
-                    if (bottomBarMode == BottomBarMode.NAV_TABS) ObsidianSurface.copy(alpha = 0.96f)
-                    else Slate900.copy(alpha = 0.98f)
+                    if (activeModal == BottomCapsuleModal.None) ObsidianSurface.copy(alpha = 0.96f)
+                    else DarkCard.copy(alpha = 0.99f)
                 )
                 .border(
-                    width = 1.dp,
+                    width = if (activeModal == BottomCapsuleModal.None) 1.dp else 1.4.dp,
                     brush = borderBrush,
                     shape = RoundedCornerShape(cornerRadius)
                 )
@@ -384,32 +433,32 @@ fun MorphingBottomBar(
                 )
                 .animateContentSize(
                     animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        dampingRatio = 0.82f,
                         stiffness = Spring.StiffnessMediumLow
                     )
                 )
         ) {
             AnimatedContent(
-                targetState = bottomBarMode,
+                targetState = activeModal,
                 transitionSpec = {
                     (fadeIn(animationSpec = tween(220)) togetherWith
-                        fadeOut(animationSpec = tween(160)))
+                        fadeOut(animationSpec = tween(150)))
                         .using(
                             SizeTransform(
                                 clip = false,
                                 sizeAnimationSpec = { _, _ ->
                                     spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        dampingRatio = 0.82f,
                                         stiffness = Spring.StiffnessMediumLow
                                     )
                                 }
                             )
                         )
                 },
-                label = "bottom_bar_mode_morph"
-            ) { mode ->
-                when (mode) {
-                    BottomBarMode.NAV_TABS -> {
+                label = "bottom_capsule_modal_morph"
+            ) { modal ->
+                when (modal) {
+                    BottomCapsuleModal.None -> {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -496,20 +545,20 @@ fun MorphingBottomBar(
                                 }
                             }
 
-                            // Встроенная симметричная кнопка `+` внутри капсулы навигации (ТОЛЬКО на вкладке Период)
+                            // Встроенная симметричная кнопка `+ Добавить` внутри капсулы навигации (ТОЛЬКО на вкладке Период)
                             AnimatedVisibility(
                                 visible = currentMainTab == 0,
                                 enter = expandHorizontally(
                                     expandFrom = Alignment.End,
                                     animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        dampingRatio = 0.82f,
                                         stiffness = Spring.StiffnessMediumLow
                                     )
                                 ) + fadeIn(animationSpec = tween(200)),
                                 exit = shrinkHorizontally(
                                     shrinkTowards = Alignment.End,
                                     animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        dampingRatio = 0.82f,
                                         stiffness = Spring.StiffnessMediumLow
                                     )
                                 ) + fadeOut(animationSpec = tween(150))
@@ -534,11 +583,13 @@ fun MorphingBottomBar(
                                                 color = NeonEmerald.copy(alpha = 0.45f),
                                                 shape = RoundedCornerShape(16.dp)
                                             )
-                                            .pointerInput(Unit) {
+                                            .pointerInput(initialType) {
                                                 detectTapGestures(
                                                     onTap = {
-                                                        bottomBarMode = BottomBarMode.MANUAL_ADD
                                                         onOpenManualInput()
+                                                        viewModel.openModal(
+                                                            BottomCapsuleModal.ManualAddTransaction(initialType)
+                                                        )
                                                     },
                                                     onLongPress = {
                                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -575,29 +626,29 @@ fun MorphingBottomBar(
                         }
                     }
 
-                    BottomBarMode.MANUAL_ADD -> {
+                    is BottomCapsuleModal.ManualAddTransaction -> {
                         val scrollState = rememberScrollState()
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(max = 520.dp)
+                                .heightIn(max = 540.dp)
                                 .verticalScroll(scrollState)
                         ) {
                             VoiceManualInputPane(
                                 viewModel = viewModel,
                                 categories = categories,
                                 selectedDate = selectedDate,
-                                initialType = initialType,
+                                initialType = modal.initialType,
                                 contentAlpha = 1f,
                                 onDismiss = {
                                     onDismissManualInput()
-                                    bottomBarMode = BottomBarMode.NAV_TABS
+                                    viewModel.closeModal()
                                 }
                             )
                         }
                     }
 
-                    BottomBarMode.VOICE_INPUT -> {
+                    is BottomCapsuleModal.VoiceInput -> {
                         val voiceSubState = when {
                             showInlineConsent -> VoiceSubState.CONSENT
                             showInlineApiKey -> VoiceSubState.API_KEY
@@ -614,7 +665,7 @@ fun MorphingBottomBar(
                                             clip = false,
                                             sizeAnimationSpec = { _, _ ->
                                                 spring(
-                                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                                    dampingRatio = 0.82f,
                                                     stiffness = Spring.StiffnessMediumLow
                                                 )
                                             }
@@ -659,8 +710,6 @@ fun MorphingBottomBar(
                                 }
 
                                 VoiceSubState.RECORDING -> {
-                                    // Компактный интерфейс записи голоса внутри нижней капсулы:
-                                    // Слева — микрофон, по центру — живой текст («Слушаю вас...») + MovingNeonGlow, справа — ✕
                                     val liveStatusText = when {
                                         isAnalyzingVoice && !isListening -> "✨ Давид разбирает операции..."
                                         recognizedText.isNotBlank() -> recognizedText
@@ -686,7 +735,6 @@ fun MorphingBottomBar(
                                             .padding(horizontal = 10.dp, vertical = 8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        // Слева — иконка микрофона (нажатие завершает запись и отправляет на разбор)
                                         Box(
                                             modifier = Modifier
                                                 .size(44.dp)
@@ -733,7 +781,6 @@ fun MorphingBottomBar(
 
                                         Spacer(modifier = Modifier.width(12.dp))
 
-                                        // По центру — живой распознаваемый текст («Слушаю вас...») и переливающееся неоновое свечение (MovingNeonGlow)
                                         Column(
                                             modifier = Modifier
                                                 .weight(1f)
@@ -778,7 +825,6 @@ fun MorphingBottomBar(
 
                                         Spacer(modifier = Modifier.width(12.dp))
 
-                                        // Справа — крестик ✕ для отмены/завершения
                                         Box(
                                             modifier = Modifier
                                                 .size(38.dp)
@@ -800,8 +846,6 @@ fun MorphingBottomBar(
                                 }
 
                                 VoiceSubState.OPERATIONS -> {
-                                    // Когда речь распознана и разобрана — эта же нижняя рамка плавно вырастает вверх,
-                                    // отображая список распознанных операций и кнопку «Сохранить»
                                     val scrollState = rememberScrollState()
                                     Box(
                                         modifier = Modifier
@@ -825,6 +869,10 @@ fun MorphingBottomBar(
                                 }
                             }
                         }
+                    }
+
+                    else -> {
+                        modalContent(modal)
                     }
                 }
             }

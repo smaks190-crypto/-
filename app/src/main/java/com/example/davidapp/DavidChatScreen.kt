@@ -68,6 +68,7 @@ fun DavidChatScreen(
     viewModel: DavidViewModel = viewModel(),
     soundManager: SoundManager? = null,
     onBack: (() -> Unit)? = null,
+    isEmbeddedInCapsule: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -133,7 +134,7 @@ fun DavidChatScreen(
                 hasApiKey = hasApiKey,
                 onOpenApiKeyDialog = { showApiKeyDialog = true },
                 isTyping = isTyping,
-                modifier = Modifier.statusBarsPadding()
+                modifier = if (isEmbeddedInCapsule) Modifier else Modifier.statusBarsPadding()
             )
         },
         bottomBar = {
@@ -141,8 +142,10 @@ fun DavidChatScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(DarkBg.copy(alpha = 0.96f))
-                    .navigationBarsPadding()
-                    .imePadding()
+                    .then(
+                        if (isEmbeddedInCapsule) Modifier
+                        else Modifier.navigationBarsPadding().imePadding()
+                    )
                     .padding(horizontal = 14.dp)
                     .padding(top = 8.dp, bottom = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)

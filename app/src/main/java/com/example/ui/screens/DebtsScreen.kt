@@ -101,6 +101,7 @@ import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
+import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.SpaceGroteskFontFamily
 import java.text.SimpleDateFormat
@@ -115,7 +116,9 @@ fun DebtsScreen(
     notifications: List<NotificationEntity>,
     onAddDebt: (name: String, initialAmount: Double, type: String, comment: String) -> Unit,
     onDeleteDebt: (debtId: String) -> Unit,
-    onAddDebtTransaction: (type: String, date: String, category: String, subcategory: String, amount: Double, debtId: String) -> Unit
+    onAddDebtTransaction: (type: String, date: String, category: String, subcategory: String, amount: Double, debtId: String) -> Unit,
+    onOpenAddDebtModal: (() -> Unit)? = null,
+    onOpenDebtDetailsModal: ((AccountEntity) -> Unit)? = null
 ) {
     var showAddDebtModal by remember { mutableStateOf(false) }
     var selectedDebtForDetails by remember { mutableStateOf<AccountEntity?>(null) }
@@ -223,7 +226,11 @@ fun DebtsScreen(
                         Button(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                showAddDebtModal = true
+                                if (onOpenAddDebtModal != null) {
+                                    onOpenAddDebtModal()
+                                } else {
+                                    showAddDebtModal = true
+                                }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Indigo500),
                             shape = RoundedCornerShape(14.dp),
@@ -371,7 +378,13 @@ fun DebtsScreen(
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(Indigo500.copy(alpha = 0.12f))
                                 .border(1.dp, Indigo400.copy(alpha = 0.3f), RoundedCornerShape(14.dp))
-                                .clickable { selectedDebtForDetails = priorityDebt }
+                                .clickable {
+                                    if (onOpenDebtDetailsModal != null) {
+                                        onOpenDebtDetailsModal(priorityDebt)
+                                    } else {
+                                        selectedDebtForDetails = priorityDebt
+                                    }
+                                }
                                 .padding(horizontal = 12.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -514,7 +527,13 @@ fun DebtsScreen(
                             debt = debt,
                             remainingBalance = remaining,
                             onDelete = { onDeleteDebt(debt.id) },
-                            onClick = { selectedDebtForDetails = debt },
+                            onClick = {
+                                if (onOpenDebtDetailsModal != null) {
+                                    onOpenDebtDetailsModal(debt)
+                                } else {
+                                    selectedDebtForDetails = debt
+                                }
+                            },
                             onQuickRepay = { payAmount ->
                                 val isWeOwe = debt.type != "owes_us"
                                 val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
@@ -843,93 +862,66 @@ fun AddDebtDialog(
         listOf("До зарплаты", "До конца месяца", "Кредитка / Грейс", "Без процентов")
     }
 
-    SwipeToDismissDialog(onDismissRequest = onDismiss) {
-        Surface(
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = ObsidianSurface,
-            border = BorderStroke(
-                width = 1.dp,
-                brush = Brush.verticalGradient(listOf(GlassHighlight, GlassBorder))
-            )
+                .size(160.dp)
+                .align(Alignment.TopEnd)
+                .offset(x = 40.dp, y = (-40).dp)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            accentColor.copy(alpha = 0.18f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
+        Column(
+            modifier = Modifier
+                .padding(22.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { focusManager.clearFocus() })
+                },
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Box(modifier = Modifier.fillMaxWidth()) {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
                 Box(
                     modifier = Modifier
-                        .size(160.dp)
-                        .align(Alignment.TopEnd)
-                        .offset(x = 40.dp, y = (-40).dp)
-                        .background(
-                            brush = Brush.radialGradient(
-                                colors = listOf(
-                                    accentColor.copy(alpha = 0.18f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(GlassHighlight)
                 )
+            }
 
-                Column(
-                    modifier = Modifier
-                        .padding(22.dp)
-                        .pointerInput(Unit) {
-                            detectTapGestures(onTap = { focusManager.clearFocus() })
-                        },
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(40.dp)
-                                .height(4.dp)
-                                .clip(CircleShape)
-                                .background(GlassHighlight)
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "УЧЕТ ОБЯЗАТЕЛЬСТВ",
-                                color = accentColor,
-                                fontFamily = SpaceGroteskFontFamily,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.2.sp
-                            )
-                            Text(
-                                text = "Новое обязательство",
-                                color = Color.White,
-                                fontFamily = ManropeFontFamily,
-                                fontSize = 19.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(ObsidianElevated)
-                                .border(1.dp, GlassBorder, CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Закрыть",
-                                tint = Slate400,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "УЧЕТ ОБЯЗАТЕЛЬСТВ",
+                        color = accentColor,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp
+                    )
+                    Text(
+                        text = "Новое обязательство",
+                        color = Color.White,
+                        fontFamily = ManropeFontFamily,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
 
                     // Segmented Type Selector
                     Row(
@@ -1105,43 +1097,65 @@ fun AddDebtDialog(
 
                     val isFormValid = name.isNotBlank() && parseAmountInput(amountText.text) > 0.0
 
-                    Button(
-                        onClick = {
-                            val amt = parseAmountInput(amountText.text)
-                            if (isFormValid) {
-                                keyboardController?.hide()
-                                onConfirm(name.trim(), amt, selectedType, comment.trim())
-                            }
-                        },
-                        enabled = isFormValid,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                            .shadow(
-                                elevation = if (isFormValid) 10.dp else 0.dp,
-                                shape = RoundedCornerShape(14.dp),
-                                ambientColor = accentColor,
-                                spotColor = accentColor
-                            ),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = accentColor,
-                            disabledContainerColor = ObsidianElevated,
-                            contentColor = if (selectedType == "owes_us") DarkBg else Color.White,
-                            disabledContentColor = Slate500
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Создать обязательство",
-                            fontFamily = ManropeFontFamily,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontSize = 14.sp
-                        )
+                        Button(
+                            onClick = {
+                                val amt = parseAmountInput(amountText.text)
+                                if (isFormValid) {
+                                    keyboardController?.hide()
+                                    onConfirm(name.trim(), amt, selectedType, comment.trim())
+                                }
+                            },
+                            enabled = isFormValid,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .shadow(
+                                    elevation = if (isFormValid) 10.dp else 0.dp,
+                                    shape = RoundedCornerShape(16.dp),
+                                    ambientColor = accentColor,
+                                    spotColor = accentColor
+                                ),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = accentColor,
+                                disabledContainerColor = ObsidianElevated,
+                                contentColor = if (selectedType == "owes_us") DarkBg else Color.White,
+                                disabledContentColor = Slate500
+                            )
+                        ) {
+                            Text(
+                                text = "Создать обязательство",
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 14.sp
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Slate800)
+                                .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                                .clickable { onDismiss() }
+                                .testTag("close_add_debt_button"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Закрыть",
+                                tint = Slate400,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
-        }
-    }
 }
 
 @Composable
@@ -1161,68 +1175,56 @@ fun DebtDetailsDialog(
     val keyboardController = LocalSoftwareKeyboardController.current
     val safeRemaining = remainingBalance.coerceAtLeast(0.0)
 
-    SwipeToDismissDialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            shape = RoundedCornerShape(28.dp),
-            color = ObsidianSurface,
-            border = BorderStroke(
-                width = 1.dp,
-                brush = Brush.verticalGradient(listOf(GlassHighlight, GlassBorder))
-            )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
         ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                // Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (isWeOwe) "ДЕТАЛИ ДОЛГА • Я ДОЛЖЕН" else "ДЕТАЛИ ЗАЙМА • МНЕ ДОЛЖНЫ",
-                            color = accentColor,
-                            fontFamily = SpaceGroteskFontFamily,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
-                        )
-                        Text(
-                            text = debt.name,
-                            color = Color.White,
-                            fontFamily = ManropeFontFamily,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                        Text(
-                            text = "Остаток: " + formatFullCurrency(safeRemaining),
-                            color = accentColor,
-                            fontFamily = SpaceGroteskFontFamily,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(ObsidianElevated)
-                            .border(1.dp, GlassBorder, CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Закрыть",
-                            tint = Slate400,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
+            Box(
+                modifier = Modifier
+                    .width(40.dp)
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(GlassHighlight)
+            )
+        }
+
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isWeOwe) "ДЕТАЛИ ДОЛГА • Я ДОЛЖЕН" else "ДЕТАЛИ ЗАЙМА • МНЕ ДОЛЖНЫ",
+                    color = accentColor,
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+                Text(
+                    text = debt.name,
+                    color = Color.White,
+                    fontFamily = ManropeFontFamily,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    text = "Остаток: " + formatFullCurrency(safeRemaining),
+                    color = accentColor,
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
 
                 // Form: Register Transaction (Repayment / Adjustment)
                 Card(
@@ -1513,7 +1515,68 @@ fun DebtDetailsDialog(
                         }
                     }
                 }
-            }
-        }
+
+                // Unified bottom action row with 52.dp square ✕ close button on the right
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val enteredAmtBottom = parseAmountInput(paymentAmountText.text)
+                    val isBottomAmtValid = enteredAmtBottom > 0.0
+                    Button(
+                        onClick = {
+                            if (isBottomAmtValid) {
+                                keyboardController?.hide()
+                                val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                                val (txType, subcat) = when (selectedOperationAction) {
+                                    "repay" -> Pair("expense", "Гашение: ${debt.name}")
+                                    "borrow_more" -> Pair("income", "Взял еще в долг: ${debt.name}")
+                                    "they_repaid" -> Pair("income", "Возврат долга: ${debt.name}")
+                                    "lend_more" -> Pair("expense", "Дал еще в долг: ${debt.name}")
+                                    else -> Pair("expense", "Гашение: ${debt.name}")
+                                }
+                                onAddPayment(txType, today, enteredAmtBottom, subcat)
+                                paymentAmountText = TextFieldValue("")
+                                onDismiss()
+                            } else {
+                                onDismiss()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isBottomAmtValid) accentColor else ObsidianElevated
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                    ) {
+                        Text(
+                            text = if (isBottomAmtValid) "Внести платеж и закрыть" else "Готово",
+                            color = if (isBottomAmtValid && !isWeOwe) DarkBg else Color.White,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Slate800)
+                            .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                            .clickable { onDismiss() }
+                            .testTag("close_debt_details_button"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Закрыть",
+                            tint = Slate400,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
     }
 }

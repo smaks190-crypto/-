@@ -111,145 +111,127 @@ fun SettingsHubDialog(
     onOpenExportImport: (() -> Unit)? = null,
     onExitBudget: (() -> Unit)? = null
 ) {
-    var currentScreen by remember { mutableStateOf(initialScreen) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var currentScreen by remember(initialScreen) { mutableStateOf(initialScreen) }
 
-    ModalBottomSheet(
-        onDismissRequest = { onDismiss() },
-        sheetState = sheetState,
-        containerColor = DarkBg,
-        dragHandle = null
+    androidx.activity.compose.BackHandler(enabled = currentScreen != SettingsScreen.HUB) {
+        currentScreen = SettingsScreen.HUB
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 360.dp)
+            .padding(horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Card(
+        // Sleek Obsidian Drag Handle
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minHeight = 360.dp)
-                .padding(horizontal = 4.dp)
-                .navigationBarsPadding()
-                .animateContentSize(
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioNoBouncy,
-                        stiffness = Spring.StiffnessLow
-                    )
-                )
-                .border(1.dp, GlassBorder, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)),
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            colors = CardDefaults.cardColors(containerColor = DarkBg)
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
+                .padding(top = 12.dp, bottom = 4.dp)
+                .width(40.dp)
+                .height(4.dp)
+                .clip(CircleShape)
+                .background(GlassHighlight)
+        )
+        androidx.compose.animation.SharedTransitionLayout {
+            CompositionLocalProvider(
+                LocalSharedTransitionScope provides this
             ) {
-                // Sleek Obsidian Drag Handle
-                Box(
-                    modifier = Modifier
-                        .padding(top = 12.dp, bottom = 4.dp)
-                        .width(40.dp)
-                        .height(4.dp)
-                        .clip(CircleShape)
-                        .background(GlassHighlight)
-                )
-                androidx.compose.animation.SharedTransitionLayout {
+                AnimatedContent(
+                    targetState = currentScreen,
+                    modifier = Modifier.fillMaxWidth(),
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) togetherWith
+                            fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing))
+                    },
+                    contentAlignment = Alignment.TopStart,
+                    label = "settings_transition"
+                ) { screen ->
                     CompositionLocalProvider(
-                        LocalSharedTransitionScope provides this
+                        LocalAnimatedVisibilityScope provides this
                     ) {
-                        AnimatedContent(
-                            targetState = currentScreen,
-                            modifier = Modifier.fillMaxWidth(),
-                            transitionSpec = {
-                                fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) togetherWith
-                                    fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing))
-                            },
-                            contentAlignment = Alignment.TopStart,
-                            label = "settings_transition"
-                        ) { screen ->
-                            CompositionLocalProvider(
-                                LocalAnimatedVisibilityScope provides this
-                            ) {
-                                when (screen) {
-                                    SettingsScreen.HUB -> {
-                                        SettingsHubMainContent(
-                                            securityManager = securityManager,
-                                            apiKey = apiKey,
-                                            currentProfileName = currentProfileName,
-                                            profileId = profileId,
-                                            onAvatarChanged = onAvatarChanged,
-                                            onRenameProfile = onRenameProfile,
-                                            onResetAllData = onResetAllData,
-                                            onDismiss = onDismiss,
-                                            onNavigateToGeneral = { currentScreen = SettingsScreen.GENERAL },
-                                            onNavigateToVoiceAI = { currentScreen = SettingsScreen.VOICE_AI },
-                                            onNavigateToSecurity = { currentScreen = SettingsScreen.SECURITY },
-                                            onNavigateToReminders = { currentScreen = SettingsScreen.REMINDERS },
-                                            onNavigateToApiKey = { currentScreen = SettingsScreen.VOICE_AI },
-                                            onNavigateToPrivacy = { currentScreen = SettingsScreen.PRIVACY },
-                                            onNavigateToBackup = { currentScreen = SettingsScreen.BACKUP },
-                                            onNavigateToCategories = { onOpenCategories?.invoke() },
-                                            onExitBudget = onExitBudget
-                                        )
+                        when (screen) {
+                            SettingsScreen.HUB -> {
+                                SettingsHubMainContent(
+                                    securityManager = securityManager,
+                                    apiKey = apiKey,
+                                    currentProfileName = currentProfileName,
+                                    profileId = profileId,
+                                    onAvatarChanged = onAvatarChanged,
+                                    onRenameProfile = onRenameProfile,
+                                    onResetAllData = onResetAllData,
+                                    onDismiss = onDismiss,
+                                    onNavigateToGeneral = { currentScreen = SettingsScreen.GENERAL },
+                                    onNavigateToVoiceAI = { currentScreen = SettingsScreen.VOICE_AI },
+                                    onNavigateToSecurity = { currentScreen = SettingsScreen.SECURITY },
+                                    onNavigateToReminders = { currentScreen = SettingsScreen.REMINDERS },
+                                    onNavigateToApiKey = { currentScreen = SettingsScreen.VOICE_AI },
+                                    onNavigateToPrivacy = { currentScreen = SettingsScreen.PRIVACY },
+                                    onNavigateToBackup = { currentScreen = SettingsScreen.BACKUP },
+                                    onNavigateToCategories = { onOpenCategories?.invoke() },
+                                    onExitBudget = onExitBudget
+                                )
+                            }
+                            SettingsScreen.GENERAL -> {
+                                GeneralSettingsTab(
+                                    onOpenCategories = { onOpenCategories?.invoke() },
+                                    onResetData = onResetAllData,
+                                    onBack = { currentScreen = SettingsScreen.HUB },
+                                    onClose = onDismiss
+                                )
+                            }
+                            SettingsScreen.VOICE_AI -> {
+                                VoiceAndAISettingsTab(
+                                    initialKey = apiKey,
+                                    onSaveApiKey = { newKey ->
+                                        onSaveApiKey?.invoke(newKey)
+                                        currentScreen = SettingsScreen.HUB
+                                    },
+                                    onBack = { currentScreen = SettingsScreen.HUB },
+                                    onClose = onDismiss
+                                )
+                            }
+                            SettingsScreen.SECURITY -> {
+                                SecuritySettingsTab(
+                                    securityManager = securityManager,
+                                    onBack = { currentScreen = SettingsScreen.HUB },
+                                    onClose = onDismiss,
+                                    onSecurityUpdated = { onSecurityUpdated?.invoke() }
+                                )
+                            }
+                            SettingsScreen.BACKUP -> {
+                                BackupRestoreSettingsTab(
+                                    onExportJson = { onOpenExportImport?.invoke() },
+                                    onExportCsv = { onOpenExportImport?.invoke() },
+                                    onImportJson = { onOpenExportImport?.invoke() },
+                                    onImportCsv = { onOpenExportImport?.invoke() },
+                                    onResetData = onResetAllData,
+                                    onBack = { currentScreen = SettingsScreen.HUB },
+                                    onClose = onDismiss
+                                )
+                            }
+                            SettingsScreen.REMINDERS -> {
+                                SettingsRemindersSubContent(
+                                    onBack = { currentScreen = SettingsScreen.HUB },
+                                    onClose = onDismiss
+                                )
+                            }
+                            SettingsScreen.API_KEY -> {
+                                SettingsApiKeySubContent(
+                                    initialKey = apiKey,
+                                    onBack = { currentScreen = SettingsScreen.HUB },
+                                    onClose = onDismiss,
+                                    onSave = { newKey ->
+                                        onSaveApiKey?.invoke(newKey)
+                                        currentScreen = SettingsScreen.HUB
                                     }
-                                    SettingsScreen.GENERAL -> {
-                                        GeneralSettingsTab(
-                                            onOpenCategories = { onOpenCategories?.invoke() },
-                                            onResetData = onResetAllData,
-                                            onBack = { currentScreen = SettingsScreen.HUB },
-                                            onClose = onDismiss
-                                        )
-                                    }
-                                    SettingsScreen.VOICE_AI -> {
-                                        VoiceAndAISettingsTab(
-                                            initialKey = apiKey,
-                                            onSaveApiKey = { newKey ->
-                                                onSaveApiKey?.invoke(newKey)
-                                                currentScreen = SettingsScreen.HUB
-                                            },
-                                            onBack = { currentScreen = SettingsScreen.HUB },
-                                            onClose = onDismiss
-                                        )
-                                    }
-                                    SettingsScreen.SECURITY -> {
-                                        SecuritySettingsTab(
-                                            securityManager = securityManager,
-                                            onBack = { currentScreen = SettingsScreen.HUB },
-                                            onClose = onDismiss,
-                                            onSecurityUpdated = { onSecurityUpdated?.invoke() }
-                                        )
-                                    }
-                                    SettingsScreen.BACKUP -> {
-                                        BackupRestoreSettingsTab(
-                                            onExportJson = { onOpenExportImport?.invoke() },
-                                            onExportCsv = { onOpenExportImport?.invoke() },
-                                            onImportJson = { onOpenExportImport?.invoke() },
-                                            onImportCsv = { onOpenExportImport?.invoke() },
-                                            onResetData = onResetAllData,
-                                            onBack = { currentScreen = SettingsScreen.HUB },
-                                            onClose = onDismiss
-                                        )
-                                    }
-                                    SettingsScreen.REMINDERS -> {
-                                        SettingsRemindersSubContent(
-                                            onBack = { currentScreen = SettingsScreen.HUB },
-                                            onClose = onDismiss
-                                        )
-                                    }
-                                    SettingsScreen.API_KEY -> {
-                                        SettingsApiKeySubContent(
-                                            initialKey = apiKey,
-                                            onBack = { currentScreen = SettingsScreen.HUB },
-                                            onClose = onDismiss,
-                                            onSave = { newKey ->
-                                                onSaveApiKey?.invoke(newKey)
-                                                currentScreen = SettingsScreen.HUB
-                                            }
-                                        )
-                                    }
-                                    SettingsScreen.PRIVACY -> {
-                                        SettingsPrivacySubContent(
-                                            onBack = { currentScreen = SettingsScreen.HUB },
-                                            onClose = onDismiss
-                                        )
-                                    }
-                                }
+                                )
+                            }
+                            SettingsScreen.PRIVACY -> {
+                                SettingsPrivacySubContent(
+                                    onBack = { currentScreen = SettingsScreen.HUB },
+                                    onClose = onDismiss
+                                )
                             }
                         }
                     }
