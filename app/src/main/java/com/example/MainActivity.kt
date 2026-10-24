@@ -875,7 +875,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 contentAlignment = Alignment.BottomCenter
             ) {
                 AnimatedVisibility(
-                    visible = (selectedBudgetId != null || activeModal != com.example.ui.viewmodel.BottomCapsuleModal.None) && (isVoicePipelineActive || !isImeVisible),
+                    visible = selectedBudgetId != null || activeModal != com.example.ui.viewmodel.BottomCapsuleModal.None,
                     enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.95f, animationSpec = tween(220)),
                     exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.95f, animationSpec = tween(150))
                 ) {

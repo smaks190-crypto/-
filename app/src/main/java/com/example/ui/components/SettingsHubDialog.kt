@@ -144,7 +144,7 @@ fun SettingsHubDialog(
                         fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) togetherWith
                             fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing))
                     },
-                    contentAlignment = Alignment.TopStart,
+                    contentAlignment = Alignment.BottomCenter,
                     label = "settings_transition"
                 ) { screen ->
                     CompositionLocalProvider(

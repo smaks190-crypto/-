@@ -160,6 +160,7 @@ fun SecuritySettingsContent(
                             .clip(CircleShape)
                             .background(ObsidianSurface)
                             .border(1.dp, GlassBorder, CircleShape)
+                            .testTag("back_to_settings_button")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -201,22 +202,6 @@ fun SecuritySettingsContent(
                         fontWeight = FontWeight.Bold
                     )
                 }
-            }
-
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(ObsidianSurface)
-                    .border(1.dp, GlassBorder, CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Закрыть",
-                    tint = Slate400,
-                    modifier = Modifier.size(16.dp)
-                )
             }
         }
 
@@ -491,65 +476,61 @@ fun SecuritySettingsContent(
                     }
                 }
 
-                if (isPinEnabled) {
-                    Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                    OutlinedButton(
-                        onClick = {
-                            oldPinInput = ""
-                            pinInput1 = ""
-                            pinInput2 = ""
-                            errorMessage = null
-                            dialogState = SecurityDialogState.CHANGE_PIN_OLD
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp)
-                            .testTag("change_pin_button"),
-                        shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.45f))
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = null,
-                            tint = Indigo400,
-                            modifier = Modifier.size(17.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Сменить основной ПИН-код",
-                            color = Indigo400,
-                            fontSize = 13.sp,
-                            fontFamily = ManropeFontFamily,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                if (onBack != null) {
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(
-                            onClick = onBack,
-                            modifier = Modifier.testTag("back_to_settings_button")
+                // Единый нижний ряд действий: Сменить ПИН (если включен) + квадратная кнопка ✕ справа
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (isPinEnabled) Arrangement.spacedBy(10.dp) else Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isPinEnabled) {
+                        OutlinedButton(
+                            onClick = {
+                                oldPinInput = ""
+                                pinInput1 = ""
+                                pinInput2 = ""
+                                errorMessage = null
+                                dialogState = SecurityDialogState.CHANGE_PIN_OLD
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .testTag("change_pin_button"),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.45f))
                         ) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Назад",
-                                tint = Slate400,
-                                modifier = Modifier.size(16.dp)
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Indigo400,
+                                modifier = Modifier.size(17.dp)
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Назад",
-                                color = Slate400,
+                                text = "Сменить основной ПИН",
+                                color = Indigo400,
                                 fontSize = 13.sp,
-                                fontFamily = ManropeFontFamily
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(ObsidianSurface)
+                            .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Закрыть",
+                            tint = Slate400,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }

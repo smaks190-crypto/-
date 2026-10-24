@@ -9,9 +9,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,16 +35,18 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import com.example.ui.theme.DarkBg
+import com.example.ui.components.SwipeToDismissDialog
+import com.example.ui.components.formatFullCurrency
+import com.example.ui.theme.DarkCard
 import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassHighlight
 import com.example.ui.theme.Indigo500
 import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
+import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
-import com.example.ui.components.formatFullCurrency
 
 @Composable
 fun MixedCategoriesDialog(
@@ -51,33 +55,51 @@ fun MixedCategoriesDialog(
     onSelectCategory: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    Dialog(onDismissRequest = onDismiss) {
+    val scrollState = rememberScrollState()
+    SwipeToDismissDialog(
+        onDismissRequest = onDismiss,
+        isAtTop = { scrollState.value == 0 }
+    ) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp)
+                .padding(horizontal = 6.dp)
                 .shadow(
-                    elevation = 20.dp,
-                    shape = RoundedCornerShape(24.dp),
+                    elevation = 26.dp,
+                    shape = RoundedCornerShape(28.dp),
                     ambientColor = Indigo500.copy(alpha = 0.5f),
-                    spotColor = Indigo500.copy(alpha = 0.5f)
+                    spotColor = Emerald400.copy(alpha = 0.5f)
                 ),
-            color = DarkBg,
-            shape = RoundedCornerShape(24.dp),
+            color = DarkCard,
+            shape = RoundedCornerShape(28.dp),
             border = BorderStroke(
-                width = 1.dp,
+                width = 1.4.dp,
                 brush = Brush.linearGradient(
-                    listOf(Emerald400, Indigo500, Rose500)
+                    listOf(Emerald400.copy(alpha = 0.65f), Indigo500.copy(alpha = 0.55f), Rose500.copy(alpha = 0.55f))
                 )
             )
         ) {
             Column(
                 modifier = Modifier
-                    .padding(20.dp)
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
                     .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Header with close button
+                // Верхний индикатор-пилюля
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(40.dp)
+                            .height(4.dp)
+                            .clip(CircleShape)
+                            .background(GlassHighlight)
+                    )
+                }
+
+                // Заголовок без верхнего крестика
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -88,7 +110,7 @@ fun MixedCategoriesDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "✨ Смешанные",
+                            text = "✨ Смешанные категории",
                             color = Color.White,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold
@@ -107,24 +129,9 @@ fun MixedCategoriesDialog(
                             )
                         }
                     }
-
-                    IconButton(
-                        onClick = onDismiss,
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(CircleShape)
-                            .background(Slate800)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Закрыть",
-                            tint = Slate400,
-                            modifier = Modifier.size(12.dp)
-                        )
-                    }
                 }
 
-                // Categories Scrollable List
+                // Список смешанных категорий
                 val remainingCategories = categoryTotalsMap.drop(2)
                 val totalSum = categoryTotalsMap.sumOf { it.second }
 
@@ -132,7 +139,7 @@ fun MixedCategoriesDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 280.dp)
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(scrollState),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     remainingCategories.forEach { (catName, sumAmt) ->
@@ -145,7 +152,7 @@ fun MixedCategoriesDialog(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(14.dp))
-                                .background(Slate900.copy(alpha = 0.4f))
+                                .background(Slate900.copy(alpha = 0.55f))
                                 .border(1.dp, Slate800, RoundedCornerShape(14.dp))
                                 .clickable { onSelectCategory(catName) }
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -178,6 +185,29 @@ fun MixedCategoriesDialog(
                                 fontWeight = FontWeight.Bold
                             )
                         }
+                    }
+                }
+
+                // Единая нижняя панель управления с квадратной кнопкой закрытия ✕ справа
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Slate800.copy(alpha = 0.9f))
+                            .border(1.dp, Slate700, RoundedCornerShape(16.dp))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Закрыть",
+                            tint = Slate400,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }

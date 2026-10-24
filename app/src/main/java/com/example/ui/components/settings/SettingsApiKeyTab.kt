@@ -90,6 +90,7 @@ fun SettingsApiKeySubContent(
                         .clip(CircleShape)
                         .background(ObsidianSurface)
                         .border(1.dp, GlassBorder, CircleShape)
+                        .testTag("back_to_settings_button")
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -146,22 +147,6 @@ fun SettingsApiKeySubContent(
                         fontFamily = ManropeFontFamily
                     )
                 }
-            }
-
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(ObsidianSurface)
-                    .border(1.dp, GlassBorder, CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Закрыть",
-                    tint = Slate400,
-                    modifier = Modifier.size(16.dp)
-                )
             }
         }
 
@@ -266,47 +251,50 @@ fun SettingsApiKeySubContent(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        Button(
-            onClick = {
-                onSave(apiKeyText)
-                Toast.makeText(
-                    context,
-                    if (apiKeyText.isNotBlank()) "API ключ сохранен" else "Ключ очищен",
-                    Toast.LENGTH_SHORT
-                ).show()
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = Emerald400),
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(46.dp)
-        ) {
-            Text(
-                text = "Сохранить ключ",
-                color = DarkBg,
-                fontFamily = ManropeFontFamily,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 13.sp
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
+        // Единый нижний ряд действий: Сохранить ключ + квадратная кнопка ✕ справа
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(
-                onClick = onBack,
-                modifier = Modifier.testTag("back_to_settings_button")
+            Button(
+                onClick = {
+                    onSave(apiKeyText)
+                    Toast.makeText(
+                        context,
+                        if (apiKeyText.isNotBlank()) "API ключ сохранен" else "Ключ очищен",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Emerald400),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp)
+            ) {
+                Text(
+                    text = "Сохранить ключ",
+                    color = DarkBg,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 13.sp
+                )
+            }
+
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(ObsidianSurface)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
             ) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Назад",
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
                     tint = Slate400,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Назад", color = Slate400, fontSize = 13.sp, fontFamily = ManropeFontFamily)
             }
         }
     }

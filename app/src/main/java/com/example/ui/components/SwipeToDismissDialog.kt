@@ -7,10 +7,10 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
@@ -65,13 +66,15 @@ fun SwipeToDismissDialog(
     contentPadding: PaddingValues = PaddingValues(start = 10.dp, end = 10.dp, top = 12.dp, bottom = 12.dp),
     content: @Composable () -> Unit
 ) {
+    val density = LocalDensity.current
+    val navBarInitialHeightPx = with(density) { 68.dp.roundToPx() }
     var offsetY by remember { mutableFloatStateOf(0f) }
     var dragStartedAtTop by remember { mutableStateOf(false) }
     val swipeEnabledState = remember { mutableStateOf(true) }
 
     val animatedOffsetY by animateFloatAsState(
         targetValue = offsetY,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
         label = "dialog_swipe_offset"
     )
 
@@ -141,10 +144,7 @@ fun SwipeToDismissDialog(
 
     Dialog(
         onDismissRequest = onDismissRequest,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
+        properties = properties
     ) {
         BackHandler(onBack = onDismissRequest)
 
@@ -152,7 +152,7 @@ fun SwipeToDismissDialog(
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.4f))
+                    .background(Color.Black.copy(alpha = 0.65f))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
@@ -169,14 +169,22 @@ fun SwipeToDismissDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .align(Alignment.BottomCenter),
-                    enter = slideInVertically(
-                        initialOffsetY = { fullHeight -> fullHeight },
-                        animationSpec = tween(durationMillis = 300)
-                    ) + fadeIn(),
-                    exit = slideOutVertically(
-                        targetOffsetY = { fullHeight -> fullHeight },
-                        animationSpec = tween(durationMillis = 250)
-                    ) + fadeOut()
+                    enter = expandVertically(
+                        expandFrom = Alignment.Bottom,
+                        initialHeight = { navBarInitialHeightPx },
+                        animationSpec = spring(
+                            dampingRatio = 0.82f,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ) + fadeIn(animationSpec = tween(durationMillis = 220, delayMillis = 60)),
+                    exit = shrinkVertically(
+                        shrinkTowards = Alignment.Bottom,
+                        targetHeight = { navBarInitialHeightPx },
+                        animationSpec = spring(
+                            dampingRatio = 0.85f,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    ) + fadeOut(animationSpec = tween(durationMillis = 120))
                 ) {
                     Box(
                         modifier = Modifier
@@ -184,8 +192,8 @@ fun SwipeToDismissDialog(
                             .heightIn(max = maxAllowedHeight)
                             .animateContentSize(
                                 animationSpec = spring(
-                                    stiffness = Spring.StiffnessMediumLow,
-                                    dampingRatio = Spring.DampingRatioNoBouncy
+                                    dampingRatio = 0.82f,
+                                    stiffness = Spring.StiffnessMediumLow
                                 )
                             )
                             .clickable(

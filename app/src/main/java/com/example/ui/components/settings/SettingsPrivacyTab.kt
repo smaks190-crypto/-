@@ -68,6 +68,7 @@ fun SettingsPrivacySubContent(
                         .clip(CircleShape)
                         .background(ObsidianSurface)
                         .border(1.dp, GlassBorder, CircleShape)
+                        .testTag("back_to_settings_button_privacy")
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -107,22 +108,6 @@ fun SettingsPrivacySubContent(
                     )
                 }
             }
-
-            IconButton(
-                onClick = onClose,
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(ObsidianSurface)
-                    .border(1.dp, GlassBorder, CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Закрыть",
-                    tint = Slate400,
-                    modifier = Modifier.size(16.dp)
-                )
-            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -160,22 +145,26 @@ fun SettingsPrivacySubContent(
 
         Spacer(modifier = Modifier.height(14.dp))
 
+        // Единая нижняя панель управления с квадратной кнопкой закрытия ✕ справа
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(
-                onClick = onBack,
-                modifier = Modifier.testTag("back_to_settings_button_privacy")
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(ObsidianSurface)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
             ) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Назад",
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Закрыть",
                     tint = Slate400,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Назад", color = Slate400, fontSize = 13.sp, fontFamily = ManropeFontFamily)
             }
         }
     }

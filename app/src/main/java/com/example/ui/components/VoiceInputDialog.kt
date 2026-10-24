@@ -123,7 +123,10 @@ import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.sin
 
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.platform.LocalDensity
 import com.example.ui.theme.DarkCard
 import com.example.ui.viewmodel.BottomCapsuleModal
 
@@ -146,9 +149,9 @@ private enum class VoiceSubState {
  *   и встроенную внутрь рамки кнопку `+ Добавить` справа (на вкладке `Период`).
  * - Когда открыто любое модальное окно (`BottomCapsuleModal`):
  *   фоновый экран плавно затемняется полупрозрачным скримом (`Color.Black.copy(alpha = 0.65f)` с `animateFloatAsState`),
- *   иконки нижней навигации растворяются (`fadeOut`), а карточка нижней капсулы (`RoundedCornerShape(28.dp)`,
- *   темный фон `DarkCard`/`Slate900`, неоновая обводка `MovingNeonGlow`) с пружинной физикой
- *   `spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow)` вырастает снизу вверх:
+ *   иконки нижней навигации растворяются строго на месте внизу (`fadeOut(tween(120))`), а карточка нижней капсулы
+ *   (`RoundedCornerShape(28.dp)`, темный фон `DarkCard`/`Slate900`, неоновая обводка `MovingNeonGlow`) с единой пружинной физикой
+ *   `spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow)` вырастает снизу вверх от стартовой высоты 68.dp:
  *   - Компактные формы (`wrapContentHeight()`)
  *   - Большие экраны со списками (`fillMaxHeight(0.88f)`)
  */
@@ -169,6 +172,7 @@ fun MorphingBottomBar(
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
     val voiceManager = viewModel.voiceInputManager
     val isListening by voiceManager.isListening.collectAsState()
     val recognizedText by voiceManager.recognizedText.collectAsState()
@@ -188,6 +192,13 @@ fun MorphingBottomBar(
     var editingIndex by remember { mutableStateOf<Int?>(null) }
 
     val editableList = remember { mutableStateListOf<ParsedVoiceOperation>() }
+
+    // Сохраняем последнее открытое окно на время пружинной анимации сворачивания вниз
+    var renderedModal by remember { mutableStateOf<BottomCapsuleModal>(BottomCapsuleModal.None) }
+    if (activeModal != BottomCapsuleModal.None) {
+        renderedModal = activeModal
+    }
+    val effectiveModal = if (activeModal != BottomCapsuleModal.None) activeModal else renderedModal
 
     LaunchedEffect(parsedOperations) {
         val ops = parsedOperations
@@ -317,7 +328,7 @@ fun MorphingBottomBar(
         }
     }
 
-    val isFullHeightModal = when (activeModal) {
+    val isFullHeightModal = when (effectiveModal) {
         is BottomCapsuleModal.AllTransactions,
         is BottomCapsuleModal.SettingsHub,
         is BottomCapsuleModal.CategoryLimits,
@@ -380,10 +391,13 @@ fun MorphingBottomBar(
         return
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.BottomCenter
     ) {
+        val fullModalHeight = ((maxHeight - 24.dp) * 0.88f).coerceAtLeast(320.dp)
+        val navBarHeightPx = with(density) { 68.dp.roundToPx() }
+
         if (scrimAlpha > 0.005f) {
             Box(
                 modifier = Modifier
@@ -398,17 +412,12 @@ fun MorphingBottomBar(
             )
         }
 
-        // Сама нижняя морфинг-капсула
+        // Сама нижняя морфинг-капсула, жестко привязанная к низу экрана (Alignment.BottomCenter)
         Box(
             modifier = Modifier
+                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .then(
-                    if (isFullHeightModal) {
-                        Modifier.fillMaxHeight(0.88f)
-                    } else {
-                        Modifier.wrapContentHeight()
-                    }
-                )
+                .wrapContentHeight(align = Alignment.Bottom)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .shadow(
                     elevation = if (activeModal == BottomCapsuleModal.None) 18.dp else 26.dp,
@@ -430,449 +439,512 @@ fun MorphingBottomBar(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = {}
-                )
-                .animateContentSize(
+                ),
+            contentAlignment = Alignment.BottomCenter
+        ) {
+            // 1. Ряд иконок нижней навигации (height = 68.dp), строго зафиксированный внизу (Alignment.BottomCenter).
+            // При открытии окна растворяется на месте (fadeOut(120ms)), НИКОГДА не подпрыгивая вверх.
+            AnimatedVisibility(
+                visible = activeModal == BottomCapsuleModal.None,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(68.dp),
+                enter = fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = 100)),
+                exit = fadeOut(animationSpec = tween(durationMillis = 120)),
+                label = "bottom_nav_icons_fade"
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(68.dp)
+                        .padding(horizontal = 6.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 4 вкладки навигации, которые плавно занимают всю доступную ширину
+                    BoxWithConstraints(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    ) {
+                        val barWidth = maxWidth
+                        val tabCount = 4
+                        val tabWidth = barWidth / tabCount
+
+                        val animatedFraction by animateFloatAsState(
+                            targetValue = currentMainTab.toFloat(),
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMedium
+                            ),
+                            label = "bottom_nav_pill"
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .width(tabWidth)
+                                .fillMaxHeight()
+                                .offset(x = tabWidth * animatedFraction)
+                                .background(Emerald400.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                                .border(1.dp, Emerald400.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            MorphNavTabButton(
+                                text = "Период",
+                                icon = Icons.Default.GridView,
+                                isSelected = currentMainTab == 0,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .testTag("tab_period"),
+                                onClick = { onSelectTab(0) }
+                            )
+
+                            MorphNavTabButton(
+                                text = "Долги",
+                                icon = Icons.Default.CreditCard,
+                                isSelected = currentMainTab == 1,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .testTag("tab_debts"),
+                                onClick = { onSelectTab(1) }
+                            )
+
+                            MorphNavTabButton(
+                                text = "Цели",
+                                icon = Icons.Default.EmojiEvents,
+                                isSelected = currentMainTab == 2,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .testTag("tab_goals"),
+                                onClick = { onSelectTab(2) }
+                            )
+
+                            MorphNavTabButton(
+                                text = "Отчет",
+                                icon = Icons.Default.PieChart,
+                                isSelected = currentMainTab == 3,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .testTag("tab_annual"),
+                                onClick = { onSelectTab(3) }
+                            )
+                        }
+                    }
+
+                    // Встроенная симметричная кнопка `+ Добавить` внутри капсулы навигации (ТОЛЬКО на вкладке Период)
+                    AnimatedVisibility(
+                        visible = currentMainTab == 0,
+                        enter = expandHorizontally(
+                            expandFrom = Alignment.End,
+                            animationSpec = spring(
+                                dampingRatio = 0.82f,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        ) + fadeIn(animationSpec = tween(200)),
+                        exit = shrinkHorizontally(
+                            shrinkTowards = Alignment.End,
+                            animationSpec = spring(
+                                dampingRatio = 0.82f,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        ) + fadeOut(animationSpec = tween(150))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .padding(start = 6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .width(68.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(
+                                        color = NeonEmerald.copy(alpha = 0.16f),
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = NeonEmerald.copy(alpha = 0.45f),
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                    .pointerInput(initialType) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                onOpenManualInput()
+                                                viewModel.openModal(
+                                                    BottomCapsuleModal.ManualAddTransaction(initialType)
+                                                )
+                                            },
+                                            onLongPress = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                triggerVoiceMode()
+                                            }
+                                        )
+                                    }
+                                    .testTag("embedded_add_operation_button"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Добавить операцию (удерживайте для голосового ввода)",
+                                        tint = NeonEmerald,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "Добавить",
+                                        color = NeonEmerald,
+                                        fontSize = 10.sp,
+                                        fontFamily = ManropeFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Контент модального окна: плавно вырастает снизу вверх от стартовой высоты панели (68.dp)
+            // до целевой высоты окна (wrapContentHeight или 0.88f экрана для больших окон) с единой пружинной физикой.
+            AnimatedVisibility(
+                visible = activeModal != BottomCapsuleModal.None,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth(),
+                enter = expandVertically(
+                    expandFrom = Alignment.Bottom,
+                    initialHeight = { navBarHeightPx },
                     animationSpec = spring(
                         dampingRatio = 0.82f,
                         stiffness = Spring.StiffnessMediumLow
                     )
-                )
-        ) {
-            AnimatedContent(
-                targetState = activeModal,
-                transitionSpec = {
-                    (fadeIn(animationSpec = tween(220)) togetherWith
-                        fadeOut(animationSpec = tween(150)))
-                        .using(
-                            SizeTransform(
-                                clip = false,
-                                sizeAnimationSpec = { _, _ ->
-                                    spring(
-                                        dampingRatio = 0.82f,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                }
+                ) + fadeIn(animationSpec = tween(durationMillis = 220, delayMillis = 60)),
+                exit = shrinkVertically(
+                    shrinkTowards = Alignment.Bottom,
+                    targetHeight = { navBarHeightPx },
+                    animationSpec = spring(
+                        dampingRatio = 0.85f,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                ) + fadeOut(animationSpec = tween(durationMillis = 120)),
+                label = "bottom_capsule_modal_expand"
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .animateContentSize(
+                            animationSpec = spring(
+                                dampingRatio = 0.82f,
+                                stiffness = Spring.StiffnessMediumLow
                             )
                         )
-                },
-                label = "bottom_capsule_modal_morph"
-            ) { modal ->
-                when (modal) {
-                    BottomCapsuleModal.None -> {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(58.dp)
-                                .padding(horizontal = 5.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // 4 вкладки навигации, которые плавно занимают всю доступную ширину
-                            BoxWithConstraints(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                            ) {
-                                val barWidth = maxWidth
-                                val tabCount = 4
-                                val tabWidth = barWidth / tabCount
-
-                                val animatedFraction by animateFloatAsState(
-                                    targetValue = currentMainTab.toFloat(),
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioNoBouncy,
-                                        stiffness = Spring.StiffnessMedium
-                                    ),
-                                    label = "bottom_nav_pill"
+                        .then(
+                            if (isFullHeightModal) {
+                                Modifier.height(fullModalHeight)
+                            } else {
+                                Modifier
+                                    .heightIn(max = fullModalHeight)
+                                    .wrapContentHeight(align = Alignment.Bottom)
+                            }
+                        ),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    AnimatedContent(
+                        targetState = effectiveModal,
+                        contentAlignment = Alignment.BottomCenter,
+                        transitionSpec = {
+                            (fadeIn(animationSpec = tween(220, delayMillis = 40)) togetherWith
+                                fadeOut(animationSpec = tween(120)))
+                                .using(
+                                    SizeTransform(
+                                        clip = false,
+                                        sizeAnimationSpec = { _, _ ->
+                                            spring(
+                                                dampingRatio = 0.82f,
+                                                stiffness = Spring.StiffnessMediumLow
+                                            )
+                                        }
+                                    )
                                 )
+                        },
+                        label = "bottom_capsule_modal_switch"
+                    ) { modal ->
+                        when (modal) {
+                            BottomCapsuleModal.None -> {
+                                Spacer(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(68.dp)
+                                )
+                            }
 
+                            is BottomCapsuleModal.ManualAddTransaction -> {
+                                val scrollState = rememberScrollState()
                                 Box(
                                     modifier = Modifier
-                                        .width(tabWidth)
-                                        .fillMaxHeight()
-                                        .offset(x = tabWidth * animatedFraction)
-                                        .background(Emerald400.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
-                                        .border(1.dp, Emerald400.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                                )
-
-                                Row(
-                                    modifier = Modifier.fillMaxSize(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .fillMaxWidth()
+                                        .heightIn(max = 540.dp)
+                                        .verticalScroll(scrollState)
                                 ) {
-                                    MorphNavTabButton(
-                                        text = "Период",
-                                        icon = Icons.Default.GridView,
-                                        isSelected = currentMainTab == 0,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .testTag("tab_period"),
-                                        onClick = { onSelectTab(0) }
-                                    )
-
-                                    MorphNavTabButton(
-                                        text = "Долги",
-                                        icon = Icons.Default.CreditCard,
-                                        isSelected = currentMainTab == 1,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .testTag("tab_debts"),
-                                        onClick = { onSelectTab(1) }
-                                    )
-
-                                    MorphNavTabButton(
-                                        text = "Цели",
-                                        icon = Icons.Default.EmojiEvents,
-                                        isSelected = currentMainTab == 2,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .testTag("tab_goals"),
-                                        onClick = { onSelectTab(2) }
-                                    )
-
-                                    MorphNavTabButton(
-                                        text = "Отчет",
-                                        icon = Icons.Default.PieChart,
-                                        isSelected = currentMainTab == 3,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .testTag("tab_annual"),
-                                        onClick = { onSelectTab(3) }
+                                    VoiceManualInputPane(
+                                        viewModel = viewModel,
+                                        categories = categories,
+                                        selectedDate = selectedDate,
+                                        initialType = modal.initialType,
+                                        contentAlpha = 1f,
+                                        onDismiss = {
+                                            onDismissManualInput()
+                                            viewModel.closeModal()
+                                        }
                                     )
                                 }
                             }
 
-                            // Встроенная симметричная кнопка `+ Добавить` внутри капсулы навигации (ТОЛЬКО на вкладке Период)
-                            AnimatedVisibility(
-                                visible = currentMainTab == 0,
-                                enter = expandHorizontally(
-                                    expandFrom = Alignment.End,
-                                    animationSpec = spring(
-                                        dampingRatio = 0.82f,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                ) + fadeIn(animationSpec = tween(200)),
-                                exit = shrinkHorizontally(
-                                    shrinkTowards = Alignment.End,
-                                    animationSpec = spring(
-                                        dampingRatio = 0.82f,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    )
-                                ) + fadeOut(animationSpec = tween(150))
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .fillMaxHeight()
-                                        .padding(start = 6.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxHeight()
-                                            .width(68.dp)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(
-                                                color = NeonEmerald.copy(alpha = 0.16f),
-                                                shape = RoundedCornerShape(16.dp)
-                                            )
-                                            .border(
-                                                width = 1.dp,
-                                                color = NeonEmerald.copy(alpha = 0.45f),
-                                                shape = RoundedCornerShape(16.dp)
-                                            )
-                                            .pointerInput(initialType) {
-                                                detectTapGestures(
-                                                    onTap = {
-                                                        onOpenManualInput()
-                                                        viewModel.openModal(
-                                                            BottomCapsuleModal.ManualAddTransaction(initialType)
+                            is BottomCapsuleModal.VoiceInput -> {
+                                val voiceSubState = when {
+                                    showInlineConsent -> VoiceSubState.CONSENT
+                                    showInlineApiKey -> VoiceSubState.API_KEY
+                                    editableList.isNotEmpty() -> VoiceSubState.OPERATIONS
+                                    else -> VoiceSubState.RECORDING
+                                }
+
+                                AnimatedContent(
+                                    targetState = voiceSubState,
+                                    contentAlignment = Alignment.BottomCenter,
+                                    transitionSpec = {
+                                        (fadeIn(tween(200)) togetherWith fadeOut(tween(140)))
+                                            .using(
+                                                SizeTransform(
+                                                    clip = false,
+                                                    sizeAnimationSpec = { _, _ ->
+                                                        spring(
+                                                            dampingRatio = 0.82f,
+                                                            stiffness = Spring.StiffnessMediumLow
                                                         )
-                                                    },
-                                                    onLongPress = {
-                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    }
+                                                )
+                                            )
+                                    },
+                                    label = "voice_substate_morph"
+                                ) { subState ->
+                                    when (subState) {
+                                        VoiceSubState.CONSENT -> {
+                                            VoiceConsentPane(
+                                                contentAlpha = 1f,
+                                                onAccept = {
+                                                    viewModel.setGeminiConsentGiven(true)
+                                                    showInlineConsent = false
+                                                    if (apiKey.isBlank()) {
+                                                        showInlineApiKey = true
+                                                    } else {
                                                         triggerVoiceMode()
                                                     }
-                                                )
-                                            }
-                                            .testTag("embedded_add_operation_button"),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Add,
-                                                contentDescription = "Добавить операцию (удерживайте для голосового ввода)",
-                                                tint = NeonEmerald,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                            Spacer(modifier = Modifier.height(2.dp))
-                                            Text(
-                                                text = "Добавить",
-                                                color = NeonEmerald,
-                                                fontSize = 10.sp,
-                                                fontFamily = ManropeFontFamily,
-                                                fontWeight = FontWeight.Bold,
-                                                maxLines = 1
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    is BottomCapsuleModal.ManualAddTransaction -> {
-                        val scrollState = rememberScrollState()
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 540.dp)
-                                .verticalScroll(scrollState)
-                        ) {
-                            VoiceManualInputPane(
-                                viewModel = viewModel,
-                                categories = categories,
-                                selectedDate = selectedDate,
-                                initialType = modal.initialType,
-                                contentAlpha = 1f,
-                                onDismiss = {
-                                    onDismissManualInput()
-                                    viewModel.closeModal()
-                                }
-                            )
-                        }
-                    }
-
-                    is BottomCapsuleModal.VoiceInput -> {
-                        val voiceSubState = when {
-                            showInlineConsent -> VoiceSubState.CONSENT
-                            showInlineApiKey -> VoiceSubState.API_KEY
-                            editableList.isNotEmpty() -> VoiceSubState.OPERATIONS
-                            else -> VoiceSubState.RECORDING
-                        }
-
-                        AnimatedContent(
-                            targetState = voiceSubState,
-                            transitionSpec = {
-                                (fadeIn(tween(200)) togetherWith fadeOut(tween(140)))
-                                    .using(
-                                        SizeTransform(
-                                            clip = false,
-                                            sizeAnimationSpec = { _, _ ->
-                                                spring(
-                                                    dampingRatio = 0.82f,
-                                                    stiffness = Spring.StiffnessMediumLow
-                                                )
-                                            }
-                                        )
-                                    )
-                            },
-                            label = "voice_substate_morph"
-                        ) { subState ->
-                            when (subState) {
-                                VoiceSubState.CONSENT -> {
-                                    VoiceConsentPane(
-                                        contentAlpha = 1f,
-                                        onAccept = {
-                                            viewModel.setGeminiConsentGiven(true)
-                                            showInlineConsent = false
-                                            if (apiKey.isBlank()) {
-                                                showInlineApiKey = true
-                                            } else {
-                                                triggerVoiceMode()
-                                            }
-                                        },
-                                        onDecline = {
-                                            viewModel.setGeminiConsentGiven(false)
-                                            cancelAndCollapseToNav()
-                                        }
-                                    )
-                                }
-
-                                VoiceSubState.API_KEY -> {
-                                    VoiceApiKeyPane(
-                                        currentKey = apiKey,
-                                        contentAlpha = 1f,
-                                        onSaveKey = { newKey ->
-                                            viewModel.saveApiKey(newKey)
-                                            showInlineApiKey = false
-                                            triggerVoiceMode()
-                                        },
-                                        onCancel = {
-                                            cancelAndCollapseToNav()
-                                        }
-                                    )
-                                }
-
-                                VoiceSubState.RECORDING -> {
-                                    val liveStatusText = when {
-                                        isAnalyzingVoice && !isListening -> "✨ Давид разбирает операции..."
-                                        recognizedText.isNotBlank() -> recognizedText
-                                        partialText.isNotBlank() && partialText != "Говорите..." -> partialText
-                                        else -> "Слушаю вас..."
-                                    }
-
-                                    val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
-                                    val micPulse by infiniteTransition.animateFloat(
-                                        initialValue = 0.94f,
-                                        targetValue = 1.08f,
-                                        animationSpec = infiniteRepeatable(
-                                            animation = tween(750, easing = FastOutSlowInEasing),
-                                            repeatMode = RepeatMode.Reverse
-                                        ),
-                                        label = "mic_pulse_scale"
-                                    )
-
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(64.dp)
-                                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(44.dp)
-                                                .graphicsLayer {
-                                                    val s = if (isListening) micPulse else 1f
-                                                    scaleX = s
-                                                    scaleY = s
-                                                }
-                                                .shadow(
-                                                    elevation = 10.dp,
-                                                    shape = CircleShape,
-                                                    ambientColor = NeonEmerald,
-                                                    spotColor = NeonEmerald
-                                                )
-                                                .clip(CircleShape)
-                                                .background(
-                                                    brush = Brush.linearGradient(
-                                                        colors = listOf(NeonEmerald, NeonIndigo)
-                                                    )
-                                                )
-                                                .clickable {
-                                                    if (isListening) {
-                                                        viewModel.stopVoiceRecordingAndProcess()
-                                                    }
-                                                }
-                                                .testTag("voice_bar_mic_button"),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (isAnalyzingVoice && !isListening) {
-                                                CircularProgressIndicator(
-                                                    color = DarkBg,
-                                                    strokeWidth = 2.5.dp,
-                                                    modifier = Modifier.size(20.dp)
-                                                )
-                                            } else {
-                                                Icon(
-                                                    imageVector = Icons.Default.Mic,
-                                                    contentDescription = "Остановить запись",
-                                                    tint = DarkBg,
-                                                    modifier = Modifier.size(22.dp)
-                                                )
-                                            }
-                                        }
-
-                                        Spacer(modifier = Modifier.width(12.dp))
-
-                                        Column(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clickable {
-                                                    if (isListening) {
-                                                        viewModel.stopVoiceRecordingAndProcess()
-                                                    }
                                                 },
-                                            verticalArrangement = Arrangement.Center
-                                        ) {
+                                                onDecline = {
+                                                    viewModel.setGeminiConsentGiven(false)
+                                                    cancelAndCollapseToNav()
+                                                }
+                                            )
+                                        }
+
+                                        VoiceSubState.API_KEY -> {
+                                            VoiceApiKeyPane(
+                                                currentKey = apiKey,
+                                                contentAlpha = 1f,
+                                                onSaveKey = { newKey ->
+                                                    viewModel.saveApiKey(newKey)
+                                                    showInlineApiKey = false
+                                                    triggerVoiceMode()
+                                                },
+                                                onCancel = {
+                                                    cancelAndCollapseToNav()
+                                                }
+                                            )
+                                        }
+
+                                        VoiceSubState.RECORDING -> {
+                                            val liveStatusText = when {
+                                                isAnalyzingVoice && !isListening -> "✨ Давид разбирает операции..."
+                                                recognizedText.isNotBlank() -> recognizedText
+                                                partialText.isNotBlank() && partialText != "Говорите..." -> partialText
+                                                else -> "Слушаю вас..."
+                                            }
+
+                                            val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
+                                            val micPulse by infiniteTransition.animateFloat(
+                                                initialValue = 0.94f,
+                                                targetValue = 1.08f,
+                                                animationSpec = infiniteRepeatable(
+                                                    animation = tween(750, easing = FastOutSlowInEasing),
+                                                    repeatMode = RepeatMode.Reverse
+                                                ),
+                                                label = "mic_pulse_scale"
+                                            )
+
                                             Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                modifier = Modifier.fillMaxWidth()
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(68.dp)
+                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text(
-                                                    text = liveStatusText,
-                                                    color = Color.White,
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                if (isAnalyzingVoice) {
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                    Text(
-                                                        text = "ИИ...",
-                                                        color = NeonEmerald,
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.ExtraBold
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(44.dp)
+                                                        .graphicsLayer {
+                                                            val s = if (isListening) micPulse else 1f
+                                                            scaleX = s
+                                                            scaleY = s
+                                                        }
+                                                        .shadow(
+                                                            elevation = 10.dp,
+                                                            shape = CircleShape,
+                                                            ambientColor = NeonEmerald,
+                                                            spotColor = NeonEmerald
+                                                        )
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            brush = Brush.linearGradient(
+                                                                colors = listOf(NeonEmerald, NeonIndigo)
+                                                            )
+                                                        )
+                                                        .clickable {
+                                                            if (isListening) {
+                                                                viewModel.stopVoiceRecordingAndProcess()
+                                                            }
+                                                        }
+                                                        .testTag("voice_bar_mic_button"),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (isAnalyzingVoice && !isListening) {
+                                                        CircularProgressIndicator(
+                                                            color = DarkBg,
+                                                            strokeWidth = 2.5.dp,
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                    } else {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Mic,
+                                                            contentDescription = "Остановить запись",
+                                                            tint = DarkBg,
+                                                            modifier = Modifier.size(22.dp)
+                                                        )
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.width(12.dp))
+
+                                                Column(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .clickable {
+                                                            if (isListening) {
+                                                                viewModel.stopVoiceRecordingAndProcess()
+                                                            }
+                                                        },
+                                                    verticalArrangement = Arrangement.Center
+                                                ) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    ) {
+                                                        Text(
+                                                            text = liveStatusText,
+                                                            color = Color.White,
+                                                            fontSize = 13.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                            modifier = Modifier.weight(1f)
+                                                        )
+                                                        if (isAnalyzingVoice) {
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                            Text(
+                                                                text = "ИИ...",
+                                                                color = NeonEmerald,
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.ExtraBold
+                                                            )
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                    MovingNeonGlowVisualizer(
+                                                        isRecording = isListening || isAnalyzingVoice,
+                                                        rmsLevel = if (isListening) rmsDb else 4f,
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    )
+                                                }
+
+                                                Spacer(modifier = Modifier.width(12.dp))
+
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(38.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Slate800.copy(alpha = 0.9f))
+                                                        .border(1.dp, Slate700, CircleShape)
+                                                        .clickable { cancelAndCollapseToNav() }
+                                                        .testTag("voice_bar_cancel_button"),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Отменить голосовой ввод",
+                                                        tint = Slate400,
+                                                        modifier = Modifier.size(18.dp)
                                                     )
                                                 }
                                             }
-                                            Spacer(modifier = Modifier.height(6.dp))
-                                            MovingNeonGlowVisualizer(
-                                                isRecording = isListening || isAnalyzingVoice,
-                                                rmsLevel = if (isListening) rmsDb else 4f,
-                                                modifier = Modifier.fillMaxWidth()
-                                            )
                                         }
 
-                                        Spacer(modifier = Modifier.width(12.dp))
-
-                                        Box(
-                                            modifier = Modifier
-                                                .size(38.dp)
-                                                .clip(CircleShape)
-                                                .background(Slate800.copy(alpha = 0.9f))
-                                                .border(1.dp, Slate700, CircleShape)
-                                                .clickable { cancelAndCollapseToNav() }
-                                                .testTag("voice_bar_cancel_button"),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Close,
-                                                contentDescription = "Отменить голосовой ввод",
-                                                tint = Slate400,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                VoiceSubState.OPERATIONS -> {
-                                    val scrollState = rememberScrollState()
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .heightIn(max = 520.dp)
-                                            .verticalScroll(scrollState)
-                                    ) {
-                                        VoiceOperationsPane(
-                                            viewModel = viewModel,
-                                            editableList = editableList,
-                                            categories = categories,
-                                            selectedDate = selectedDate,
-                                            contentAlpha = 1f,
-                                            editingIndex = editingIndex,
-                                            onEditingIndexChanged = { editingIndex = it },
-                                            onDismissVoiceOperations = {
-                                                cancelAndCollapseToNav()
+                                        VoiceSubState.OPERATIONS -> {
+                                            val scrollState = rememberScrollState()
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(max = 520.dp)
+                                                    .verticalScroll(scrollState)
+                                            ) {
+                                                VoiceOperationsPane(
+                                                    viewModel = viewModel,
+                                                    editableList = editableList,
+                                                    categories = categories,
+                                                    selectedDate = selectedDate,
+                                                    contentAlpha = 1f,
+                                                    editingIndex = editingIndex,
+                                                    onEditingIndexChanged = { editingIndex = it },
+                                                    onDismissVoiceOperations = {
+                                                        cancelAndCollapseToNav()
+                                                    }
+                                                )
                                             }
-                                        )
+                                        }
                                     }
                                 }
                             }
-                        }
-                    }
 
-                    else -> {
-                        modalContent(modal)
+                            else -> {
+                                modalContent(modal)
+                            }
+                        }
                     }
                 }
             }
