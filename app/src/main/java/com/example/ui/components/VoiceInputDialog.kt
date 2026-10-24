@@ -126,7 +126,9 @@ import kotlin.math.sin
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import com.example.ui.theme.DarkCard
 import com.example.ui.viewmodel.BottomCapsuleModal
 
@@ -339,17 +341,19 @@ fun MorphingBottomBar(
     val isCompactVoiceBar = activeModal is BottomCapsuleModal.VoiceInput &&
         editableList.isEmpty() && !showInlineConsent && !showInlineApiKey
 
+    val isVoiceModal = effectiveModal is BottomCapsuleModal.VoiceInput
+
     val cornerRadius by animateDpAsState(
         targetValue = when {
             activeModal == BottomCapsuleModal.None -> 22.dp
-            isCompactVoiceBar -> 22.dp
+            activeModal is BottomCapsuleModal.VoiceInput -> 36.dp
             else -> 28.dp
         },
         animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
         label = "morph_bar_corner"
     )
 
-    // Неоновое переливающееся свечение рамки (MovingNeonGlow)
+    // Неоновое переливающееся свечение рамки
     val glowTransition = rememberInfiniteTransition(label = "capsule_neon_glow")
     val glowPhase by glowTransition.animateFloat(
         initialValue = 0f,
@@ -363,10 +367,11 @@ fun MorphingBottomBar(
 
     val borderBrush = when (activeModal) {
         BottomCapsuleModal.None -> Brush.horizontalGradient(listOf(GlassHighlight, GlassHighlight))
-        is BottomCapsuleModal.VoiceInput -> Brush.linearGradient(
-            colors = listOf(NeonEmerald.copy(alpha = 0.8f), NeonCyan.copy(alpha = 0.65f), NeonIndigo.copy(alpha = 0.8f)),
-            start = Offset(0f, 0f),
-            end = Offset(600f * (0.4f + glowPhase * 0.6f), 600f)
+        is BottomCapsuleModal.VoiceInput -> Brush.verticalGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.22f),
+                Color(0xFF38BDF8).copy(alpha = 0.45f)
+            )
         )
         else -> Brush.linearGradient(
             colors = listOf(
@@ -420,18 +425,33 @@ fun MorphingBottomBar(
                 .wrapContentHeight(align = Alignment.Bottom)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .shadow(
-                    elevation = if (activeModal == BottomCapsuleModal.None) 18.dp else 26.dp,
+                    elevation = if (activeModal == BottomCapsuleModal.None) 18.dp else 28.dp,
                     shape = RoundedCornerShape(cornerRadius),
-                    ambientColor = if (activeModal != BottomCapsuleModal.None) NeonEmerald else Color.Black,
-                    spotColor = if (activeModal != BottomCapsuleModal.None) NeonIndigo else Color.Black
+                    ambientColor = when {
+                        activeModal is BottomCapsuleModal.VoiceInput -> Color(0xFF00E5FF)
+                        activeModal != BottomCapsuleModal.None -> NeonEmerald
+                        else -> Color.Black
+                    },
+                    spotColor = when {
+                        activeModal is BottomCapsuleModal.VoiceInput -> Color(0xFF38BDF8)
+                        activeModal != BottomCapsuleModal.None -> NeonIndigo
+                        else -> Color.Black
+                    }
                 )
                 .clip(RoundedCornerShape(cornerRadius))
                 .background(
-                    if (activeModal == BottomCapsuleModal.None) ObsidianSurface.copy(alpha = 0.96f)
-                    else DarkCard.copy(alpha = 0.99f)
+                    when {
+                        activeModal == BottomCapsuleModal.None -> ObsidianSurface.copy(alpha = 0.96f)
+                        isVoiceModal -> Color(0xFF080C14)
+                        else -> DarkCard.copy(alpha = 0.99f)
+                    }
                 )
                 .border(
-                    width = if (activeModal == BottomCapsuleModal.None) 1.dp else 1.4.dp,
+                    width = when {
+                        activeModal == BottomCapsuleModal.None -> 1.dp
+                        activeModal is BottomCapsuleModal.VoiceInput -> 1.dp
+                        else -> 1.4.dp
+                    },
                     brush = borderBrush,
                     shape = RoundedCornerShape(cornerRadius)
                 )
@@ -725,216 +745,247 @@ fun MorphingBottomBar(
                                     else -> VoiceSubState.RECORDING
                                 }
 
-                                AnimatedContent(
-                                    targetState = voiceSubState,
-                                    contentAlignment = Alignment.BottomCenter,
-                                    transitionSpec = {
-                                        (fadeIn(tween(200)) togetherWith fadeOut(tween(140)))
-                                            .using(
-                                                SizeTransform(
-                                                    clip = false,
-                                                    sizeAnimationSpec = { _, _ ->
-                                                        spring(
-                                                            dampingRatio = 0.82f,
-                                                            stiffness = Spring.StiffnessMediumLow
-                                                        )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(Color(0xFF080C14)),
+                                    contentAlignment = Alignment.BottomCenter
+                                ) {
+                                    // Живое объемное северное сияние Gemini Live (Volumetric Liquid Aurora Glow):
+                                    // заполняет всю 84.dp капсулу при слушании и переливается в нижней части при росте списка операций
+                                    VolumetricLiquidAuroraGlow(
+                                        isRecording = isListening || isAnalyzingVoice,
+                                        rmsLevel = if (isListening) rmsDb else if (isAnalyzingVoice) 5.2f else 2.2f,
+                                        cornerRadius = 36.dp,
+                                        maxAuroraHeight = if (voiceSubState == VoiceSubState.RECORDING) null else 190.dp,
+                                        showGlassBorder = false,
+                                        fillBackground = false,
+                                        modifier = Modifier.matchParentSize()
+                                    )
+
+                                    AnimatedContent(
+                                        targetState = voiceSubState,
+                                        contentAlignment = Alignment.BottomCenter,
+                                        transitionSpec = {
+                                            (fadeIn(tween(200)) togetherWith fadeOut(tween(140)))
+                                                .using(
+                                                    SizeTransform(
+                                                        clip = false,
+                                                        sizeAnimationSpec = { _, _ ->
+                                                            spring(
+                                                                dampingRatio = 0.82f,
+                                                                stiffness = Spring.StiffnessMediumLow
+                                                            )
+                                                        }
+                                                    )
+                                                )
+                                        },
+                                        label = "voice_substate_morph"
+                                    ) { subState ->
+                                        when (subState) {
+                                            VoiceSubState.CONSENT -> {
+                                                VoiceConsentPane(
+                                                    contentAlpha = 1f,
+                                                    onAccept = {
+                                                        viewModel.setGeminiConsentGiven(true)
+                                                        showInlineConsent = false
+                                                        if (apiKey.isBlank()) {
+                                                            showInlineApiKey = true
+                                                        } else {
+                                                            triggerVoiceMode()
+                                                        }
+                                                    },
+                                                    onDecline = {
+                                                        viewModel.setGeminiConsentGiven(false)
+                                                        cancelAndCollapseToNav()
                                                     }
                                                 )
-                                            )
-                                    },
-                                    label = "voice_substate_morph"
-                                ) { subState ->
-                                    when (subState) {
-                                        VoiceSubState.CONSENT -> {
-                                            VoiceConsentPane(
-                                                contentAlpha = 1f,
-                                                onAccept = {
-                                                    viewModel.setGeminiConsentGiven(true)
-                                                    showInlineConsent = false
-                                                    if (apiKey.isBlank()) {
-                                                        showInlineApiKey = true
-                                                    } else {
-                                                        triggerVoiceMode()
-                                                    }
-                                                },
-                                                onDecline = {
-                                                    viewModel.setGeminiConsentGiven(false)
-                                                    cancelAndCollapseToNav()
-                                                }
-                                            )
-                                        }
-
-                                        VoiceSubState.API_KEY -> {
-                                            VoiceApiKeyPane(
-                                                currentKey = apiKey,
-                                                contentAlpha = 1f,
-                                                onSaveKey = { newKey ->
-                                                    viewModel.saveApiKey(newKey)
-                                                    showInlineApiKey = false
-                                                    triggerVoiceMode()
-                                                },
-                                                onCancel = {
-                                                    cancelAndCollapseToNav()
-                                                }
-                                            )
-                                        }
-
-                                        VoiceSubState.RECORDING -> {
-                                            val liveStatusText = when {
-                                                isAnalyzingVoice && !isListening -> "✨ Давид разбирает операции..."
-                                                recognizedText.isNotBlank() -> recognizedText
-                                                partialText.isNotBlank() && partialText != "Говорите..." -> partialText
-                                                else -> "Слушаю вас..."
                                             }
 
-                                            val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
-                                            val micPulse by infiniteTransition.animateFloat(
-                                                initialValue = 0.94f,
-                                                targetValue = 1.08f,
-                                                animationSpec = infiniteRepeatable(
-                                                    animation = tween(750, easing = FastOutSlowInEasing),
-                                                    repeatMode = RepeatMode.Reverse
-                                                ),
-                                                label = "mic_pulse_scale"
-                                            )
-
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(68.dp)
-                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(44.dp)
-                                                        .graphicsLayer {
-                                                            val s = if (isListening) micPulse else 1f
-                                                            scaleX = s
-                                                            scaleY = s
-                                                        }
-                                                        .shadow(
-                                                            elevation = 10.dp,
-                                                            shape = CircleShape,
-                                                            ambientColor = NeonEmerald,
-                                                            spotColor = NeonEmerald
-                                                        )
-                                                        .clip(CircleShape)
-                                                        .background(
-                                                            brush = Brush.linearGradient(
-                                                                colors = listOf(NeonEmerald, NeonIndigo)
-                                                            )
-                                                        )
-                                                        .clickable {
-                                                            if (isListening) {
-                                                                viewModel.stopVoiceRecordingAndProcess()
-                                                            }
-                                                        }
-                                                        .testTag("voice_bar_mic_button"),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    if (isAnalyzingVoice && !isListening) {
-                                                        CircularProgressIndicator(
-                                                            color = DarkBg,
-                                                            strokeWidth = 2.5.dp,
-                                                            modifier = Modifier.size(20.dp)
-                                                        )
-                                                    } else {
-                                                        Icon(
-                                                            imageVector = Icons.Default.Mic,
-                                                            contentDescription = "Остановить запись",
-                                                            tint = DarkBg,
-                                                            modifier = Modifier.size(22.dp)
-                                                        )
+                                            VoiceSubState.API_KEY -> {
+                                                VoiceApiKeyPane(
+                                                    currentKey = apiKey,
+                                                    contentAlpha = 1f,
+                                                    onSaveKey = { newKey ->
+                                                        viewModel.saveApiKey(newKey)
+                                                        showInlineApiKey = false
+                                                        triggerVoiceMode()
+                                                    },
+                                                    onCancel = {
+                                                        cancelAndCollapseToNav()
                                                     }
+                                                )
+                                            }
+
+                                            VoiceSubState.RECORDING -> {
+                                                val liveStatusText = when {
+                                                    isAnalyzingVoice && !isListening -> "✨ Давид разбирает операции..."
+                                                    recognizedText.isNotBlank() -> recognizedText
+                                                    partialText.isNotBlank() && partialText != "Говорите..." -> partialText
+                                                    else -> "Слушаю..."
                                                 }
 
-                                                Spacer(modifier = Modifier.width(12.dp))
+                                                val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
+                                                val micPulse by infiniteTransition.animateFloat(
+                                                    initialValue = 0.94f,
+                                                    targetValue = 1.08f,
+                                                    animationSpec = infiniteRepeatable(
+                                                        animation = tween(850, easing = FastOutSlowInEasing),
+                                                        repeatMode = RepeatMode.Reverse
+                                                    ),
+                                                    label = "mic_pulse_scale"
+                                                )
 
-                                                Column(
+                                                // Капсула Gemini Live (height = 84.dp со скруглением 36.dp), целиком залитая сиянием
+                                                Row(
                                                     modifier = Modifier
-                                                        .weight(1f)
-                                                        .clickable {
-                                                            if (isListening) {
-                                                                viewModel.stopVoiceRecordingAndProcess()
-                                                            }
-                                                        },
-                                                    verticalArrangement = Arrangement.Center
+                                                        .fillMaxWidth()
+                                                        .height(84.dp)
+                                                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                                        modifier = Modifier.fillMaxWidth()
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(44.dp)
+                                                            .graphicsLayer {
+                                                                val s = if (isListening) micPulse else 1f
+                                                                scaleX = s
+                                                                scaleY = s
+                                                            }
+                                                            .clip(CircleShape)
+                                                            .background(Color.White.copy(alpha = 0.14f))
+                                                            .border(
+                                                                width = 1.dp,
+                                                                brush = Brush.verticalGradient(
+                                                                    colors = listOf(
+                                                                        Color.White.copy(alpha = 0.45f),
+                                                                        Color(0xFF38BDF8).copy(alpha = 0.55f)
+                                                                    )
+                                                                ),
+                                                                shape = CircleShape
+                                                            )
+                                                            .clickable {
+                                                                if (isListening) {
+                                                                    viewModel.stopVoiceRecordingAndProcess()
+                                                                }
+                                                            }
+                                                            .testTag("voice_bar_mic_button"),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        if (isAnalyzingVoice && !isListening) {
+                                                            CircularProgressIndicator(
+                                                                color = Color.White,
+                                                                strokeWidth = 2.2.dp,
+                                                                modifier = Modifier.size(20.dp)
+                                                            )
+                                                        } else {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Mic,
+                                                                contentDescription = "Остановить запись",
+                                                                tint = Color.White,
+                                                                modifier = Modifier.size(22.dp)
+                                                            )
+                                                        }
+                                                    }
+
+                                                    Spacer(modifier = Modifier.width(14.dp))
+
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clickable {
+                                                                if (isListening) {
+                                                                    viewModel.stopVoiceRecordingAndProcess()
+                                                                }
+                                                            },
+                                                        verticalArrangement = Arrangement.Center
                                                     ) {
                                                         Text(
                                                             text = liveStatusText,
                                                             color = Color.White,
-                                                            fontSize = 13.sp,
-                                                            fontWeight = FontWeight.SemiBold,
-                                                            maxLines = 1,
+                                                            fontSize = 15.sp,
+                                                            fontFamily = ManropeFontFamily,
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 2,
                                                             overflow = TextOverflow.Ellipsis,
-                                                            modifier = Modifier.weight(1f)
-                                                        )
-                                                        if (isAnalyzingVoice) {
-                                                            Spacer(modifier = Modifier.width(6.dp))
-                                                            Text(
-                                                                text = "ИИ...",
-                                                                color = NeonEmerald,
-                                                                fontSize = 10.sp,
-                                                                fontWeight = FontWeight.ExtraBold
+                                                            style = TextStyle(
+                                                                shadow = Shadow(
+                                                                    color = Color.Black.copy(alpha = 0.75f),
+                                                                    offset = Offset(0f, 2f),
+                                                                    blurRadius = 10f
+                                                                )
                                                             )
-                                                        }
+                                                        )
+                                                        Spacer(modifier = Modifier.height(2.dp))
+                                                        Text(
+                                                            text = if (isAnalyzingVoice) {
+                                                                "Gemini Live • разбор операций"
+                                                            } else {
+                                                                "Gemini Live • нажмите для завершения"
+                                                            },
+                                                            color = Color(0xFFE0F2FE).copy(alpha = 0.82f),
+                                                            fontSize = 11.sp,
+                                                            fontFamily = ManropeFontFamily,
+                                                            fontWeight = FontWeight.Medium,
+                                                            maxLines = 1,
+                                                            style = TextStyle(
+                                                                shadow = Shadow(
+                                                                    color = Color.Black.copy(alpha = 0.65f),
+                                                                    offset = Offset(0f, 1.5f),
+                                                                    blurRadius = 6f
+                                                                )
+                                                            )
+                                                        )
                                                     }
-                                                    Spacer(modifier = Modifier.height(6.dp))
-                                                    MovingNeonGlowVisualizer(
-                                                        isRecording = isListening || isAnalyzingVoice,
-                                                        rmsLevel = if (isListening) rmsDb else 4f,
-                                                        modifier = Modifier.fillMaxWidth()
-                                                    )
-                                                }
 
-                                                Spacer(modifier = Modifier.width(12.dp))
+                                                    Spacer(modifier = Modifier.width(12.dp))
 
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(38.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Slate800.copy(alpha = 0.9f))
-                                                        .border(1.dp, Slate700, CircleShape)
-                                                        .clickable { cancelAndCollapseToNav() }
-                                                        .testTag("voice_bar_cancel_button"),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Close,
-                                                        contentDescription = "Отменить голосовой ввод",
-                                                        tint = Slate400,
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
+                                                    // Аккуратная круглая кнопка закрытия ✕ справа поверх сияния
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(40.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Color(0xFF080C14).copy(alpha = 0.48f))
+                                                            .border(
+                                                                width = 1.dp,
+                                                                color = Color.White.copy(alpha = 0.24f),
+                                                                shape = CircleShape
+                                                            )
+                                                            .clickable { cancelAndCollapseToNav() }
+                                                            .testTag("voice_bar_cancel_button"),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Close,
+                                                            contentDescription = "Отменить голосовой ввод",
+                                                            tint = Color.White.copy(alpha = 0.92f),
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
-                                        }
 
-                                        VoiceSubState.OPERATIONS -> {
-                                            val scrollState = rememberScrollState()
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .heightIn(max = 520.dp)
-                                                    .verticalScroll(scrollState)
-                                            ) {
-                                                VoiceOperationsPane(
-                                                    viewModel = viewModel,
-                                                    editableList = editableList,
-                                                    categories = categories,
-                                                    selectedDate = selectedDate,
-                                                    contentAlpha = 1f,
-                                                    editingIndex = editingIndex,
-                                                    onEditingIndexChanged = { editingIndex = it },
-                                                    onDismissVoiceOperations = {
-                                                        cancelAndCollapseToNav()
-                                                    }
-                                                )
+                                            VoiceSubState.OPERATIONS -> {
+                                                val scrollState = rememberScrollState()
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .heightIn(max = 520.dp)
+                                                        .verticalScroll(scrollState)
+                                                ) {
+                                                    VoiceOperationsPane(
+                                                        viewModel = viewModel,
+                                                        editableList = editableList,
+                                                        categories = categories,
+                                                        selectedDate = selectedDate,
+                                                        contentAlpha = 1f,
+                                                        editingIndex = editingIndex,
+                                                        onEditingIndexChanged = { editingIndex = it },
+                                                        onDismissVoiceOperations = {
+                                                            cancelAndCollapseToNav()
+                                                        }
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -1191,55 +1242,13 @@ fun Neon32BandVoiceVisualizer(
     modifier: Modifier = Modifier,
     barCount: Int = 32
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "voice_32_wave")
-    val phase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 650, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "wave_phase"
+    VolumetricLiquidAuroraGlow(
+        isRecording = true,
+        rmsLevel = amplitude,
+        cornerRadius = 18.dp,
+        showGlassBorder = false,
+        fillBackground = false,
+        modifier = modifier
     )
-
-    val smoothedAmp by animateFloatAsState(
-        targetValue = amplitude.coerceIn(0.05f, 1f),
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "smoothed_amp"
-    )
-
-    val barBrush = remember {
-        Brush.verticalGradient(
-            colors = listOf(NeonEmerald, NeonCyan, NeonIndigo)
-        )
-    }
-
-    Canvas(modifier = modifier) {
-        val totalWidth = size.width
-        val totalHeight = size.height
-        val spacing = (totalWidth / (barCount * 2.4f)).coerceAtLeast(1.5f)
-        val barWidth = ((totalWidth - spacing * (barCount - 1)) / barCount).coerceAtLeast(2f)
-        val centerIndex = (barCount - 1) / 2f
-
-        for (i in 0 until barCount) {
-            val normalizedDist = abs(i - centerIndex) / centerIndex
-            val bellEnvelope = exp(-2.4f * normalizedDist * normalizedDist)
-            val harmonic = 0.55f + 0.45f * sin(phase + i * 0.55f)
-            val heightFraction = (0.14f + smoothedAmp * bellEnvelope * harmonic * 0.86f).coerceIn(0.12f, 1f)
-            val barHeight = totalHeight * heightFraction
-            val x = i * (barWidth + spacing)
-            val y = (totalHeight - barHeight) / 2f
-
-            drawRoundRect(
-                brush = barBrush,
-                topLeft = Offset(x, y),
-                size = Size(barWidth, barHeight),
-                cornerRadius = CornerRadius(barWidth / 2f, barWidth / 2f)
-            )
-        }
-    }
 }
 

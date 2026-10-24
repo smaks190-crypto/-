@@ -49,6 +49,9 @@ class VoiceInputManager(context: Context) {
     private val _rmsDb = MutableStateFlow(0f)
     val rmsDb: StateFlow<Float> = _rmsDb.asStateFlow()
 
+    private val _voiceLevel = MutableStateFlow(0f)
+    val voiceLevel: StateFlow<Float> = _voiceLevel.asStateFlow()
+
     private val _errorState = MutableStateFlow<String?>(null)
     val errorState: StateFlow<String?> = _errorState.asStateFlow()
 
@@ -120,6 +123,7 @@ class VoiceInputManager(context: Context) {
             audioRecord = record
             _isListening.value = true
             _rmsDb.value = 1.5f
+            _voiceLevel.value = 0.08f
 
             synchronized(chunkLock) {
                 activeSpeechBuffer.reset()
@@ -141,7 +145,7 @@ class VoiceInputManager(context: Context) {
                         val frameCopy = frameBuf.copyOf(readBytes)
                         val rms = calculatePcmRms(frameCopy, readBytes)
 
-                        // Плавная нормализация амплитуды (1..12) для 32-полосной неоновой волны
+                        // Плавная нормализация амплитуды (1..12) и уровня голоса (0f..1f) для Volumetric Liquid Aurora
                         val visualDb = if (rms > 80.0) {
                             val db = 20f * log10((rms / 80.0).toFloat())
                             (db * 0.35f).coerceIn(1.5f, 12f)
@@ -149,6 +153,7 @@ class VoiceInputManager(context: Context) {
                             1.0f
                         }
                         _rmsDb.value = visualDb
+                        _voiceLevel.value = ((visualDb - 1.0f) / 9.5f).coerceIn(0f, 1f)
 
                         val isSpeechFrame = rms >= SPEECH_RMS_THRESHOLD
 
@@ -239,6 +244,7 @@ class VoiceInputManager(context: Context) {
             }
         }
         _rmsDb.value = 0f
+        _voiceLevel.value = 0f
 
         synchronized(chunkLock) {
             val remainingPcm = activeSpeechBuffer.toByteArray()
@@ -285,6 +291,7 @@ class VoiceInputManager(context: Context) {
             activeSpeechFrames = 0
         }
         _rmsDb.value = 0f
+        _voiceLevel.value = 0f
     }
 
     private fun calculatePcmRms(buffer: ByteArray, length: Int): Double {
