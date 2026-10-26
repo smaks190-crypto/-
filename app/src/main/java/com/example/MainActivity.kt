@@ -353,7 +353,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
 
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(1800)
-        splashStage = "exiting"
+        if (splashStage == "loading") {
+            splashStage = "exiting"
+        }
 
         if (com.example.notifications.ReminderManager.isReminderEnabled(context)) {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
