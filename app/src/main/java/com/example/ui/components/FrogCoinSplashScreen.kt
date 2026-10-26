@@ -2,7 +2,7 @@ package com.example.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.LinearEasing\nimport androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
@@ -18,7 +18,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.delay\nimport androidx.compose.ui.graphics.drawscope.rotate
 import kotlin.math.abs
 import kotlin.math.sin
 
@@ -88,15 +88,13 @@ fun FrogCoinSplashScreen(isExiting: Boolean, onExitFinished: () -> Unit) {
     val exit = remember { Animatable(0f) }
 
     LaunchedEffect(Unit) {
-        // A small anticipation, a quick throw, a weightless apex, then falling.
-        intro.animateTo(1f, tween(1450, easing = LinearEasing))
+        intro.animateTo(1f, tween(800, easing = LinearEasing))
     }
     LaunchedEffect(isExiting) {
         if (isExiting) {
-            // Wait for the toss before transitioning; no separate, disconnected coin.
-            if (intro.value < 1f) intro.animateTo(1f, tween(240, easing = LinearEasing))
-            delay(80)
-            exit.animateTo(1f, tween(720, easing = FastOutSlowInEasing))
+            if (intro.value < 1f) intro.animateTo(1f, tween(800, easing = LinearEasing))
+            delay(30)
+            exit.animateTo(1f, tween(550, easing = FastOutSlowInEasing))
             onExitFinished()
         }
     }
@@ -106,41 +104,50 @@ fun FrogCoinSplashScreen(isExiting: Boolean, onExitFinished: () -> Unit) {
             val w = size.width
             val h = size.height
             val short = minOf(w, h)
-            val mascotScale = short / 315f
-            val mascotY = h * .52f
+            val centerX = w / 2f
+            val mascotY = h * .54f
+            val s = short / 315f
             val t = intro.value
             val reveal = exit.value
-            // Curtain is attached to the falling coin. Actual app is drawn behind this overlay.
+            val apexY = h * .22f
+            val contactY = 0f
             val curtainY = if (isExiting) h * reveal else 0f
-            drawRect(Night, Offset(0f, curtainY), Size(w, h - curtainY))
+            drawRect(Night, Offset(0f, curtainY), Size(w, h - curtainY.coerceAtMost(h)))
             if (curtainY >= h) return@Canvas
-            withTransform({ translate(0f, curtainY) }) {
-                drawCircle(NightSoft, short * .28f, Offset(w * .5f, mascotY), alpha = .42f)
-                val gesture = smooth(.08f, .30f, t)
-                val blink = (1f - abs(t - .19f) / .035f).coerceIn(0f, 1f)
-                frog(w * .5f, mascotY, mascotScale, gesture, blink)
-
-                // Single coin throughout the sequence. Its position and spin remain continuous.
-                val release = smooth(.19f, .32f, t)
-                val flight = smooth(.30f, .98f, t)
-                val airborne = (t - .30f).coerceIn(0f, .7f) / .7f
-                val startY = mascotY + (38f - gesture * 84f) * mascotScale
-                val apexY = mascotY - short * .55f
-                val landingY = mascotY - short * .09f
-                val arcY = apexY + (landingY - apexY) * (airborne * airborne)
-                val coinY = startY * (1f - release) + (apexY + (arcY - apexY) * flight) * release
-                val coinX = w * .5f + (77f + gesture * 7f) * mascotScale * (1f - release)
-                val spinning = t * 2.1f + reveal * 1.4f
-                // While the curtain falls, coin stays locked to the curtain's upper edge.
-                if (isExiting && reveal > 0f) {
-                    coin(w * .5f, 0f, short * .055f * (1f + reveal * .24f), spinning)
-                } else {
-                    coin(coinX, coinY, short * .055f, spinning)
+            val rise = smooth(0f, .6875f, t)
+            val fall = smooth(.6875f, 1f, t)
+            val frogFade = 1f - smooth(.6875f, 1f, t)
+            val squash = when {
+                t < .15f -> 1f - .08f * (t / .15f)
+                t < .32f -> .92f + .13f * ((t - .15f) / .17f)
+                t < .52f -> 1.05f - .05f * ((t - .32f) / .20f)
+                else -> 1f
+            }
+            // The mascot stays visible throughout the throw and fades only at the apex.
+            withTransform({
+                translate(centerX, mascotY)
+                scale(1f - .15f * (1f - frogFade), squash * (1f - .15f * (1f - frogFade)))
+                translate(-centerX, -mascotY)
+            }) {
+                // Draw into a layer to apply alpha to the complete character.
+                drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(0f, 0f, w, h), androidx.compose.ui.graphics.Paint().apply { alpha = frogFade })
+                frog(centerX, mascotY, s, 0f, 0f)
+                drawContext.canvas.restore()
+            }
+            val mouthY = mascotY + 57f * s
+            val coinY = if (t <= .6875f) mouthY + (apexY - mouthY) * rise else apexY + (contactY - apexY) * fall
+            val spin = t * 2.6f + reveal * 1.4f
+            if (!isExiting || reveal <= 0f) {
+                coin(centerX, coinY, short * .055f, spin)
+                val trail = if (t <= .6875f) rise else fall
+                drawLine(CoinLight.copy(alpha = .24f * trail), Offset(centerX, coinY + short * .07f), Offset(centerX, coinY + short * .18f), short * .006f)
+                if (t > .6875f) {
+                    drawLine(CoinLight.copy(alpha = .36f * fall), Offset(centerX - short * .04f, coinY - short * .17f), Offset(centerX - short * .04f, coinY - short * .08f), short * .004f)
+                    drawLine(CoinLight.copy(alpha = .36f * fall), Offset(centerX + short * .04f, coinY - short * .21f), Offset(centerX + short * .04f, coinY - short * .09f), short * .004f)
                 }
-                if (t > .30f && t < .88f && !isExiting) {
-                    val trail = (1f - abs(t - .60f) / .30f).coerceIn(0f, 1f)
-                    drawLine(CoinLight.copy(alpha = .16f * trail), Offset(coinX, coinY + short * .08f), Offset(coinX, coinY + short * .17f), short * .007f)
-                }
+            } else {
+                // Preserve the existing curtain reveal: coin stays on its leading edge.
+                coin(centerX, curtainY, short * .055f * (1f + reveal * .24f), spin)
             }
         }
     }
