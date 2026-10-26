@@ -47,9 +47,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -190,7 +188,6 @@ private fun SplashCanvasOverlay(
     onSplashFinished: () -> Unit
 ) {
     val context = LocalContext.current
-    val hapticFeedback = LocalHapticFeedback.current
     val masterTimeline = remember { Animatable(0f) }
     val reusablePaths = remember { SplashReusablePaths() }
 
@@ -205,11 +202,8 @@ private fun SplashCanvasOverlay(
         withFrameNanos { }
         withFrameNanos { }
 
-        // В момент отрыва монетки изо рта жабы вверх запускаем звонкий «Дзынь!» и легкий тактильный импульс
+        // В момент отрыва монетки изо рта жабы вверх запускаем мягкий звон «Дзынь!» в фоновом потоке
         DavidSoundManager.playCoinToss(context)
-        runCatching {
-            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        }
 
         masterTimeline.animateTo(
             targetValue = 1f,
@@ -222,8 +216,6 @@ private fun SplashCanvasOverlay(
         onSplashFinished()
     }
 
-    val t = masterTimeline.value
-
     Canvas(
         modifier = Modifier
             .fillMaxSize()
@@ -231,6 +223,10 @@ private fun SplashCanvasOverlay(
                 compositingStrategy = CompositingStrategy.Offscreen
             }
     ) {
+        // Читаем значение таймлайна строго внутри DrawScope, чтобы на каждом кадре 120 FPS
+        // перезапускалась только фаза отрисовки без единой рекомпозиции!
+        val t = masterTimeline.value
+
         val w = size.width
         val h = size.height
         if (w <= 1f || h <= 1f) return@Canvas
