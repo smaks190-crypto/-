@@ -2,7 +2,8 @@ package com.example.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing\nimport androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
@@ -18,7 +19,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
-import kotlinx.coroutines.delay\nimport androidx.compose.ui.graphics.drawscope.rotate
+import kotlinx.coroutines.delay
+import androidx.compose.ui.graphics.drawscope.rotate
 import kotlin.math.abs
 import kotlin.math.sin
 
