@@ -115,7 +115,7 @@ import com.example.ui.components.AddGoalDialog
 import com.example.ui.components.dialogs.AddTransactionDialog
 import com.example.ui.components.GeminiConsentDialog
 import com.example.ui.components.dialogs.CategoriesDialog
-import com.example.ui.components.GrowthChartSplashScreen
+import com.example.ui.components.FrogCoinSplashScreen
 import com.example.ui.screens.DebtsScreen
 import com.example.ui.screens.AnnualReportScreen
 import com.example.ui.screens.BudgetSelectionScreen
@@ -1122,7 +1122,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
         }
 
         if (splashStage != "done") {
-            GrowthChartSplashScreen(
+            FrogCoinSplashScreen(
                 isExiting = splashStage == "exiting",
                 onExitFinished = { splashStage = "done" }
             )
