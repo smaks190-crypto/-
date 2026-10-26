@@ -677,10 +677,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            Text(
-                                                text = "🐸",
-                                                fontSize = 15.sp
-                                            )
+                                            com.example.ui.components.BrandFrogAvatar(size = 20.dp)
                                             if (!isExpandedByNeon || !shouldShowMessage) {
                                                 Text(
                                                     text = "Давид AI",
@@ -1114,12 +1111,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             }
         }
 
-        if (splashStage != "done") {
-            GrowthChartSplashScreen(
-                isExiting = splashStage == "exiting",
-                onExitFinished = { splashStage = "done" }
-            )
-        }
+        SplashHost(
+            onSplashDone = { splashStage = "done" }
+        )
 
         // Всплывающее неоновое уведомление о получении достижения от Давида Жабова
         com.example.davidapp.AchievementUnlockedBanner(
@@ -1127,6 +1121,28 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
                 .padding(top = 12.dp)
+        )
+    }
+}
+
+@Composable
+private fun SplashHost(
+    onSplashDone: () -> Unit
+) {
+    var localDone by remember { mutableStateOf(false) }
+
+    LaunchedEffect(localDone) {
+        if (localDone) {
+            // Уведомляем родительский экран в фоне после того, как шторка уже полностью скрылась без рекомпозиции MainAppScreen
+            kotlinx.coroutines.delay(750)
+            onSplashDone()
+        }
+    }
+
+    if (!localDone) {
+        GrowthChartSplashScreen(
+            isExiting = false,
+            onExitFinished = { localDone = true }
         )
     }
 }

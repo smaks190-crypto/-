@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -61,17 +62,22 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -81,9 +87,16 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.BrandFrogAvatar
+import com.example.ui.components.BrandFrogPaths
 import com.example.ui.components.CategoryIconBadge
 import com.example.ui.components.MarkdownFormattedText
+import com.example.ui.components.drawBrandFrogVector
 import com.example.ui.components.formatRublesCompact
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 import com.example.ui.theme.Amber400
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
@@ -212,7 +225,7 @@ fun DavidChatTopBar(
                             shape = CircleShape
                         )
                 ) {
-                    Text(text = "🐸", fontSize = 19.sp)
+                    BrandFrogAvatar(size = 28.dp)
                 }
 
                 Box(
@@ -651,7 +664,7 @@ fun DavidTextBubble(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(bottom = 5.dp)
                 ) {
-                    Text(text = "🐸", fontSize = 12.sp)
+                    BrandFrogAvatar(size = 16.dp)
                     Spacer(modifier = Modifier.width(5.dp))
                     Text(
                         text = "Давид Жабов",
@@ -1052,88 +1065,218 @@ fun DavidChartBubble(
 }
 
 /**
- * Индикатор печати Давида в стиле Obsidian Neo-Bank
+ * Анимационный индикатор ожидания ответа Давида Жабова без какого-либо текста:
+ * фирменная жаба циклично подбрасывает золотую монетку вверх и ловит её обратно.
  */
 @Composable
-fun DavidTypingBubble(modifier: Modifier = Modifier) {
-    val infiniteTransition = rememberInfiniteTransition(label = "dots")
-
-    val dot1Offset by infiniteTransition.animateFloat(
+fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "david_coin_toss_loader")
+    val phase by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = -5f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(380, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
+            animation = tween(durationMillis = 850, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
         ),
-        label = "dot1"
+        label = "coin_toss_phase"
     )
 
-    val dot2Offset by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = -5f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(380, delayMillis = 140, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "dot2"
-    )
-
-    val dot3Offset by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = -5f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(380, delayMillis = 280, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "dot3"
-    )
+    val frogPaths = remember { BrandFrogPaths() }
+    val rubleBowlPath = remember { Path() }
 
     Surface(
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
         color = ObsidianSurface,
-        border = BorderStroke(1.dp, GlassBorder),
-        modifier = modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+        border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.45f)),
+        modifier = modifier
+            .padding(horizontal = 14.dp, vertical = 4.dp)
+            .testTag("david_coin_toss_loader")
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
         ) {
-            Text(text = "🐸", fontSize = 12.sp)
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = "Давид считает",
-                color = Slate400,
-                fontSize = 12.sp,
-                fontFamily = ManropeFontFamily,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.width(8.dp))
+            Canvas(modifier = Modifier.size(64.dp)) {
+                val p = phase
+                val w = size.width
+                val h = size.height
 
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Box(
-                    modifier = Modifier
-                        .offset(y = dot1Offset.dp)
-                        .size(5.dp)
-                        .clip(CircleShape)
-                        .background(Emerald400)
+                // Парабола полета монетки (0f = во рту жабы, 1f = пик взлета над головой)
+                val flightHeight = sin(p * PI.toFloat()).coerceIn(0f, 1f)
+
+                // Упругая деформация жабы (Squash & Stretch) при броске и ловле монетки
+                val frogScaleX: Float
+                val frogScaleY: Float
+                when {
+                    p < 0.16f -> {
+                        val k = p / 0.16f
+                        val s = sin(k * PI.toFloat())
+                        frogScaleX = 1f - 0.08f * s
+                        frogScaleY = 1f + 0.10f * s
+                    }
+                    p > 0.82f -> {
+                        val k = (p - 0.82f) / 0.18f
+                        val s = sin(k * PI.toFloat())
+                        frogScaleX = 1f + 0.10f * s
+                        frogScaleY = 1f - 0.09f * s
+                    }
+                    else -> {
+                        frogScaleX = 1f
+                        frogScaleY = 1f
+                    }
+                }
+
+                // Открытие рта в момент вылета и ловли монетки
+                val mouthOpen = when {
+                    p < 0.22f -> sin((p / 0.22f) * PI.toFloat())
+                    p > 0.78f -> sin(((p - 0.78f) / 0.22f) * PI.toFloat())
+                    else -> 0.15f
+                }.coerceIn(0f, 1f)
+
+                // Зрачки жабы следят за высотой монетки
+                val pupilOffset = -flightHeight * 0.95f
+
+                // Отрисовка фирменной жабы в нижней части мини-холста
+                withTransform({
+                    translate(left = 0f, top = h * 0.18f)
+                    scale(
+                        scaleX = frogScaleX * 0.76f,
+                        scaleY = frogScaleY * 0.76f,
+                        pivot = Offset(w / 2f, h * 0.56f)
+                    )
+                }) {
+                    drawBrandFrogVector(
+                        paths = frogPaths,
+                        mouthOpenProgress = mouthOpen,
+                        pupilOffsetYRatio = pupilOffset
+                    )
+                }
+
+                // Координаты и 3D-вращение золотой монетки вокруг вертикальной оси
+                val coinStartY = h * 0.67f
+                val coinPeakY = h * 0.15f
+                val coinCenterY = coinStartY - (coinStartY - coinPeakY) * flightHeight
+                val coinCenterX = w / 2f
+                val coinRadius = w * 0.155f
+                val flipScaleX = cos(p * 2f * PI.toFloat())
+                val absScaleX = abs(flipScaleX).coerceAtLeast(0.14f)
+
+                // Золотое свечение вокруг подлетающей монетки
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFFFBBF24).copy(alpha = 0.25f + 0.25f * flightHeight),
+                            Color.Transparent
+                        ),
+                        center = Offset(coinCenterX, coinCenterY),
+                        radius = coinRadius * 1.9f
+                    ),
+                    radius = coinRadius * 1.9f,
+                    center = Offset(coinCenterX, coinCenterY)
                 )
-                Box(
-                    modifier = Modifier
-                        .offset(y = dot2Offset.dp)
-                        .size(5.dp)
-                        .clip(CircleShape)
-                        .background(Emerald400.copy(alpha = 0.7f))
-                )
-                Box(
-                    modifier = Modifier
-                        .offset(y = dot3Offset.dp)
-                        .size(5.dp)
-                        .clip(CircleShape)
-                        .background(Indigo400)
-                )
+
+                withTransform({
+                    translate(left = coinCenterX, top = coinCenterY)
+                }) {
+                    // 3D-гурт (ребро) монетки при развороте
+                    val edgeThickness = (1f - absScaleX) * (coinRadius * 0.36f)
+                    if (edgeThickness > 0.4f) {
+                        drawOval(
+                            color = Color(0xFFB45309),
+                            topLeft = Offset(-coinRadius * absScaleX - edgeThickness * 0.5f, -coinRadius),
+                            size = Size(coinRadius * 2f * absScaleX + edgeThickness, coinRadius * 2f)
+                        )
+                    }
+
+                    withTransform({
+                        scale(scaleX = absScaleX, scaleY = 1f, pivot = Offset.Zero)
+                    }) {
+                        // Внешний золотой обод
+                        drawCircle(
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFFFDE047),
+                                    Color(0xFFF59E0B),
+                                    Color(0xFFD97706)
+                                ),
+                                start = Offset(-coinRadius, -coinRadius),
+                                end = Offset(coinRadius, coinRadius)
+                            ),
+                            radius = coinRadius,
+                            center = Offset.Zero
+                        )
+
+                        // Внутренний диск монетки
+                        val innerR = coinRadius * 0.78f
+                        drawCircle(
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFFFEF08A),
+                                    Color(0xFFFBBF24),
+                                    Color(0xFFF59E0B)
+                                ),
+                                start = Offset(0f, -innerR),
+                                end = Offset(0f, innerR)
+                            ),
+                            radius = innerR,
+                            center = Offset.Zero
+                        )
+
+                        // Символ рубля ₽ на грани монетки
+                        if (absScaleX > 0.28f) {
+                            val strokeW = (coinRadius * 0.18f).coerceAtLeast(1.2f)
+                            val stemX = -coinRadius * 0.14f
+                            val topY = -coinRadius * 0.38f
+                            val botY = coinRadius * 0.40f
+
+                            drawLine(
+                                color = Color(0xFF92400E),
+                                start = Offset(stemX, topY),
+                                end = Offset(stemX, botY),
+                                strokeWidth = strokeW,
+                                cap = StrokeCap.Round
+                            )
+
+                            rubleBowlPath.reset()
+                            rubleBowlPath.moveTo(stemX, topY)
+                            rubleBowlPath.lineTo(coinRadius * 0.08f, topY)
+                            rubleBowlPath.arcTo(
+                                rect = Rect(
+                                    left = -coinRadius * 0.08f,
+                                    top = topY,
+                                    right = coinRadius * 0.30f,
+                                    bottom = coinRadius * 0.04f
+                                ),
+                                startAngleDegrees = -90f,
+                                sweepAngleDegrees = 180f,
+                                forceMoveTo = false
+                            )
+                            rubleBowlPath.lineTo(stemX, coinRadius * 0.04f)
+
+                            drawPath(
+                                path = rubleBowlPath,
+                                color = Color(0xFF92400E),
+                                style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                            )
+
+                            drawLine(
+                                color = Color(0xFF92400E),
+                                start = Offset(-coinRadius * 0.28f, coinRadius * 0.18f),
+                                end = Offset(coinRadius * 0.16f, coinRadius * 0.18f),
+                                strokeWidth = strokeW * 0.85f,
+                                cap = StrokeCap.Round
+                            )
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+@Composable
+fun DavidTypingBubble(modifier: Modifier = Modifier) {
+    DavidCoinTossLoader(modifier = modifier)
 }
 
 /**
