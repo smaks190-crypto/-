@@ -1066,7 +1066,7 @@ fun DavidChartBubble(
 
 /**
  * Анимационный индикатор ожидания ответа Давида Жабова без какого-либо текста:
- * фирменная жаба циклично подбрасывает золотую монетку вверх и ловит её обратно.
+ * фирменная жаба циклично подбрасывает объемную 3D золотую монетку с вертикальным кувырком и ловит её обратно.
  */
 @Composable
 fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
@@ -1082,7 +1082,10 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
     )
 
     val frogPaths = remember { BrandFrogPaths() }
+    val rubleShadowPath = remember { Path() }
     val rubleBowlPath = remember { Path() }
+    val rubleHighlightPath = remember { Path() }
+    val shinePath = remember { Path() }
 
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -1152,121 +1155,276 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                     )
                 }
 
-                // Координаты и 3D-вращение золотой монетки вокруг вертикальной оси
+                // Координаты и ВЕРТИКАЛЬНОЕ 3D-вращение (кувырок через верх/низ вокруг горизонтальной оси)
                 val coinStartY = h * 0.67f
                 val coinPeakY = h * 0.15f
-                val coinCenterY = coinStartY - (coinStartY - coinPeakY) * flightHeight
-                val coinCenterX = w / 2f
-                val coinRadius = w * 0.155f
-                val flipScaleX = cos(p * 2f * PI.toFloat())
-                val absScaleX = abs(flipScaleX).coerceAtLeast(0.14f)
+                val coinY = coinStartY - (coinStartY - coinPeakY) * flightHeight
+                val coinX = w / 2f
+                val coinRadius = w * 0.165f
+
+                // Полный цикл кувырка монетки по вертикали (scaleX всегда = 1f, сжимается только scaleY)
+                val spinAngle = p * 2f * PI.toFloat()
+                val flipCos = cos(spinAngle)
+                val faceScaleY = abs(flipCos).coerceAtLeast(0.08f)
+
+                // Толщина 3D-цилиндра монеты и вертикальное смещение ребра
+                val rimThickness = coinRadius * 0.34f
+                val rimOffsetY = sin(spinAngle) * rimThickness
+
+                val frontFaceY = coinY - rimOffsetY * 0.35f
+                val backRimY = coinY + rimOffsetY * 0.65f
+                val ellipseRadiusY = coinRadius * faceScaleY
 
                 // Золотое свечение вокруг подлетающей монетки
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFFFBBF24).copy(alpha = 0.25f + 0.25f * flightHeight),
+                            Color(0xFFFBBF24).copy(alpha = 0.26f + 0.26f * flightHeight),
                             Color.Transparent
                         ),
-                        center = Offset(coinCenterX, coinCenterY),
-                        radius = coinRadius * 1.9f
+                        center = Offset(coinX, coinY),
+                        radius = coinRadius * 1.95f
                     ),
-                    radius = coinRadius * 1.9f,
-                    center = Offset(coinCenterX, coinCenterY)
+                    radius = coinRadius * 1.95f,
+                    center = Offset(coinX, coinY)
                 )
 
-                withTransform({
-                    translate(left = coinCenterX, top = coinCenterY)
-                }) {
-                    // 3D-гурт (ребро) монетки при развороте
-                    val edgeThickness = (1f - absScaleX) * (coinRadius * 0.36f)
-                    if (edgeThickness > 0.4f) {
-                        drawOval(
-                            color = Color(0xFFB45309),
-                            topLeft = Offset(-coinRadius * absScaleX - edgeThickness * 0.5f, -coinRadius),
-                            size = Size(coinRadius * 2f * absScaleX + edgeThickness, coinRadius * 2f)
-                        )
+                // --- СЛОЙ 1: Объемный 3D-гурт (боковая стенка цилиндра монеты) ---
+                val rimCylinderBrush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Color(0xFF78350F),
+                        Color(0xFFB45309),
+                        Color(0xFFF59E0B),
+                        Color(0xFFB45309),
+                        Color(0xFF78350F)
+                    ),
+                    startX = coinX - coinRadius,
+                    endX = coinX + coinRadius
+                )
+
+                val topWallY = minOf(frontFaceY, backRimY)
+                val botWallY = maxOf(frontFaceY, backRimY)
+                val wallHeight = (botWallY - topWallY).coerceAtLeast(0.8f)
+
+                // Тыльный эллипс 3D-цилиндра
+                drawOval(
+                    brush = rimCylinderBrush,
+                    topLeft = Offset(coinX - coinRadius, backRimY - ellipseRadiusY),
+                    size = Size(coinRadius * 2f, ellipseRadiusY * 2f)
+                )
+
+                // Боковая соединительная стенка между лицевой гранью и тыльным эллипсом
+                drawRect(
+                    brush = rimCylinderBrush,
+                    topLeft = Offset(coinX - coinRadius, topWallY),
+                    size = Size(coinRadius * 2f, wallHeight)
+                )
+
+                // 7 вертикальных золотых насечек на боковом ребре (гурт монеты)
+                val notchCount = 7
+                val notchStrokeW = (coinRadius * 0.09f).coerceAtLeast(0.9f)
+                for (i in 0 until notchCount) {
+                    val normX = -0.82f + (1.64f * i / (notchCount - 1))
+                    val nx = coinX + normX * coinRadius
+                    // Смещение по дуге эллипса для реалистичной цилиндрической перспективы
+                    val curveFactor = kotlin.math.sqrt((1f - normX * normX).coerceAtLeast(0f))
+                    val arcShiftY = if (backRimY >= frontFaceY) {
+                        ellipseRadiusY * curveFactor
+                    } else {
+                        -ellipseRadiusY * curveFactor
                     }
+                    val nStartY = frontFaceY + arcShiftY
+                    val nEndY = backRimY + arcShiftY
 
-                    withTransform({
-                        scale(scaleX = absScaleX, scaleY = 1f, pivot = Offset.Zero)
-                    }) {
-                        // Внешний золотой обод
-                        drawCircle(
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    Color(0xFFFDE047),
-                                    Color(0xFFF59E0B),
-                                    Color(0xFFD97706)
-                                ),
-                                start = Offset(-coinRadius, -coinRadius),
-                                end = Offset(coinRadius, coinRadius)
+                    drawLine(
+                        color = Color(0xFFFDE047).copy(alpha = 0.52f),
+                        start = Offset(nx, nStartY),
+                        end = Offset(nx, nEndY),
+                        strokeWidth = notchStrokeW,
+                        cap = StrokeCap.Round
+                    )
+                }
+
+                // --- СЛОЙ 2: Лицевая/оборотная грань монеты с вертикальной трансформацией scaleY ---
+                withTransform({
+                    translate(left = coinX, top = frontFaceY)
+                    scale(scaleX = 1f, scaleY = faceScaleY, pivot = Offset.Zero)
+                }) {
+                    // Внешний золотой обод (#FDE047 -> #F59E0B -> #D97706)
+                    drawCircle(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFFFDE047),
+                                Color(0xFFF59E0B),
+                                Color(0xFFD97706)
                             ),
-                            radius = coinRadius,
-                            center = Offset.Zero
+                            start = Offset(-coinRadius, -coinRadius),
+                            end = Offset(coinRadius, coinRadius)
+                        ),
+                        radius = coinRadius,
+                        center = Offset.Zero
+                    )
+
+                    // Утопленное внутреннее кольцо (#B45309) со светлым бликом внутренней фаски (#FEF08A)
+                    val recessedRingR = coinRadius * 0.83f
+                    drawCircle(
+                        color = Color(0xFFB45309),
+                        radius = recessedRingR,
+                        center = Offset.Zero
+                    )
+                    drawCircle(
+                        color = Color(0xFFFEF08A).copy(alpha = 0.65f),
+                        radius = recessedRingR,
+                        center = Offset(0f, -coinRadius * 0.03f),
+                        style = Stroke(width = (coinRadius * 0.055f).coerceAtLeast(0.8f))
+                    )
+
+                    // Центральное поле монеты
+                    val innerFieldR = coinRadius * 0.76f
+                    drawCircle(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFFFEF08A),
+                                Color(0xFFFBBF24),
+                                Color(0xFFF59E0B)
+                            ),
+                            start = Offset(-innerFieldR * 0.5f, -innerFieldR),
+                            end = Offset(innerFieldR * 0.5f, innerFieldR)
+                        ),
+                        radius = innerFieldR,
+                        center = Offset.Zero
+                    )
+
+                    // Живой диагональный блик света, пробегающий по грани при каждом кувырке монетки
+                    val glintShift = sin(spinAngle) * coinRadius * 0.55f
+                    shinePath.reset()
+                    shinePath.moveTo(-coinRadius * 0.52f + glintShift, -coinRadius * 0.58f)
+                    shinePath.lineTo(-coinRadius * 0.18f + glintShift, -coinRadius * 0.70f)
+                    shinePath.lineTo(coinRadius * 0.46f + glintShift, coinRadius * 0.54f)
+                    shinePath.lineTo(coinRadius * 0.14f + glintShift, coinRadius * 0.68f)
+                    shinePath.close()
+
+                    drawPath(
+                        path = shinePath,
+                        color = Color(0xFFFEF9C3).copy(alpha = 0.42f)
+                    )
+
+                    // Объемный 3D-символ ₽ (тень рельефа + бронзовое тело + верхний светлый блик)
+                    if (abs(flipCos) > 0.22f) {
+                        val strokeW = (coinRadius * 0.18f).coerceAtLeast(1.3f)
+                        val shadowShift = 1.dp.toPx().coerceAtMost(coinRadius * 0.11f)
+                        val highlightShift = 0.5.dp.toPx().coerceAtMost(coinRadius * 0.06f)
+
+                        val stemX = -coinRadius * 0.14f
+                        val topY = -coinRadius * 0.38f
+                        val botY = coinRadius * 0.40f
+                        val midY = coinRadius * 0.04f
+                        val barY = coinRadius * 0.20f
+
+                        // 1. Темная тень рельефа со сдвигом +1.dp
+                        val shadowColor = Color(0xFF451A03).copy(alpha = 0.65f)
+                        drawLine(
+                            color = shadowColor,
+                            start = Offset(stemX + shadowShift, topY + shadowShift),
+                            end = Offset(stemX + shadowShift, botY + shadowShift),
+                            strokeWidth = strokeW,
+                            cap = StrokeCap.Round
+                        )
+                        rubleShadowPath.reset()
+                        rubleShadowPath.moveTo(stemX + shadowShift, topY + shadowShift)
+                        rubleShadowPath.lineTo(coinRadius * 0.08f + shadowShift, topY + shadowShift)
+                        rubleShadowPath.arcTo(
+                            rect = Rect(
+                                left = -coinRadius * 0.08f + shadowShift,
+                                top = topY + shadowShift,
+                                right = coinRadius * 0.30f + shadowShift,
+                                bottom = midY + shadowShift
+                            ),
+                            startAngleDegrees = -90f,
+                            sweepAngleDegrees = 180f,
+                            forceMoveTo = false
+                        )
+                        rubleShadowPath.lineTo(stemX + shadowShift, midY + shadowShift)
+                        drawPath(
+                            path = rubleShadowPath,
+                            color = shadowColor,
+                            style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                        )
+                        drawLine(
+                            color = shadowColor,
+                            start = Offset(-coinRadius * 0.28f + shadowShift, barY + shadowShift),
+                            end = Offset(coinRadius * 0.16f + shadowShift, barY + shadowShift),
+                            strokeWidth = strokeW * 0.85f,
+                            cap = StrokeCap.Round
                         )
 
-                        // Внутренний диск монетки
-                        val innerR = coinRadius * 0.78f
-                        drawCircle(
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    Color(0xFFFEF08A),
-                                    Color(0xFFFBBF24),
-                                    Color(0xFFF59E0B)
-                                ),
-                                start = Offset(0f, -innerR),
-                                end = Offset(0f, innerR)
+                        // 2. Основной золотисто-бронзовый символ ₽
+                        val mainSymbolColor = Color(0xFF92400E)
+                        drawLine(
+                            color = mainSymbolColor,
+                            start = Offset(stemX, topY),
+                            end = Offset(stemX, botY),
+                            strokeWidth = strokeW,
+                            cap = StrokeCap.Round
+                        )
+                        rubleBowlPath.reset()
+                        rubleBowlPath.moveTo(stemX, topY)
+                        rubleBowlPath.lineTo(coinRadius * 0.08f, topY)
+                        rubleBowlPath.arcTo(
+                            rect = Rect(
+                                left = -coinRadius * 0.08f,
+                                top = topY,
+                                right = coinRadius * 0.30f,
+                                bottom = midY
                             ),
-                            radius = innerR,
-                            center = Offset.Zero
+                            startAngleDegrees = -90f,
+                            sweepAngleDegrees = 180f,
+                            forceMoveTo = false
+                        )
+                        rubleBowlPath.lineTo(stemX, midY)
+                        drawPath(
+                            path = rubleBowlPath,
+                            color = mainSymbolColor,
+                            style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                        )
+                        drawLine(
+                            color = mainSymbolColor,
+                            start = Offset(-coinRadius * 0.28f, barY),
+                            end = Offset(coinRadius * 0.16f, barY),
+                            strokeWidth = strokeW * 0.85f,
+                            cap = StrokeCap.Round
                         )
 
-                        // Символ рубля ₽ на грани монетки
-                        if (absScaleX > 0.28f) {
-                            val strokeW = (coinRadius * 0.18f).coerceAtLeast(1.2f)
-                            val stemX = -coinRadius * 0.14f
-                            val topY = -coinRadius * 0.38f
-                            val botY = coinRadius * 0.40f
-
-                            drawLine(
-                                color = Color(0xFF92400E),
-                                start = Offset(stemX, topY),
-                                end = Offset(stemX, botY),
-                                strokeWidth = strokeW,
-                                cap = StrokeCap.Round
-                            )
-
-                            rubleBowlPath.reset()
-                            rubleBowlPath.moveTo(stemX, topY)
-                            rubleBowlPath.lineTo(coinRadius * 0.08f, topY)
-                            rubleBowlPath.arcTo(
-                                rect = Rect(
-                                    left = -coinRadius * 0.08f,
-                                    top = topY,
-                                    right = coinRadius * 0.30f,
-                                    bottom = coinRadius * 0.04f
-                                ),
-                                startAngleDegrees = -90f,
-                                sweepAngleDegrees = 180f,
-                                forceMoveTo = false
-                            )
-                            rubleBowlPath.lineTo(stemX, coinRadius * 0.04f)
-
-                            drawPath(
-                                path = rubleBowlPath,
-                                color = Color(0xFF92400E),
-                                style = Stroke(width = strokeW, cap = StrokeCap.Round)
-                            )
-
-                            drawLine(
-                                color = Color(0xFF92400E),
-                                start = Offset(-coinRadius * 0.28f, coinRadius * 0.18f),
-                                end = Offset(coinRadius * 0.16f, coinRadius * 0.18f),
-                                strokeWidth = strokeW * 0.85f,
-                                cap = StrokeCap.Round
-                            )
-                        }
+                        // 3. Тонкий светлый блик чеканки (#FEF9C3) сверху
+                        val highlightColor = Color(0xFFFEF9C3).copy(alpha = 0.78f)
+                        val highlightW = (strokeW * 0.38f).coerceAtLeast(0.7f)
+                        drawLine(
+                            color = highlightColor,
+                            start = Offset(stemX - highlightShift, topY - highlightShift),
+                            end = Offset(stemX - highlightShift, botY - highlightShift),
+                            strokeWidth = highlightW,
+                            cap = StrokeCap.Round
+                        )
+                        rubleHighlightPath.reset()
+                        rubleHighlightPath.moveTo(stemX - highlightShift, topY - highlightShift)
+                        rubleHighlightPath.lineTo(coinRadius * 0.08f - highlightShift, topY - highlightShift)
+                        rubleHighlightPath.arcTo(
+                            rect = Rect(
+                                left = -coinRadius * 0.08f - highlightShift,
+                                top = topY - highlightShift,
+                                right = coinRadius * 0.30f - highlightShift,
+                                bottom = midY - highlightShift
+                            ),
+                            startAngleDegrees = -90f,
+                            sweepAngleDegrees = 180f,
+                            forceMoveTo = false
+                        )
+                        rubleHighlightPath.lineTo(stemX - highlightShift, midY - highlightShift)
+                        drawPath(
+                            path = rubleHighlightPath,
+                            color = highlightColor,
+                            style = Stroke(width = highlightW, cap = StrokeCap.Round)
+                        )
                     }
                 }
             }
