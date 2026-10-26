@@ -1071,11 +1071,11 @@ fun DavidChartBubble(
 @Composable
 fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
     val infiniteTransition = rememberInfiniteTransition(label = "david_coin_toss_loader")
-    val phase by infiniteTransition.animateFloat(
+    val tossPhase by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 850, easing = LinearEasing),
+            animation = tween(durationMillis = 900, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "coin_toss_phase"
@@ -1100,7 +1100,7 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
         ) {
             Canvas(modifier = Modifier.size(64.dp)) {
-                val p = phase
+                val p = tossPhase
                 val w = size.width
                 val h = size.height
 
@@ -1155,25 +1155,23 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                     )
                 }
 
-                // Координаты и ВЕРТИКАЛЬНОЕ 3D-вращение (кувырок через верх/низ вокруг горизонтальной оси)
+                // --- ВЕРТИКАЛЬНОЕ 3D-ВРАЩЕНИЕ МОНЕТКИ (вокруг горизонтальной оси X) ---
                 val coinStartY = h * 0.67f
                 val coinPeakY = h * 0.15f
                 val coinY = coinStartY - (coinStartY - coinPeakY) * flightHeight
                 val coinX = w / 2f
                 val coinRadius = w * 0.165f
 
-                // Полный цикл кувырка монетки по вертикали (scaleX всегда = 1f, сжимается только scaleY)
-                val spinAngle = p * 2f * PI.toFloat()
+                // 2 полных оборота по вертикали за один цикл броска: ширина всегда = 1f, сжимается только высота scaleY
+                val spinAngle = p * 2f * PI.toFloat() * 2f
                 val flipCos = cos(spinAngle)
-                val faceScaleY = abs(flipCos).coerceAtLeast(0.08f)
+                val flipSin = sin(spinAngle)
+                val faceScaleY = abs(flipCos).coerceAtLeast(0.10f)
 
-                // Толщина 3D-цилиндра монеты и вертикальное смещение ребра
-                val rimThickness = coinRadius * 0.34f
-                val rimOffsetY = sin(spinAngle) * rimThickness
-
-                val frontFaceY = coinY - rimOffsetY * 0.35f
-                val backRimY = coinY + rimOffsetY * 0.65f
-                val ellipseRadiusY = coinRadius * faceScaleY
+                // Толщина 3D-гурта монеты и его вертикальный сдвиг
+                val rimThickness = coinRadius * 0.36f
+                val rimOffsetY = flipSin * rimThickness
+                val ovalHeight = coinRadius * 2f * faceScaleY
 
                 // Золотое свечение вокруг подлетающей монетки
                 drawCircle(
@@ -1189,8 +1187,8 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                     center = Offset(coinX, coinY)
                 )
 
-                // --- СЛОЙ 1: Объемный 3D-гурт (боковая стенка цилиндра монеты) ---
-                val rimCylinderBrush = Brush.horizontalGradient(
+                // --- СЛОЙ 1: Объемный 3D-гурт (цилиндрическое ребро монеты из 7 промежуточных овалов + 7 насечек) ---
+                val rimGradientBrush = Brush.horizontalGradient(
                     colors = listOf(
                         Color(0xFF78350F),
                         Color(0xFFB45309),
@@ -1202,52 +1200,36 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                     endX = coinX + coinRadius
                 )
 
-                val topWallY = minOf(frontFaceY, backRimY)
-                val botWallY = maxOf(frontFaceY, backRimY)
-                val wallHeight = (botWallY - topWallY).coerceAtLeast(0.8f)
+                for (step in 0..6) {
+                    val fraction = step / 6f
+                    val layerCenterY = coinY + rimOffsetY * (1f - fraction)
+                    drawOval(
+                        brush = rimGradientBrush,
+                        topLeft = Offset(coinX - coinRadius, layerCenterY - ovalHeight / 2f),
+                        size = Size(coinRadius * 2f, ovalHeight)
+                    )
+                }
 
-                // Тыльный эллипс 3D-цилиндра
-                drawOval(
-                    brush = rimCylinderBrush,
-                    topLeft = Offset(coinX - coinRadius, backRimY - ellipseRadiusY),
-                    size = Size(coinRadius * 2f, ellipseRadiusY * 2f)
-                )
-
-                // Боковая соединительная стенка между лицевой гранью и тыльным эллипсом
-                drawRect(
-                    brush = rimCylinderBrush,
-                    topLeft = Offset(coinX - coinRadius, topWallY),
-                    size = Size(coinRadius * 2f, wallHeight)
-                )
-
-                // 7 вертикальных золотых насечек на боковом ребре (гурт монеты)
-                val notchCount = 7
-                val notchStrokeW = (coinRadius * 0.09f).coerceAtLeast(0.9f)
-                for (i in 0 until notchCount) {
-                    val normX = -0.82f + (1.64f * i / (notchCount - 1))
+                // 7 вертикальных насечек гурта вдоль боковой стенки монеты
+                val notchStrokeW = (coinRadius * 0.095f).coerceAtLeast(1f)
+                for (notchIdx in 0..6) {
+                    val normX = -0.78f + (1.56f * notchIdx / 6f)
                     val nx = coinX + normX * coinRadius
-                    // Смещение по дуге эллипса для реалистичной цилиндрической перспективы
                     val curveFactor = kotlin.math.sqrt((1f - normX * normX).coerceAtLeast(0f))
-                    val arcShiftY = if (backRimY >= frontFaceY) {
-                        ellipseRadiusY * curveFactor
-                    } else {
-                        -ellipseRadiusY * curveFactor
-                    }
-                    val nStartY = frontFaceY + arcShiftY
-                    val nEndY = backRimY + arcShiftY
-
+                    val arcOffsetY = (ovalHeight * 0.5f) * curveFactor * (if (rimOffsetY >= 0f) 1f else -1f)
                     drawLine(
-                        color = Color(0xFFFDE047).copy(alpha = 0.52f),
-                        start = Offset(nx, nStartY),
-                        end = Offset(nx, nEndY),
+                        color = Color(0xFFFDE047).copy(alpha = 0.55f),
+                        start = Offset(nx, coinY - rimOffsetY * 0.25f + arcOffsetY),
+                        end = Offset(nx, coinY + rimOffsetY + arcOffsetY),
                         strokeWidth = notchStrokeW,
                         cap = StrokeCap.Round
                     )
                 }
 
-                // --- СЛОЙ 2: Лицевая/оборотная грань монеты с вертикальной трансформацией scaleY ---
+                // --- СЛОЙ 2: Лицевая / оборотная грань монеты ---
+                val faceCenterY = coinY - rimOffsetY * 0.25f
                 withTransform({
-                    translate(left = coinX, top = frontFaceY)
+                    translate(left = coinX, top = faceCenterY)
                     scale(scaleX = 1f, scaleY = faceScaleY, pivot = Offset.Zero)
                 }) {
                     // Внешний золотой обод (#FDE047 -> #F59E0B -> #D97706)
@@ -1265,22 +1247,22 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                         center = Offset.Zero
                     )
 
-                    // Утопленное внутреннее кольцо (#B45309) со светлым бликом внутренней фаски (#FEF08A)
-                    val recessedRingR = coinRadius * 0.83f
+                    // Утопленное внутреннее кольцо (#B45309) со светлой фаской (#FEF08A)
+                    val innerRingRadius = coinRadius * 0.82f
                     drawCircle(
                         color = Color(0xFFB45309),
-                        radius = recessedRingR,
+                        radius = innerRingRadius,
                         center = Offset.Zero
                     )
                     drawCircle(
-                        color = Color(0xFFFEF08A).copy(alpha = 0.65f),
-                        radius = recessedRingR,
+                        color = Color(0xFFFEF08A).copy(alpha = 0.70f),
+                        radius = innerRingRadius,
                         center = Offset(0f, -coinRadius * 0.03f),
-                        style = Stroke(width = (coinRadius * 0.055f).coerceAtLeast(0.8f))
+                        style = Stroke(width = (coinRadius * 0.06f).coerceAtLeast(0.8f))
                     )
 
-                    // Центральное поле монеты
-                    val innerFieldR = coinRadius * 0.76f
+                    // Центральное золотое поле
+                    val coreFieldRadius = coinRadius * 0.75f
                     drawCircle(
                         brush = Brush.linearGradient(
                             colors = listOf(
@@ -1288,32 +1270,32 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                                 Color(0xFFFBBF24),
                                 Color(0xFFF59E0B)
                             ),
-                            start = Offset(-innerFieldR * 0.5f, -innerFieldR),
-                            end = Offset(innerFieldR * 0.5f, innerFieldR)
+                            start = Offset(-coreFieldRadius * 0.5f, -coreFieldRadius),
+                            end = Offset(coreFieldRadius * 0.5f, coreFieldRadius)
                         ),
-                        radius = innerFieldR,
+                        radius = coreFieldRadius,
                         center = Offset.Zero
                     )
 
-                    // Живой диагональный блик света, пробегающий по грани при каждом кувырке монетки
-                    val glintShift = sin(spinAngle) * coinRadius * 0.55f
+                    // Диагональный пробегающий блик света при каждом кувырке
+                    val glintShift = flipSin * coinRadius * 0.52f
                     shinePath.reset()
-                    shinePath.moveTo(-coinRadius * 0.52f + glintShift, -coinRadius * 0.58f)
-                    shinePath.lineTo(-coinRadius * 0.18f + glintShift, -coinRadius * 0.70f)
+                    shinePath.moveTo(-coinRadius * 0.50f + glintShift, -coinRadius * 0.58f)
+                    shinePath.lineTo(-coinRadius * 0.16f + glintShift, -coinRadius * 0.70f)
                     shinePath.lineTo(coinRadius * 0.46f + glintShift, coinRadius * 0.54f)
                     shinePath.lineTo(coinRadius * 0.14f + glintShift, coinRadius * 0.68f)
                     shinePath.close()
 
                     drawPath(
                         path = shinePath,
-                        color = Color(0xFFFEF9C3).copy(alpha = 0.42f)
+                        color = Color(0xFFFEF9C3).copy(alpha = 0.44f)
                     )
 
-                    // Объемный 3D-символ ₽ (тень рельефа + бронзовое тело + верхний светлый блик)
-                    if (abs(flipCos) > 0.22f) {
+                    // Объемный рельефный символ ₽ (темная тень #78350F со сдвигом +1.2.dp, бронзовый ₽ #92400E и верхний блик #FEF9C3)
+                    if (abs(flipCos) > 0.20f) {
                         val strokeW = (coinRadius * 0.18f).coerceAtLeast(1.3f)
-                        val shadowShift = 1.dp.toPx().coerceAtMost(coinRadius * 0.11f)
-                        val highlightShift = 0.5.dp.toPx().coerceAtMost(coinRadius * 0.06f)
+                        val shadowShift = 1.2.dp.toPx().coerceAtMost(coinRadius * 0.13f)
+                        val highlightShift = 0.55.dp.toPx().coerceAtMost(coinRadius * 0.065f)
 
                         val stemX = -coinRadius * 0.14f
                         val topY = -coinRadius * 0.38f
@@ -1321,10 +1303,10 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                         val midY = coinRadius * 0.04f
                         val barY = coinRadius * 0.20f
 
-                        // 1. Темная тень рельефа со сдвигом +1.dp
-                        val shadowColor = Color(0xFF451A03).copy(alpha = 0.65f)
+                        // 1. Темная тень рельефа (#78350F) со сдвигом +1.2.dp
+                        val reliefShadowColor = Color(0xFF78350F).copy(alpha = 0.78f)
                         drawLine(
-                            color = shadowColor,
+                            color = reliefShadowColor,
                             start = Offset(stemX + shadowShift, topY + shadowShift),
                             end = Offset(stemX + shadowShift, botY + shadowShift),
                             strokeWidth = strokeW,
@@ -1347,18 +1329,18 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                         rubleShadowPath.lineTo(stemX + shadowShift, midY + shadowShift)
                         drawPath(
                             path = rubleShadowPath,
-                            color = shadowColor,
+                            color = reliefShadowColor,
                             style = Stroke(width = strokeW, cap = StrokeCap.Round)
                         )
                         drawLine(
-                            color = shadowColor,
+                            color = reliefShadowColor,
                             start = Offset(-coinRadius * 0.28f + shadowShift, barY + shadowShift),
                             end = Offset(coinRadius * 0.16f + shadowShift, barY + shadowShift),
                             strokeWidth = strokeW * 0.85f,
                             cap = StrokeCap.Round
                         )
 
-                        // 2. Основной золотисто-бронзовый символ ₽
+                        // 2. Золотисто-бронзовый символ ₽ (#92400E)
                         val mainSymbolColor = Color(0xFF92400E)
                         drawLine(
                             color = mainSymbolColor,
@@ -1395,9 +1377,9 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                             cap = StrokeCap.Round
                         )
 
-                        // 3. Тонкий светлый блик чеканки (#FEF9C3) сверху
-                        val highlightColor = Color(0xFFFEF9C3).copy(alpha = 0.78f)
-                        val highlightW = (strokeW * 0.38f).coerceAtLeast(0.7f)
+                        // 3. Яркий верхний блик чеканки (#FEF9C3)
+                        val highlightColor = Color(0xFFFEF9C3).copy(alpha = 0.82f)
+                        val highlightW = (strokeW * 0.38f).coerceAtLeast(0.75f)
                         drawLine(
                             color = highlightColor,
                             start = Offset(stemX - highlightShift, topY - highlightShift),

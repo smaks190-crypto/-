@@ -60,9 +60,9 @@ import kotlin.math.sin
 // Статический флаг процесса: гарантирует, что стартовая анимация проигрывается ровно один раз за сессию
 private var hasSplashPlayedInSession = false
 
-private const val SPLASH_TOTAL_DURATION_MS = 1150
-private const val PHASE_1_END = 420f / 1150f // 0..420 мс: Вылет монетки полностью за верхний край экрана
-// 420..1150 мс: Стремительное падение монетки сверху с ускорением навылет за нижний край экрана
+private const val SPLASH_TOTAL_DURATION_MS = 1350
+private const val PHASE_1_END = 480f / 1350f // 0..480 мс: Вылет монетки полностью за верхний край экрана
+// 480..1350 мс: Стремительное падение монетки сверху с ускорением навылет за нижний край экрана
 
 // Ускоряющаяся кривая гравитации без торможения в конце — монетка и шторка пролетают нижний край на максимальной скорости
 private val CoinFallAndPullEasing = CubicBezierEasing(0.45f, 0.0f, 0.90f, 0.85f)
@@ -105,10 +105,10 @@ private val SpeedLineConfigs = arrayOf(
 )
 
 /**
- * Пул переиспользуемых объектов [Path] и кэшированных [Brush], создаваемый один раз через `remember`.
- * Полностью исключает создание новых объектов `Brush` и `Path` внутри `onDraw` на 120 FPS.
+ * Кэш всех градиентных кистей [Brush] и переиспользуемых [Path].
+ * Внутри блока `Canvas { ... }` и всех функций отрисовки не создается ни одного нового объекта `Brush`.
  */
-private class SplashReusablePaths {
+private class SplashCachedBrushes {
     val curtainPath = Path()
     val topEdgePath = Path()
     val mouthPath = Path()
@@ -124,11 +124,11 @@ private class SplashReusablePaths {
     private var cachedCoinRadius = -1f
     private var cachedAuraRadius = -1f
 
-    var shadowBrush: Brush = Brush.linearGradient(listOf(Color.Black, Color.Transparent))
+    var frogShadowBrush: Brush = Brush.linearGradient(listOf(Color.Black, Color.Transparent))
         private set
-    var headBrush: Brush = Brush.linearGradient(listOf(Color(0xFF4ADE80), Color(0xFF16A34A)))
+    var frogHeadBrush: Brush = Brush.linearGradient(listOf(Color(0xFF4ADE80), Color(0xFF16A34A)))
         private set
-    var jawBrush: Brush = Brush.linearGradient(listOf(Color(0xFF86EFAC), Color(0xFF4ADE80)))
+    var frogJawBrush: Brush = Brush.linearGradient(listOf(Color(0xFF86EFAC), Color(0xFF4ADE80)))
         private set
     var frogAuraBrush: Brush = Brush.linearGradient(listOf(Color(0xFF0D2818), Color.Transparent))
         private set
@@ -136,15 +136,15 @@ private class SplashReusablePaths {
         private set
     var coinCoreBrush: Brush = Brush.linearGradient(CoinCoreGradientColors)
         private set
-    var coinAuraBrush: Brush = Brush.linearGradient(listOf(Color(0xFFFEF08A), Color.Transparent))
+    var coinOuterGlowBrush: Brush = Brush.linearGradient(listOf(Color(0xFFFEF08A), Color.Transparent))
         private set
 
-    fun ensureBrushes(frogBaseRadius: Float, baseCoinRadius: Float, auraRadius: Float) {
+    fun ensureInitialized(frogBaseRadius: Float, baseCoinRadius: Float, auraRadius: Float) {
         val r = frogBaseRadius.coerceAtLeast(16f)
         if (abs(r - cachedFrogRadius) > 0.5f) {
             cachedFrogRadius = r
             val shadowRadius = (r * 1.15f).coerceAtLeast(4f)
-            shadowBrush = Brush.radialGradient(
+            frogShadowBrush = Brush.radialGradient(
                 colors = listOf(
                     Color.Black.copy(alpha = 0.45f),
                     Color.Transparent
@@ -152,7 +152,7 @@ private class SplashReusablePaths {
                 center = Offset(0f, r * 0.22f),
                 radius = shadowRadius
             )
-            headBrush = Brush.verticalGradient(
+            frogHeadBrush = Brush.verticalGradient(
                 colors = listOf(
                     Color(0xFF4ADE80),
                     Color(0xFF22C55E),
@@ -161,7 +161,7 @@ private class SplashReusablePaths {
                 startY = -r * 0.95f,
                 endY = r * 0.78f
             )
-            jawBrush = Brush.verticalGradient(
+            frogJawBrush = Brush.verticalGradient(
                 colors = listOf(
                     Color(0xFF86EFAC),
                     Color(0xFF4ADE80)
@@ -185,7 +185,7 @@ private class SplashReusablePaths {
                 center = Offset(-cr * 0.22f, -cr * 0.22f),
                 radius = (coreRadius * 1.3f).coerceAtLeast(2f)
             )
-            coinAuraBrush = Brush.radialGradient(
+            coinOuterGlowBrush = Brush.radialGradient(
                 colors = listOf(
                     Color(0xFFFEF08A).copy(alpha = 0.72f),
                     Color(0xFFF59E0B).copy(alpha = 0.36f),
@@ -283,7 +283,7 @@ private fun SplashCanvasOverlay(
 ) {
     val context = LocalContext.current
     val masterTimeline = remember { Animatable(0f) }
-    val reusablePaths = remember { SplashReusablePaths() }
+    val cachedBrushes = remember { SplashCachedBrushes() }
 
     LaunchedEffect(Unit) {
         if (hasSplashPlayedInSession) {
@@ -294,12 +294,13 @@ private fun SplashCanvasOverlay(
         // Предварительный прогрев PCM-буфера звона монетки в фоновом потоке
         DavidSoundManager.warmUpCoinToss()
 
-        // Warm-up Frames + пауза стабилизации 180 мс:
-        // первые 180 мс жаба спокойно держит монетку во рту, пока Room БД и MainAppScreen
-        // полностью завершают стартовую загрузку и верстку, чтобы бросок монетки шел при стабильных 120 FPS
-        withFrameNanos { }
-        withFrameNanos { }
-        delay(180)
+        // Дожидаемся 3 кадров отрисовки и выдерживаем паузу стабилизации 320 мс:
+        // в это время на экране нарисована жаба с золотой монеткой во рту (t == 0f),
+        // а под шторкой полностью завершаются запросы Room БД и первая верстка MainAppScreen / графиков
+        repeat(3) {
+            withFrameNanos { }
+        }
+        delay(320L)
 
         // В момент отрыва монетки изо рта жабы вверх запускаем мягкий звон «Дзынь!» в фоновом потоке
         DavidSoundManager.playCoinToss(context)
@@ -334,16 +335,16 @@ private fun SplashCanvasOverlay(
         val auraRadius = (minOf(w, h) * 0.52f).coerceAtLeast(10f)
         val maxDipDepth = 96.dp.toPx()
 
-        // Инициализируем/кэшируем все Brush один раз для текущих размеров экрана
-        reusablePaths.ensureBrushes(
+        // Инициализируем/кэшируем все Brush строго один раз для текущих размеров экрана
+        cachedBrushes.ensureInitialized(
             frogBaseRadius = frogBaseRadius,
             baseCoinRadius = baseCoinRadius,
             auraRadius = auraRadius
         )
 
-        // Фаза 1 (0..420 мс): Взлет монетки изо рта жабы полностью за верхний край экрана (-coinRadius * 2.2f)
+        // Фаза 1 (0..480 мс): Взлет монетки изо рта жабы полностью за верхний край экрана (-coinRadius * 2.2f)
         val p1 = (t / PHASE_1_END).coerceIn(0f, 1f)
-        // Фаза 2 (420..1150 мс): Возвращение монетки сверху из-за экрана (-coinRadius * 1.5f) и стягивание шторки вниз
+        // Фаза 2 (480..1350 мс): Возвращение монетки сверху из-за экрана (-coinRadius * 1.5f) и стягивание шторки вниз
         val p2 = ((t - PHASE_1_END) / (1f - PHASE_1_END)).coerceIn(0f, 1f)
 
         val coinY: Float
@@ -355,7 +356,16 @@ private fun SplashCanvasOverlay(
         val currentDipDepth: Float
         val revealActive: Boolean
 
-        if (t <= PHASE_1_END) {
+        if (t <= 0.0001f) {
+            // Во время стартовой паузы стабилизации (320 мс при t == 0f) золотая монетка находится прямо во рту у жабы
+            coinY = mouthOriginY
+            coinFlipScaleX = 1f
+            coinScale = 0.86f
+            coinGlowIntensity = 0.35f
+            curtainTopY = 0f
+            currentDipDepth = 0f
+            revealActive = false
+        } else if (t <= PHASE_1_END) {
             // --- ФАЗА 1: Вылет монетки вверх ПОЛНОСТЬЮ за верхнюю границу экрана ---
             val easedUp = FastOutSlowInEasing.transform(p1)
             val offscreenTopTargetY = -baseCoinRadius * 2.2f
@@ -364,8 +374,8 @@ private fun SplashCanvasOverlay(
             // 2.5 оборота в воздухе по мере взлета за верхний край экрана
             val spinAngle = easedUp * 2.5f * PI.toFloat()
             coinFlipScaleX = cos(spinAngle)
-            coinScale = lerpFloat(0.78f, 1.06f, easedUp)
-            coinGlowIntensity = (p1 * 0.55f).coerceIn(0f, 1f)
+            coinScale = lerpFloat(0.86f, 1.06f, easedUp)
+            coinGlowIntensity = (0.35f + p1 * 0.45f).coerceIn(0f, 1f)
 
             curtainTopY = 0f
             currentDipDepth = 0f
@@ -405,8 +415,16 @@ private fun SplashCanvasOverlay(
         val curtainDipBottomY = curtainTopY + currentDipDepth
 
         // --- Параметры жабы (остается внутри шторки и ждет монетку) ---
-        val squashWindow = (t / (150f / SPLASH_TOTAL_DURATION_MS)).coerceIn(0f, 1f)
-        val (tossScaleX, tossScaleY) = computeFrogSquashStretch(squashWindow)
+        val squashWindow = if (t <= 0.0001f) {
+            0f
+        } else {
+            (t / (150f / SPLASH_TOTAL_DURATION_MS)).coerceIn(0f, 1f)
+        }
+        val (tossScaleX, tossScaleY) = if (t <= 0.0001f) {
+            Pair(1f, 1f)
+        } else {
+            computeFrogSquashStretch(squashWindow)
+        }
 
         // Когда прогиб шторки с монеткой доходит до макушки жабы (curtainDipBottomY >= frogTopY),
         // жаба упруго сжимается вниз и плавно растворяется по мере прохождения шторки сквозь неё
@@ -429,14 +447,17 @@ private fun SplashCanvasOverlay(
             (1f - ((contactProgress - 0.30f) / 0.70f)).coerceIn(0f, 1f)
         }
 
-        val eyeLookUpProgress = if (t <= PHASE_1_END) {
+        val eyeLookUpProgress = if (t <= 0.0001f) {
+            0f
+        } else if (t <= PHASE_1_END) {
             FastOutSlowInEasing.transform(p1)
         } else {
             1f - contactEased * 0.5f
         }
 
         val mouthOpenFactor = when {
-            squashWindow < 0.35f -> squashWindow / 0.35f
+            t <= 0.0001f -> 0.42f
+            squashWindow < 0.35f -> lerpFloat(0.42f, 1f, squashWindow / 0.35f)
             t <= PHASE_1_END -> (1f - ((p1 - 0.20f) / 0.55f).coerceIn(0f, 1f) * 0.65f)
             contactProgress > 0f -> (0.35f + 0.35f * sin(contactProgress * PI.toFloat())).coerceIn(0.2f, 0.7f)
             else -> 0.35f
@@ -444,7 +465,7 @@ private fun SplashCanvasOverlay(
 
         // 1. РИСУЕМ ТЕМНУЮ ШТОРКУ И ЖАБУ (в Фазе 1 — напрямую без clipPath!)
         drawElasticCurtainWithFrog(
-            paths = reusablePaths,
+            brushes = cachedBrushes,
             centerX = centerX,
             curtainTopY = curtainTopY,
             dipDepth = currentDipDepth,
@@ -459,9 +480,9 @@ private fun SplashCanvasOverlay(
             mouthOpenFactor = mouthOpenFactor
         )
 
-        // 2. РИСУЕМ СВЕТО-ШЛЕЙФ И СКОРОСТНЫЕ ЛИНИИ МОНЕТКИ
+        // 2. РИСУЕМ СВЕТО-ШЛЕЙФ И СКОРОСТНЫЕ ЛИНИИ МОНЕТКИ БЕЗ СОЗДАНИЯ BRUSH
         val effectiveCoinRadius = baseCoinRadius * coinScale
-        if (t <= PHASE_1_END) {
+        if (t > 0.0001f && t <= PHASE_1_END) {
             drawUpwardTossArcs(
                 centerX = centerX,
                 coinY = coinY,
@@ -469,7 +490,7 @@ private fun SplashCanvasOverlay(
                 coinRadius = effectiveCoinRadius,
                 progress = p1
             )
-        } else {
+        } else if (t > PHASE_1_END) {
             val trailStrength = (1f - (p2 / 0.88f)).coerceIn(0f, 1f)
             if (trailStrength > 0.01f && coinY > -effectiveCoinRadius) {
                 drawSpeedTrails(
@@ -485,7 +506,7 @@ private fun SplashCanvasOverlay(
         // 3. РИСУЕМ ЗОЛОТУЮ МОНЕТКУ С КЭШИРОВАННЫМИ BRUSH
         if (coinY + effectiveCoinRadius * 2f >= 0f && coinY - effectiveCoinRadius * 2f <= h) {
             drawGoldenCoin(
-                paths = reusablePaths,
+                brushes = cachedBrushes,
                 center = Offset(centerX, coinY),
                 baseRadius = baseCoinRadius,
                 coinScale = coinScale,
@@ -536,7 +557,7 @@ private fun computeFrogSquashStretch(progress: Float): Pair<Float, Float> {
  * - Вызываем `clipPath(curtainPath)` ТОЛЬКО когда `revealActive == true`.
  */
 private fun DrawScope.drawElasticCurtainWithFrog(
-    paths: SplashReusablePaths,
+    brushes: SplashCachedBrushes,
     centerX: Float,
     curtainTopY: Float,
     dipDepth: Float,
@@ -567,7 +588,7 @@ private fun DrawScope.drawElasticCurtainWithFrog(
                 translate(left = frogCenter.x, top = frogCenter.y)
             }) {
                 drawCircle(
-                    brush = paths.frogAuraBrush,
+                    brush = brushes.frogAuraBrush,
                     radius = auraRadius,
                     center = Offset.Zero,
                     alpha = frogAlpha
@@ -575,7 +596,7 @@ private fun DrawScope.drawElasticCurtainWithFrog(
             }
 
             drawEmojiFrog(
-                paths = paths,
+                brushes = brushes,
                 center = frogCenter,
                 baseRadius = frogBaseRadius,
                 scaleX = frogScaleX,
@@ -592,7 +613,7 @@ private fun DrawScope.drawElasticCurtainWithFrog(
     val dipBottomY = curtainTopY + dipDepth
     val shoulderSpan = (w * 0.38f).coerceAtLeast(80f)
 
-    val curtainPath = paths.curtainPath
+    val curtainPath = brushes.curtainPath
     curtainPath.reset()
     curtainPath.moveTo(0f, curtainTopY)
     curtainPath.lineTo((centerX - shoulderSpan).coerceAtLeast(0f), curtainTopY)
@@ -629,7 +650,7 @@ private fun DrawScope.drawElasticCurtainWithFrog(
                 translate(left = frogCenter.x, top = frogCenter.y)
             }) {
                 drawCircle(
-                    brush = paths.frogAuraBrush,
+                    brush = brushes.frogAuraBrush,
                     radius = auraRadius,
                     center = Offset.Zero,
                     alpha = frogAlpha
@@ -637,7 +658,7 @@ private fun DrawScope.drawElasticCurtainWithFrog(
             }
 
             drawEmojiFrog(
-                paths = paths,
+                brushes = brushes,
                 center = frogCenter,
                 baseRadius = frogBaseRadius,
                 scaleX = frogScaleX,
@@ -650,7 +671,7 @@ private fun DrawScope.drawElasticCurtainWithFrog(
     }
 
     // Неоново-изумрудный и золотой кант вдоль изогнутой верхней границы шторки
-    val topEdgePath = paths.topEdgePath
+    val topEdgePath = brushes.topEdgePath
     topEdgePath.reset()
     topEdgePath.moveTo(0f, curtainTopY)
     topEdgePath.lineTo((centerX - shoulderSpan).coerceAtLeast(0f), curtainTopY)
@@ -674,22 +695,22 @@ private fun DrawScope.drawElasticCurtainWithFrog(
 
     drawPath(
         path = topEdgePath,
-        brush = paths.curtainEdgeGlowBrush,
+        brush = brushes.curtainEdgeGlowBrush,
         style = Stroke(width = 7.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
     )
 
     drawPath(
         path = topEdgePath,
-        brush = paths.curtainEdgeCoreBrush,
+        brush = brushes.curtainEdgeCoreBrush,
         style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
     )
 }
 
 /**
- * Отрисовка жабы с использованием кэшированных `headBrush`, `jawBrush`, `shadowBrush` и `Path` (0 аллокаций на кадр).
+ * Отрисовка жабы с использованием кэшированных `frogHeadBrush`, `frogJawBrush`, `frogShadowBrush` и `Path` (0 аллокаций на кадр).
  */
 private fun DrawScope.drawEmojiFrog(
-    paths: SplashReusablePaths,
+    brushes: SplashCachedBrushes,
     center: Offset,
     baseRadius: Float,
     scaleX: Float,
@@ -706,7 +727,7 @@ private fun DrawScope.drawEmojiFrog(
     }) {
         val shadowRadius = (r * 1.15f).coerceAtLeast(4f)
         drawCircle(
-            brush = paths.shadowBrush,
+            brush = brushes.frogShadowBrush,
             radius = shadowRadius,
             center = Offset(0f, r * 0.22f),
             alpha = alpha
@@ -734,26 +755,26 @@ private fun DrawScope.drawEmojiFrog(
         )
 
         drawCircle(
-            brush = paths.headBrush,
+            brush = brushes.frogHeadBrush,
             radius = eyeBumpRadius,
             center = Offset(-eyeBumpOffsetX, eyeBumpOffsetY),
             alpha = alpha
         )
         drawCircle(
-            brush = paths.headBrush,
+            brush = brushes.frogHeadBrush,
             radius = eyeBumpRadius,
             center = Offset(eyeBumpOffsetX, eyeBumpOffsetY),
             alpha = alpha
         )
         drawOval(
-            brush = paths.headBrush,
+            brush = brushes.frogHeadBrush,
             topLeft = Offset(-r * 1.02f, -r * 0.52f),
             size = Size(r * 2.04f, r * 1.30f),
             alpha = alpha
         )
 
         drawOval(
-            brush = paths.jawBrush,
+            brush = brushes.frogJawBrush,
             topLeft = Offset(-r * 0.92f, -r * 0.06f),
             size = Size(r * 1.84f, r * 0.80f),
             alpha = alpha
@@ -834,7 +855,7 @@ private fun DrawScope.drawEmojiFrog(
         val mouthHeight = r * (0.18f + 0.30f * mouthOpenFactor)
         val mouthTopY = r * 0.16f
 
-        val mouthPath = paths.mouthPath
+        val mouthPath = brushes.mouthPath
         mouthPath.reset()
         mouthPath.moveTo(-mouthWidth / 2f, mouthTopY)
         mouthPath.quadraticTo(0f, mouthTopY - r * 0.10f, mouthWidth / 2f, mouthTopY)
@@ -854,7 +875,7 @@ private fun DrawScope.drawEmojiFrog(
             )
         }
 
-        val smileLine = paths.smileLinePath
+        val smileLine = brushes.smileLinePath
         smileLine.reset()
         smileLine.moveTo(-mouthWidth * 0.54f, mouthTopY)
         smileLine.quadraticTo(0f, mouthTopY - r * 0.10f, mouthWidth * 0.54f, mouthTopY)
@@ -868,11 +889,11 @@ private fun DrawScope.drawEmojiFrog(
 }
 
 /**
- * Отрисовка золотой монетки с кэшированными `coinAuraBrush`, `coinRimBrush`, `coinCoreBrush` и переиспользуемыми `Path`
+ * Отрисовка золотой монетки с кэшированными `coinOuterGlowBrush`, `coinRimBrush`, `coinCoreBrush` и переиспользуемыми `Path`
  * (0 аллокаций `Brush` внутри `onDraw`).
  */
 private fun DrawScope.drawGoldenCoin(
-    paths: SplashReusablePaths,
+    brushes: SplashCachedBrushes,
     center: Offset,
     baseRadius: Float,
     coinScale: Float,
@@ -889,7 +910,7 @@ private fun DrawScope.drawGoldenCoin(
         scale(scaleX = coinScale, scaleY = coinScale, pivot = Offset.Zero)
     }) {
         drawCircle(
-            brush = paths.coinAuraBrush,
+            brush = brushes.coinOuterGlowBrush,
             radius = r * 2.6f,
             center = Offset.Zero,
             alpha = (0.45f + 0.55f * glowIntensity).coerceIn(0f, 1f)
@@ -905,7 +926,7 @@ private fun DrawScope.drawGoldenCoin(
             scale(scaleX = absFlip, scaleY = 1f, pivot = Offset.Zero)
         }) {
             drawCircle(
-                brush = paths.coinRimBrush,
+                brush = brushes.coinRimBrush,
                 radius = r,
                 center = Offset.Zero
             )
@@ -918,13 +939,13 @@ private fun DrawScope.drawGoldenCoin(
 
             val coreRadius = (r * 0.74f).coerceAtLeast(2f)
             drawCircle(
-                brush = paths.coinCoreBrush,
+                brush = brushes.coinCoreBrush,
                 radius = coreRadius,
                 center = Offset.Zero
             )
 
             val shineShift = sin(timeProgress * PI.toFloat() * 4f) * r * 0.12f
-            val shinePath = paths.shinePath
+            val shinePath = brushes.shinePath
             shinePath.reset()
             shinePath.moveTo(-r * 0.48f + shineShift, -r * 0.56f)
             shinePath.lineTo(-r * 0.16f + shineShift, -r * 0.68f)
@@ -940,7 +961,7 @@ private fun DrawScope.drawGoldenCoin(
             if (absFlip > 0.28f) {
                 val emblemColor = Color(0xFF92400E)
 
-                val crownPath = paths.crownPath
+                val crownPath = brushes.crownPath
                 crownPath.reset()
                 val cw = r * 0.42f
                 val topY = -r * 0.52f
@@ -970,7 +991,7 @@ private fun DrawScope.drawGoldenCoin(
                     cap = StrokeCap.Round
                 )
 
-                val bowlPath = paths.rubleBowlPath
+                val bowlPath = brushes.rubleBowlPath
                 bowlPath.reset()
                 bowlPath.moveTo(stemX, topR)
                 bowlPath.lineTo(r * 0.10f, topR)
@@ -1005,7 +1026,8 @@ private fun DrawScope.drawGoldenCoin(
 }
 
 /**
- * Световые дуги и золотые искры при подбрасывании монетки вверх за пределы экрана в Фазе 1.
+ * Световые дуги и золотые искры при подбрасывании монетки вверх за пределы экрана в Фазе 1
+ * (рисуются чистыми примитивами без создания Brush).
  */
 private fun DrawScope.drawUpwardTossArcs(
     centerX: Float,
@@ -1016,6 +1038,18 @@ private fun DrawScope.drawUpwardTossArcs(
 ) {
     val alpha = sin(progress * PI.toFloat()).coerceIn(0f, 1f)
     if (alpha <= 0.02f) return
+
+    val trailTop = (coinY + coinRadius * 0.6f).coerceAtLeast(0f)
+    val trailBottom = lerpFloat(mouthY, (coinY + coinRadius * 3.2f).coerceAtLeast(0f), progress * 0.65f)
+    if (trailBottom > trailTop + 4f) {
+        drawLine(
+            color = Color(0xFFFDE047).copy(alpha = 0.26f * alpha),
+            start = Offset(centerX, trailTop),
+            end = Offset(centerX, trailBottom),
+            strokeWidth = coinRadius * 0.48f,
+            cap = StrokeCap.Round
+        )
+    }
 
     val stepPx = 6.dp.toPx() * progress
     for (idx in 0 until 4) {
@@ -1043,7 +1077,8 @@ private fun DrawScope.drawUpwardTossArcs(
 }
 
 /**
- * Вертикальный золотой световой шлейф и скоростные линии позади падающей монетки.
+ * Вертикальный золотой световой шлейф и скоростные линии позади падающей монетки
+ * (рисуются чистыми примитивами без создания Brush).
  */
 private fun DrawScope.drawSpeedTrails(
     centerX: Float,
@@ -1079,11 +1114,6 @@ private fun lerpFloat(start: Float, stop: Float, fraction: Float): Float {
     return start + (stop - start) * fraction.coerceIn(0f, 1f)
 }
 
-/**
- * Демо-превью стартового экрана `GrowthChartSplashScreen`:
- * показывает, как падающая из-за верхнего края золотая монетка стягивает темную шторку с жабой вниз
- * и открывает интерфейс приложения с карточкой «Привет, Жабик! Баланс: 1 250 ₽».
- */
 @Preview(showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
 fun SplashDemoPreview() {

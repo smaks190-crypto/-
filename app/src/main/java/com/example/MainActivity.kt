@@ -184,19 +184,25 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
 
     var avatarUpdateKey by remember { mutableStateOf(0) }
 
-    val avatarBitmap = remember(currentProfile?.id, avatarUpdateKey) {
+    val avatarBitmap = androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+        initialValue = null,
+        key1 = currentProfile?.id,
+        key2 = avatarUpdateKey
+    ) {
         val profileId = currentProfile?.id ?: "default"
-        val file = File(context.filesDir, "avatar_$profileId.jpg")
-        if (file.exists()) {
-            try {
-                BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
-            } catch (e: Exception) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val file = File(context.filesDir, "avatar_$profileId.jpg")
+            if (file.exists()) {
+                try {
+                    BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+                } catch (e: Exception) {
+                    null
+                }
+            } else {
                 null
             }
-        } else {
-            null
         }
-    }
+    }.value
 
     val transactions by viewModel.transactions.collectAsState()
     val goals by viewModel.goals.collectAsState()
