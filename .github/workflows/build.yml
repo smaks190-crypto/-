@@ -10,9 +10,14 @@ name: Build Android APK & AAB
 on:
   pull_request:
     branches: [ "main" ]
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [ "main" ]
   workflow_dispatch:
+
+concurrency:
+  group: android-build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -34,8 +39,9 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      # СОЗДАЕМ ТЕСТОВЫЙ КЛЮЧ ПОДПИСИ
+      # DEBUG ТОЛЬКО ДЛЯ PR И РУЧНОГО ЗАПУСКА НЕ ИЗ MAIN
       - name: Generate debug keystore
+        if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')
         run: |
           mkdir -p ~/.android
           keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
@@ -46,10 +52,12 @@ jobs:
 
       # СОБИРАЕМ APK С ПОМОЩЬЮ СИСТЕМНОГО GRADLE (ОТЛАДКА)
       - name: Build Debug APK
+        if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')
         run: gradle assembleDebug
 
       # СОХРАНЯЕМ ГОТОВЫЙ ФАЙЛ ОТЛАДКИ
       - name: Upload APK artifact
+        if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
