@@ -355,7 +355,7 @@ private fun SplashCanvasOverlay(
         if (w <= 1f || h <= 1f) return@Canvas
 
         val centerX = w / 2f
-        val frogY = h * 0.56f
+        val frogY = h * 0.50f
         val frogBaseRadius = (minOf(w, h) * 0.17f).coerceAtLeast(36f)
         val baseCoinRadius = (minOf(w, h) * 0.088f).coerceAtLeast(24f)
         val auraRadius = (minOf(w, h) * 0.52f).coerceAtLeast(10f)
@@ -474,8 +474,8 @@ private fun SplashCanvasOverlay(
             val offscreenTopTargetY = -baseCoinRadius * 2.4f
             coinY = lerpFloat(mouthOriginY, offscreenTopTargetY, easedUp)
 
-            // Один полный кувырок СВЕРХУ ВНИЗ: отрицательный угол без разворота на ребре.
-            coinSpinAngle = -launchProgress * 2.0f * PI.toFloat()
+            // Один полный кувырок в обратном направлении: положительный угол без разворота на ребре.
+            coinSpinAngle = launchProgress * 2.0f * PI.toFloat()
             coinScale = lerpFloat(0.82f, 1.06f, easedUp)
             coinGlowIntensity = (0.35f + launchProgress * 0.50f).coerceIn(0f, 1f)
         } else {
@@ -485,8 +485,8 @@ private fun SplashCanvasOverlay(
             val fallEndY = h + maxDipDepth * 1.35f
             coinY = lerpFloat(fallStartY, fallEndY, easedFall)
 
-            // Два оборота сверху вниз при падении; непрерывное продолжение от -2*PI
-            coinSpinAngle = -(2.0f + p2 * 4.0f) * PI.toFloat()
+            // Два оборота в обратном направлении при падении; продолжение от +2*PI
+            coinSpinAngle = (2.0f + p2 * 4.0f) * PI.toFloat()
 
             if (coinY <= 0f) {
                 coinScale = 1.08f
@@ -975,8 +975,8 @@ private fun DrawScope.drawGoldenCoin(
 ) {
     val r = baseRadius.coerceAtLeast(10f)
     // Orthographic projection of a real, thick cylinder rotating about X.
-    // The angular timeline is monotonically NEGATIVE: the TOP goes forwards
-    // and DOWN. Never use abs(cos) for the face transform: it would mirror
+    // The angular timeline is monotonically POSITIVE: reverse the previous
+    // downward tumble. Never use abs(cos) for the face transform: it would mirror
     // each quarter-turn and look like the coin rocks back and forth.
     val flipCos = cos(spinAngle)
     val flipSin = sin(spinAngle)
