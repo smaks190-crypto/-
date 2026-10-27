@@ -472,18 +472,18 @@ private fun SplashCanvasOverlay(
             val launchProgress = ((p1 - 0.06f) / 0.94f).coerceIn(0f, 1f)
             // The lips grip the coin while it rotates to its first edge-on pose.
             // The coin does NOT travel upwards until that quarter turn is complete.
-            val gripRatio = 0.22f
+            val gripRatio = 0.12f
             val gripProgress = (launchProgress / gripRatio).coerceIn(0f, 1f)
             val freeFlight = ((launchProgress - gripRatio) / (1f - gripRatio)).coerceIn(0f, 1f)
             val easedUp = FastOutSlowInEasing.transform(freeFlight)
             val offscreenTopTargetY = -baseCoinRadius * 2.4f
             coinY = lerpFloat(mouthOriginY, offscreenTopTargetY, easedUp)
-            // 0 -> PI/2 in the lips, then PI/2 -> 2PI during free flight.
+            // 0 -> PI/4 while gripped, then PI/4 -> 2PI during free flight.
             // No restart or reversal at release.
             coinSpinAngle = if (launchProgress < gripRatio) {
-                gripProgress * (PI.toFloat() * 0.5f)
+                gripProgress * (PI.toFloat() * 0.25f)
             } else {
-                PI.toFloat() * (0.5f + freeFlight * 1.5f)
+                PI.toFloat() * (0.25f + freeFlight * 1.75f)
             }
             coinScale = lerpFloat(0.82f, 1.06f, easedUp)
             coinGlowIntensity = (0.35f + freeFlight * 0.50f).coerceIn(0f, 1f)
@@ -566,7 +566,7 @@ private fun SplashCanvasOverlay(
         // 2. РИСУЕМ СВЕТО-ШЛЕЙФ И СКОРОСТНЫЕ ЛИНИИ МОНЕТКИ БЕЗ СОЗДАНИЯ BRUSH
         val effectiveCoinRadius = baseCoinRadius * coinScale
         if (t <= PHASE_1_END && p1 > PHASE_1_HOLD_RATIO &&
-            ((p1 - PHASE_1_HOLD_RATIO) / (1f - PHASE_1_HOLD_RATIO)) > 0.22f) {
+            ((p1 - PHASE_1_HOLD_RATIO) / (1f - PHASE_1_HOLD_RATIO)) > 0.12f) {
             drawUpwardTossArcs(
                 centerX = centerX,
                 coinY = coinY,
@@ -591,7 +591,7 @@ private fun SplashCanvasOverlay(
         if (coinY + effectiveCoinRadius * 2f >= 0f && coinY - effectiveCoinRadius * 2f <= h) {
             if (t <= PHASE_1_END &&
                 (p1 <= PHASE_1_HOLD_RATIO ||
-                    ((p1 - PHASE_1_HOLD_RATIO) / (1f - PHASE_1_HOLD_RATIO)) < 0.22f)) {
+                    ((p1 - PHASE_1_HOLD_RATIO) / (1f - PHASE_1_HOLD_RATIO)) < 0.12f)) {
                 // Keep the coin gripped by the lip through its first quarter turn.
                 // Hide only the upper part behind the real upper lip. The lower half
                 // remains visible BELOW the mouth, as if the frog is gripping the coin.
