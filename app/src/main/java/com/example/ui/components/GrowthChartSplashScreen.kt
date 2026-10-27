@@ -65,7 +65,7 @@ private var hasSplashPlayedInSession = false
 
 private const val SPLASH_TOTAL_DURATION_MS = 1420
 private const val PHASE_1_END = 0.40f          // Фаза 1 (0..568 мс): Пружинный присед (p1 <= 0.06f) и выстрел монетки вверх за край экрана
-private const val PHASE_1_HOLD_RATIO = 0.12f   // Первые 6% Фазы 1 (p1 <= 0.06f) монетка плотно сидит во рту под верхней губой
+private const val PHASE_1_HOLD_RATIO = 0.12f   // Первые 12% Фазы 1: жаба приседает, монетка синхронно опускается с губами
 
 // Ускоряющаяся кривая гравитации без торможения в конце — монетка и шторка пролетают нижний край на максимальной скорости
 private val CoinFallAndPullEasing = CubicBezierEasing(0.45f, 0.0f, 0.90f, 0.85f)
@@ -326,9 +326,9 @@ private fun SplashCanvasOverlay(
         }
         delay(50L)
 
-        // Синхронно включаем звон монетки в момент завершения короткого замаха (p1 = 0.06f -> ~35 мс от старта таймлайна)
+        // Звон монетки совпадает с завершением удлинённого замаха (12% фазы 1 ≈ 68 мс от старта таймлайна)
         launch {
-            delay(35L)
+            delay(68L)
             DavidSoundManager.playCoinToss(context)
         }
 
@@ -462,13 +462,13 @@ private fun SplashCanvasOverlay(
         val mouthOriginY = currentFrogCenterY + (frogBaseRadius * 0.43f) * currentFrogScaleY
 
         if (t <= PHASE_1_END && p1 <= PHASE_1_HOLD_RATIO) {
-            // --- Первые 6% Фазы 1 (p1 <= 0.06f): монетка плотно сидит во рту и НЕ движется вверх сквозь губу ---
+            // --- Первые 12% Фазы 1: жаба опускает губы, монетка следует за ними и остаётся зажатой ---
             coinY = mouthOriginY
             coinSpinAngle = 0f
             coinScale = 0.82f
             coinGlowIntensity = 0.30f
         } else if (t <= PHASE_1_END) {
-            // --- Подъем монетки вверх начинается с p1 > 0.06f ---
+            // --- После синхронного опускания губ начинается поворот и затем бросок монетки ---
             val launchProgress = ((p1 - PHASE_1_HOLD_RATIO) / (1f - PHASE_1_HOLD_RATIO)).coerceIn(0f, 1f)
             // The lips grip the coin while it rotates to its first edge-on pose.
             // The coin does NOT travel upwards until that quarter turn is complete.
@@ -532,7 +532,7 @@ private fun SplashCanvasOverlay(
                 0.65f
             }
             t <= PHASE_1_END -> {
-                val launchProgress = ((p1 - 0.06f) / 0.94f).coerceIn(0f, 1f)
+                val launchProgress = ((p1 - PHASE_1_HOLD_RATIO) / (1f - PHASE_1_HOLD_RATIO)).coerceIn(0f, 1f)
                 if (launchProgress < 0.28f) {
                     lerpFloat(0.65f, 1.0f, launchProgress / 0.28f)
                 } else {
