@@ -223,7 +223,7 @@ fun DavidChatScreen(
 
             if (isTyping) {
                 item {
-                    DavidTypingBubble()
+                    DavidCoinTossLoader()
                 }
             }
 

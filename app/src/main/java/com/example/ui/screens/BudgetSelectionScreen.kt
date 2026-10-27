@@ -303,7 +303,7 @@ fun BudgetSelectionScreen(
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(text = "🐸", fontSize = 20.sp)
+                        com.example.ui.components.BrandFrogAvatar(size = 28.dp)
                     }
 
                     Spacer(modifier = Modifier.width(12.dp))
@@ -473,7 +473,7 @@ fun BudgetSelectionScreen(
                                 .border(1.dp, Emerald400.copy(alpha = 0.35f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(text = "🐸", fontSize = 30.sp)
+                            com.example.ui.components.BrandFrogAvatar(size = 38.dp)
                         }
                         Spacer(modifier = Modifier.height(14.dp))
                         Text(

@@ -184,19 +184,25 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
 
     var avatarUpdateKey by remember { mutableStateOf(0) }
 
-    val avatarBitmap = remember(currentProfile?.id, avatarUpdateKey) {
+    val avatarBitmap = androidx.compose.runtime.produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+        initialValue = null,
+        key1 = currentProfile?.id,
+        key2 = avatarUpdateKey
+    ) {
         val profileId = currentProfile?.id ?: "default"
-        val file = File(context.filesDir, "avatar_$profileId.jpg")
-        if (file.exists()) {
-            try {
-                BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
-            } catch (e: Exception) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val file = File(context.filesDir, "avatar_$profileId.jpg")
+            if (file.exists()) {
+                try {
+                    BitmapFactory.decodeFile(file.absolutePath)?.asImageBitmap()
+                } catch (e: Exception) {
+                    null
+                }
+            } else {
                 null
             }
-        } else {
-            null
         }
-    }
+    }.value
 
     val transactions by viewModel.transactions.collectAsState()
     val goals by viewModel.goals.collectAsState()
@@ -266,19 +272,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     var avatarTapCount by remember { mutableStateOf(0) }
     var lastAvatarTapTime by remember { mutableStateOf(0L) }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "wave")
-    val waveRotation by infiniteTransition.animateFloat(
-        initialValue = -15f,
-        targetValue = 20f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 350, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "waveRotation"
-    )
-
     LaunchedEffect(selectedBudgetId, splashStage) {
         if (splashStage == "done" && selectedBudgetId != null) {
+            kotlinx.coroutines.delay(650)
             viewModel.addWelcomeNotification(currentProfile?.name ?: "")
             showWelcomeBubble = true
             kotlinx.coroutines.delay(4800)
@@ -352,8 +348,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     }
 
     LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(1800)
-        splashStage = "exiting"
+        kotlinx.coroutines.delay(2200)
 
         if (com.example.notifications.ReminderManager.isReminderEnabled(context)) {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -609,7 +604,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     val isDavidChatOpen = activeModal is com.example.ui.viewmodel.BottomCapsuleModal.DavidChat
                                     val hasOpenedChatBefore = remember(isDavidChatOpen, pName) { prefs.getBoolean("has_opened_david_chat_before_$pName", false) }
                                     val hasUnread = unreadNotificationsCount > 0 || !hasOpenedChatBefore
-                                    val shouldShowMessage = showWelcomeBubble || (hasUnread && unreadNotificationsCount > 0)
+                                    val shouldShowMessage = (splashStage == "done") && (showWelcomeBubble || (hasUnread && unreadNotificationsCount > 0))
                                     val iconNeonColor = Emerald400
 
                                     var isExpandedByNeon by remember { mutableStateOf(false) }
@@ -617,7 +612,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     val haptic = LocalHapticFeedback.current
                                     val neonAlpha = remember { androidx.compose.animation.core.Animatable(1f) }
 
-                                    LaunchedEffect(shouldShowMessage, unreadNotificationsCount) {
+                                    LaunchedEffect(shouldShowMessage, unreadNotificationsCount, splashStage) {
                                         if (shouldShowMessage) {
                                             if (isExpandedByNeon) {
                                                 kotlinx.coroutines.delay(4000)
@@ -625,6 +620,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                 return@LaunchedEffect
                                             }
 
+                                            kotlinx.coroutines.delay(500)
                                             isExpandedByNeon = false
                                             isNeonFlickering = true
 
@@ -655,17 +651,20 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             .height(40.dp)
                                             .clip(RoundedCornerShape(16.dp))
                                             .background(com.example.ui.theme.ObsidianSurface)
-                                            .border(
-                                                width = 1.dp,
-                                                color = if (isNeonFlickering) {
+                                            .drawBehind {
+                                                val borderColor = if (isNeonFlickering) {
                                                     iconNeonColor.copy(alpha = neonAlpha.value.coerceIn(0.15f, 1f))
                                                 } else if (shouldShowMessage || hasUnread) {
                                                     iconNeonColor.copy(alpha = 0.6f)
                                                 } else {
                                                     com.example.ui.theme.GlassBorder
-                                                },
-                                                shape = RoundedCornerShape(16.dp)
-                                            )
+                                                }
+                                                drawRoundRect(
+                                                    color = borderColor,
+                                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx(), 16.dp.toPx()),
+                                                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx())
+                                                )
+                                            }
                                             .animateContentSize(
                                                 animationSpec = spring(
                                                     stiffness = Spring.StiffnessMediumLow,
@@ -684,10 +683,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
-                                            Text(
-                                                text = "🐸",
-                                                fontSize = 15.sp
-                                            )
+                                            com.example.ui.components.BrandFrogAvatar(size = 20.dp)
                                             if (!isExpandedByNeon || !shouldShowMessage) {
                                                 Text(
                                                     text = "Давид AI",
@@ -1121,12 +1117,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             }
         }
 
-        if (splashStage != "done") {
-            GrowthChartSplashScreen(
-                isExiting = splashStage == "exiting",
-                onExitFinished = { splashStage = "done" }
-            )
-        }
+        SplashHost(
+            onSplashDone = { splashStage = "done" }
+        )
 
         // Всплывающее неоновое уведомление о получении достижения от Давида Жабова
         com.example.davidapp.AchievementUnlockedBanner(
@@ -1134,6 +1127,28 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
                 .padding(top = 12.dp)
+        )
+    }
+}
+
+@Composable
+private fun SplashHost(
+    onSplashDone: () -> Unit
+) {
+    var localDone by remember { mutableStateOf(false) }
+
+    LaunchedEffect(localDone) {
+        if (localDone) {
+            // Уведомляем родительский экран в фоне после того, как шторка уже полностью скрылась без рекомпозиции MainAppScreen
+            kotlinx.coroutines.delay(750)
+            onSplashDone()
+        }
+    }
+
+    if (!localDone) {
+        GrowthChartSplashScreen(
+            isExiting = false,
+            onExitFinished = { localDone = true }
         )
     }
 }
