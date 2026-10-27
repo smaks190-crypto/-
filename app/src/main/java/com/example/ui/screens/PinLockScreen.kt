@@ -86,6 +86,7 @@ fun PinLockScreen(
     title: String = "David Finance AI",
     subtitle: String = "Введите ПИН-код для доступа",
     isBiometricAvailable: Boolean = false,
+    securityManager: SecurityManager? = null,
     onVerifyPin: (String) -> Boolean,
     onBiometricClick: () -> Unit = {},
     onResetSecurity: () -> Unit = {},
@@ -94,11 +95,19 @@ fun PinLockScreen(
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    val securityManager = remember { SecurityManager(context) }
+    val activeSecurityManager = securityManager ?: remember { SecurityManager(context) }
     var enteredPin by remember { mutableStateOf("") }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember {
+        mutableStateOf<String?>(
+            if (activeSecurityManager.isStorageError()) {
+                "Ошибка защищённого хранилища. Подтвердите личность или повторите попытку."
+            } else {
+                null
+            }
+        )
+    }
     var showResetDialog by remember { mutableStateOf(false) }
-    var secondsRemaining by remember { mutableStateOf(securityManager.getRemainingBlockTimeSeconds()) }
+    var secondsRemaining by remember { mutableStateOf(activeSecurityManager.getRemainingBlockTimeSeconds()) }
 
     val shakeOffsetX = remember { Animatable(0f) }
     val coroutineScope = rememberCoroutineScope()
@@ -107,13 +116,13 @@ fun PinLockScreen(
         if (secondsRemaining > 0) {
             errorMessage = "Слишком много попыток. Заблокировано на $secondsRemaining сек."
             delay(1000L)
-            val nextVal = securityManager.getRemainingBlockTimeSeconds()
+            val nextVal = activeSecurityManager.getRemainingBlockTimeSeconds()
             if (nextVal <= 0L) {
                 errorMessage = null
             }
             secondsRemaining = nextVal
-        } else if (securityManager.isBlocked()) {
-            secondsRemaining = securityManager.getRemainingBlockTimeSeconds()
+        } else if (!activeSecurityManager.isStorageError() && activeSecurityManager.isBlocked()) {
+            secondsRemaining = activeSecurityManager.getRemainingBlockTimeSeconds()
         }
     }
 
@@ -146,20 +155,31 @@ fun PinLockScreen(
             errorMessage = null
 
             if (newPin.length == 4) {
+                if (activeSecurityManager.isStorageError()) {
+                    activeSecurityManager.tryRecoverSecureStorage()
+                }
+                val attemptsBefore = activeSecurityManager.getFailedAttempts()
                 if (onVerifyPin(newPin)) {
-                    securityManager.resetFailedAttempts()
+                    activeSecurityManager.resetFailedAttempts()
                     onSuccess()
                 } else {
-                    securityManager.handleFailedAttempt()
-                    val remaining = securityManager.getRemainingBlockTimeSeconds()
+                    if (!activeSecurityManager.isStorageError() &&
+                        activeSecurityManager.getFailedAttempts() == attemptsBefore
+                    ) {
+                        activeSecurityManager.handleFailedAttempt()
+                    }
+                    val remaining = activeSecurityManager.getRemainingBlockTimeSeconds()
                     if (remaining > 0) {
                         secondsRemaining = remaining
                     }
                     triggerVibration()
-                    errorMessage = if (remaining > 0) {
-                        "Слишком много попыток. Заблокировано на $remaining сек."
-                    } else {
-                        "Неверный ПИН-код (${securityManager.getFailedAttempts()}/5)"
+                    errorMessage = when {
+                        activeSecurityManager.isStorageError() ->
+                            "Защищённое хранилище недоступно. Доступ заблокирован."
+                        remaining > 0 ->
+                            "Слишком много попыток. Заблокировано на $remaining сек."
+                        else ->
+                            "Неверный ПИН-код (${activeSecurityManager.getFailedAttempts()}/5)"
                     }
                     coroutineScope.launch {
                         shakeOffsetX.animateTo(20f, spring(stiffness = 1000f))

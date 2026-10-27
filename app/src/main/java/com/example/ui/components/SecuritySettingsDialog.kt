@@ -550,11 +550,15 @@ fun SecuritySettingsContent(
                             } else {
                                 pinInput2 = pin
                                 if (pinInput1 == pinInput2) {
-                                    securityManager.setPin(pinInput1)
-                                    isPinEnabled = true
-                                    onSecurityUpdated()
-                                    dialogState = SecurityDialogState.OVERVIEW
-                                    Toast.makeText(context, "ПИН-код успешно сохранен!", Toast.LENGTH_SHORT).show()
+                                    if (securityManager.setPin(pinInput1)) {
+                                        isPinEnabled = true
+                                        onSecurityUpdated()
+                                        dialogState = SecurityDialogState.OVERVIEW
+                                        Toast.makeText(context, "ПИН-код успешно сохранен!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        errorMessage = "Ошибка защищённого хранилища. Не удалось сохранить ПИН-код."
+                                        pinInput2 = ""
+                                    }
                                 } else {
                                     errorMessage = "ПИН-коды не совпадают. Попробуйте снова."
                                     pinInput2 = ""
@@ -577,7 +581,7 @@ fun SecuritySettingsContent(
                         errorMessage = errorMessage,
                         onPinEntered = { pin ->
                             if (dialogState == SecurityDialogState.CREATE_GUEST_PIN) {
-                                if (securityManager.verifyPin(pin) && !securityManager.isGuestSessionActive()) {
+                                if (securityManager.isSameAsPrimaryPin(pin)) {
                                     errorMessage = "Гостевой ПИН не должен совпадать с основным!"
                                 } else {
                                     pinInput1 = pin
@@ -587,11 +591,15 @@ fun SecuritySettingsContent(
                             } else {
                                 pinInput2 = pin
                                 if (pinInput1 == pinInput2) {
-                                    securityManager.setGuestPin(pinInput1)
-                                    isGuestPinEnabled = true
-                                    onSecurityUpdated()
-                                    dialogState = SecurityDialogState.OVERVIEW
-                                    Toast.makeText(context, "Скрытый гостевой ПИН активирован 🐸", Toast.LENGTH_SHORT).show()
+                                    if (securityManager.setGuestPin(pinInput1)) {
+                                        isGuestPinEnabled = true
+                                        onSecurityUpdated()
+                                        dialogState = SecurityDialogState.OVERVIEW
+                                        Toast.makeText(context, "Скрытый гостевой ПИН активирован 🐸", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        errorMessage = "Не удалось сохранить гостевой ПИН."
+                                        pinInput2 = ""
+                                    }
                                 } else {
                                     errorMessage = "ПИН-коды не совпадают. Попробуйте снова."
                                     pinInput2 = ""
@@ -613,12 +621,20 @@ fun SecuritySettingsContent(
                         accentColor = Indigo400,
                         errorMessage = errorMessage,
                         onPinEntered = { oldPin ->
-                            if (securityManager.verifyPin(oldPin)) {
+                            if (securityManager.isBlocked()) {
+                                val remaining = securityManager.getRemainingBlockTimeSeconds()
+                                errorMessage = "Слишком много попыток. Заблокировано на $remaining сек."
+                            } else if (securityManager.verifyPrimaryPinOnly(oldPin)) {
                                 oldPinInput = oldPin
                                 errorMessage = null
                                 dialogState = SecurityDialogState.CHANGE_PIN_NEW
                             } else {
-                                errorMessage = "Неверный текущий ПИН-код"
+                                val remaining = securityManager.getRemainingBlockTimeSeconds()
+                                errorMessage = if (remaining > 0) {
+                                    "Слишком много попыток. Заблокировано на $remaining сек."
+                                } else {
+                                    "Неверный текущий ПИН-код (${securityManager.getFailedAttempts()}/5)"
+                                }
                             }
                         },
                         onCancel = {
@@ -643,10 +659,14 @@ fun SecuritySettingsContent(
                             } else {
                                 pinInput2 = pin
                                 if (pinInput1 == pinInput2) {
-                                    securityManager.setPin(pinInput1)
-                                    onSecurityUpdated()
-                                    dialogState = SecurityDialogState.OVERVIEW
-                                    Toast.makeText(context, "ПИН-код успешно изменен!", Toast.LENGTH_SHORT).show()
+                                    if (securityManager.setPin(pinInput1)) {
+                                        onSecurityUpdated()
+                                        dialogState = SecurityDialogState.OVERVIEW
+                                        Toast.makeText(context, "ПИН-код успешно изменен!", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        errorMessage = "Ошибка защищённого хранилища. Не удалось изменить ПИН-код."
+                                        pinInput2 = ""
+                                    }
                                 } else {
                                     errorMessage = "ПИН-коды не совпадают"
                                     pinInput2 = ""

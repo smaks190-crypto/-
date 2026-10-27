@@ -412,12 +412,17 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
         if (isAppLocked) {
             com.example.ui.screens.PinLockScreen(
                 isBiometricAvailable = securityManager.isBiometricEnabled() && activity != null,
+                securityManager = securityManager,
                 onVerifyPin = { pin -> securityManager.verifyPin(pin) },
                 onBiometricClick = {
-                    if (activity != null) {
+                    if (activity != null && !securityManager.isStorageError()) {
                         com.example.ui.security.BiometricPromptHelper.showBiometricPrompt(
                             activity = activity,
-                            onSuccess = { isAppLocked = false }
+                            onSuccess = {
+                                securityManager.resetFailedAttempts()
+                                securityManager.setGuestSessionActive(false)
+                                isAppLocked = false
+                            }
                         )
                     }
                 },
@@ -433,10 +438,22 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         com.example.ui.security.BiometricPromptHelper.showBiometricOrDevicePrompt(
                             activity = activity,
                             onSuccess = {
-                                viewModel.clearAllDataAndResetSecurity(securityManager)
-                                isAppLocked = false
+                                if (securityManager.isStorageError()) {
+                                    // Безопасное восстановление после сбоя Android Keystore БЕЗ удаления финансовых данных пользователя
+                                    if (securityManager.recoverKeystoreAndResetPinOnly()) {
+                                        isAppLocked = false
+                                        Toast.makeText(
+                                            activity,
+                                            "Хранилище ключей восстановлено. Данные бюджета сохранены.",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                } else {
+                                    viewModel.clearAllDataAndResetSecurity(securityManager)
+                                    isAppLocked = false
+                                }
                             },
-                            onError = { err ->
+                            onError = { _ ->
                                 Toast.makeText(
                                     activity,
                                     "Аутентификация не удалась. Введите «СБРОС» вручную.",
