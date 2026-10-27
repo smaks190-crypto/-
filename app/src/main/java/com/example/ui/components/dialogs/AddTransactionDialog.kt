@@ -1,44 +1,41 @@
 package com.example.ui.components.dialogs
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import android.widget.Toast
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,12 +47,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TileMode
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -67,26 +67,35 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.CategoryEntity
 import com.example.data.db.TransactionEntity
-import com.example.ui.components.CompactDatePickerField
 import com.example.ui.components.LocalDialogSwipeEnabled
-import com.example.ui.components.PlusMinusMorphToggle
-import com.example.ui.components.SwipeToDismissDialog
+import com.example.ui.components.ObsidianBentoDateCard
+import com.example.ui.components.SingleDatePickerDialog
+import com.example.ui.components.TransactionTypeSegmentedToggle
 import com.example.ui.components.capitalizeFirstLetter
+import com.example.ui.components.detectCategoryAndTypeByTitle
 import com.example.ui.components.formatAmountTextFieldValue
 import com.example.ui.components.parseAmountInput
-import com.example.ui.theme.DarkBg
+import com.example.ui.components.resolveCategoryVisualSpec
 import com.example.ui.theme.Emerald400
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.GlassHighlight
+import com.example.ui.theme.Indigo400
 import com.example.ui.theme.Indigo500
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
-import com.example.ui.theme.Slate700
+import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate800
-import com.example.ui.theme.Slate900
+import com.example.ui.theme.SpaceGroteskFontFamily
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlinx.coroutines.launch
+
+private val DialogBentoFieldBg = Color(0xFF0B111E)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -98,122 +107,73 @@ fun AddTransactionDialog(
     onSuggestCategory: (suspend (transactionName: String, type: String, categoriesList: List<String>) -> String)? = null,
     editingTransaction: TransactionEntity? = null
 ) {
+    val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val haptic = LocalHapticFeedback.current
+    val coroutineScope = rememberCoroutineScope()
+
     var type by remember { mutableStateOf(editingTransaction?.type ?: initialType) }
-    var date by remember { mutableStateOf(editingTransaction?.date ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())) }
+    var date by remember {
+        mutableStateOf(
+            editingTransaction?.date
+                ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        )
+    }
     var selectedCategory by remember {
-        mutableStateOf(editingTransaction?.category ?: (categories.filter { it.type == type }.firstOrNull()?.name ?: ""))
+        mutableStateOf(
+            editingTransaction?.category
+                ?: (categories.filter { it.type == type }.firstOrNull()?.name ?: "")
+        )
     }
     var subcategory by remember { mutableStateOf(editingTransaction?.subcategory ?: "") }
     var amountText by remember {
-        val initialAmount = editingTransaction?.amount?.let { if (it == 0.0) "" else if (it % 1 == 0.0) String.format(Locale.US, "%.0f", it) else it.toString() } ?: ""
-        mutableStateOf(TextFieldValue(initialAmount))
+        val initialAmount = editingTransaction?.amount?.let {
+            if (it == 0.0) ""
+            else if (it % 1 == 0.0) String.format(Locale.US, "%.0f", it)
+            else it.toString()
+        } ?: ""
+        mutableStateOf(
+            formatAmountTextFieldValue(
+                TextFieldValue(""),
+                TextFieldValue(initialAmount)
+            )
+        )
     }
-    var dropdownExpanded by remember { mutableStateOf(false) }
 
     var aiSuggestedCategory by remember { mutableStateOf<String?>(null) }
     var isAiSuggesting by remember { mutableStateOf(false) }
-    var userManuallySelectedCategory by remember { mutableStateOf(false) }
+    var userManuallySelectedCategory by remember { mutableStateOf(editingTransaction != null) }
 
-    var neonFlickerValue by remember { mutableStateOf(1f) }
-    var isFlickerFinished by remember { mutableStateOf(false) }
+    var isAmountFocused by remember { mutableStateOf(false) }
+    var isDescriptionFocused by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        neonFlickerValue = 1f
-        kotlinx.coroutines.delay(1300)
-
-        val sequence = listOf(
-            0.1f to 70L,
-            0.9f to 90L,
-            0.0f to 120L,
-            0.8f to 60L,
-            0.05f to 100L,
-            0.7f to 50L,
-            0.0f to 180L,
-            0.95f to 60L,
-            0.1f to 80L,
-            0.4f to 50L,
-            0.0f to 200L
-        )
-
-        for (step in sequence) {
-            neonFlickerValue = step.first
-            kotlinx.coroutines.delay(step.second)
-        }
-
-        isFlickerFinished = true
-
-        while (true) {
-            kotlinx.coroutines.delay((3000..6500).random().toLong())
-            val sparkSequence = listOf(
-                0.15f to 40L,
-                0.0f to 60L,
-                0.25f to 50L,
-                0.0f to 40L
-            )
-            for (spark in sparkSequence) {
-                neonFlickerValue = spark.first
-                kotlinx.coroutines.delay(spark.second)
-            }
+    val filteredCategories = remember(categories, type) {
+        categories.filter { it.type == type }
+    }
+    LaunchedEffect(filteredCategories, type) {
+        if (selectedCategory.isBlank() || filteredCategories.none { it.name == selectedCategory }) {
+            selectedCategory = filteredCategories.firstOrNull()?.name ?: ""
         }
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "border_gradient_edit")
-    val offset by infiniteTransition.animateFloat(
-        initialValue = 0f, targetValue = 600f,
-        animationSpec = infiniteRepeatable(tween(4000, easing = LinearEasing), RepeatMode.Restart),
-        label = "offset"
-    )
-
-    val borderAlpha = 1f
-    val dynamicGradient = Brush.linearGradient(
-        colors = listOf(
-            Indigo500.copy(alpha = borderAlpha),
-            Emerald400.copy(alpha = borderAlpha),
-            Rose500.copy(alpha = borderAlpha),
-            Indigo500.copy(alpha = borderAlpha)
-        ),
-        start = Offset(offset, offset), end = Offset(offset + 600f, offset + 600f),
-        tileMode = TileMode.Repeated
-    )
-
-    val progress = offset / 600f
-    val getGradientColor = { p: Float ->
-        val norm = p % 1f
-        val phase = if (norm < 0f) norm + 1f else norm
-        when {
-            phase < 0.3333f -> {
-                val t = phase / 0.3333f
-                lerp(Indigo500, Emerald400, t)
-            }
-            phase < 0.6666f -> {
-                val t = (phase - 0.3333f) / 0.3333f
-                lerp(Emerald400, Rose500, t)
-            }
-            else -> {
-                val t = (phase - 0.6666f) / 0.3334f
-                lerp(Rose500, Indigo500, t)
-            }
-        }
-    }
-    val neonColor1 = getGradientColor(progress)
-    val neonColor2 = getGradientColor(progress + 0.6666f)
-
-    val coroutineScope = rememberCoroutineScope()
-
-    // Debounced automatic category suggestion via Gemini
+    // Автоматический подбор категории через Gemini с дебаунсом
     LaunchedEffect(subcategory, type) {
         val trimmed = subcategory.trim()
         if (trimmed.length >= 3 && onSuggestCategory != null) {
-            kotlinx.coroutines.delay(600)
+            delay(600)
             if (subcategory.trim() == trimmed) {
-                isAiSuggesting = true
-                val catNames = categories.filter { it.type == type }.map { it.name }
-                val suggested = onSuggestCategory(trimmed, type, catNames)
-                isAiSuggesting = false
-                if (suggested.isNotBlank()) {
-                    aiSuggestedCategory = suggested
-                    if (!userManuallySelectedCategory || selectedCategory.isBlank()) {
-                        selectedCategory = suggested
+                val instantMatch = detectCategoryAndTypeByTitle(trimmed, categories, type)
+                if (instantMatch == null) {
+                    isAiSuggesting = true
+                    val catNames = categories.filter { it.type == type }.map { it.name }
+                    val suggested = onSuggestCategory(trimmed, type, catNames)
+                    isAiSuggesting = false
+                    if (suggested.isNotBlank()) {
+                        aiSuggestedCategory = suggested
+                        if (!userManuallySelectedCategory || selectedCategory.isBlank()) {
+                            selectedCategory = suggested
+                        }
                     }
                 }
             }
@@ -223,444 +183,615 @@ fun AddTransactionDialog(
         }
     }
 
-    val filteredCategories = remember(categories, type) { categories.filter { it.type == type } }
-
     val scrollState = rememberScrollState()
+    val swipeEnabledState = LocalDialogSwipeEnabled.current
+    LaunchedEffect(scrollState.isScrollInProgress) {
+        swipeEnabledState.value = !scrollState.isScrollInProgress
+    }
 
-    Column(
+    val isIncome = type == "income"
+    val accentColor by animateColorAsState(
+        targetValue = if (isIncome) Emerald400 else Rose500,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "dialog_tx_accent"
+    )
+
+    val parsedAmount = remember(amountText.text) { parseAmountInput(amountText.text) }
+    val isAmountValid = parsedAmount > 0.0
+    val isCategoryValid = selectedCategory.trim().isNotBlank()
+    val isDescriptionValid = subcategory.trim().isNotBlank()
+    val isDateValid = date.trim().isNotBlank()
+    val isFormValid = isAmountValid && isCategoryValid && isDescriptionValid && isDateValid
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(20.dp)
-            .verticalScroll(scrollState)
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { focusManager.clearFocus() })
+            }
     ) {
+        // Фоновое радиальное свечение Obsidian Neo-Bank в правом верхнем углу
         Box(
             modifier = Modifier
+                .size(160.dp)
+                .align(Alignment.TopEnd)
+                .offset(x = 40.dp, y = (-40).dp)
+                .background(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            accentColor.copy(alpha = 0.16f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
+        Column(
+            modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 10.dp),
-            contentAlignment = Alignment.Center
+                .padding(horizontal = 20.dp, vertical = 18.dp)
+                .verticalScroll(scrollState),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Верхний декоративный пилл-индикатор модального окна
             Box(
-                modifier = Modifier
-                    .width(36.dp)
-                    .height(4.dp)
-                    .clip(CircleShape)
-                    .background(Slate700)
-            )
-        }
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(GlassHighlight)
+                )
+            }
 
-        Box(
-            modifier = Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Text(
-                text = if (editingTransaction != null) "Редактировать операцию" else "Добавить операцию",
-                color = Color.White,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
+            // 1. ФИРМЕННАЯ ШАПКА + СЕГМЕНТИРОВАННЫЙ ПЕРЕКЛЮЧАТЕЛЬ «РАСХОД / ДОХОД»
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = if (editingTransaction != null) "РЕДАКТИРОВАНИЕ ОПЕРАЦИИ" else "НОВАЯ ОПЕРАЦИЯ",
+                        color = accentColor,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 1.2.sp
+                    )
+                    Text(
+                        text = if (editingTransaction != null) "Редактировать операцию" else "Добавить операцию",
+                        color = Color.White,
+                        fontFamily = ManropeFontFamily,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-                // Row 1: Category (Left) and Type toggle (Right)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    // Category
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("КАТЕГОРИЯ", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(DarkBg)
-                                    .border(1.dp, Slate800, RoundedCornerShape(12.dp))
-                                    .clickable { dropdownExpanded = true }
-                                    .padding(horizontal = 12.dp),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = selectedCategory.ifEmpty { "Категория" },
-                                        color = if (selectedCategory.isNotEmpty()) Color.White else Slate400,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f, fill = false)
-                                    )
-                                    if (selectedCategory == aiSuggestedCategory && !aiSuggestedCategory.isNullOrBlank()) {
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(Indigo500.copy(alpha = 0.2f))
-                                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("✨ ИИ", color = Indigo500, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                }
-                            }
-
-                            DropdownMenu(
-                                expanded = dropdownExpanded,
-                                onDismissRequest = { dropdownExpanded = false },
-                                modifier = Modifier.background(Slate900)
-                            ) {
-                                filteredCategories.forEach { cat ->
-                                    DropdownMenuItem(
-                                        text = { Text(cat.name, color = Color.White) },
-                                        onClick = {
-                                            selectedCategory = cat.name
-                                            userManuallySelectedCategory = true
-                                            dropdownExpanded = false
-                                        }
-                                    )
-                                }
-                            }
+                TransactionTypeSegmentedToggle(
+                    selectedType = type,
+                    onSelectType = { newType ->
+                        if (newType != type) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            type = newType
+                            userManuallySelectedCategory = false
+                            selectedCategory = categories.filter { it.type == newType }.firstOrNull()?.name ?: ""
+                            aiSuggestedCategory = null
                         }
                     }
+                )
+            }
 
-                    // Type Toggle (Rightmost: Morphing Plus/Minus button)
-                    Column {
-                        Text("ТИП", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        PlusMinusMorphToggle(
-                            type = type,
-                            onToggle = {
-                                val newType = if (type == "expense") "income" else "expense"
-                                type = newType
-                                userManuallySelectedCategory = false
-                                selectedCategory = categories.filter { it.type == newType }.firstOrNull()?.name ?: ""
-                                aiSuggestedCategory = null
-                            }
+            // 2. АКЦЕНТНЫЙ БЛОК «СУММА» И «ДАТА» (НАВЕРХУ)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val amountBorderColor by animateColorAsState(
+                    targetValue = if (isAmountFocused || isAmountValid) {
+                        accentColor.copy(alpha = 0.55f)
+                    } else {
+                        GlassBorder
+                    },
+                    animationSpec = tween(200),
+                    label = "dialog_amount_border"
+                )
+
+                // Слева: Акцентная Bento-карточка ввода суммы (weight 1.35f)
+                Box(
+                    modifier = Modifier
+                        .weight(1.35f)
+                        .height(64.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(DialogBentoFieldBg)
+                        .border(1.dp, amountBorderColor, RoundedCornerShape(18.dp))
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "СУММА",
+                            color = if (isAmountFocused) accentColor else Slate400,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
                         )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (amountText.text.isEmpty()) {
+                                    Text(
+                                        text = "0",
+                                        color = Slate600,
+                                        fontFamily = SpaceGroteskFontFamily,
+                                        fontSize = 24.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                }
+                                BasicTextField(
+                                    value = amountText,
+                                    onValueChange = { amountText = formatAmountTextFieldValue(amountText, it) },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    cursorBrush = SolidColor(accentColor),
+                                    textStyle = TextStyle(
+                                        color = Color.White,
+                                        fontFamily = SpaceGroteskFontFamily,
+                                        fontSize = 24.sp,
+                                        fontWeight = FontWeight.ExtraBold
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { isAmountFocused = it.isFocused }
+                                        .testTag("transaction_amount_input")
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(6.dp))
+
+                            Text(
+                                text = "₽",
+                                color = accentColor,
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                // Справа: Bento-карточка выбора даты (weight 1f)
+                ObsidianBentoDateCard(
+                    dateIso = date,
+                    accentColor = accentColor,
+                    onClick = {
+                        focusManager.clearFocus()
+                        showDatePicker = true
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+            }
 
-                // Subcategory / Description
+            // 3. КОМПАКТНЫЙ БЛОК «КАТЕГОРИЯ» БЕЗ ДУБЛИРОВАНИЯ
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val activeCatSpec = remember(selectedCategory, type) {
+                    resolveCategoryVisualSpec(selectedCategory.ifEmpty { "Прочее" }, type)
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("ОПИСАНИЕ / НАЗВАНИЕ ОПЕРАЦИИ", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    if (onSuggestCategory != null) {
-                        Row(
-                            modifier = Modifier
-                                .shadow(
-                                    elevation = 6.dp,
-                                    shape = RoundedCornerShape(8.dp),
-                                    clip = false,
-                                    ambientColor = Indigo500,
-                                    spotColor = Indigo500
-                                )
-                                .background(Indigo500.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                                .border(1.dp, Indigo500.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                                .clickable {
-                                    if (subcategory.isNotBlank() && !isAiSuggesting) {
-                                        coroutineScope.launch {
-                                            isAiSuggesting = true
-                                            val catNames = categories.filter { it.type == type }.map { it.name }
-                                            val suggested = onSuggestCategory(subcategory.trim(), type, catNames)
-                                            isAiSuggesting = false
-                                            if (suggested.isNotBlank()) {
-                                                aiSuggestedCategory = suggested
-                                                selectedCategory = suggested
-                                                userManuallySelectedCategory = true
-                                            }
-                                        }
-                                    }
-                                }
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Star,
-                                contentDescription = null,
-                                tint = Indigo500,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("ИИ Категория", color = Indigo500, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = subcategory,
-                    onValueChange = { subcategory = it.capitalizeFirstLetter() },
-                    placeholder = { Text("Например: Пятерочка, Такси, Зарплата", color = Slate400) },
-                    modifier = Modifier.fillMaxWidth().testTag("transaction_description_input"),
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                    trailingIcon = {
-                        if (isAiSuggesting) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                color = Indigo500,
-                                strokeWidth = 2.dp
-                            )
-                        } else if (onSuggestCategory != null && subcategory.isNotBlank()) {
-                            IconButton(
-                                onClick = {
-                                    coroutineScope.launch {
-                                        isAiSuggesting = true
-                                        val catNames = categories.filter { it.type == type }.map { it.name }
-                                        val suggested = onSuggestCategory(subcategory.trim(), type, catNames)
-                                        isAiSuggesting = false
-                                        if (suggested.isNotBlank()) {
-                                            aiSuggestedCategory = suggested
-                                            selectedCategory = suggested
-                                            userManuallySelectedCategory = true
-                                        }
-                                    }
-                                },
-                                modifier = Modifier.testTag("ai_suggest_category_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Star,
-                                    contentDescription = "Определить категорию через Gemini",
-                                    tint = Emerald400,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = DarkBg,
-                        unfocusedContainerColor = DarkBg,
-                        focusedBorderColor = Emerald400,
-                        unfocusedBorderColor = Slate800,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                )
+                    Text(
+                        text = "КАТЕГОРИЯ",
+                        color = Slate400,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.8.sp
+                    )
 
-                if (isAiSuggesting) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Star, contentDescription = null, tint = Indigo500, modifier = Modifier.size(12.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Gemini подбирает категорию...", color = Indigo500, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                    }
-                } else if (!aiSuggestedCategory.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .shadow(
-                                elevation = 8.dp,
-                                shape = RoundedCornerShape(10.dp),
-                                clip = false,
-                                ambientColor = Indigo500,
-                                spotColor = Indigo500
-                            )
-                            .background(Color(0xFF0F172A).copy(alpha = 0.9f), RoundedCornerShape(10.dp))
-                            .border(
-                                width = 1.dp,
-                                brush = Brush.horizontalGradient(listOf(Indigo500, Emerald400)),
-                                shape = RoundedCornerShape(10.dp)
-                            )
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = null,
-                            tint = Emerald400,
-                            modifier = Modifier
-                                .size(14.dp)
-                                .shadow(elevation = 4.dp, shape = CircleShape, ambientColor = Emerald400, spotColor = Emerald400)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "ИИ Предложение",
-                                color = Indigo500,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Категория: $aiSuggestedCategory",
-                                color = Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        if (selectedCategory != aiSuggestedCategory) {
+                        if (!aiSuggestedCategory.isNullOrBlank() && selectedCategory == aiSuggestedCategory) {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(Emerald400.copy(alpha = 0.2f))
+                                    .background(Indigo500.copy(alpha = 0.18f))
+                                    .border(1.dp, Indigo500.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "✨ ИИ",
+                                    color = Indigo400,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        } else if (!aiSuggestedCategory.isNullOrBlank() && selectedCategory != aiSuggestedCategory) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Emerald400.copy(alpha = 0.16f))
+                                    .border(1.dp, Emerald400.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
                                     .clickable {
                                         selectedCategory = aiSuggestedCategory!!
                                         userManuallySelectedCategory = true
                                     }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    text = "Применить",
+                                    text = "✨ Применить: $aiSuggestedCategory",
                                     color = Emerald400,
-                                    fontSize = 10.sp,
+                                    fontFamily = ManropeFontFamily,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        if (selectedCategory.isNotBlank()) {
+                            Text(
+                                text = selectedCategory,
+                                color = activeCatSpec.color,
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                if (filteredCategories.isNotEmpty()) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 2.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(filteredCategories, key = { it.id }) { cat ->
+                            val isSelected = cat.name == selectedCategory
+                            val spec = remember(cat.name, cat.type) {
+                                resolveCategoryVisualSpec(cat.name, cat.type)
+                            }
+                            val catColor = spec.color
+
+                            val chipBg by animateColorAsState(
+                                targetValue = if (isSelected) catColor.copy(alpha = 0.18f) else DialogBentoFieldBg,
+                                animationSpec = tween(180),
+                                label = "dialog_chip_bg"
+                            )
+                            val chipBorder by animateColorAsState(
+                                targetValue = if (isSelected) catColor.copy(alpha = 0.7f) else GlassBorder,
+                                animationSpec = tween(180),
+                                label = "dialog_chip_border"
+                            )
+                            val chipTextColor by animateColorAsState(
+                                targetValue = if (isSelected) Color.White else Slate400,
+                                animationSpec = tween(180),
+                                label = "dialog_chip_text"
+                            )
+
+                            Row(
+                                modifier = Modifier
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(chipBg)
+                                    .border(
+                                        width = if (isSelected) 1.2.dp else 1.dp,
+                                        color = chipBorder,
+                                        shape = RoundedCornerShape(14.dp)
+                                    )
+                                    .clickable {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        selectedCategory = cat.name
+                                        userManuallySelectedCategory = true
+                                    }
+                                    .padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .background(catColor.copy(alpha = if (isSelected) 0.24f else 0.14f))
+                                        .border(
+                                            width = 1.dp,
+                                            color = catColor.copy(alpha = if (isSelected) 0.55f else 0.28f),
+                                            shape = RoundedCornerShape(9.dp)
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = spec.icon,
+                                        contentDescription = cat.name,
+                                        tint = catColor,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+
+                                Text(
+                                    text = cat.name,
+                                    color = chipTextColor,
+                                    fontFamily = ManropeFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. ПОЛЕ «ОПИСАНИЕ ИЛИ НАЗВАНИЕ» СО ВСТРОЕННОЙ КНОПКОЙ «✨ ИИ»
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    text = "ОПИСАНИЕ ИЛИ НАЗВАНИЕ",
+                    color = Slate400,
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp
+                )
+
+                val descBorderColor by animateColorAsState(
+                    targetValue = when {
+                        isDescriptionFocused -> Indigo500.copy(alpha = 0.75f)
+                        subcategory.isNotBlank() -> Emerald400.copy(alpha = 0.40f)
+                        else -> GlassBorder
+                    },
+                    animationSpec = tween(200),
+                    label = "dialog_desc_border"
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(DialogBentoFieldBg)
+                        .border(1.dp, descBorderColor, RoundedCornerShape(16.dp))
+                        .padding(start = 14.dp, end = 8.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.weight(1f),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (subcategory.isEmpty()) {
+                                Text(
+                                    text = "Например: Пятерочка, Такси, Зарплата",
+                                    color = Slate500,
+                                    fontFamily = ManropeFontFamily,
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            BasicTextField(
+                                value = subcategory,
+                                onValueChange = { newVal ->
+                                    val cap = newVal.capitalizeFirstLetter()
+                                    subcategory = cap
+                                    if (!userManuallySelectedCategory) {
+                                        val detected = detectCategoryAndTypeByTitle(cap, categories, type)
+                                        if (detected != null) {
+                                            val (detType, detCat) = detected
+                                            if (detType != type) {
+                                                type = detType
+                                            }
+                                            selectedCategory = detCat
+                                            aiSuggestedCategory = detCat
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                                cursorBrush = SolidColor(Emerald400),
+                                textStyle = TextStyle(
+                                    color = Color.White,
+                                    fontFamily = ManropeFontFamily,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { isDescriptionFocused = it.isFocused }
+                                    .testTag("transaction_description_input")
+                            )
+                        }
+
+                        if (onSuggestCategory != null) {
+                            Row(
+                                modifier = Modifier
+                                    .height(34.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Indigo500.copy(alpha = 0.18f))
+                                    .border(1.dp, Indigo500.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        if (subcategory.trim().isBlank()) {
+                                            Toast.makeText(
+                                                context,
+                                                "Введите название операции для ИИ-подбора",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else if (!isAiSuggesting) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            coroutineScope.launch {
+                                                isAiSuggesting = true
+                                                val catNames = categories.filter { it.type == type }.map { it.name }
+                                                val suggested = onSuggestCategory(subcategory.trim(), type, catNames)
+                                                isAiSuggesting = false
+                                                if (suggested.isNotBlank()) {
+                                                    aiSuggestedCategory = suggested
+                                                    selectedCategory = suggested
+                                                    userManuallySelectedCategory = true
+                                                }
+                                            }
+                                        }
+                                    }
+                                    .padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                if (isAiSuggesting) {
+                                    CircularProgressIndicator(
+                                        color = Indigo400,
+                                        strokeWidth = 1.8.dp,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Star,
+                                        contentDescription = "ИИ подбор категории",
+                                        tint = Indigo400,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+                                Text(
+                                    text = "ИИ",
+                                    color = Color.White,
+                                    fontFamily = SpaceGroteskFontFamily,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                         }
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Row combining Amount (Left) and Date (Right)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    // Amount (Left - shortened, takes available space)
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("СУММА (₽)", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        OutlinedTextField(
-                            value = amountText,
-                            onValueChange = { amountText = formatAmountTextFieldValue(amountText, it) },
-                            placeholder = { Text("0", color = Slate400, fontSize = 13.sp) },
-                            suffix = { Text("₽", color = Emerald400, fontWeight = FontWeight.Bold, fontSize = 13.sp) },
-                            singleLine = true,
-                            textStyle = TextStyle(fontSize = 13.sp, color = Color.White),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                                .testTag("transaction_amount_input"),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = DarkBg,
-                                unfocusedContainerColor = DarkBg,
-                                focusedBorderColor = Emerald400,
-                                unfocusedBorderColor = Slate800,
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                    }
-
-                    // Date (Right)
-                    Column {
-                        Text("ДАТА", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        CompactDatePickerField(
-                            value = date,
-                            onDateSelected = { date = it }
-                        )
-                    }
-                }
-
-                // Validation logic for required fields
-                val parsedAmount = remember(amountText.text) { parseAmountInput(amountText.text) }
-                val isAmountValid = parsedAmount > 0
-                val isCategoryValid = selectedCategory.trim().isNotBlank()
-                val isDescriptionValid = subcategory.trim().isNotBlank()
-                val isDateValid = date.trim().isNotBlank()
-                val isFormValid = isAmountValid && isCategoryValid && isDescriptionValid && isDateValid
-
-                val visualNeonLevel = if (isFormValid) {
-                    1f
-                } else {
-                    neonFlickerValue
-                }
-
-                val currentContainerColor = lerp(
-                    Slate800,
-                    Emerald400.copy(alpha = 0.15f),
-                    visualNeonLevel
+            // 5. ВЫРАЗИТЕЛЬНЫЙ НИЖНИЙ РЯД: КНОПКА «СОХРАНИТЬ / ОБНОВИТЬ» + КНОПКА ЗАКРЫТИЯ «✕»
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val saveBorderColor by animateColorAsState(
+                    targetValue = if (isAmountValid) Emerald400.copy(alpha = 0.75f) else Slate800,
+                    animationSpec = tween(200),
+                    label = "dialog_save_border"
                 )
-                val currentContentColor = lerp(
-                    Slate500,
-                    Emerald400,
-                    visualNeonLevel
-                )
-                val currentBorderColor = lerp(
-                    Slate700,
-                    Emerald400.copy(alpha = 0.5f),
-                    visualNeonLevel
+                val saveTextColor by animateColorAsState(
+                    targetValue = if (isAmountValid) Emerald400 else Slate400,
+                    animationSpec = tween(200),
+                    label = "dialog_save_text"
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Emerald400 glowing save button
-                    Button(
-                        onClick = {
-                            if (isFormValid) {
-                                onSave(type, date, selectedCategory.ifEmpty { "Прочее" }, subcategory.trim(), parsedAmount)
-                                onDismiss()
+                        .weight(1f)
+                        .height(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(DialogBentoFieldBg)
+                        .background(
+                            brush = if (isAmountValid) {
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        Emerald400.copy(alpha = 0.28f),
+                                        NeonCyan.copy(alpha = 0.18f)
+                                    )
+                                )
+                            } else {
+                                Brush.horizontalGradient(
+                                    colors = listOf(
+                                        DialogBentoFieldBg,
+                                        DialogBentoFieldBg
+                                    )
+                                )
                             }
-                        },
-                        enabled = isFormValid,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = currentContainerColor,
-                            contentColor = currentContentColor,
-                            disabledContainerColor = currentContainerColor,
-                            disabledContentColor = currentContentColor
-                        ),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(52.dp)
-                            .shadow(
-                                elevation = (visualNeonLevel * 14).dp,
-                                shape = RoundedCornerShape(16.dp),
-                                ambientColor = Emerald400,
-                                spotColor = Emerald400
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = currentBorderColor,
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                            .testTag("save_transaction_button")
-                    ) {
-                        Text("Сохранить", color = currentContentColor, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    }
-
-                    // Bottom-right square ✕ close button under the thumb
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Slate800)
-                            .border(1.dp, Slate700, RoundedCornerShape(16.dp))
-                            .clickable { onDismiss() }
-                            .testTag("close_edit_transaction_button"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Закрыть",
-                            tint = Slate400,
-                            modifier = Modifier.size(20.dp)
                         )
-                    }
+                        .border(
+                            width = if (isAmountValid) 1.2.dp else 1.dp,
+                            color = saveBorderColor,
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .clickable {
+                            when {
+                                !isAmountValid -> {
+                                    Toast.makeText(context, "Введите сумму операции", Toast.LENGTH_SHORT).show()
+                                }
+                                !isDescriptionValid -> {
+                                    Toast.makeText(context, "Введите описание или название операции", Toast.LENGTH_SHORT).show()
+                                }
+                                else -> {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onSave(
+                                        type,
+                                        date,
+                                        selectedCategory.ifEmpty { "Прочее" },
+                                        subcategory.trim(),
+                                        parsedAmount
+                                    )
+                                    onDismiss()
+                                }
+                            }
+                        }
+                        .testTag("save_transaction_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (editingTransaction != null) "Обновить" else "Сохранить",
+                        color = if (isFormValid) Color.White else saveTextColor,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 15.sp
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Slate800.copy(alpha = 0.65f))
+                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                        .clickable { onDismiss() }
+                        .testTag("close_edit_transaction_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Закрыть",
+                        tint = Slate400,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
+        }
+    }
+
+    if (showDatePicker) {
+        SingleDatePickerDialog(
+            initialDate = date,
+            onDismiss = { showDatePicker = false },
+            onConfirm = { selected ->
+                date = selected
+            }
+        )
+    }
 }

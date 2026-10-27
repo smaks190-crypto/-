@@ -1105,7 +1105,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 onDismiss = { showDebugConsole = false }
             )
 
-            if (!showDebugConsole) {
+            if (!showDebugConsole && activeModal == com.example.ui.viewmodel.BottomCapsuleModal.None) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
