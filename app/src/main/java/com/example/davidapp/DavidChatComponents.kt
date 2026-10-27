@@ -1066,7 +1066,8 @@ fun DavidChartBubble(
 
 /**
  * Анимационный индикатор ожидания ответа Давида Жабова без какого-либо текста:
- * фирменная жаба циклично подбрасывает объемную 3D золотую монетку с вертикальным кувырком и ловит её обратно.
+ * фирменная жаба циклично подбрасывает двустороннюю объемную 3D золотую монетку
+ * (Аверс: знак рубля ₽, Реверс: чеканный золотой барельеф жабы Давида) с вертикальным кувырком и ловит её обратно.
  */
 @Composable
 fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
@@ -1085,6 +1086,7 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
     val rubleShadowPath = remember { Path() }
     val rubleBowlPath = remember { Path() }
     val rubleHighlightPath = remember { Path() }
+    val embossedFrogSmilePath = remember { Path() }
     val shinePath = remember { Path() }
 
     Surface(
@@ -1155,7 +1157,7 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                     )
                 }
 
-                // --- ВЕРТИКАЛЬНОЕ 3D-ВРАЩЕНИЕ МОНЕТКИ (вокруг горизонтальной оси X) ---
+                // --- ВЕРТИКАЛЬНОЕ 3D-ВРАЩЕНИЕ ДВУСТОРОННЕЙ МОНЕТКИ (вокруг горизонтальной оси X) ---
                 val coinStartY = h * 0.67f
                 val coinPeakY = h * 0.15f
                 val coinY = coinStartY - (coinStartY - coinPeakY) * flightHeight
@@ -1163,10 +1165,10 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                 val coinRadius = w * 0.165f
 
                 // 2 полных оборота по вертикали за один цикл броска: ширина всегда = 1f, сжимается только высота scaleY
-                val spinAngle = p * 2f * PI.toFloat() * 2f
+                val spinAngle = p * 4.0f * PI.toFloat()
                 val flipCos = cos(spinAngle)
                 val flipSin = sin(spinAngle)
-                val faceScaleY = abs(flipCos).coerceAtLeast(0.10f)
+                val faceScaleY = abs(flipCos).coerceAtLeast(0.04f)
 
                 // Толщина 3D-гурта монеты и его вертикальный сдвиг
                 val rimThickness = coinRadius * 0.36f
@@ -1291,122 +1293,223 @@ fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
                         color = Color(0xFFFEF9C3).copy(alpha = 0.44f)
                     )
 
-                    // Объемный рельефный символ ₽ (темная тень #78350F со сдвигом +1.2.dp, бронзовый ₽ #92400E и верхний блик #FEF9C3)
-                    if (abs(flipCos) > 0.20f) {
-                        val strokeW = (coinRadius * 0.18f).coerceAtLeast(1.3f)
-                        val shadowShift = 1.2.dp.toPx().coerceAtMost(coinRadius * 0.13f)
-                        val highlightShift = 0.55.dp.toPx().coerceAtMost(coinRadius * 0.065f)
+                    // Двусторонняя чеканка монеты:
+                    // Аверс (flipCos >= 0f) — рельефный символ рубля ₽
+                    // Реверс (flipCos < 0f) — чеканный золотой барельеф жабы Давида
+                    if (abs(flipCos) > 0.14f) {
+                        if (flipCos >= 0f) {
+                            val strokeW = (coinRadius * 0.18f).coerceAtLeast(1.3f)
+                            val shadowShift = 1.2.dp.toPx().coerceAtMost(coinRadius * 0.13f)
+                            val highlightShift = 0.55.dp.toPx().coerceAtMost(coinRadius * 0.065f)
 
-                        val stemX = -coinRadius * 0.14f
-                        val topY = -coinRadius * 0.38f
-                        val botY = coinRadius * 0.40f
-                        val midY = coinRadius * 0.04f
-                        val barY = coinRadius * 0.20f
+                            val stemX = -coinRadius * 0.14f
+                            val topY = -coinRadius * 0.38f
+                            val botY = coinRadius * 0.40f
+                            val midY = coinRadius * 0.04f
+                            val barY = coinRadius * 0.20f
 
-                        // 1. Темная тень рельефа (#78350F) со сдвигом +1.2.dp
-                        val reliefShadowColor = Color(0xFF78350F).copy(alpha = 0.78f)
-                        drawLine(
-                            color = reliefShadowColor,
-                            start = Offset(stemX + shadowShift, topY + shadowShift),
-                            end = Offset(stemX + shadowShift, botY + shadowShift),
-                            strokeWidth = strokeW,
-                            cap = StrokeCap.Round
-                        )
-                        rubleShadowPath.reset()
-                        rubleShadowPath.moveTo(stemX + shadowShift, topY + shadowShift)
-                        rubleShadowPath.lineTo(coinRadius * 0.08f + shadowShift, topY + shadowShift)
-                        rubleShadowPath.arcTo(
-                            rect = Rect(
-                                left = -coinRadius * 0.08f + shadowShift,
-                                top = topY + shadowShift,
-                                right = coinRadius * 0.30f + shadowShift,
-                                bottom = midY + shadowShift
-                            ),
-                            startAngleDegrees = -90f,
-                            sweepAngleDegrees = 180f,
-                            forceMoveTo = false
-                        )
-                        rubleShadowPath.lineTo(stemX + shadowShift, midY + shadowShift)
-                        drawPath(
-                            path = rubleShadowPath,
-                            color = reliefShadowColor,
-                            style = Stroke(width = strokeW, cap = StrokeCap.Round)
-                        )
-                        drawLine(
-                            color = reliefShadowColor,
-                            start = Offset(-coinRadius * 0.28f + shadowShift, barY + shadowShift),
-                            end = Offset(coinRadius * 0.16f + shadowShift, barY + shadowShift),
-                            strokeWidth = strokeW * 0.85f,
-                            cap = StrokeCap.Round
-                        )
+                            // 1. Темная тень рельефа (#78350F) со сдвигом +1.2.dp
+                            val reliefShadowColor = Color(0xFF78350F).copy(alpha = 0.78f)
+                            drawLine(
+                                color = reliefShadowColor,
+                                start = Offset(stemX + shadowShift, topY + shadowShift),
+                                end = Offset(stemX + shadowShift, botY + shadowShift),
+                                strokeWidth = strokeW,
+                                cap = StrokeCap.Round
+                            )
+                            rubleShadowPath.reset()
+                            rubleShadowPath.moveTo(stemX + shadowShift, topY + shadowShift)
+                            rubleShadowPath.lineTo(coinRadius * 0.08f + shadowShift, topY + shadowShift)
+                            rubleShadowPath.arcTo(
+                                rect = Rect(
+                                    left = -coinRadius * 0.08f + shadowShift,
+                                    top = topY + shadowShift,
+                                    right = coinRadius * 0.30f + shadowShift,
+                                    bottom = midY + shadowShift
+                                ),
+                                startAngleDegrees = -90f,
+                                sweepAngleDegrees = 180f,
+                                forceMoveTo = false
+                            )
+                            rubleShadowPath.lineTo(stemX + shadowShift, midY + shadowShift)
+                            drawPath(
+                                path = rubleShadowPath,
+                                color = reliefShadowColor,
+                                style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                            )
+                            drawLine(
+                                color = reliefShadowColor,
+                                start = Offset(-coinRadius * 0.28f + shadowShift, barY + shadowShift),
+                                end = Offset(coinRadius * 0.16f + shadowShift, barY + shadowShift),
+                                strokeWidth = strokeW * 0.85f,
+                                cap = StrokeCap.Round
+                            )
 
-                        // 2. Золотисто-бронзовый символ ₽ (#92400E)
-                        val mainSymbolColor = Color(0xFF92400E)
-                        drawLine(
-                            color = mainSymbolColor,
-                            start = Offset(stemX, topY),
-                            end = Offset(stemX, botY),
-                            strokeWidth = strokeW,
-                            cap = StrokeCap.Round
-                        )
-                        rubleBowlPath.reset()
-                        rubleBowlPath.moveTo(stemX, topY)
-                        rubleBowlPath.lineTo(coinRadius * 0.08f, topY)
-                        rubleBowlPath.arcTo(
-                            rect = Rect(
-                                left = -coinRadius * 0.08f,
-                                top = topY,
-                                right = coinRadius * 0.30f,
-                                bottom = midY
-                            ),
-                            startAngleDegrees = -90f,
-                            sweepAngleDegrees = 180f,
-                            forceMoveTo = false
-                        )
-                        rubleBowlPath.lineTo(stemX, midY)
-                        drawPath(
-                            path = rubleBowlPath,
-                            color = mainSymbolColor,
-                            style = Stroke(width = strokeW, cap = StrokeCap.Round)
-                        )
-                        drawLine(
-                            color = mainSymbolColor,
-                            start = Offset(-coinRadius * 0.28f, barY),
-                            end = Offset(coinRadius * 0.16f, barY),
-                            strokeWidth = strokeW * 0.85f,
-                            cap = StrokeCap.Round
-                        )
+                            // 2. Золотисто-бронзовый символ ₽ (#92400E)
+                            val mainSymbolColor = Color(0xFF92400E)
+                            drawLine(
+                                color = mainSymbolColor,
+                                start = Offset(stemX, topY),
+                                end = Offset(stemX, botY),
+                                strokeWidth = strokeW,
+                                cap = StrokeCap.Round
+                            )
+                            rubleBowlPath.reset()
+                            rubleBowlPath.moveTo(stemX, topY)
+                            rubleBowlPath.lineTo(coinRadius * 0.08f, topY)
+                            rubleBowlPath.arcTo(
+                                rect = Rect(
+                                    left = -coinRadius * 0.08f,
+                                    top = topY,
+                                    right = coinRadius * 0.30f,
+                                    bottom = midY
+                                ),
+                                startAngleDegrees = -90f,
+                                sweepAngleDegrees = 180f,
+                                forceMoveTo = false
+                            )
+                            rubleBowlPath.lineTo(stemX, midY)
+                            drawPath(
+                                path = rubleBowlPath,
+                                color = mainSymbolColor,
+                                style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                            )
+                            drawLine(
+                                color = mainSymbolColor,
+                                start = Offset(-coinRadius * 0.28f, barY),
+                                end = Offset(coinRadius * 0.16f, barY),
+                                strokeWidth = strokeW * 0.85f,
+                                cap = StrokeCap.Round
+                            )
 
-                        // 3. Яркий верхний блик чеканки (#FEF9C3)
-                        val highlightColor = Color(0xFFFEF9C3).copy(alpha = 0.82f)
-                        val highlightW = (strokeW * 0.38f).coerceAtLeast(0.75f)
-                        drawLine(
-                            color = highlightColor,
-                            start = Offset(stemX - highlightShift, topY - highlightShift),
-                            end = Offset(stemX - highlightShift, botY - highlightShift),
-                            strokeWidth = highlightW,
-                            cap = StrokeCap.Round
-                        )
-                        rubleHighlightPath.reset()
-                        rubleHighlightPath.moveTo(stemX - highlightShift, topY - highlightShift)
-                        rubleHighlightPath.lineTo(coinRadius * 0.08f - highlightShift, topY - highlightShift)
-                        rubleHighlightPath.arcTo(
-                            rect = Rect(
-                                left = -coinRadius * 0.08f - highlightShift,
-                                top = topY - highlightShift,
-                                right = coinRadius * 0.30f - highlightShift,
-                                bottom = midY - highlightShift
-                            ),
-                            startAngleDegrees = -90f,
-                            sweepAngleDegrees = 180f,
-                            forceMoveTo = false
-                        )
-                        rubleHighlightPath.lineTo(stemX - highlightShift, midY - highlightShift)
-                        drawPath(
-                            path = rubleHighlightPath,
-                            color = highlightColor,
-                            style = Stroke(width = highlightW, cap = StrokeCap.Round)
-                        )
+                            // 3. Яркий верхний блик чеканки (#FEF9C3)
+                            val highlightColor = Color(0xFFFEF9C3).copy(alpha = 0.82f)
+                            val highlightW = (strokeW * 0.38f).coerceAtLeast(0.75f)
+                            drawLine(
+                                color = highlightColor,
+                                start = Offset(stemX - highlightShift, topY - highlightShift),
+                                end = Offset(stemX - highlightShift, botY - highlightShift),
+                                strokeWidth = highlightW,
+                                cap = StrokeCap.Round
+                            )
+                            rubleHighlightPath.reset()
+                            rubleHighlightPath.moveTo(stemX - highlightShift, topY - highlightShift)
+                            rubleHighlightPath.lineTo(coinRadius * 0.08f - highlightShift, topY - highlightShift)
+                            rubleHighlightPath.arcTo(
+                                rect = Rect(
+                                    left = -coinRadius * 0.08f - highlightShift,
+                                    top = topY - highlightShift,
+                                    right = coinRadius * 0.30f - highlightShift,
+                                    bottom = midY - highlightShift
+                                ),
+                                startAngleDegrees = -90f,
+                                sweepAngleDegrees = 180f,
+                                forceMoveTo = false
+                            )
+                            rubleHighlightPath.lineTo(stemX - highlightShift, midY - highlightShift)
+                            drawPath(
+                                path = rubleHighlightPath,
+                                color = highlightColor,
+                                style = Stroke(width = highlightW, cap = StrokeCap.Round)
+                            )
+                        } else {
+                            // Реверс (flipCos < 0f): чеканный золотой барельеф головы жабы Давида
+                            val r = coinRadius
+                            val highlightColor = Color(0xFFFEF08A).copy(alpha = 0.7f)
+                            val shadowStampColor = Color(0xFF78350F)
+                            val mainStampColor = Color(0xFF92400E)
+                            val innerStampColor = Color(0xFFB45309)
+
+                            val highlightOffset = Offset(-r * 0.02f, -r * 0.02f)
+                            val leftEyeCenter = Offset(-r * 0.24f, -r * 0.22f)
+                            val rightEyeCenter = Offset(r * 0.24f, -r * 0.22f)
+                            val eyeBumpRadius = r * 0.20f
+                            val headTopLeft = Offset(-r * 0.48f, -r * 0.20f)
+                            val headSize = Size(r * 0.96f, r * 0.62f)
+
+                            // 1) Светло-золотой блик барельефа со сдвигом (-r * 0.02f, -r * 0.02f)
+                            drawCircle(
+                                color = highlightColor,
+                                radius = eyeBumpRadius,
+                                center = leftEyeCenter + highlightOffset
+                            )
+                            drawCircle(
+                                color = highlightColor,
+                                radius = eyeBumpRadius,
+                                center = rightEyeCenter + highlightOffset
+                            )
+                            drawOval(
+                                color = highlightColor,
+                                topLeft = headTopLeft + highlightOffset,
+                                size = headSize
+                            )
+
+                            // 2) Основной штамп бугорков глаз и овала головы (#92400E / #B45309)
+                            drawCircle(
+                                color = mainStampColor,
+                                radius = eyeBumpRadius,
+                                center = leftEyeCenter
+                            )
+                            drawCircle(
+                                color = mainStampColor,
+                                radius = eyeBumpRadius,
+                                center = rightEyeCenter
+                            )
+                            drawOval(
+                                color = mainStampColor,
+                                topLeft = headTopLeft,
+                                size = headSize
+                            )
+                            drawOval(
+                                color = innerStampColor,
+                                topLeft = Offset(-r * 0.43f, -r * 0.16f),
+                                size = Size(r * 0.86f, r * 0.54f)
+                            )
+
+                            // 3) Внутри глазниц — светло-золотые радужки (#FDE047, r * 0.12f) и темные чеканные зрачки (#78350F, r * 0.07f)
+                            drawCircle(
+                                color = Color(0xFFFDE047),
+                                radius = r * 0.12f,
+                                center = leftEyeCenter
+                            )
+                            drawCircle(
+                                color = Color(0xFFFDE047),
+                                radius = r * 0.12f,
+                                center = rightEyeCenter
+                            )
+                            drawCircle(
+                                color = shadowStampColor,
+                                radius = r * 0.07f,
+                                center = leftEyeCenter
+                            )
+                            drawCircle(
+                                color = shadowStampColor,
+                                radius = r * 0.07f,
+                                center = rightEyeCenter
+                            )
+
+                            // 4) Две ноздри по центру и широкая довольная улыбка Давида
+                            val nostrilRadius = (r * 0.035f).coerceAtLeast(0.6f)
+                            drawCircle(
+                                color = shadowStampColor,
+                                radius = nostrilRadius,
+                                center = Offset(-r * 0.08f, -r * 0.04f)
+                            )
+                            drawCircle(
+                                color = shadowStampColor,
+                                radius = nostrilRadius,
+                                center = Offset(r * 0.08f, -r * 0.04f)
+                            )
+
+                            embossedFrogSmilePath.reset()
+                            embossedFrogSmilePath.moveTo(-r * 0.30f, r * 0.12f)
+                            embossedFrogSmilePath.quadraticTo(0f, r * 0.30f, r * 0.30f, r * 0.12f)
+                            drawPath(
+                                path = embossedFrogSmilePath,
+                                color = shadowStampColor,
+                                style = Stroke(width = (r * 0.065f).coerceAtLeast(1f), cap = StrokeCap.Round)
+                            )
+                        }
                     }
                 }
             }
