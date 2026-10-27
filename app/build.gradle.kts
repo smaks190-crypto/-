@@ -174,3 +174,15 @@ dependencies {
   // Локальное офлайн-распознавание речи VOSK отключено (используется прямая отправка аудио в Gemini)
   // implementation("com.alphacephei:vosk-android:0.3.47")
 }
+
+// Автоматическая верификация Unit-тестов Developer Console и компиляции Release Source Set при сборке Debug APK
+tasks.withType<Test>().configureEach {
+  filter {
+    includeTestsMatching("com.example.utils.GlobalConsoleLoggerTest")
+    includeTestsMatching("com.example.ExampleUnitTest")
+  }
+}
+
+tasks.matching { it.name == "assembleDebug" }.configureEach {
+  dependsOn("compileReleaseKotlin", "testDebugUnitTest")
+}
