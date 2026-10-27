@@ -132,6 +132,17 @@ jobs:
             --target "$GITHUB_SHA" \
             --latest
 
+      # ПРЕОБРАЗУЕМ СТАНДАРТНЫЕ ЗАМЕТКИ GITHUB В РУССКОЯЗЫЧНЫЙ ФОРМАТ
+      - name: Localize release notes to Russian
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v${RELEASE_VERSION}-build.${GITHUB_RUN_NUMBER}"
+          gh release view "$tag" --json body --jq .body > /tmp/release-notes-original.md
+          python3 .github/scripts/localize_release_notes.py /tmp/release-notes-original.md /tmp/release-notes-ru.md
+          gh release edit "$tag" --notes-file /tmp/release-notes-ru.md
+
       # ОБНОВЛЯЕМ БЛОК README ПОСЛЕ УСПЕШНОЙ ПУБЛИКАЦИИ
       - name: Update README with latest version and changes
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
