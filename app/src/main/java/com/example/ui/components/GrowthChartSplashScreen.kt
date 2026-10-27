@@ -52,17 +52,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.davidapp.DavidSoundManager
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 // Статический флаг процесса: гарантирует, что стартовая анимация проигрывается ровно один раз за сессию
 private var hasSplashPlayedInSession = false
 
-private const val SPLASH_TOTAL_DURATION_MS = 1350
-private const val PHASE_1_END = 480f / 1350f // 0..480 мс: Вылет монетки полностью за верхний край экрана
-// 480..1350 мс: Стремительное падение монетки сверху с ускорением навылет за нижний край экрана
+private const val SPLASH_TOTAL_DURATION_MS = 1420
+private const val PHASE_1_WINDUP_END = 0.09f // Подэтап 1А (0..~130 мс): Живой замах/приседание жабы с монеткой во рту
+private const val PHASE_1_END = 0.40f        // Подэтап 1Б (~130..568 мс): Выстрел монетки вверх за край экрана с 2 вертикальными 3D-оборотами
+// Фаза 2 (0.40f..1.0f): Стремительное падение монетки сверху с ускорением навылет за нижний край экрана
 
 // Ускоряющаяся кривая гравитации без торможения в конце — монетка и шторка пролетают нижний край на максимальной скорости
 private val CoinFallAndPullEasing = CubicBezierEasing(0.45f, 0.0f, 0.90f, 0.85f)
@@ -82,6 +85,14 @@ private val CurtainEdgeCoreColors = listOf(
     Color(0xFFFEF08A),
     Color(0xFF6EE7B7),
     Color(0xFF10B981).copy(alpha = 0.55f)
+)
+
+private val Coin3dRimGradientColors = listOf(
+    Color(0xFF78350F),
+    Color(0xFFB45309),
+    Color(0xFFFDE047),
+    Color(0xFFB45309),
+    Color(0xFF78350F)
 )
 
 private val CoinRimGradientColors = listOf(
@@ -132,6 +143,8 @@ private class SplashCachedBrushes {
         private set
     var frogAuraBrush: Brush = Brush.linearGradient(listOf(Color(0xFF0D2818), Color.Transparent))
         private set
+    var coin3dRimBrush: Brush = Brush.horizontalGradient(Coin3dRimGradientColors)
+        private set
     var coinRimBrush: Brush = Brush.linearGradient(CoinRimGradientColors)
         private set
     var coinCoreBrush: Brush = Brush.linearGradient(CoinCoreGradientColors)
@@ -174,6 +187,11 @@ private class SplashCachedBrushes {
         val cr = baseCoinRadius.coerceAtLeast(10f)
         if (abs(cr - cachedCoinRadius) > 0.5f) {
             cachedCoinRadius = cr
+            coin3dRimBrush = Brush.horizontalGradient(
+                colors = Coin3dRimGradientColors,
+                startX = -cr,
+                endX = cr
+            )
             coinRimBrush = Brush.linearGradient(
                 colors = CoinRimGradientColors,
                 start = Offset(-cr, -cr),
@@ -294,16 +312,18 @@ private fun SplashCanvasOverlay(
         // Предварительный прогрев PCM-буфера звона монетки в фоновом потоке
         DavidSoundManager.warmUpCoinToss()
 
-        // Дожидаемся 3 кадров отрисовки и выдерживаем паузу стабилизации 320 мс:
-        // в это время на экране нарисована жаба с золотой монеткой во рту (t == 0f),
-        // а под шторкой полностью завершаются запросы Room БД и первая верстка MainAppScreen / графиков
-        repeat(3) {
+        // Ждем ровно 2 кадра и минимальную паузу 50 мс — и сразу начинаем живой замах жабы!
+        repeat(2) {
             withFrameNanos { }
         }
-        delay(320L)
+        delay(50L)
 
-        // В момент отрыва монетки изо рта жабы вверх запускаем мягкий звон «Дзынь!» в фоновом потоке
-        DavidSoundManager.playCoinToss(context)
+        // Ровно в момент t = 0.09f (~130 мс от старта таймлайна, когда жаба завершает замах и выстреливает монетку вверх)
+        // синхронно включаем звон монетки
+        launch {
+            delay(130L)
+            DavidSoundManager.playCoinToss(context)
+        }
 
         masterTimeline.animateTo(
             targetValue = 1f,
@@ -342,13 +362,11 @@ private fun SplashCanvasOverlay(
             auraRadius = auraRadius
         )
 
-        // Фаза 1 (0..480 мс): Взлет монетки изо рта жабы полностью за верхний край экрана (-coinRadius * 2.2f)
-        val p1 = (t / PHASE_1_END).coerceIn(0f, 1f)
-        // Фаза 2 (480..1350 мс): Возвращение монетки сверху из-за экрана (-coinRadius * 1.5f) и стягивание шторки вниз
+        // Прогресс Фазы 2 (0.40f..1.0f)
         val p2 = ((t - PHASE_1_END) / (1f - PHASE_1_END)).coerceIn(0f, 1f)
 
         val coinY: Float
-        val coinFlipScaleX: Float
+        val coinSpinAngle: Float
         val coinScale: Float
         val coinGlowIntensity: Float
 
@@ -356,39 +374,81 @@ private fun SplashCanvasOverlay(
         val currentDipDepth: Float
         val revealActive: Boolean
 
-        if (t <= 0.0001f) {
-            // Во время стартовой паузы стабилизации (320 мс при t == 0f) золотая монетка находится прямо во рту у жабы
-            coinY = mouthOriginY
-            coinFlipScaleX = 1f
-            coinScale = 0.86f
-            coinGlowIntensity = 0.35f
+        val tossScaleX: Float
+        val tossScaleY: Float
+        val windupSquatPushY: Float
+        val flightUpProgress: Float
+
+        if (t <= PHASE_1_WINDUP_END) {
+            // --- ПОДЭТАП 1А (t от 0f до 0.09f, первые ~130 мс): Живой замах / приседание жабы с монеткой во рту ---
+            val windupProgress = (t / PHASE_1_WINDUP_END).coerceIn(0f, 1f)
+            val windupEased = FastOutSlowInEasing.transform(windupProgress)
+
+            // Жаба плавно приседает, набирая пружинную инерцию для броска (scaleY: 1.0f -> 0.86f, scaleX: 1.0f -> 1.10f)
+            tossScaleX = lerpFloat(1.0f, 1.10f, windupEased)
+            tossScaleY = lerpFloat(1.0f, 0.86f, windupEased)
+            windupSquatPushY = windupEased * (frogBaseRadius * 0.14f)
+            flightUpProgress = 0f
+
+            // Монетка сидит во рту жабы и опускается вместе с её ртом во время приседания
+            coinY = mouthOriginY + windupSquatPushY * 1.15f
+            coinSpinAngle = 0f
+            coinScale = lerpFloat(0.86f, 0.90f, windupEased)
+            coinGlowIntensity = lerpFloat(0.32f, 0.45f, windupEased)
+
             curtainTopY = 0f
             currentDipDepth = 0f
             revealActive = false
         } else if (t <= PHASE_1_END) {
-            // --- ФАЗА 1: Вылет монетки вверх ПОЛНОСТЬЮ за верхнюю границу экрана ---
-            val easedUp = FastOutSlowInEasing.transform(p1)
-            val offscreenTopTargetY = -baseCoinRadius * 2.2f
-            coinY = lerpFloat(mouthOriginY, offscreenTopTargetY, easedUp)
+            // --- ПОДЭТАП 1Б (t от 0.09f до PHASE_1_END): Выстрел монетки вверх за край экрана ---
+            val rawFlight = ((t - PHASE_1_WINDUP_END) / (PHASE_1_END - PHASE_1_WINDUP_END)).coerceIn(0f, 1f)
+            flightUpProgress = FastOutSlowInEasing.transform(rawFlight)
 
-            // 2.5 оборота в воздухе по мере взлета за верхний край экрана
-            val spinAngle = easedUp * 2.5f * PI.toFloat()
-            coinFlipScaleX = cos(spinAngle)
-            coinScale = lerpFloat(0.86f, 1.06f, easedUp)
-            coinGlowIntensity = (0.35f + p1 * 0.45f).coerceIn(0f, 1f)
+            // Жаба резко распрямляется вверх (scaleY: 0.86f -> 1.08f -> 1.0f, scaleX: 1.10f -> 0.95f -> 1.0f)
+            if (rawFlight < 0.45f) {
+                val k = FastOutSlowInEasing.transform(rawFlight / 0.45f)
+                tossScaleX = lerpFloat(1.10f, 0.95f, k)
+                tossScaleY = lerpFloat(0.86f, 1.08f, k)
+                windupSquatPushY = lerpFloat(frogBaseRadius * 0.14f, -frogBaseRadius * 0.06f, k)
+            } else {
+                val k = LinearOutSlowInEasing.transform((rawFlight - 0.45f) / 0.55f)
+                tossScaleX = lerpFloat(0.95f, 1.0f, k)
+                tossScaleY = lerpFloat(1.08f, 1.0f, k)
+                windupSquatPushY = lerpFloat(-frogBaseRadius * 0.06f, 0f, k)
+            }
+
+            val launchOriginY = mouthOriginY + frogBaseRadius * 0.14f * 1.15f
+            val offscreenTopTargetY = -baseCoinRadius * 2.2f
+            coinY = lerpFloat(launchOriginY, offscreenTopTargetY, flightUpProgress)
+
+            // Монетка совершает 2 полных вертикальных 3D-оборота в воздухе
+            coinSpinAngle = flightUpProgress * 4f * PI.toFloat()
+            coinScale = lerpFloat(0.90f, 1.06f, flightUpProgress)
+            coinGlowIntensity = (0.45f + rawFlight * 0.40f).coerceIn(0f, 1f)
 
             curtainTopY = 0f
             currentDipDepth = 0f
             revealActive = false
         } else {
             // --- ФАЗА 2: Падение сверху из-за экрана и синхронный захват темной шторки ---
+            tossScaleX = 1.0f
+            tossScaleY = 1.0f
+            windupSquatPushY = 0f
+            flightUpProgress = 1f
+
             val easedFall = CoinFallAndPullEasing.transform(p2)
             val fallStartY = -baseCoinRadius * 1.5f
             val fallEndY = h + maxDipDepth * 1.35f
             coinY = lerpFloat(fallStartY, fallEndY, easedFall)
 
-            // При падении монетка развернута анфас (с короной и символом ₽) и ярко сияет
-            coinFlipScaleX = 1f
+            // В начале падения (p2 in 0f..0.18f) монетка завершает финальный полуоборот до 0f,
+            // а далее тянет шторку вниз анфас с живым 3D-покачиванием, показывающим золотой гурт!
+            coinSpinAngle = if (p2 <= 0.18f) {
+                val finishTurn = FastOutSlowInEasing.transform((p2 / 0.18f).coerceIn(0f, 1f))
+                lerpFloat(-PI.toFloat(), 0f, finishTurn)
+            } else {
+                sin((p2 - 0.18f) * PI.toFloat() * 3f) * 0.22f
+            }
 
             if (coinY <= 0f) {
                 curtainTopY = 0f
@@ -414,18 +474,6 @@ private fun SplashCanvasOverlay(
 
         val curtainDipBottomY = curtainTopY + currentDipDepth
 
-        // --- Параметры жабы (остается внутри шторки и ждет монетку) ---
-        val squashWindow = if (t <= 0.0001f) {
-            0f
-        } else {
-            (t / (150f / SPLASH_TOTAL_DURATION_MS)).coerceIn(0f, 1f)
-        }
-        val (tossScaleX, tossScaleY) = if (t <= 0.0001f) {
-            Pair(1f, 1f)
-        } else {
-            computeFrogSquashStretch(squashWindow)
-        }
-
         // Когда прогиб шторки с монеткой доходит до макушки жабы (curtainDipBottomY >= frogTopY),
         // жаба упруго сжимается вниз и плавно растворяется по мере прохождения шторки сквозь неё
         val frogTopY = frogY - frogBaseRadius * 0.95f
@@ -447,19 +495,36 @@ private fun SplashCanvasOverlay(
             (1f - ((contactProgress - 0.30f) / 0.70f)).coerceIn(0f, 1f)
         }
 
-        val eyeLookUpProgress = if (t <= 0.0001f) {
-            0f
-        } else if (t <= PHASE_1_END) {
-            FastOutSlowInEasing.transform(p1)
-        } else {
-            1f - contactEased * 0.5f
+        val eyeLookUpProgress = when {
+            t <= PHASE_1_WINDUP_END -> {
+                // Во время приседания взгляд чуть опускается к монетке во рту
+                -0.18f * (t / PHASE_1_WINDUP_END).coerceIn(0f, 1f)
+            }
+            t <= PHASE_1_END -> {
+                lerpFloat(-0.18f, 1f, flightUpProgress)
+            }
+            else -> {
+                1f - contactEased * 0.5f
+            }
         }
 
         val mouthOpenFactor = when {
-            t <= 0.0001f -> 0.42f
-            squashWindow < 0.35f -> lerpFloat(0.42f, 1f, squashWindow / 0.35f)
-            t <= PHASE_1_END -> (1f - ((p1 - 0.20f) / 0.55f).coerceIn(0f, 1f) * 0.65f)
-            contactProgress > 0f -> (0.35f + 0.35f * sin(contactProgress * PI.toFloat())).coerceIn(0.2f, 0.7f)
+            t <= PHASE_1_WINDUP_END -> {
+                // Во время замаха жаба держит монетку во рту
+                lerpFloat(0.38f, 0.52f, (t / PHASE_1_WINDUP_END).coerceIn(0f, 1f))
+            }
+            t <= PHASE_1_END -> {
+                val rawFlight = ((t - PHASE_1_WINDUP_END) / (PHASE_1_END - PHASE_1_WINDUP_END)).coerceIn(0f, 1f)
+                if (rawFlight < 0.28f) {
+                    // Резкое раскрытие рта при выстреле монетки вверх
+                    lerpFloat(0.52f, 1.0f, rawFlight / 0.28f)
+                } else {
+                    lerpFloat(1.0f, 0.35f, ((rawFlight - 0.28f) / 0.72f).coerceIn(0f, 1f))
+                }
+            }
+            contactProgress > 0f -> {
+                (0.35f + 0.35f * sin(contactProgress * PI.toFloat())).coerceIn(0.2f, 0.7f)
+            }
             else -> 0.35f
         }.coerceIn(0.18f, 1f)
 
@@ -470,7 +535,7 @@ private fun SplashCanvasOverlay(
             curtainTopY = curtainTopY,
             dipDepth = currentDipDepth,
             revealActive = revealActive,
-            frogCenter = Offset(centerX, frogY + contactPushY),
+            frogCenter = Offset(centerX, frogY + windupSquatPushY + contactPushY),
             frogBaseRadius = frogBaseRadius,
             auraRadius = auraRadius,
             frogScaleX = tossScaleX * contactScaleX,
@@ -482,13 +547,13 @@ private fun SplashCanvasOverlay(
 
         // 2. РИСУЕМ СВЕТО-ШЛЕЙФ И СКОРОСТНЫЕ ЛИНИИ МОНЕТКИ БЕЗ СОЗДАНИЯ BRUSH
         val effectiveCoinRadius = baseCoinRadius * coinScale
-        if (t > 0.0001f && t <= PHASE_1_END) {
+        if (t > PHASE_1_WINDUP_END && t <= PHASE_1_END) {
             drawUpwardTossArcs(
                 centerX = centerX,
                 coinY = coinY,
                 mouthY = mouthOriginY,
                 coinRadius = effectiveCoinRadius,
-                progress = p1
+                progress = flightUpProgress
             )
         } else if (t > PHASE_1_END) {
             val trailStrength = (1f - (p2 / 0.88f)).coerceIn(0f, 1f)
@@ -503,48 +568,16 @@ private fun SplashCanvasOverlay(
             }
         }
 
-        // 3. РИСУЕМ ЗОЛОТУЮ МОНЕТКУ С КЭШИРОВАННЫМИ BRUSH
+        // 3. РИСУЕМ ОБЪЕМНУЮ 3D-ЗОЛОТУЮ МОНЕТКУ С ВЕРТИКАЛЬНЫМ КУВЫРКОМ И РИФЛЕНЫМ ГУРТОМ
         if (coinY + effectiveCoinRadius * 2f >= 0f && coinY - effectiveCoinRadius * 2f <= h) {
             drawGoldenCoin(
                 brushes = cachedBrushes,
                 center = Offset(centerX, coinY),
                 baseRadius = baseCoinRadius,
                 coinScale = coinScale,
-                flipScaleX = coinFlipScaleX,
+                spinAngle = coinSpinAngle,
                 glowIntensity = coinGlowIntensity,
                 timeProgress = t
-            )
-        }
-    }
-}
-
-/**
- * Вычисляет пружинный Squash & Stretch импульс жабы в первые 150 мс:
- * scaleY: 1.0f -> 0.88f -> 1.06f -> 1.0f
- * scaleX: 1.0f -> 1.08f -> 0.96f -> 1.0f
- */
-private fun computeFrogSquashStretch(progress: Float): Pair<Float, Float> {
-    val p = progress.coerceIn(0f, 1f)
-    return when {
-        p < 0.40f -> {
-            val k = FastOutSlowInEasing.transform(p / 0.40f)
-            Pair(
-                lerpFloat(1.0f, 1.08f, k),
-                lerpFloat(1.0f, 0.88f, k)
-            )
-        }
-        p < 0.75f -> {
-            val k = FastOutSlowInEasing.transform((p - 0.40f) / 0.35f)
-            Pair(
-                lerpFloat(1.08f, 0.96f, k),
-                lerpFloat(0.88f, 1.06f, k)
-            )
-        }
-        else -> {
-            val k = LinearOutSlowInEasing.transform((p - 0.75f) / 0.25f)
-            Pair(
-                lerpFloat(0.96f, 1.0f, k),
-                lerpFloat(1.06f, 1.0f, k)
             )
         }
     }
@@ -889,7 +922,8 @@ private fun DrawScope.drawEmojiFrog(
 }
 
 /**
- * Отрисовка золотой монетки с кэшированными `coinOuterGlowBrush`, `coinRimBrush`, `coinCoreBrush` и переиспользуемыми `Path`
+ * Отрисовка объемной 3D-золотой монетки с вертикальным кувырком вокруг горизонтальной оси X,
+ * массивным рифленым гуртом (9 насечек) и двухслойной 3D-штамповкой короны и знака `₽`
  * (0 аллокаций `Brush` внутри `onDraw`).
  */
 private fun DrawScope.drawGoldenCoin(
@@ -897,18 +931,24 @@ private fun DrawScope.drawGoldenCoin(
     center: Offset,
     baseRadius: Float,
     coinScale: Float,
-    flipScaleX: Float,
+    spinAngle: Float,
     glowIntensity: Float,
     timeProgress: Float
 ) {
     val r = baseRadius.coerceAtLeast(10f)
-    val absFlip = abs(flipScaleX).coerceIn(0.14f, 1f)
-    val edgeThickness = (r * 0.22f * (1f - absFlip)).coerceAtLeast(2.dp.toPx())
+    val flipCos = cos(spinAngle)
+    val flipSin = sin(spinAngle)
+
+    // Монетка всегда сохраняет полную горизонтальную ширину (scaleX = 1f) и сжимается ТОЛЬКО по вертикали!
+    val faceScaleY = abs(flipCos).coerceAtLeast(0.12f)
+    val rimThickness = r * 0.34f // Толщина 3D-гурта монеты
+    val rimOffsetY = flipSin * rimThickness // Вертикальный сдвиг задней стенки ребра
 
     withTransform({
         translate(left = center.x, top = center.y)
         scale(scaleX = coinScale, scaleY = coinScale, pivot = Offset.Zero)
     }) {
+        // Внешнее золотое свечение
         drawCircle(
             brush = brushes.coinOuterGlowBrush,
             radius = r * 2.6f,
@@ -916,27 +956,66 @@ private fun DrawScope.drawGoldenCoin(
             alpha = (0.45f + 0.55f * glowIntensity).coerceIn(0f, 1f)
         )
 
-        drawOval(
-            color = Color(0xFFB45309),
-            topLeft = Offset(-r * absFlip - edgeThickness, -r),
-            size = Size(r * 2f * absFlip + edgeThickness * 2f, r * 2f)
-        )
+        // Слой 1 — Массивный цилиндрический 3D-гурт (боковое золотое ребро из 7 промежуточных овалов)
+        val steps = 6
+        for (step in 0..steps) {
+            val fraction = step.toFloat() / steps
+            val sliceY = lerpFloat(rimOffsetY, -rimOffsetY * 0.25f, fraction)
+            drawOval(
+                brush = brushes.coin3dRimBrush,
+                topLeft = Offset(-r, sliceY - r * faceScaleY),
+                size = Size(r * 2f, r * 2f * faceScaleY)
+            )
+        }
 
+        // Рифление ребра (9 вертикальных насечек гурта вдоль ширины монеты)
+        if (abs(rimOffsetY) > 1.5f) {
+            val notchStroke = (r * 0.055f).coerceAtLeast(1.5f)
+            for (notch in -4..4) {
+                val notchX = notch * (r * 0.20f)
+                val normalizedX = (notchX / r).coerceIn(-0.95f, 0.95f)
+                val curveY = sqrt((1f - normalizedX * normalizedX).coerceAtLeast(0f)) * r * faceScaleY
+                val frontEdgeY = -rimOffsetY * 0.25f + if (rimOffsetY > 0f) curveY else -curveY
+                val backEdgeY = rimOffsetY + if (rimOffsetY > 0f) curveY else -curveY
+                drawLine(
+                    color = if (notch % 2 == 0) {
+                        Color(0xFF78350F).copy(alpha = 0.82f)
+                    } else {
+                        Color(0xFFFEF08A).copy(alpha = 0.65f)
+                    },
+                    start = Offset(notchX, frontEdgeY),
+                    end = Offset(notchX, backEdgeY),
+                    strokeWidth = notchStroke,
+                    cap = StrokeCap.Round
+                )
+            }
+        }
+
+        // Слой 2 — Лицевая / оборотная грань монеты с 3D-фаской и рельефной эмблемой
         withTransform({
-            scale(scaleX = absFlip, scaleY = 1f, pivot = Offset.Zero)
+            translate(left = 0f, top = -rimOffsetY * 0.25f)
+            scale(scaleX = 1f, scaleY = faceScaleY, pivot = Offset.Zero)
         }) {
+            // Внешний золотой обод
             drawCircle(
                 brush = brushes.coinRimBrush,
                 radius = r,
                 center = Offset.Zero
             )
 
+            // Внутреннее утопленное кольцо со смещенным световым бликом фаски
             drawCircle(
-                color = Color(0xFFD97706),
-                radius = r * 0.80f,
+                color = Color(0xFFB45309),
+                radius = r * 0.82f,
                 center = Offset.Zero
             )
+            drawCircle(
+                color = Color(0xFFFEF08A).copy(alpha = 0.55f),
+                radius = r * 0.80f,
+                center = Offset(-r * 0.02f, -r * 0.03f)
+            )
 
+            // Центральное золотое ядро
             val coreRadius = (r * 0.74f).coerceAtLeast(2f)
             drawCircle(
                 brush = brushes.coinCoreBrush,
@@ -944,6 +1023,7 @@ private fun DrawScope.drawGoldenCoin(
                 center = Offset.Zero
             )
 
+            // Диагональный солнечный блик
             val shineShift = sin(timeProgress * PI.toFloat() * 4f) * r * 0.12f
             val shinePath = brushes.shinePath
             shinePath.reset()
@@ -958,8 +1038,13 @@ private fun DrawScope.drawGoldenCoin(
                 color = Color(0xFFFEF08A).copy(alpha = 0.45f)
             )
 
-            if (absFlip > 0.28f) {
+            // Двухслойная 3D-штамповка короны и знака рубля ₽ с верхним световым бликом
+            if (abs(flipCos) > 0.20f) {
+                val shadowColor = Color(0xFF78350F)
                 val emblemColor = Color(0xFF92400E)
+                val highlightColor = Color(0xFFFEF08A).copy(alpha = 0.45f)
+                val reliefShiftY = r * 0.045f
+                val highlightShiftY = -r * 0.022f
 
                 val crownPath = brushes.crownPath
                 crownPath.reset()
@@ -975,21 +1060,11 @@ private fun DrawScope.drawGoldenCoin(
                 crownPath.lineTo(cw * 0.75f, baseY)
                 crownPath.close()
 
-                drawPath(path = crownPath, color = emblemColor)
-
                 val strokeW = (r * 0.13f).coerceAtLeast(2f)
                 val stemX = -r * 0.14f
                 val topR = -r * 0.16f
                 val bottomR = r * 0.48f
                 val midR = r * 0.16f
-
-                drawLine(
-                    color = emblemColor,
-                    start = Offset(stemX, topR),
-                    end = Offset(stemX, bottomR),
-                    strokeWidth = strokeW,
-                    cap = StrokeCap.Round
-                )
 
                 val bowlPath = brushes.rubleBowlPath
                 bowlPath.reset()
@@ -1008,6 +1083,41 @@ private fun DrawScope.drawGoldenCoin(
                 )
                 bowlPath.lineTo(stemX - r * 0.12f, midR)
 
+                // 1) Нижний слой штамповки — глубокая тень рельефа (+reliefShiftY)
+                withTransform({
+                    translate(left = 0f, top = reliefShiftY)
+                }) {
+                    drawPath(path = crownPath, color = shadowColor)
+                    drawLine(
+                        color = shadowColor,
+                        start = Offset(stemX, topR),
+                        end = Offset(stemX, bottomR),
+                        strokeWidth = strokeW,
+                        cap = StrokeCap.Round
+                    )
+                    drawPath(
+                        path = bowlPath,
+                        color = shadowColor,
+                        style = Stroke(width = strokeW, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    )
+                    drawLine(
+                        color = shadowColor,
+                        start = Offset(stemX - r * 0.12f, r * 0.31f),
+                        end = Offset(r * 0.20f, r * 0.31f),
+                        strokeWidth = strokeW * 0.88f,
+                        cap = StrokeCap.Round
+                    )
+                }
+
+                // 2) Основной слой штамповки (Offset.Zero)
+                drawPath(path = crownPath, color = emblemColor)
+                drawLine(
+                    color = emblemColor,
+                    start = Offset(stemX, topR),
+                    end = Offset(stemX, bottomR),
+                    strokeWidth = strokeW,
+                    cap = StrokeCap.Round
+                )
                 drawPath(
                     path = bowlPath,
                     color = emblemColor,
@@ -1020,6 +1130,25 @@ private fun DrawScope.drawGoldenCoin(
                     strokeWidth = strokeW * 0.88f,
                     cap = StrokeCap.Round
                 )
+
+                // 3) Тонкий верхний блик чеканки
+                withTransform({
+                    translate(left = 0f, top = highlightShiftY)
+                }) {
+                    drawPath(path = crownPath, color = highlightColor)
+                    drawLine(
+                        color = highlightColor,
+                        start = Offset(stemX, topR),
+                        end = Offset(stemX, bottomR),
+                        strokeWidth = strokeW * 0.45f,
+                        cap = StrokeCap.Round
+                    )
+                    drawPath(
+                        path = bowlPath,
+                        color = highlightColor,
+                        style = Stroke(width = strokeW * 0.45f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    )
+                }
             }
         }
     }
@@ -1136,34 +1265,38 @@ fun SplashDemoPreview() {
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(24.dp))
                         .background(Color(0xFF111C2D))
-                        .border(1.dp, Color(0xFF10B981).copy(alpha = 0.45f), RoundedCornerShape(24.dp))
+                        .border(
+                            width = 1.dp,
+                            color = Color(0xFF10B981).copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(24.dp)
+                        )
                         .padding(20.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF064E3B)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        BrandFrogAvatar(size = 34.dp)
-                    }
                     Column {
                         Text(
-                            text = "Привет, Жабик!",
-                            color = Color(0xFF6EE7B7),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
+                            text = "DAVID FINANCE",
+                            color = Color(0xFF34D399),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Баланс: 1 250 ₽",
+                            text = "1 480 500 ₽",
                             color = Color.White,
-                            fontSize = 24.sp,
+                            fontSize = 28.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF10B981).copy(alpha = 0.2f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        BrandFrogAvatar(size = 32.dp)
                     }
                 }
             }
