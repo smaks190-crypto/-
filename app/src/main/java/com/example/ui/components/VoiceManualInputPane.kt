@@ -46,7 +46,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -659,19 +658,14 @@ fun VoiceManualInputPane(
                     modifier = Modifier
                         .weight(1f)
                         .height(52.dp)
-                        .shadow(
-                            elevation = if (isAmountValid) 12.dp else 0.dp,
-                            shape = RoundedCornerShape(16.dp),
-                            ambientColor = Emerald400,
-                            spotColor = Emerald400
-                        )
                         .clip(RoundedCornerShape(16.dp))
+                        .background(BentoFieldBg)
                         .background(
                             brush = if (isAmountValid) {
                                 Brush.horizontalGradient(
                                     colors = listOf(
-                                        Emerald400.copy(alpha = 0.24f),
-                                        NeonCyan.copy(alpha = 0.16f)
+                                        Emerald400.copy(alpha = 0.28f),
+                                        NeonCyan.copy(alpha = 0.18f)
                                     )
                                 )
                             } else {
@@ -846,13 +840,6 @@ fun ObsidianBentoDateCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val yearStr = remember(dateIso) {
-        try {
-            if (dateIso.length >= 4) dateIso.substring(0, 4) else ""
-        } catch (_: Exception) {
-            ""
-        }
-    }
     val monthNum = remember(dateIso) {
         try {
             if (dateIso.length >= 7) dateIso.substring(5, 7).toInt() else 1
@@ -900,10 +887,10 @@ fun ObsidianBentoDateCard(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "$monthNameRu $yearStr",
+                text = monthNameRu,
                 color = Color.White,
                 fontFamily = ManropeFontFamily,
-                fontSize = 13.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

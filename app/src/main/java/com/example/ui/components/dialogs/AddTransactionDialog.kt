@@ -47,7 +47,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -708,19 +707,14 @@ fun AddTransactionDialog(
                     modifier = Modifier
                         .weight(1f)
                         .height(52.dp)
-                        .shadow(
-                            elevation = if (isAmountValid) 12.dp else 0.dp,
-                            shape = RoundedCornerShape(16.dp),
-                            ambientColor = Emerald400,
-                            spotColor = Emerald400
-                        )
                         .clip(RoundedCornerShape(16.dp))
+                        .background(DialogBentoFieldBg)
                         .background(
                             brush = if (isAmountValid) {
                                 Brush.horizontalGradient(
                                     colors = listOf(
-                                        Emerald400.copy(alpha = 0.24f),
-                                        NeonCyan.copy(alpha = 0.16f)
+                                        Emerald400.copy(alpha = 0.28f),
+                                        NeonCyan.copy(alpha = 0.18f)
                                     )
                                 )
                             } else {
