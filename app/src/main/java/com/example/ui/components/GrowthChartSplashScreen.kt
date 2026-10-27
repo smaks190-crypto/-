@@ -459,7 +459,7 @@ private fun SplashCanvasOverlay(
         val currentFrogScaleY = tossScaleY * contactScaleY
 
         // Точная посадка монетки в нижней челюсти жабы (как на системной иконке ic_launcher_foreground.xml)
-        val mouthOriginY = currentFrogCenterY + (frogBaseRadius * 0.68f) * currentFrogScaleY
+        val mouthOriginY = currentFrogCenterY + (frogBaseRadius * 0.35f) * currentFrogScaleY
 
         if (t <= PHASE_1_END && p1 <= PHASE_1_HOLD_RATIO) {
             // --- Первые 6% Фазы 1 (p1 <= 0.06f): монетка плотно сидит во рту и НЕ движется вверх сквозь губу ---
@@ -474,8 +474,8 @@ private fun SplashCanvasOverlay(
             val offscreenTopTargetY = -baseCoinRadius * 2.4f
             coinY = lerpFloat(mouthOriginY, offscreenTopTargetY, easedUp)
 
-            // 2 полных 3D-оборота (4 смены стороны: ₽ -> Жаба -> ₽ -> Жаба -> ₽)
-            coinSpinAngle = easedUp * 4.0f * PI.toFloat()
+            // Один читаемый полный оборот при взлёте: ₽ -> ребро -> жаба -> ребро -> ₽
+            coinSpinAngle = launchProgress * 2.0f * PI.toFloat()
             coinScale = lerpFloat(0.82f, 1.06f, easedUp)
             coinGlowIntensity = (0.35f + launchProgress * 0.50f).coerceIn(0f, 1f)
         } else {
@@ -485,8 +485,8 @@ private fun SplashCanvasOverlay(
             val fallEndY = h + maxDipDepth * 1.35f
             coinY = lerpFloat(fallStartY, fallEndY, easedFall)
 
-            // 3 полных 3D-оборота при падении сверху вниз (непрерывное продолжение от 4*PI)
-            coinSpinAngle = (4.0f + p2 * 6.0f) * PI.toFloat()
+            // Два полных оборота при падении, непрерывное продолжение от 2*PI
+            coinSpinAngle = (2.0f + p2 * 4.0f) * PI.toFloat()
 
             if (coinY <= 0f) {
                 coinScale = 1.08f
@@ -580,10 +580,18 @@ private fun SplashCanvasOverlay(
         // 3. РИСУЕМ ДВУСТОРОННЮЮ ОБЪЕМНУЮ 3D-ЗОЛОТУЮ МОНЕТКУ (Аверс: ₽ с короной / Реверс: золотая жаба Давид)
         if (coinY + effectiveCoinRadius * 2f >= 0f && coinY - effectiveCoinRadius * 2f <= h) {
             if (t <= PHASE_1_END && p1 <= PHASE_1_HOLD_RATIO) {
-                // Жестко отсекаем отрисовку монетки сверху на старте (p1 <= 0.06f), чтобы ни один пиксель
-                // монетки или ее свечения гарантированно не мог вылезти выше верхней губы!
-                val lipClipTop = currentFrogCenterY + (frogBaseRadius * 0.18f) * currentFrogScaleY
-                clipRect(top = lipClipTop) {
+                // Clip the coin to the actual mouth cavity. No second painted-on upper lip.
+                val mouthR = frogBaseRadius.coerceAtLeast(16f)
+                val mouthHalfWidth = mouthR * 0.66f * currentFrogScaleX
+                val mouthTop = currentFrogCenterY + mouthR * 0.16f * currentFrogScaleY
+                val mouthHeight = mouthR * (0.18f + 0.30f * mouthOpenFactor) * currentFrogScaleY
+                val mouthClip = reusablePaths.upperLipOverlapPath
+                mouthClip.reset()
+                mouthClip.moveTo(centerX - mouthHalfWidth, mouthTop)
+                mouthClip.quadraticTo(centerX, mouthTop - mouthR * 0.10f * currentFrogScaleY, centerX + mouthHalfWidth, mouthTop)
+                mouthClip.quadraticTo(centerX, mouthTop + mouthHeight, centerX - mouthHalfWidth, mouthTop)
+                mouthClip.close()
+                clipPath(mouthClip) {
                     drawGoldenCoin(
                         paths = reusablePaths,
                         brushes = cachedBrushes,
@@ -609,24 +617,7 @@ private fun SplashCanvasOverlay(
             }
         }
 
-        // 4. ПЕРЕКРЫТИЕ ВЕРХНЕЙ ГУБОЙ ЖАБЫ НА СТАРТЕ (p1 <= 0.08f, плавно гаснет к 0.10f)
-        val lipOverlapAlpha = when {
-            t > PHASE_1_END -> 0f
-            p1 <= 0.08f -> 1f
-            p1 < 0.10f -> (1f - (p1 - 0.08f) / 0.02f).coerceIn(0f, 1f)
-            else -> 0f
-        } * frogAlpha
 
-        if (lipOverlapAlpha > 0.01f) {
-            drawFrogUpperLipOverlap(
-                paths = reusablePaths,
-                center = Offset(centerX, currentFrogCenterY),
-                baseRadius = frogBaseRadius,
-                scaleX = currentFrogScaleX,
-                scaleY = currentFrogScaleY,
-                lipAlpha = lipOverlapAlpha
-            )
-        }
     }
 }
 
@@ -973,53 +964,6 @@ private fun DrawScope.drawEmojiFrog(
 }
 
 /**
- * Высокая накладка верхней губы жабы поверх монетки на старте (`p1 <= 0.08f`, плавно гаснет к `0.10f`).
- * Начинается сразу под ноздрями (`y = -r * 0.02f`) и идет до арки верхней губы (`y = r * 0.30f`, в центре `r * 0.16f`),
- * чтобы верх монетки никогда не торчал над губой.
- */
-private fun DrawScope.drawFrogUpperLipOverlap(
-    paths: SplashReusablePaths,
-    center: Offset,
-    baseRadius: Float,
-    scaleX: Float,
-    scaleY: Float,
-    lipAlpha: Float
-) {
-    val r = baseRadius.coerceAtLeast(16f)
-
-    withTransform({
-        translate(left = center.x, top = center.y)
-        scale(scaleX = scaleX, scaleY = scaleY, pivot = Offset.Zero)
-    }) {
-        // 1) Высокая изумрудная накладка верхней губы от зоны под ноздрями до арки рта
-        val lipPath = paths.upperLipOverlapPath
-        lipPath.reset()
-        lipPath.moveTo(-r * 0.66f, r * 0.22f)
-        lipPath.quadraticTo(0f, -r * 0.02f, r * 0.66f, r * 0.22f)
-        lipPath.lineTo(r * 0.66f, r * 0.30f)
-        lipPath.quadraticTo(0f, r * 0.16f, -r * 0.66f, r * 0.30f)
-        lipPath.close()
-
-        drawPath(
-            path = lipPath,
-            color = Color(0xFF22C55E).copy(alpha = lipAlpha)
-        )
-
-        // 2) Темно-изумрудный контур #064E3B вдоль нижней кромки верхней губы
-        val smileLine = paths.smileLinePath
-        smileLine.reset()
-        smileLine.moveTo(-r * 0.64f, r * 0.30f)
-        smileLine.quadraticTo(0f, r * 0.16f, r * 0.64f, r * 0.30f)
-
-        drawPath(
-            path = smileLine,
-            color = Color(0xFF064E3B).copy(alpha = lipAlpha),
-            style = Stroke(width = (r * 0.055f).coerceAtLeast(2f), cap = StrokeCap.Round)
-        )
-    }
-}
-
-/**
  * Отрисовка двусторонней объемной 3D-золотой монетки с вертикальным кувырком вокруг горизонтальной оси X:
  * - Аверс (`flipCos >= 0f`): рельефный знак рубля `₽` с короной.
  * - Реверс (`flipCos < 0f`): чеканный золотой барельеф головы жабы Давида (`drawEmbossedFrogEmblem`).
@@ -1040,8 +984,8 @@ private fun DrawScope.drawGoldenCoin(
     val flipSin = sin(spinAngle)
 
     // Монетка всегда сохраняет полную горизонтальную ширину (scaleX = 1f) и сжимается ТОЛЬКО по вертикали!
-    val faceScaleY = abs(flipCos).coerceAtLeast(0.04f)
-    val rimThickness = r * 0.34f // Толщина 3D-гурта монеты
+    val faceScaleY = abs(flipCos).coerceAtLeast(0.015f)
+    val rimThickness = r * 0.46f // Толщина 3D-гурта монеты
     val rimOffsetY = flipSin * rimThickness // Вертикальный сдвиг задней стенки ребра
 
     withTransform({
