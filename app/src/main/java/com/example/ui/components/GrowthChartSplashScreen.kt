@@ -65,7 +65,7 @@ private var hasSplashPlayedInSession = false
 
 private const val SPLASH_TOTAL_DURATION_MS = 1420
 private const val PHASE_1_END = 0.40f          // Фаза 1 (0..568 мс): Пружинный присед (p1 <= 0.06f) и выстрел монетки вверх за край экрана
-private const val PHASE_1_HOLD_RATIO = 0.06f   // Первые 6% Фазы 1 (p1 <= 0.06f) монетка плотно сидит во рту под верхней губой
+private const val PHASE_1_HOLD_RATIO = 0.12f   // Первые 6% Фазы 1 (p1 <= 0.06f) монетка плотно сидит во рту под верхней губой
 
 // Ускоряющаяся кривая гравитации без торможения в конце — монетка и шторка пролетают нижний край на максимальной скорости
 private val CoinFallAndPullEasing = CubicBezierEasing(0.45f, 0.0f, 0.90f, 0.85f)
@@ -469,7 +469,7 @@ private fun SplashCanvasOverlay(
             coinGlowIntensity = 0.30f
         } else if (t <= PHASE_1_END) {
             // --- Подъем монетки вверх начинается с p1 > 0.06f ---
-            val launchProgress = ((p1 - 0.06f) / 0.94f).coerceIn(0f, 1f)
+            val launchProgress = ((p1 - PHASE_1_HOLD_RATIO) / (1f - PHASE_1_HOLD_RATIO)).coerceIn(0f, 1f)
             // The lips grip the coin while it rotates to its first edge-on pose.
             // The coin does NOT travel upwards until that quarter turn is complete.
             val gripRatio = 0.12f
