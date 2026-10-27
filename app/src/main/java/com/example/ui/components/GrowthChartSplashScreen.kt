@@ -514,17 +514,13 @@ private fun SplashCanvasOverlay(
             (1f - ((contactProgress - 0.30f) / 0.70f)).coerceIn(0f, 1f)
         }
 
-        val eyeLookUpProgress = when {
-            t <= PHASE_1_END && p1 <= PHASE_1_HOLD_RATIO -> {
-                -0.18f * (p1 / PHASE_1_HOLD_RATIO).coerceIn(0f, 1f)
-            }
-            t <= PHASE_1_END -> {
-                lerpFloat(-0.18f, 1f, flightUpProgress)
-            }
-            else -> {
-                1f - contactEased * 0.5f
-            }
-        }
+        // Зрачки следят за фактической координатой монетки на всём пути:
+        // вниз к губам перед броском, вверх во время полёта и вниз при падении.
+        // Монетка движется по центральной вертикальной траектории, поэтому горизонтальный сдвиг не нужен.
+        val eyeCenterY = currentFrogCenterY - frogBaseRadius * 0.50f
+        val eyeLookYOffset = (
+            (coinY - eyeCenterY) / (frogBaseRadius * 2.2f)
+        ).coerceIn(-1f, 1f)
 
         val mouthOpenFactor = when {
             t <= PHASE_1_END && p1 <= PHASE_1_HOLD_RATIO -> {
@@ -559,7 +555,7 @@ private fun SplashCanvasOverlay(
             frogScaleX = currentFrogScaleX,
             frogScaleY = currentFrogScaleY,
             frogAlpha = frogAlpha,
-            eyeLookYOffset = -eyeLookUpProgress,
+            eyeLookYOffset = eyeLookYOffset,
             mouthOpenFactor = mouthOpenFactor
         )
 
