@@ -26,8 +26,17 @@ enum class LogLevel(val label: String, val priority: Int) {
 
 enum class NetworkCallStatus(val label: String) {
     SUCCESS("SUCCESS"),
+    SUCCESS_AFTER_FALLBACK("SUCCESS_AFTER_FALLBACK"),
     FALLBACK("FALLBACK"),
-    ERROR("ERROR")
+    FAILED("FAILED"),
+    CANCELLED("CANCELLED"),
+    ERROR("FAILED");
+
+    val isTerminalSuccess: Boolean
+        get() = this == SUCCESS || this == SUCCESS_AFTER_FALLBACK
+
+    val isTerminalFailure: Boolean
+        get() = this == FAILED || this == ERROR
 }
 
 data class LogEntry(
@@ -59,7 +68,8 @@ data class NetworkTraceEntry(
     val errorMessage: String? = null,
     val attemptNumber: Int = 1,
     val totalModelsInChain: Int = 1,
-    val details: String? = null
+    val details: String? = null,
+    val chainOutcome: NetworkCallStatus = status
 )
 
 data class DbOperationEntry(
@@ -459,6 +469,13 @@ object GlobalConsoleLogger {
         }
     }
 
+    fun getChainOutcomeForOperation(operationId: String): NetworkCallStatus? {
+        if (operationId.isBlank()) return null
+        val matching = _networkTraces.value.filter { it.operationId == operationId }
+        if (matching.isEmpty()) return null
+        return matching.last().chainOutcome
+    }
+
     fun recordNetworkCall(
         operationType: String,
         modelName: String,
@@ -477,50 +494,79 @@ object GlobalConsoleLogger {
         val maskedError = errorMessage?.let { maskSensitive(it) }
         val maskedDetails = details?.let { maskSensitive(it) }
 
-        val trace = NetworkTraceEntry(
-            id = idCounter.getAndIncrement(),
-            operationId = opId,
-            timestamp = formatTime(now),
-            epochMillis = now,
-            operationType = maskSensitive(operationType),
-            modelName = modelName.ifBlank { "unknown-model" },
-            durationMs = durationMs.coerceAtLeast(0L),
-            status = status,
-            httpCode = httpCode,
-            errorType = errorType,
-            errorMessage = maskedError,
-            attemptNumber = attemptNumber,
-            totalModelsInChain = totalModelsInChain,
-            details = maskedDetails
-        )
-
+        val effectiveStatus: NetworkCallStatus
         synchronized(lock) {
-            val updated = (_networkTraces.value + trace).takeLast(MAX_NETWORK_TRACES)
-            _networkTraces.value = updated
+            val hadPreviousAttemptInChain = attemptNumber > 1 ||
+                _networkTraces.value.any { it.operationId == opId && it.status == NetworkCallStatus.FALLBACK }
+
+            effectiveStatus = when {
+                status == NetworkCallStatus.SUCCESS && hadPreviousAttemptInChain -> NetworkCallStatus.SUCCESS_AFTER_FALLBACK
+                status == NetworkCallStatus.ERROR -> NetworkCallStatus.FAILED
+                else -> status
+            }
+
+            val trace = NetworkTraceEntry(
+                id = idCounter.getAndIncrement(),
+                operationId = opId,
+                timestamp = formatTime(now),
+                epochMillis = now,
+                operationType = maskSensitive(operationType),
+                modelName = modelName.ifBlank { "unknown-model" },
+                durationMs = durationMs.coerceAtLeast(0L),
+                status = effectiveStatus,
+                httpCode = httpCode,
+                errorType = errorType,
+                errorMessage = maskedError,
+                attemptNumber = attemptNumber,
+                totalModelsInChain = totalModelsInChain,
+                details = maskedDetails,
+                chainOutcome = effectiveStatus
+            )
+
+            val updatedList = (_networkTraces.value + trace).takeLast(MAX_NETWORK_TRACES).map { existing ->
+                if (existing.operationId == opId && effectiveStatus != NetworkCallStatus.FALLBACK) {
+                    existing.copy(chainOutcome = effectiveStatus)
+                } else {
+                    existing
+                }
+            }
+            _networkTraces.value = updatedList
         }
 
         val summary = buildString {
-            append("[$operationType] model=$modelName • ${durationMs}ms • ${status.label}")
+            append("[$operationType] model=$modelName • ${durationMs}ms • ${effectiveStatus.label}")
             if (httpCode != null) append(" (HTTP $httpCode)")
             if (totalModelsInChain > 1) append(" [попытка $attemptNumber/$totalModelsInChain]")
         }
 
-        when (status) {
+        when (effectiveStatus) {
             NetworkCallStatus.SUCCESS -> i(
                 tag = "GEMINI",
                 message = summary,
                 details = maskedDetails,
                 operationId = opId
             )
+            NetworkCallStatus.SUCCESS_AFTER_FALLBACK -> i(
+                tag = "GEMINI",
+                message = "$summary → цепочка успешно завершена на резервной модели",
+                details = maskedDetails,
+                operationId = opId
+            )
             NetworkCallStatus.FALLBACK -> w(
                 tag = "GEMINI",
                 message = "$summary → переключение на резервную модель",
+                details = listOfNotNull(errorType, maskedError, maskedDetails).joinToString(" | ").ifBlank { null },
+                operationId = opId
+            )
+            NetworkCallStatus.CANCELLED -> w(
+                tag = "GEMINI",
+                message = "$summary → запрос отменён (CancellationException)",
                 details = listOfNotNull(maskedError, maskedDetails).joinToString(" | ").ifBlank { null },
                 operationId = opId
             )
-            NetworkCallStatus.ERROR -> e(
+            NetworkCallStatus.FAILED, NetworkCallStatus.ERROR -> e(
                 tag = "GEMINI",
-                message = summary,
+                message = "$summary → все модели в цепочке завершились ошибкой",
                 details = listOfNotNull(errorType, maskedError, maskedDetails).joinToString(" | ").ifBlank { null },
                 operationId = opId
             )
@@ -768,12 +814,14 @@ object GlobalConsoleLogger {
                 appendLine("No network/AI calls recorded in this session.")
             } else {
                 val successCount = netList.count { it.status == NetworkCallStatus.SUCCESS }
+                val successAfterFallbackCount = netList.count { it.status == NetworkCallStatus.SUCCESS_AFTER_FALLBACK }
                 val fallbackCount = netList.count { it.status == NetworkCallStatus.FALLBACK }
-                val errorCount = netList.count { it.status == NetworkCallStatus.ERROR }
+                val failedCount = netList.count { it.status.isTerminalFailure }
+                val cancelledCount = netList.count { it.status == NetworkCallStatus.CANCELLED }
                 val avgMs = netList.map { it.durationMs }.average().toLong()
-                appendLine("Summary: SUCCESS=$successCount, FALLBACK=$fallbackCount, ERROR=$errorCount, AVG_LATENCY=${avgMs}ms")
+                appendLine("Summary: SUCCESS=$successCount, SUCCESS_AFTER_FALLBACK=$successAfterFallbackCount, FALLBACK=$fallbackCount, FAILED=$failedCount, CANCELLED=$cancelledCount, AVG_LATENCY=${avgMs}ms")
                 netList.takeLast(20).forEach { net ->
-                    appendLine("  [${net.timestamp}] (${net.operationId}) ${net.operationType} | model=${net.modelName} | ${net.durationMs}ms | ${net.status.label} ${net.httpCode?.let { "HTTP $it" } ?: ""} ${net.errorMessage ?: ""}")
+                    appendLine("  [${net.timestamp}] (${net.operationId}) ${net.operationType} | model=${net.modelName} | ${net.durationMs}ms | status=${net.status.label} | chainOutcome=${net.chainOutcome.label} ${net.httpCode?.let { "HTTP $it" } ?: ""} ${net.errorMessage ?: ""}")
                 }
             }
             appendLine()

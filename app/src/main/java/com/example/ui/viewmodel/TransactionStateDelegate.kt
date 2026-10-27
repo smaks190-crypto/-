@@ -121,8 +121,10 @@ class TransactionStateDelegate(
                     voiceErrorMessage.value = msg
                     toastMessage.emit(msg)
                 }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
             } catch (e: Exception) {
-                com.example.utils.GlobalConsoleLogger.e("VOICE", "Ошибка Gemini Live чанка: ${e.message}", e)
+                com.example.utils.GlobalConsoleLogger.w("VOICE", "Ошибка Gemini Live чанка: ${e.message}")
                 if (isFinalFlush && activeChunkJobs.get() <= 1 && parsedVoiceOperations.value.isNullOrEmpty()) {
                     val msg = e.message ?: "Ошибка анализа голоса"
                     voiceErrorMessage.value = msg
@@ -185,6 +187,8 @@ class TransactionStateDelegate(
                     val currentList = parsedVoiceOperations.value.orEmpty()
                     parsedVoiceOperations.value = currentList + result
                 }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
             } catch (e: Exception) {
                 val msg = "Ошибка при анализе: ${e.message}"
                 voiceErrorMessage.value = msg
@@ -278,14 +282,6 @@ class TransactionStateDelegate(
             val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
             try {
                 val isFirstToday = transactions.value.none { it.date == date && it.id != tx.id }
-                val userPhrase = repository.generateUserPhrase(
-                    apiKey = effectiveKey,
-                    type = type,
-                    category = category,
-                    subcategory = subcategory,
-                    amount = amount,
-                    isFirstToday = isFirstToday
-                )
                 if (category.contains("совмест", true) || category.contains("сплит", true) || category.contains("дележ", true) ||
                     subcategory.contains("совмест", true) || subcategory.contains("сплит", true) || subcategory.contains("пополам", true) || subcategory.contains("дележ", true)) {
                     com.example.davidapp.AchievementManager.unlock(context, "expense_share")
@@ -321,19 +317,34 @@ class TransactionStateDelegate(
                         }
                     }
                 }
-                
-                val comment = repository.generateDavidComment(
-                    apiKey = effectiveKey,
-                    type = type,
-                    category = category,
-                    subcategory = subcategory,
-                    amount = amount,
-                    recentTransactions = transactions.value.take(5),
-                    activeDebts = accounts.value,
-                    activeGoals = goals.value,
-                    extraContext = extraCtx,
-                    allTransactions = transactions.value
-                )
+
+                val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
+                    val phraseDeferred = kotlinx.coroutines.async {
+                        repository.generateUserPhrase(
+                            apiKey = effectiveKey,
+                            type = type,
+                            category = category,
+                            subcategory = subcategory,
+                            amount = amount,
+                            isFirstToday = isFirstToday
+                        )
+                    }
+                    val commentDeferred = kotlinx.coroutines.async {
+                        repository.generateDavidComment(
+                            apiKey = effectiveKey,
+                            type = type,
+                            category = category,
+                            subcategory = subcategory,
+                            amount = amount,
+                            recentTransactions = transactions.value.take(5),
+                            activeDebts = accounts.value,
+                            activeGoals = goals.value,
+                            extraContext = extraCtx,
+                            allTransactions = transactions.value
+                        )
+                    }
+                    phraseDeferred.await() to commentDeferred.await()
+                }
                 repository.insertNotification(
                     com.example.data.db.NotificationEntity(
                         budgetId = currentBudgetId,
@@ -345,8 +356,10 @@ class TransactionStateDelegate(
                         isRead = false
                     )
                 )
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
             } catch (e: Exception) {
-                com.example.utils.GlobalConsoleLogger.e("DAVID", "Ошибка при генерации реакции Давида: ${e.message}", e)
+                com.example.utils.GlobalConsoleLogger.w("DAVID", "Использован локальный ответ Давида: ${e.message}")
                 val fallbackUserPhrase = if (type == "income") "Записал доход: $subcategory на ${amount.toInt()} ₽" else "Записал расход: $subcategory на ${amount.toInt()} ₽"
                 val fallbackComment = if (type == "income") "О, плюс в кассу! Главное теперь не спустить всё за один вечер." else "Зафиксировал трату. Держись бюджета, ква-ква!"
                 repository.insertNotification(
@@ -419,25 +432,32 @@ class TransactionStateDelegate(
                 val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
                 try {
                     val isFirstToday = transactions.value.none { it.date == finalDate && it.id != tx.id }
-                    val userPhrase = repository.generateUserPhrase(
-                        apiKey = effectiveKey,
-                        type = op.type,
-                        category = finalCategory,
-                        subcategory = finalSubcategory,
-                        amount = op.amount,
-                        isFirstToday = isFirstToday
-                    )
-                    val comment = repository.generateDavidComment(
-                        apiKey = effectiveKey,
-                        type = op.type,
-                        category = finalCategory,
-                        subcategory = finalSubcategory,
-                        amount = op.amount,
-                        recentTransactions = transactions.value.take(5),
-                        activeDebts = accounts.value,
-                        activeGoals = goals.value,
-                        allTransactions = transactions.value
-                    )
+                    val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
+                        val phraseDeferred = kotlinx.coroutines.async {
+                            repository.generateUserPhrase(
+                                apiKey = effectiveKey,
+                                type = op.type,
+                                category = finalCategory,
+                                subcategory = finalSubcategory,
+                                amount = op.amount,
+                                isFirstToday = isFirstToday
+                            )
+                        }
+                        val commentDeferred = kotlinx.coroutines.async {
+                            repository.generateDavidComment(
+                                apiKey = effectiveKey,
+                                type = op.type,
+                                category = finalCategory,
+                                subcategory = finalSubcategory,
+                                amount = op.amount,
+                                recentTransactions = transactions.value.take(5),
+                                activeDebts = accounts.value,
+                                activeGoals = goals.value,
+                                allTransactions = transactions.value
+                            )
+                        }
+                        phraseDeferred.await() to commentDeferred.await()
+                    }
                     repository.insertNotification(
                         com.example.data.db.NotificationEntity(
                             budgetId = currentBudgetId,
@@ -449,8 +469,10 @@ class TransactionStateDelegate(
                             isRead = false
                         )
                     )
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
                 } catch (e: Exception) {
-                    com.example.utils.GlobalConsoleLogger.e("DAVID", "Ошибка при генерации реакции на голосовую операцию: ${e.message}", e)
+                    com.example.utils.GlobalConsoleLogger.w("DAVID", "Использован локальный ответ на голосовую операцию: ${e.message}")
                     val fallbackUserPhrase = if (op.type == "income") "Записал доход: $finalSubcategory на ${op.amount.toInt()} ₽" else "Записал расход: $finalSubcategory на ${op.amount.toInt()} ₽"
                     val fallbackComment = if (op.type == "income") "О, плюс в кассу! Главное теперь не спустить всё за один вечер." else "Зафиксировал трату. Держись бюджета, ква-ква!"
                     repository.insertNotification(
@@ -492,18 +514,25 @@ class TransactionStateDelegate(
 
                 val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
                 try {
-                    val userPhrase = repository.generateUserPhraseMulti(
-                        apiKey = effectiveKey,
-                        operations = processedOps
-                    )
-                    val comment = repository.generateDavidCommentMulti(
-                        apiKey = effectiveKey,
-                        operations = processedOps,
-                        recentTransactions = transactions.value.take(5),
-                        activeDebts = accounts.value,
-                        activeGoals = goals.value,
-                        allTransactions = transactions.value
-                    )
+                    val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
+                        val phraseDeferred = kotlinx.coroutines.async {
+                            repository.generateUserPhraseMulti(
+                                apiKey = effectiveKey,
+                                operations = processedOps
+                            )
+                        }
+                        val commentDeferred = kotlinx.coroutines.async {
+                            repository.generateDavidCommentMulti(
+                                apiKey = effectiveKey,
+                                operations = processedOps,
+                                recentTransactions = transactions.value.take(5),
+                                activeDebts = accounts.value,
+                                activeGoals = goals.value,
+                                allTransactions = transactions.value
+                            )
+                        }
+                        phraseDeferred.await() to commentDeferred.await()
+                    }
                     
                     val opsString = processedOps.joinToString(";") { "${it.type}|${it.category}|${it.subcategory}|${it.amount}" }
                     val dominantType = if (processedOps.all { it.type == "income" }) "income" else "expense"
@@ -519,8 +548,10 @@ class TransactionStateDelegate(
                             isRead = false
                         )
                     )
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
                 } catch (e: Exception) {
-                    com.example.utils.GlobalConsoleLogger.e("DAVID", "Ошибка при генерации групповой реакции: ${e.message}", e)
+                    com.example.utils.GlobalConsoleLogger.w("DAVID", "Использован локальный ответ для группы операций: ${e.message}")
                     val opsString = processedOps.joinToString(";") { "${it.type}|${it.category}|${it.subcategory}|${it.amount}" }
                     val dominantType = if (processedOps.all { it.type == "income" }) "income" else "expense"
                     val fallbackUserPhrase = "Записал пачку операций (${processedOps.size} шт.)"
@@ -580,26 +611,33 @@ class TransactionStateDelegate(
                 } else {
                     "Это взнос в цель '${goal.name}'. Собрано $updatedCurrent из ${goal.targetAmount} руб. Осталось: ${goal.targetAmount - updatedCurrent} руб."
                 }
-                val comment = repository.generateDavidComment(
-                    apiKey = apiKey.value,
-                    type = "expense",
-                    category = "Сбережения",
-                    subcategory = "Взнос в цель: ${goal.name}",
-                    amount = amount,
-                    recentTransactions = transactions.value.take(5),
-                    activeDebts = accounts.value,
-                    activeGoals = goals.value,
-                    extraContext = extraCtx,
-                    allTransactions = transactions.value
-                )
-                val userPhrase = repository.generateUserPhrase(
-                    apiKey = apiKey.value,
-                    type = "expense",
-                    category = "Сбережения",
-                    subcategory = "Взнос в цель: ${goal.name}",
-                    amount = amount,
-                    isFirstToday = transactions.value.none { it.date == todayIso && it.id != tx.id }
-                )
+                val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
+                    val phraseDeferred = kotlinx.coroutines.async {
+                        repository.generateUserPhrase(
+                            apiKey = apiKey.value,
+                            type = "expense",
+                            category = "Сбережения",
+                            subcategory = "Взнос в цель: ${goal.name}",
+                            amount = amount,
+                            isFirstToday = transactions.value.none { it.date == todayIso && it.id != tx.id }
+                        )
+                    }
+                    val commentDeferred = kotlinx.coroutines.async {
+                        repository.generateDavidComment(
+                            apiKey = apiKey.value,
+                            type = "expense",
+                            category = "Сбережения",
+                            subcategory = "Взнос в цель: ${goal.name}",
+                            amount = amount,
+                            recentTransactions = transactions.value.take(5),
+                            activeDebts = accounts.value,
+                            activeGoals = goals.value,
+                            extraContext = extraCtx,
+                            allTransactions = transactions.value
+                        )
+                    }
+                    phraseDeferred.await() to commentDeferred.await()
+                }
                 repository.insertNotification(
                     com.example.data.db.NotificationEntity(
                         budgetId = currentBudgetId,
@@ -611,6 +649,8 @@ class TransactionStateDelegate(
                         isRead = false
                     )
                 )
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
             } catch (e: Exception) { e.printStackTrace() }
 
             if (updatedCurrent >= goal.targetAmount) {
@@ -658,27 +698,34 @@ class TransactionStateDelegate(
                 
                 try {
                     val goalSubcategory = "Цель: $name (Целевая сумма: ${target.toInt()} ₽, Внесено: ${current.toInt()} ₽)"
-                    val userPhrase = repository.generateUserPhrase(
-                        apiKey = apiKey.value,
-                        type = "expense",
-                        category = "Цели",
-                        subcategory = goalSubcategory,
-                        amount = if (current > 0) current else target,
-                        isFirstToday = false
-                    )
                     val extraCtx = "Создана новая финансовая цель '$name'. Целевая сумма: ${target.toInt()} руб. Первоначальный взнос: ${current.toInt()} руб. (Осталось собрать: ${(target - current).toInt()} руб.). В комментарии ОБЯЗАТЕЛЬНО раздели и учти общую сумму цели (${target.toInt()} ₽) и сколько из неё было внесено первым взносом (${current.toInt()} ₽)!"
-                    val comment = repository.generateDavidComment(
-                        apiKey = apiKey.value,
-                        type = "expense",
-                        category = "Новая цель",
-                        subcategory = goalSubcategory,
-                        amount = target,
-                        recentTransactions = transactions.value.take(5),
-                        activeDebts = accounts.value,
-                        activeGoals = goals.value,
-                        extraContext = extraCtx,
-                        allTransactions = transactions.value
-                    )
+                    val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
+                        val phraseDeferred = kotlinx.coroutines.async {
+                            repository.generateUserPhrase(
+                                apiKey = apiKey.value,
+                                type = "expense",
+                                category = "Цели",
+                                subcategory = goalSubcategory,
+                                amount = if (current > 0) current else target,
+                                isFirstToday = false
+                            )
+                        }
+                        val commentDeferred = kotlinx.coroutines.async {
+                            repository.generateDavidComment(
+                                apiKey = apiKey.value,
+                                type = "expense",
+                                category = "Новая цель",
+                                subcategory = goalSubcategory,
+                                amount = target,
+                                recentTransactions = transactions.value.take(5),
+                                activeDebts = accounts.value,
+                                activeGoals = goals.value,
+                                extraContext = extraCtx,
+                                allTransactions = transactions.value
+                            )
+                        }
+                        phraseDeferred.await() to commentDeferred.await()
+                    }
                     repository.insertNotification(
                         com.example.data.db.NotificationEntity(
                             budgetId = currentBudgetId,
@@ -690,6 +737,8 @@ class TransactionStateDelegate(
                             isRead = false
                         )
                     )
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
                 } catch (e: Exception) { e.printStackTrace() }
             }
         }
@@ -732,26 +781,33 @@ class TransactionStateDelegate(
                         "Пользователь создал новый долг '$name' на сумму ${initialBalance.toInt()} руб."
                     }
 
-                    val userPhrase = repository.generateUserPhrase(
-                        apiKey = apiKey.value,
-                        type = if (type == "we_owe") "income" else "expense",
-                        category = "Долги/Кредиты",
-                        subcategory = "$debtType: $name",
-                        amount = initialBalance,
-                        isFirstToday = false
-                    )
-                    val comment = repository.generateDavidComment(
-                        apiKey = apiKey.value,
-                        type = if (type == "we_owe") "expense" else "income",
-                        category = "Долги/Кредиты",
-                        subcategory = "$debtType: $name",
-                        amount = initialBalance,
-                        recentTransactions = transactions.value.take(5),
-                        activeDebts = accounts.value,
-                        activeGoals = goals.value,
-                        extraContext = debtExtraCtx,
-                        allTransactions = transactions.value
-                    )
+                    val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
+                        val phraseDeferred = kotlinx.coroutines.async {
+                            repository.generateUserPhrase(
+                                apiKey = apiKey.value,
+                                type = if (type == "we_owe") "income" else "expense",
+                                category = "Долги/Кредиты",
+                                subcategory = "$debtType: $name",
+                                amount = initialBalance,
+                                isFirstToday = false
+                            )
+                        }
+                        val commentDeferred = kotlinx.coroutines.async {
+                            repository.generateDavidComment(
+                                apiKey = apiKey.value,
+                                type = if (type == "we_owe") "expense" else "income",
+                                category = "Долги/Кредиты",
+                                subcategory = "$debtType: $name",
+                                amount = initialBalance,
+                                recentTransactions = transactions.value.take(5),
+                                activeDebts = accounts.value,
+                                activeGoals = goals.value,
+                                extraContext = debtExtraCtx,
+                                allTransactions = transactions.value
+                            )
+                        }
+                        phraseDeferred.await() to commentDeferred.await()
+                    }
                     val displayType = if (type == "we_owe") "expense" else "income"
                     repository.insertNotification(
                         com.example.data.db.NotificationEntity(
@@ -764,6 +820,8 @@ class TransactionStateDelegate(
                             isRead = false
                         )
                     )
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
                 } catch (e: Exception) { e.printStackTrace() }
             }
         }
@@ -947,6 +1005,8 @@ class TransactionStateDelegate(
                             )
                         )
                     }
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    throw ce
                 } catch (e: Exception) {
                     fullText = "ERROR_NO_CONNECTION"
                     aiAuditResult.value = fullText

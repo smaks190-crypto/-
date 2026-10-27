@@ -1242,9 +1242,11 @@ private fun NetworkAiTabContent(
     context: Context
 ) {
     val reversedTraces = remember(traces) { traces.asReversed() }
-    val successCount = remember(traces) { traces.count { it.status == NetworkCallStatus.SUCCESS } }
-    val fallbackCount = remember(traces) { traces.count { it.status == NetworkCallStatus.FALLBACK } }
-    val errorCount = remember(traces) { traces.count { it.status == NetworkCallStatus.ERROR } }
+    val successCount = remember(traces) { traces.count { it.status.isTerminalSuccess } }
+    val fallbackCount = remember(traces) {
+        traces.count { it.status == NetworkCallStatus.FALLBACK || it.status == NetworkCallStatus.SUCCESS_AFTER_FALLBACK }
+    }
+    val errorCount = remember(traces) { traces.count { it.status.isTerminalFailure } }
     val avgDurationMs = remember(traces) {
         if (traces.isEmpty()) 0L else traces.map { it.durationMs }.average().toLong()
     }
@@ -1325,8 +1327,10 @@ private fun NetworkAiTabContent(
                     items(reversedTraces, key = { it.id }) { trace ->
                         val statusColor = when (trace.status) {
                             NetworkCallStatus.SUCCESS -> Emerald400
+                            NetworkCallStatus.SUCCESS_AFTER_FALLBACK -> Cyan400
                             NetworkCallStatus.FALLBACK -> ConsoleAmber
-                            NetworkCallStatus.ERROR -> Rose500
+                            NetworkCallStatus.CANCELLED -> Slate400
+                            NetworkCallStatus.FAILED, NetworkCallStatus.ERROR -> Rose500
                         }
                         val latencyColor = when {
                             trace.durationMs < 1500L -> Emerald400
@@ -1340,7 +1344,7 @@ private fun NetworkAiTabContent(
                                 .background(ObsidianCardBg)
                                 .border(1.dp, statusColor.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                                 .clickable {
-                                    val summary = "[${trace.timestamp}] (${trace.operationId}) ${trace.operationType} | model=${trace.modelName} | ${trace.durationMs}ms | ${trace.status.label} ${trace.httpCode ?: ""} ${trace.errorMessage ?: ""}"
+                                    val summary = "[${trace.timestamp}] (${trace.operationId}) ${trace.operationType} | model=${trace.modelName} | ${trace.durationMs}ms | status=${trace.status.label} | chainOutcome=${trace.chainOutcome.label} ${trace.httpCode ?: ""} ${trace.errorMessage ?: ""}"
                                     copyTextToClipboard(context, "Network Trace", summary, "Сетевая метрика скопирована")
                                 }
                                 .padding(9.dp)
@@ -1350,7 +1354,10 @@ private fun NetworkAiTabContent(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(5.dp))
@@ -1371,9 +1378,12 @@ private fun NetworkAiTabContent(
                                         color = Color.White,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "${trace.durationMs} ms",
                                     color = latencyColor,
@@ -1404,6 +1414,22 @@ private fun NetworkAiTabContent(
                                 )
                             }
 
+                            if (trace.status == NetworkCallStatus.FALLBACK && trace.chainOutcome != NetworkCallStatus.FALLBACK) {
+                                Spacer(modifier = Modifier.height(3.dp))
+                                val outcomeColor = when {
+                                    trace.chainOutcome.isTerminalSuccess -> Emerald400
+                                    trace.chainOutcome == NetworkCallStatus.CANCELLED -> Slate400
+                                    else -> Rose500
+                                }
+                                Text(
+                                    text = "Итог цепочки #${trace.operationId}: ${trace.chainOutcome.label}",
+                                    color = outcomeColor,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+
                             if (trace.httpCode != null || !trace.errorType.isNullOrBlank() || !trace.errorMessage.isNullOrBlank()) {
                                 Spacer(modifier = Modifier.height(3.dp))
                                 Text(
@@ -1412,7 +1438,7 @@ private fun NetworkAiTabContent(
                                         trace.errorType,
                                         trace.errorMessage
                                     ).joinToString(" • "),
-                                    color = Rose500,
+                                    color = if (trace.status == NetworkCallStatus.FALLBACK) ConsoleAmber else Rose500,
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace
                                 )

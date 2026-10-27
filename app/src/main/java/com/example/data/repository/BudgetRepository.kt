@@ -3,9 +3,13 @@ package com.example.data.repository
 import com.example.utils.GlobalConsoleLogger
 import com.example.utils.NetworkCallStatus
 import com.example.data.api.GeminiApiService
+import com.example.data.api.GeminiChainResult
 import com.example.data.api.GeminiContent
+import com.example.data.api.GeminiFallbackExecutor
+import com.example.data.api.GeminiModelChains
 import com.example.data.api.GeminiPart
 import com.example.data.api.GeminiRequest
+import com.example.data.api.GeminiTimeoutProfile
 import com.example.data.api.RetrofitClient
 import androidx.room.withTransaction
 import com.example.data.db.AccountDao
@@ -23,6 +27,7 @@ import com.example.data.db.TransactionDao
 import com.example.data.db.TransactionEntity
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
@@ -30,6 +35,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import org.json.JSONArray
+import java.net.SocketTimeoutException
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -237,73 +243,35 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        val modelsToTry = listOf(
-            "gemini-3.8-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
-        )
-        val opId = GlobalConsoleLogger.newOperationId("DAVID")
-
-        for ((idx, model) in modelsToTry.withIndex()) {
-            val attempt = idx + 1
-            val startMs = System.currentTimeMillis()
-            try {
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                        ?.trim()
-                        ?.removePrefix("\"")
-                        ?.removeSuffix("\"")
-                        ?.removePrefix("«")
-                        ?.removeSuffix("»")
-                        ?.trim()
-                    if (!responseText.isNullOrEmpty()) {
-                        GlobalConsoleLogger.recordNetworkCall(
-                            operationType = "Реакция Давида Жабова",
-                            modelName = model,
-                            durationMs = System.currentTimeMillis() - startMs,
-                            status = NetworkCallStatus.SUCCESS,
-                            httpCode = 200,
-                            attemptNumber = attempt,
-                            totalModelsInChain = modelsToTry.size,
-                            details = "cat=$category",
-                            operationId = opId
-                        )
-                        return responseText
-                    }
-                } else {
-                    GlobalConsoleLogger.recordNetworkCall(
-                        operationType = "Реакция Давида Жабова",
-                        modelName = model,
-                        durationMs = System.currentTimeMillis() - startMs,
-                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                        httpCode = response.error.code,
-                        errorType = response.error.status ?: "GeminiError",
-                        errorMessage = response.error.message,
-                        attemptNumber = attempt,
-                        totalModelsInChain = modelsToTry.size,
-                        details = "cat=$category",
-                        operationId = opId
-                    )
-                }
-            } catch (e: Exception) {
-                GlobalConsoleLogger.recordNetworkCall(
-                    operationType = "Реакция Давида Жабова",
-                    modelName = model,
-                    durationMs = System.currentTimeMillis() - startMs,
-                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                    errorType = e.javaClass.simpleName,
-                    errorMessage = e.localizedMessage ?: e.message,
-                    attemptNumber = attempt,
-                    totalModelsInChain = modelsToTry.size,
-                    details = "cat=$category",
-                    operationId = opId
-                )
+        val chainResult = GeminiFallbackExecutor.executeWithFallback(
+            operationType = "Реакция Давида Жабова",
+            operationPrefix = "DAVID",
+            models = GeminiModelChains.DAVID_REACTION_MODELS,
+            details = "cat=$category | sum=${amount.toInt()}"
+        ,
+            extractResult = { response ->
+                response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                    ?.trim()
+                    ?.removePrefix("\"")
+                    ?.removeSuffix("\"")
+                    ?.removePrefix("«")
+                    ?.removeSuffix("»")
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
             }
+        ) { model ->
+            apiService.generateContent(
+                model = model,
+                apiKey = apiKey,
+                request = request,
+                timeoutProfile = GeminiTimeoutProfile.FAST_BACKGROUND.name
+            )
         }
 
-        return generateLocalDavidComment(type, category, amount)
+        return when (chainResult) {
+            is GeminiChainResult.Success -> chainResult.value
+            is GeminiChainResult.Failure -> generateLocalDavidComment(type, category, amount)
+        }
     }
 
     suspend fun generateDavidCommentMulti(
@@ -363,32 +331,34 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        val modelsToTry = listOf(
-            "gemini-3.8-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
-        )
-
-        for (model in modelsToTry) {
-            try {
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                    if (!responseText.isNullOrEmpty()) {
-                        return responseText.trim()
-                            .removePrefix("\"")
-                            .removeSuffix("\"")
-                            .removePrefix("«")
-                            .removeSuffix("»")
-                            .trim()
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+        val chainResult = GeminiFallbackExecutor.executeWithFallback(
+            operationType = "Групповая реакция Давида",
+            operationPrefix = "DAVID-M",
+            models = GeminiModelChains.DAVID_REACTION_MODELS,
+            details = "ops=${operations.size}",
+            extractResult = { response ->
+                response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                    ?.trim()
+                    ?.removePrefix("\"")
+                    ?.removeSuffix("\"")
+                    ?.removePrefix("«")
+                    ?.removeSuffix("»")
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
             }
+        ) { model ->
+            apiService.generateContent(
+                model = model,
+                apiKey = apiKey,
+                request = request,
+                timeoutProfile = GeminiTimeoutProfile.FAST_BACKGROUND.name
+            )
         }
-        return "Добавлено ${operations.size} операций на общую сумму ${String.format("%.0f", operations.sumOf { it.amount })} ₽."
+
+        return when (chainResult) {
+            is GeminiChainResult.Success -> chainResult.value
+            is GeminiChainResult.Failure -> "Добавлено ${operations.size} операций на общую сумму ${String.format("%.0f", operations.sumOf { it.amount })} ₽."
+        }
     }
 
     suspend fun generateUserPhraseMulti(
@@ -414,32 +384,34 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        val modelsToTry = listOf(
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
-        )
-
-        for (model in modelsToTry) {
-            try {
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                        ?.trim()
-                    if (!responseText.isNullOrEmpty()) {
-                        return responseText
-                            .removePrefix("\"")
-                            .removeSuffix("\"")
-                            .removePrefix("«")
-                            .removeSuffix("»")
-                            .trim()
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
+        val chainResult = GeminiFallbackExecutor.executeWithFallback(
+            operationType = "Фраза пользователя (Группа)",
+            operationPrefix = "PHRASE-M",
+            models = GeminiModelChains.USER_PHRASE_MODELS,
+            details = "ops=${operations.size}",
+            extractResult = { response ->
+                response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                    ?.trim()
+                    ?.removePrefix("\"")
+                    ?.removeSuffix("\"")
+                    ?.removePrefix("«")
+                    ?.removeSuffix("»")
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
             }
+        ) { model ->
+            apiService.generateContent(
+                model = model,
+                apiKey = apiKey,
+                request = request,
+                timeoutProfile = GeminiTimeoutProfile.FAST_BACKGROUND.name
+            )
         }
 
-        return "Добавил ${operations.size} операций на сумму ${operations.sumOf { it.amount }} ₽"
+        return when (chainResult) {
+            is GeminiChainResult.Success -> chainResult.value
+            is GeminiChainResult.Failure -> "Добавил ${operations.size} операций на сумму ${operations.sumOf { it.amount }} ₽"
+        }
     }
 
     suspend fun generateUserPhrase(
@@ -470,69 +442,34 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        val modelsToTry = listOf(
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
-        )
-        val opId = GlobalConsoleLogger.newOperationId("CAT-AI")
-
-        for ((idx, model) in modelsToTry.withIndex()) {
-            val attempt = idx + 1
-            val startMs = System.currentTimeMillis()
-            try {
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                        ?.trim()
-                        ?.removePrefix("\"")
-                        ?.removeSuffix("\"")
-                        ?.removePrefix("«")
-                        ?.removeSuffix("»")
-                        ?.trim()
-                    if (!responseText.isNullOrEmpty()) {
-                        GlobalConsoleLogger.recordNetworkCall(
-                            operationType = "Автоподбор категории (ИИ)",
-                            modelName = model,
-                            durationMs = System.currentTimeMillis() - startMs,
-                            status = NetworkCallStatus.SUCCESS,
-                            httpCode = 200,
-                            attemptNumber = attempt,
-                            totalModelsInChain = modelsToTry.size,
-                            details = "result=$responseText",
-                            operationId = opId
-                        )
-                        return responseText
-                    }
-                } else {
-                    GlobalConsoleLogger.recordNetworkCall(
-                        operationType = "Автоподбор категории (ИИ)",
-                        modelName = model,
-                        durationMs = System.currentTimeMillis() - startMs,
-                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                        httpCode = response.error.code,
-                        errorType = response.error.status ?: "GeminiError",
-                        errorMessage = response.error.message,
-                        attemptNumber = attempt,
-                        totalModelsInChain = modelsToTry.size,
-                        operationId = opId
-                    )
-                }
-            } catch (e: Exception) {
-                GlobalConsoleLogger.recordNetworkCall(
-                    operationType = "Автоподбор категории (ИИ)",
-                    modelName = model,
-                    durationMs = System.currentTimeMillis() - startMs,
-                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                    errorType = e.javaClass.simpleName,
-                    errorMessage = e.localizedMessage ?: e.message,
-                    attemptNumber = attempt,
-                    totalModelsInChain = modelsToTry.size,
-                    operationId = opId
-                )
+        val chainResult = GeminiFallbackExecutor.executeWithFallback(
+            operationType = "Фраза пользователя (ИИ)",
+            operationPrefix = "PHRASE",
+            models = GeminiModelChains.USER_PHRASE_MODELS,
+            details = "cat=$category",
+            extractResult = { response ->
+                response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                    ?.trim()
+                    ?.removePrefix("\"")
+                    ?.removeSuffix("\"")
+                    ?.removePrefix("«")
+                    ?.removeSuffix("»")
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
             }
+        ) { model ->
+            apiService.generateContent(
+                model = model,
+                apiKey = apiKey,
+                request = request,
+                timeoutProfile = GeminiTimeoutProfile.FAST_BACKGROUND.name
+            )
         }
 
-        return generateLocalUserPhrase(type, category, subcategory, amount, isFirstToday)
+        return when (chainResult) {
+            is GeminiChainResult.Success -> chainResult.value
+            is GeminiChainResult.Failure -> generateLocalUserPhrase(type, category, subcategory, amount, isFirstToday)
+        }
     }
 
     private fun generateLocalUserPhrase(
@@ -1219,21 +1156,23 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        var lastExceptionMessage = ""
-        val modelsToTry = listOf(
-            "gemini-3.8-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-2.5-flash"
-        )
-
+        val modelsToTry = GeminiFallbackExecutor.orderModelsByHealth(GeminiModelChains.AUDIT_MODELS)
         val opId = GlobalConsoleLogger.newOperationId("AUDIT")
         var success = false
+        var hadPriorFallback = false
+
         for ((idx, model) in modelsToTry.withIndex()) {
             val attempt = idx + 1
+            val isLastAttempt = attempt >= modelsToTry.size
             val startMs = System.currentTimeMillis()
             try {
-                val response = apiService.streamGenerateContent(model, apiKey, "sse", request)
+                val response = apiService.streamGenerateContent(
+                    model = model,
+                    apiKey = apiKey,
+                    alt = "sse",
+                    request = request,
+                    timeoutProfile = GeminiTimeoutProfile.STREAMING_AUDIT.headerValue
+                )
                 if (response.isSuccessful) {
                     val body = response.body()
                     if (body != null) {
@@ -1257,11 +1196,17 @@ class BudgetRepository(
                             }
                         }
                         if (success) {
+                            GeminiFallbackExecutor.markModelHealthy(model)
+                            val finalStatus = if (hadPriorFallback || attempt > 1) {
+                                NetworkCallStatus.SUCCESS_AFTER_FALLBACK
+                            } else {
+                                NetworkCallStatus.SUCCESS
+                            }
                             GlobalConsoleLogger.recordNetworkCall(
                                 operationType = "Аудит бюджета (SSE Stream)",
                                 modelName = model,
                                 durationMs = System.currentTimeMillis() - startMs,
-                                status = NetworkCallStatus.SUCCESS,
+                                status = finalStatus,
                                 httpCode = response.code(),
                                 attemptNumber = attempt,
                                 totalModelsInChain = modelsToTry.size,
@@ -1271,15 +1216,35 @@ class BudgetRepository(
                             return@flow
                         }
                     }
-                } else {
-                    lastExceptionMessage = "HTTP ${response.code()}: ${response.message()}"
+                    hadPriorFallback = true
                     GlobalConsoleLogger.recordNetworkCall(
                         operationType = "Аудит бюджета (SSE Stream)",
                         modelName = model,
                         durationMs = System.currentTimeMillis() - startMs,
-                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                        status = if (!isLastAttempt) NetworkCallStatus.FALLBACK else NetworkCallStatus.FAILED,
                         httpCode = response.code(),
-                        errorType = "HTTP_${response.code()}",
+                        errorType = "EmptyStreamBody",
+                        errorMessage = "Пустой поток ответа от модели $model",
+                        attemptNumber = attempt,
+                        totalModelsInChain = modelsToTry.size,
+                        details = "period=$periodName",
+                        operationId = opId
+                    )
+                } else {
+                    val code = response.code()
+                    GeminiFallbackExecutor.markModelUnhealthyForHttpCode(
+                        model = model,
+                        httpCode = code,
+                        retryAfterHeader = response.headers()["Retry-After"]
+                    )
+                    hadPriorFallback = true
+                    GlobalConsoleLogger.recordNetworkCall(
+                        operationType = "Аудит бюджета (SSE Stream)",
+                        modelName = model,
+                        durationMs = System.currentTimeMillis() - startMs,
+                        status = if (!isLastAttempt) NetworkCallStatus.FALLBACK else NetworkCallStatus.FAILED,
+                        httpCode = code,
+                        errorType = "HTTP_$code",
                         errorMessage = response.message(),
                         attemptNumber = attempt,
                         totalModelsInChain = modelsToTry.size,
@@ -1287,13 +1252,28 @@ class BudgetRepository(
                         operationId = opId
                     )
                 }
-            } catch (e: Exception) {
-                lastExceptionMessage = e.message ?: e.toString()
+            } catch (ce: CancellationException) {
                 GlobalConsoleLogger.recordNetworkCall(
                     operationType = "Аудит бюджета (SSE Stream)",
                     modelName = model,
                     durationMs = System.currentTimeMillis() - startMs,
-                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                    status = NetworkCallStatus.CANCELLED,
+                    errorType = "CancellationException",
+                    errorMessage = "Потоковый аудит отменён",
+                    attemptNumber = attempt,
+                    totalModelsInChain = modelsToTry.size,
+                    details = "period=$periodName",
+                    operationId = opId
+                )
+                throw ce
+            } catch (e: Exception) {
+                GeminiFallbackExecutor.markModelUnhealthyForThrowable(model, e)
+                hadPriorFallback = true
+                GlobalConsoleLogger.recordNetworkCall(
+                    operationType = "Аудит бюджета (SSE Stream)",
+                    modelName = model,
+                    durationMs = System.currentTimeMillis() - startMs,
+                    status = if (!isLastAttempt) NetworkCallStatus.FALLBACK else NetworkCallStatus.FAILED,
                     errorType = e.javaClass.simpleName,
                     errorMessage = e.localizedMessage ?: e.message,
                     attemptNumber = attempt,
@@ -1398,33 +1378,25 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        var lastExceptionMessage = ""
-
-        val modelsToTry = listOf(
-            "gemini-3.8-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash",
-            "gemini-2.5-flash"
+        val chainResult = GeminiFallbackExecutor.executeWithFallback(
+            operationPrefix = "AUDIT",
+            operationType = "Аудит бюджета",
+            modelsChain = GeminiModelChains.AUDIT_MODELS,
+            timeoutProfile = GeminiTimeoutProfile.STREAMING_AUDIT,
+            apiKey = apiKey,
+            request = request,
+            apiService = apiService,
+            detailsBuilder = { "period=$periodName" },
+            extractResult = { response ->
+                response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.takeIf { it.isNotBlank() }
+            }
         )
 
-        for (model in modelsToTry) {
-            try {
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error != null) {
-                    lastExceptionMessage = "HTTP ${response.error.code ?: 400}: ${response.error.message ?: "Ошибка API"}"
-                } else {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                    if (!responseText.isNullOrEmpty()) {
-                        return Result.success(responseText)
-                    }
-                }
-            } catch (e: Exception) {
-                lastExceptionMessage = e.message ?: e.toString()
-            }
+        return if (chainResult.value != null) {
+            Result.success(chainResult.value)
+        } else {
+            Result.failure(Exception("ERROR_NO_CONNECTION"))
         }
-
-        // Fallback
-        return Result.failure(Exception("ERROR_NO_CONNECTION"))
     }
 
     private fun generateLocalOfflineAudit(
@@ -1514,7 +1486,7 @@ class BudgetRepository(
         categories: List<String>
     ): String {
         if (transactionName.isBlank()) return ""
-        if (apiKey.isBlank()) return ""
+        if (apiKey.isBlank()) return localCategorySuggestion(transactionName, type, categories)
 
         val typeText = if (type == "income") "Доход" else "Расход"
         val userQuery = "Тип операции: '$typeText'.\n" +
@@ -1537,32 +1509,28 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        val modelsToTry = listOf(
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
+        val chainResult = GeminiFallbackExecutor.executeWithFallback(
+            operationPrefix = "CAT-AI",
+            operationType = "Автоподбор категории (ИИ)",
+            modelsChain = GeminiModelChains.CATEGORY_SUGGEST_MODELS,
+            timeoutProfile = GeminiTimeoutProfile.FAST_BACKGROUND,
+            apiKey = apiKey,
+            request = request,
+            apiService = apiService,
+            detailsBuilder = { cat -> "name=$transactionName -> ${cat ?: ""}" },
+            extractResult = { response ->
+                response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                    ?.trim()
+                    ?.removePrefix("\"")
+                    ?.removeSuffix("\"")
+                    ?.removePrefix("«")
+                    ?.removeSuffix("»")
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+            }
         )
 
-        for (model in modelsToTry) {
-            try {
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                        ?.trim()
-                        ?.removePrefix("\"")
-                        ?.removeSuffix("\"")
-                        ?.removePrefix("«")
-                        ?.removeSuffix("»")
-                        ?.trim()
-                    if (!responseText.isNullOrEmpty()) {
-                        return responseText
-                    }
-                }
-            } catch (_: Exception) {
-                // Try next model or fallback
-            }
-        }
-
-        return localCategorySuggestion(transactionName, type, categories)
+        return chainResult.value ?: localCategorySuggestion(transactionName, type, categories)
     }
 
     private fun localCategorySuggestion(name: String, type: String, categories: List<String>): String {
@@ -1687,79 +1655,32 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        var lastError: String? = null
-
-        val modelsToTry = listOf(
-            "gemini-3.5-flash",
-            "gemini-3.8-flash",
-            "gemini-2.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
+        val chainResult = GeminiFallbackExecutor.executeWithFallback(
+            operationPrefix = "VOICE-TXT",
+            operationType = "Разбор голоса (Текст)",
+            modelsChain = GeminiModelChains.VOICE_TEXT_MODELS,
+            timeoutProfile = GeminiTimeoutProfile.VOICE_PARSE,
+            apiKey = apiKey,
+            request = request,
+            apiService = apiService,
+            detailsBuilder = { parsed -> "распознано=${parsed?.size ?: 0} шт." },
+            extractResult = { response ->
+                val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                if (!responseText.isNullOrEmpty()) {
+                    val jsonString = extractJsonArray(responseText)
+                    if (jsonString.isNotBlank()) {
+                        val parsed = parseJsonOperations(jsonString, todayStr)
+                        parsed.takeIf { it.isNotEmpty() }
+                    } else null
+                } else null
+            }
         )
 
-        val opId = GlobalConsoleLogger.newOperationId("VOICE-TXT")
-        GlobalConsoleLogger.i("GEMINI", "Запрос к Gemini API для разбора текста (${trimmedText.length} симв.)", operationId = opId)
-
-        for ((idx, model) in modelsToTry.withIndex()) {
-            val attempt = idx + 1
-            val startMs = System.currentTimeMillis()
-            try {
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                    if (!responseText.isNullOrEmpty()) {
-                        val jsonString = extractJsonArray(responseText)
-                        if (jsonString.isNotBlank()) {
-                            val parsed = parseJsonOperations(jsonString, todayStr)
-                            if (parsed.isNotEmpty()) {
-                                GlobalConsoleLogger.recordNetworkCall(
-                                    operationType = "Разбор голоса (Текст)",
-                                    modelName = model,
-                                    durationMs = System.currentTimeMillis() - startMs,
-                                    status = NetworkCallStatus.SUCCESS,
-                                    httpCode = 200,
-                                    attemptNumber = attempt,
-                                    totalModelsInChain = modelsToTry.size,
-                                    details = "распознано=${parsed.size} шт.",
-                                    operationId = opId
-                                )
-                                return parsed
-                            }
-                        }
-                    }
-                } else {
-                    lastError = response.error.message
-                    GlobalConsoleLogger.recordNetworkCall(
-                        operationType = "Разбор голоса (Текст)",
-                        modelName = model,
-                        durationMs = System.currentTimeMillis() - startMs,
-                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                        httpCode = response.error.code,
-                        errorType = response.error.status ?: "GeminiError",
-                        errorMessage = response.error.message,
-                        attemptNumber = attempt,
-                        totalModelsInChain = modelsToTry.size,
-                        operationId = opId
-                    )
-                }
-            } catch (e: Exception) {
-                lastError = e.message
-                GlobalConsoleLogger.recordNetworkCall(
-                    operationType = "Разбор голоса (Текст)",
-                    modelName = model,
-                    durationMs = System.currentTimeMillis() - startMs,
-                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                    errorType = e.javaClass.simpleName,
-                    errorMessage = e.localizedMessage ?: e.message,
-                    attemptNumber = attempt,
-                    totalModelsInChain = modelsToTry.size,
-                    operationId = opId
-                )
-            }
+        if (chainResult.value != null) {
+            return chainResult.value
         }
 
-        GlobalConsoleLogger.e("GEMINI", "Все Gemini модели завершились ошибкой: $lastError")
-        throw IllegalStateException(lastError ?: "Не удалось разбрать операции из текста. Попробуйте сформулировать точнее.")
+        throw IllegalStateException("Не удалось разбрать операции из текста. Попробуйте сформулировать точнее.")
     }
 
     suspend fun parseVoiceAudioOperations(
@@ -1830,78 +1751,27 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        var lastError: String? = null
-        val modelsToTry = listOf(
-            "gemini-2.5-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
+        val chainResult = GeminiFallbackExecutor.executeWithFallback(
+            operationPrefix = "VOICE-WAV",
+            operationType = "Gemini Live Аудио (WAV)",
+            modelsChain = GeminiModelChains.VOICE_AUDIO_MODELS,
+            timeoutProfile = GeminiTimeoutProfile.VOICE_PARSE,
+            apiKey = apiKey,
+            request = request,
+            apiService = apiService,
+            detailsBuilder = { parsed -> "bytes=${audioBytes.size} | распознано=${parsed?.size ?: 0}" },
+            extractResult = { response ->
+                val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                if (!responseText.isNullOrEmpty()) {
+                    val jsonString = extractJsonArray(responseText)
+                    if (jsonString.isNotBlank()) {
+                        parseJsonOperations(jsonString, todayStr)
+                    } else null
+                } else null
+            }
         )
 
-        val opId = GlobalConsoleLogger.newOperationId("VOICE-WAV")
-        GlobalConsoleLogger.i("GEMINI", "Отправка Live-аудиофрагмента (${audioBytes.size} байт) в Gemini API...", operationId = opId)
-
-        for ((idx, model) in modelsToTry.withIndex()) {
-            val attempt = idx + 1
-            val startMs = System.currentTimeMillis()
-            try {
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                    if (!responseText.isNullOrEmpty()) {
-                        val jsonString = extractJsonArray(responseText)
-                        if (jsonString.isNotBlank()) {
-                            val parsed = parseJsonOperations(jsonString, todayStr)
-                            GlobalConsoleLogger.recordNetworkCall(
-                                operationType = "Gemini Live Аудио (WAV)",
-                                modelName = model,
-                                durationMs = System.currentTimeMillis() - startMs,
-                                status = NetworkCallStatus.SUCCESS,
-                                httpCode = 200,
-                                attemptNumber = attempt,
-                                totalModelsInChain = modelsToTry.size,
-                                details = "bytes=${audioBytes.size} | распознано=${parsed.size}",
-                                operationId = opId
-                            )
-                            return@withContext parsed
-                        }
-                    }
-                } else {
-                    lastError = response.error.message
-                    GlobalConsoleLogger.recordNetworkCall(
-                        operationType = "Gemini Live Аудио (WAV)",
-                        modelName = model,
-                        durationMs = System.currentTimeMillis() - startMs,
-                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                        httpCode = response.error.code,
-                        errorType = response.error.status ?: "GeminiError",
-                        errorMessage = response.error.message,
-                        attemptNumber = attempt,
-                        totalModelsInChain = modelsToTry.size,
-                        details = "bytes=${audioBytes.size}",
-                        operationId = opId
-                    )
-                }
-            } catch (e: Exception) {
-                lastError = e.message
-                GlobalConsoleLogger.recordNetworkCall(
-                    operationType = "Gemini Live Аудио (WAV)",
-                    modelName = model,
-                    durationMs = System.currentTimeMillis() - startMs,
-                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                    errorType = e.javaClass.simpleName,
-                    errorMessage = e.localizedMessage ?: e.message,
-                    attemptNumber = attempt,
-                    totalModelsInChain = modelsToTry.size,
-                    details = "bytes=${audioBytes.size}",
-                    operationId = opId
-                )
-            }
-        }
-
-        if (lastError != null) {
-            GlobalConsoleLogger.e("GEMINI", "Ошибка Gemini Live аудио: $lastError")
-        }
-        return@withContext emptyList()
+        return@withContext chainResult.value ?: emptyList()
     }
 
     private fun extractJsonArray(rawText: String): String {

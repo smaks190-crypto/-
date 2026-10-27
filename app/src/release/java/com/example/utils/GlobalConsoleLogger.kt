@@ -19,8 +19,17 @@ enum class LogLevel(val label: String, val priority: Int) {
 
 enum class NetworkCallStatus(val label: String) {
     SUCCESS("SUCCESS"),
+    SUCCESS_AFTER_FALLBACK("SUCCESS_AFTER_FALLBACK"),
     FALLBACK("FALLBACK"),
-    ERROR("ERROR")
+    FAILED("FAILED"),
+    CANCELLED("CANCELLED"),
+    ERROR("FAILED");
+
+    val isTerminalSuccess: Boolean
+        get() = this == SUCCESS || this == SUCCESS_AFTER_FALLBACK
+
+    val isTerminalFailure: Boolean
+        get() = this == FAILED || this == ERROR
 }
 
 data class LogEntry(
@@ -52,7 +61,8 @@ data class NetworkTraceEntry(
     val errorMessage: String? = null,
     val attemptNumber: Int = 1,
     val totalModelsInChain: Int = 1,
-    val details: String? = null
+    val details: String? = null,
+    val chainOutcome: NetworkCallStatus = status
 )
 
 data class DbOperationEntry(
@@ -129,6 +139,7 @@ object GlobalConsoleLogger {
     fun markErrorsAsRead() {}
     fun setupUncaughtExceptionHandler(context: Context? = null) {}
     fun clearPersistedCrash() {}
+    fun getChainOutcomeForOperation(operationId: String): NetworkCallStatus? = null
 
     fun d(tag: String, message: String, details: String? = null, operationId: String? = null) {}
     fun i(tag: String, message: String, details: String? = null, operationId: String? = null) {}
