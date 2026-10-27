@@ -9,9 +9,17 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
+### Версия v10.60 (сборка 151)
+
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
-Версия и список изменений появятся здесь после первой успешной автоматической публикации.
+**Что изменилось:**
+
+## What's Changed
+* ci: automatic APK version, generated release notes and README updates by @smaks190-crypto in https://github.com/smaks190-crypto/-/pull/12
+
+
+**Full Changelog**: https://github.com/smaks190-crypto/-/compare/build-146-1...v10.60-build.151
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
