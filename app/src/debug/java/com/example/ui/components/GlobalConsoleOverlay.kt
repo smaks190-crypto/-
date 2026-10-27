@@ -85,7 +85,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.BuildConfig
-import com.example.ui.theme.Cyan400
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.GlassBorder
@@ -106,6 +105,7 @@ import com.example.utils.SystemDiagnosticsState
 import kotlinx.coroutines.delay
 import java.util.Locale
 
+private val Cyan400 = Color(0xFF22D3EE)
 private val ConsoleAmber = Color(0xFFFBBF24)
 private val ConsoleFatalRed = Color(0xFFFF2E54)
 private val ObsidianSurface = Color(0xFF0B0F1A)
