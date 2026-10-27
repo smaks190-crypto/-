@@ -474,7 +474,7 @@ private fun SplashCanvasOverlay(
             val offscreenTopTargetY = -baseCoinRadius * 2.4f
             coinY = lerpFloat(mouthOriginY, offscreenTopTargetY, easedUp)
 
-            // Непрерывный оборот вокруг вертикальной оси: ₽ -> ребро -> жаба -> ребро -> ₽
+            // Непрерывный кувырок снизу вверх вокруг горизонтальной оси X.
             coinSpinAngle = launchProgress * 2.0f * PI.toFloat()
             coinScale = lerpFloat(0.82f, 1.06f, easedUp)
             coinGlowIntensity = (0.35f + launchProgress * 0.50f).coerceIn(0f, 1f)
@@ -958,7 +958,7 @@ private fun DrawScope.drawEmojiFrog(
 }
 
 /**
- * Отрисовка двусторонней объемной 3D-золотой монетки вокруг вертикальной оси Y:
+ * Отрисовка двусторонней объемной 3D-золотой монетки вокруг горизонтальной оси X:
  * - Аверс (`flipCos >= 0f`): рельефный знак рубля `₽` с короной.
  * - Реверс (`flipCos < 0f`): чеканный золотой барельеф головы жабы Давида (`drawEmbossedFrogEmblem`).
  * (0 аллокаций `Brush` внутри `onDraw`).
@@ -974,14 +974,14 @@ private fun DrawScope.drawGoldenCoin(
     timeProgress: Float
 ) {
     val r = baseRadius.coerceAtLeast(10f)
-    // Rotate about the VERTICAL axis: the silhouette passes through a narrow
-    // edge, then the opposite face. sin() keeps the rim motion directional
-    // through every half-turn rather than reversing at the edge.
+    // End-over-end rotation about the HORIZONTAL X axis: bottom moves up.
+    // Keep the signed sine for depth and the signed cosine for front/back.
+    // abs(cos) is used ONLY for the projected face height, never to reverse time.
     val flipCos = cos(spinAngle)
     val flipSin = sin(spinAngle)
-    val faceScaleX = abs(flipCos).coerceAtLeast(0.015f)
-    val rimThickness = r * 0.34f
-    val rimOffsetX = flipSin * rimThickness
+    val faceScaleY = abs(flipCos).coerceAtLeast(0.012f)
+    val rimThickness = r * 0.40f
+    val rimOffsetY = flipSin * rimThickness
 
     withTransform({
         translate(left = center.x, top = center.y)
@@ -994,44 +994,46 @@ private fun DrawScope.drawGoldenCoin(
             alpha = (0.45f + 0.55f * glowIntensity).coerceIn(0f, 1f)
         )
 
-        // Layered cylindrical edge: its horizontal displacement changes sign
-        // as the coin passes each edge-on position.
+        // Back-to-front slices of the cylindrical rim. Their signed vertical
+        // displacement makes the visible edge travel down, then up, as a
+        // genuine full turn proceeds (not a reversing scale animation).
         val steps = 8
         for (step in 0..steps) {
             val fraction = step.toFloat() / steps
-            val sliceX = lerpFloat(rimOffsetX, -rimOffsetX * 0.25f, fraction)
+            val sliceY = lerpFloat(rimOffsetY, -rimOffsetY * 0.25f, fraction)
             drawOval(
                 brush = brushes.coin3dRimBrush,
-                topLeft = Offset(sliceX - r * faceScaleX, -r),
-                size = Size(r * 2f * faceScaleX, r * 2f)
+                topLeft = Offset(-r, sliceY - r * faceScaleY),
+                size = Size(r * 2f, r * 2f * faceScaleY)
             )
         }
 
-        // Horizontal grooves across the exposed vertical edge.
-        if (abs(rimOffsetX) > 1.5f) {
+        // Grooves run across the horizontal edge when the coin is edge-on.
+        if (abs(rimOffsetY) > 1.5f) {
             val notchStroke = (r * 0.05f).coerceAtLeast(1.5f)
             for (notch in -4..4) {
-                val notchY = notch * (r * 0.20f)
-                val normalizedY = (notchY / r).coerceIn(-0.95f, 0.95f)
-                val curveX = sqrt((1f - normalizedY * normalizedY).coerceAtLeast(0f)) * r * faceScaleX
-                val nearX = -rimOffsetX * 0.25f + if (rimOffsetX > 0f) curveX else -curveX
-                val farX = rimOffsetX + if (rimOffsetX > 0f) curveX else -curveX
+                val notchX = notch * (r * 0.20f)
+                val normalizedX = (notchX / r).coerceIn(-0.95f, 0.95f)
+                val curveY = sqrt((1f - normalizedX * normalizedX).coerceAtLeast(0f)) * r * faceScaleY
+                val nearY = -rimOffsetY * 0.25f + if (rimOffsetY > 0f) curveY else -curveY
+                val farY = rimOffsetY + if (rimOffsetY > 0f) curveY else -curveY
                 drawLine(
                     color = if (notch % 2 == 0) Color(0xFF78350F).copy(alpha = 0.82f)
                         else Color(0xFFFEF08A).copy(alpha = 0.65f),
-                    start = Offset(nearX, notchY),
-                    end = Offset(farX, notchY),
+                    start = Offset(notchX, nearY),
+                    end = Offset(notchX, farY),
                     strokeWidth = notchStroke,
                     cap = StrokeCap.Round
                 )
             }
         }
 
-        // Front (ruble) and reverse (frog) have different emblems.
-        // Only the horizontal projection is compressed; rotation never changes direction.
+        // The opposite face has its own emblem. Preserve its vertical
+        // orientation in the projection while using signed cosine for
+        // visibility; this avoids the apparent ping-pong at 90 degrees.
         withTransform({
-            translate(left = -rimOffsetX * 0.25f, top = 0f)
-            scale(scaleX = faceScaleX, scaleY = 1f, pivot = Offset.Zero)
+            translate(left = 0f, top = -rimOffsetY * 0.25f)
+            scale(scaleX = 1f, scaleY = faceScaleY, pivot = Offset.Zero)
         }) {
             // Внешний золотой обод
             drawCircle(
