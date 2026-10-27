@@ -474,8 +474,8 @@ private fun SplashCanvasOverlay(
             val offscreenTopTargetY = -baseCoinRadius * 2.4f
             coinY = lerpFloat(mouthOriginY, offscreenTopTargetY, easedUp)
 
-            // Непрерывный кувырок снизу вверх вокруг горизонтальной оси X.
-            coinSpinAngle = launchProgress * 2.0f * PI.toFloat()
+            // Один полный кувырок СВЕРХУ ВНИЗ: отрицательный угол без разворота на ребре.
+            coinSpinAngle = -launchProgress * 2.0f * PI.toFloat()
             coinScale = lerpFloat(0.82f, 1.06f, easedUp)
             coinGlowIntensity = (0.35f + launchProgress * 0.50f).coerceIn(0f, 1f)
         } else {
@@ -485,8 +485,8 @@ private fun SplashCanvasOverlay(
             val fallEndY = h + maxDipDepth * 1.35f
             coinY = lerpFloat(fallStartY, fallEndY, easedFall)
 
-            // Два полных оборота при падении, непрерывное продолжение от 2*PI
-            coinSpinAngle = (2.0f + p2 * 4.0f) * PI.toFloat()
+            // Два оборота сверху вниз при падении; непрерывное продолжение от -2*PI
+            coinSpinAngle = -(2.0f + p2 * 4.0f) * PI.toFloat()
 
             if (coinY <= 0f) {
                 coinScale = 1.08f
@@ -974,14 +974,20 @@ private fun DrawScope.drawGoldenCoin(
     timeProgress: Float
 ) {
     val r = baseRadius.coerceAtLeast(10f)
-    // End-over-end rotation about the HORIZONTAL X axis: bottom moves up.
-    // Keep the signed sine for depth and the signed cosine for front/back.
-    // abs(cos) is used ONLY for the projected face height, never to reverse time.
+    // Orthographic projection of a real, thick cylinder rotating about X.
+    // The angular timeline is monotonically NEGATIVE: the TOP goes forwards
+    // and DOWN. Never use abs(cos) for the face transform: it would mirror
+    // each quarter-turn and look like the coin rocks back and forth.
     val flipCos = cos(spinAngle)
     val flipSin = sin(spinAngle)
-    val faceScaleY = abs(flipCos).coerceAtLeast(0.012f)
-    val rimThickness = r * 0.40f
-    val rimOffsetY = flipSin * rimThickness
+    val projectedFaceY = if (abs(flipCos) < 0.015f) {
+        if (flipCos < 0f) -0.015f else 0.015f
+    } else flipCos
+    val faceHeight = abs(projectedFaceY)
+    val halfDepth = r * 0.24f
+    val depthShift = flipSin * halfDepth
+    // The frontmost visible cap changes at each half-turn.
+    val capY = if (flipCos >= 0f) -depthShift else depthShift
 
     withTransform({
         translate(left = center.x, top = center.y)
@@ -994,46 +1000,50 @@ private fun DrawScope.drawGoldenCoin(
             alpha = (0.45f + 0.55f * glowIntensity).coerceIn(0f, 1f)
         )
 
-        // Back-to-front slices of the cylindrical rim. Their signed vertical
-        // displacement makes the visible edge travel down, then up, as a
-        // genuine full turn proceeds (not a reversing scale animation).
+        // Project both faces at +/- depthShift, and connect them with
+        // eight slices of the metal edge. At 90/270 degrees the edge has
+        // actual thickness instead of collapsing into an infinitesimal line.
         val steps = 8
         for (step in 0..steps) {
             val fraction = step.toFloat() / steps
-            val sliceY = lerpFloat(rimOffsetY, -rimOffsetY * 0.25f, fraction)
+            val sliceY = lerpFloat(-depthShift, depthShift, fraction)
             drawOval(
                 brush = brushes.coin3dRimBrush,
-                topLeft = Offset(-r, sliceY - r * faceScaleY),
-                size = Size(r * 2f, r * 2f * faceScaleY)
+                topLeft = Offset(-r, sliceY - r * faceHeight),
+                size = Size(r * 2f, r * 2f * faceHeight)
             )
         }
-
-        // Grooves run across the horizontal edge when the coin is edge-on.
-        if (abs(rimOffsetY) > 1.5f) {
-            val notchStroke = (r * 0.05f).coerceAtLeast(1.5f)
+        // Alternating top/bottom lighting makes successive edge-on positions
+        // distinguishable; a symmetric band looks identical in both directions.
+        val edgeVisibility = abs(flipSin)
+        if (edgeVisibility > 0.08f) {
+            val edgeY = if (flipSin < 0f) -abs(depthShift) else abs(depthShift)
+            drawLine(
+                color = if (flipSin < 0f) Color(0xFFFFE88B)
+                        else Color(0xFF78350F),
+                start = Offset(-r * 0.88f, edgeY),
+                end = Offset(r * 0.88f, edgeY),
+                strokeWidth = (r * 0.09f).coerceAtLeast(2f),
+                alpha = edgeVisibility * 0.85f,
+                cap = StrokeCap.Round
+            )
             for (notch in -4..4) {
-                val notchX = notch * (r * 0.20f)
-                val normalizedX = (notchX / r).coerceIn(-0.95f, 0.95f)
-                val curveY = sqrt((1f - normalizedX * normalizedX).coerceAtLeast(0f)) * r * faceScaleY
-                val nearY = -rimOffsetY * 0.25f + if (rimOffsetY > 0f) curveY else -curveY
-                val farY = rimOffsetY + if (rimOffsetY > 0f) curveY else -curveY
+                val x = notch * r * 0.19f
                 drawLine(
-                    color = if (notch % 2 == 0) Color(0xFF78350F).copy(alpha = 0.82f)
-                        else Color(0xFFFEF08A).copy(alpha = 0.65f),
-                    start = Offset(notchX, nearY),
-                    end = Offset(notchX, farY),
-                    strokeWidth = notchStroke,
+                    color = Color(0xFF92400E).copy(alpha = edgeVisibility * 0.7f),
+                    start = Offset(x, -abs(depthShift) * 0.7f),
+                    end = Offset(x, abs(depthShift) * 0.7f),
+                    strokeWidth = (r * 0.025f).coerceAtLeast(1f),
                     cap = StrokeCap.Round
                 )
             }
         }
 
-        // The opposite face has its own emblem. Preserve its vertical
-        // orientation in the projection while using signed cosine for
-        // visibility; this avoids the apparent ping-pong at 90 degrees.
+        // Signed face projection: its orientation continues THROUGH the
+        // edge; the reverse emblem is drawn on the far side of the turn.
         withTransform({
-            translate(left = 0f, top = -rimOffsetY * 0.25f)
-            scale(scaleX = 1f, scaleY = faceScaleY, pivot = Offset.Zero)
+            translate(left = 0f, top = capY)
+            scale(scaleX = 1f, scaleY = projectedFaceY, pivot = Offset.Zero)
         }) {
             // Внешний золотой обод
             drawCircle(
