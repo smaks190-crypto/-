@@ -13,6 +13,8 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [ "main" ]
+    paths-ignore:
+      - "README.md"
   workflow_dispatch:
 
 permissions:
@@ -85,25 +87,22 @@ jobs:
         run: |
           echo "$RELEASE_KEYSTORE_BASE64" | base64 --decode > my-upload-key.jks
 
-      # СОБИРАЕМ РЕЛИЗНЫЙ BUNDLE (.AAB)
-      - name: Build Release Bundle (AAB)
+      # ЕДИНЫЙ НОМЕР ВЕРСИИ ДЛЯ APK И AAB
+      - name: Set release version
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        env:
-          KEYSTORE_PATH: my-upload-key.jks
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        run: gradle bundleRelease --no-configuration-cache
+        run: |
+          base=$(sed -n 's/^VERSION_CODE=//p' version.properties)
+          echo "CI_VERSION_CODE=$((base + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
 
-      # СОБИРАЕМ РЕЛИЗНЫЙ APK (.APK)
-      - name: Build Release APK
+      # APK И AAB В ОДНОМ GRADLE ЗАПУСКЕ
+      - name: Build Release APK and AAB
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           KEYSTORE_PATH: my-upload-key.jks
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        run: gradle assembleRelease --no-configuration-cache
+        run: gradle bundleRelease assembleRelease --no-configuration-cache
 
       # СОХРАНЯЕМ ГОТОВЫЕ РЕЛИЗНЫЕ ФАЙЛЫ
       - name: Upload Release Artifacts
@@ -115,16 +114,52 @@ jobs:
             app/build/outputs/bundle/release/app-release.aab
             app/build/outputs/apk/release/app-release.apk
 
-      # ПУБЛИКУЕМ APK ПОСЛЕ УСПЕШНОЙ СБОРКИ MAIN
-      - name: Publish latest APK to GitHub Releases
+      # ПУБЛИКУЕМ ПОДПИСАННЫЕ APK И AAB С АВТОМАТИЧЕСКОЙ ИСТОРИЕЙ PR
+      - name: Publish latest GitHub Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           test -s app/build/outputs/apk/release/app-release.apk
-          gh release create "build-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}" \
+          test -s app/build/outputs/bundle/release/app-release.aab
+          version=$(printf '%d.%02d' "$((1 + CI_VERSION_CODE / 100))" "$((CI_VERSION_CODE % 100))")
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          gh release create "v${version}-build.${GITHUB_RUN_NUMBER}" \
             app/build/outputs/apk/release/app-release.apk \
-            --title "Build ${GITHUB_RUN_NUMBER} (main)" \
-            --notes "Automatic release from main commit ${GITHUB_SHA}." \
+            app/build/outputs/bundle/release/app-release.aab \
+            --title "David Finance AI v${version} (build ${GITHUB_RUN_NUMBER})" \
+            --generate-notes \
             --target "$GITHUB_SHA" \
             --latest
+
+      # ОБНОВЛЯЕМ БЛОК README ПОСЛЕ УСПЕШНОЙ ПУБЛИКАЦИИ
+      - name: Update README with latest version and changes
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "v${RELEASE_VERSION}-build.${GITHUB_RUN_NUMBER}" --json body --jq .body > /tmp/release-notes.md
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          readme = Path("README.md")
+          content = readme.read_text(encoding="utf-8")
+          start = "<!-- LATEST_RELEASE_START -->"
+          end = "<!-- LATEST_RELEASE_END -->"
+          assert content.count(start) == 1 and content.count(end) == 1
+          notes = Path("/tmp/release-notes.md").read_text(encoding="utf-8").strip()
+          if not notes:
+              notes = "В этом выпуске нет автоматически описанных изменений."
+          block = (f"{start}\n### Версия v{os.environ['RELEASE_VERSION']} (сборка {os.environ['GITHUB_RUN_NUMBER']})\n\n"
+                   "[📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)\n\n"
+                   f"**Что изменилось:**\n\n{notes}\n{end}")
+          before, rest = content.split(start, 1)
+          _, after = rest.split(end, 1)
+          readme.write_text(before + block + after, encoding="utf-8")
+          PY
+          if git diff --quiet -- README.md; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: update latest release information [skip ci]"
+          git push origin HEAD:main
