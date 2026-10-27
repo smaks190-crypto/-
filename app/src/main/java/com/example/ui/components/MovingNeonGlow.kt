@@ -45,20 +45,19 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-// Палитра Gemini Live Volumetric Liquid Aurora (компактное краевое свечение по низу капсулы)
+// Фирменная изумрудно-мятная палитра приложения David Finance (Obsidian Neo-Bank Emerald)
 private val AuroraSpaceBg = Color(0xFF080C14)
-private val AuroraRoyalBlue = Color(0xFF1D4ED8)
-private val AuroraDeepIndigo = Color(0xFF4F46E5)
-private val AuroraCyan = Color(0xFF00E5FF)
-private val AuroraSkyBlue = Color(0xFF38BDF8)
-private val AuroraViolet = Color(0xFF818CF8)
-private val AuroraEmeraldHint = Color(0xFF10B981)
-private val AuroraCoreIce = Color(0xFFE0F2FE)
+private val AuroraDeepEmerald = Color(0xFF065F46)
+private val AuroraEmerald = Color(0xFF10B981)
+private val AuroraNeonMint = Color(0xFF34D399)
+private val AuroraTealCyan = Color(0xFF14B8A6)
+private val AuroraSubtleIndigo = Color(0xFF6366F1)
+private val AuroraCoreMint = Color(0xFFA7F3D0)
 
 /**
- * Компактная жидкая неоновая анимация в стиле Gemini Live (Volumetric Liquid Aurora Edge Glow).
- * Формирует аккуратное многослойное свечение строго вдоль нижней кромки капсулы без засветки
- * текста и кнопок, плавно откликаясь на голос увеличением высоты и яркости нижнего ореола.
+ * Компактная жидкая неоновая анимация в фирменном изумрудном цвете приложения (Obsidian Emerald Edge Glow).
+ * Формирует аккуратное многослойное свечение строго вдоль нижней кромки капсулы микрофона
+ * без засветки текста и нижних кнопок действий.
  */
 @Composable
 fun VolumetricLiquidAuroraGlow(
@@ -139,8 +138,8 @@ fun VolumetricLiquidAuroraGlow(
     val glassBorderBrush = remember {
         Brush.verticalGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.16f),
-                AuroraSkyBlue.copy(alpha = 0.42f)
+                AuroraEmerald.copy(alpha = 0.26f),
+                AuroraTealCyan.copy(alpha = 0.48f)
             )
         )
     }
@@ -174,60 +173,64 @@ fun VolumetricLiquidAuroraGlow(
             val h = size.height
             if (w <= 0f || h <= 0f) return@Canvas
 
+            // Когда открыты под-экраны CONSENT / API_KEY / OPERATIONS (maxAuroraHeight != null и !fillBackground),
+            // не рисуем дублирующее свечение под нижними кнопками действий («Сохранить», «Разрешить ИИ»),
+            // так как в режиме OPERATIONS уже светится сама 64.dp капсула прослушивания микрофона.
+            if (maxAuroraHeight != null && !fillBackground) return@Canvas
+
             val maxCapPx = maxAuroraHeight?.toPx()?.coerceAtMost(h) ?: h
 
-            // Компактная высота краевого свечения строго у нижней границы:
-            // В покое (диалоги согласия / ключа / пауза): 10..13.dp у самой кромки.
-            // При записи голоса: от 15.dp в тишине до 28.dp на пике речи (не выше 34% высоты капсулы).
+            // Компактная высота краевого свечения строго у нижней границы капсулы:
+            // В тишине: 12..14.dp у самой кромки; при речи: плавно поднимается до 24.dp (не выше 30% высоты капсулы).
             val targetEdgeDp = if (isRecording) {
-                (14f + breathPhase * 2f + smoothedVoiceLevel * 14f).dp
+                (12.5f + breathPhase * 2f + smoothedVoiceLevel * 12f).dp
             } else {
-                (9.5f + breathPhase * 2.5f).dp
+                (8.5f + breathPhase * 2f).dp
             }
             val domeHeight = targetEdgeDp.toPx()
-                .coerceAtMost(maxCapPx * 0.34f)
-                .coerceAtMost(h * 0.34f)
+                .coerceAtMost(maxCapPx * 0.30f)
+                .coerceAtMost(h * 0.30f)
 
             val orbitalX = sin(phase3300)
             val orbitalY = cos(phase3300)
 
-            // Мягкая компактная подложка через native BlurMaskFilter строго вдоль нижней кромки
+            // Мягкая компактная подложка через native BlurMaskFilter в фирменном изумрудном цвете
             drawIntoCanvas { canvas ->
                 val nativeCanvas = canvas.nativeCanvas
-                val blurRadius = (domeHeight * 0.55f).coerceIn(6.dp.toPx(), 15.dp.toPx())
+                val blurRadius = (domeHeight * 0.50f).coerceIn(5.dp.toPx(), 13.dp.toPx())
                 blurPaint.maskFilter = BlurMaskFilter(blurRadius, BlurMaskFilter.Blur.NORMAL)
 
-                // Размытый базовый ореол Royal Blue у самого дна капсулы
-                blurPaint.color = AuroraRoyalBlue
-                    .copy(alpha = if (isRecording) (0.34f + smoothedVoiceLevel * 0.22f).coerceAtMost(0.60f) else 0.24f)
+                // Размытый базовый ореол Deep Emerald у самого дна капсулы
+                blurPaint.color = AuroraDeepEmerald
+                    .copy(alpha = if (isRecording) (0.38f + smoothedVoiceLevel * 0.22f).coerceAtMost(0.64f) else 0.24f)
                     .toArgb()
                 nativeCanvas.drawOval(
                     -w * 0.08f + phase2100 * w * 0.05f,
-                    h - domeHeight * 0.55f,
+                    h - domeHeight * 0.50f,
                     w * 1.08f + phase2700 * w * 0.05f,
                     h + domeHeight * 0.90f,
                     blurPaint
                 )
 
-                // Тонкий размытый ореол дрейфующего циана вдоль нижней линии
-                blurPaint.color = AuroraSkyBlue
-                    .copy(alpha = if (isRecording) (0.22f + smoothedVoiceLevel * 0.24f).coerceAtMost(0.50f) else 0.16f)
+                // Тонкий размытый ореол дрейфующего изумруда вдоль нижней линии
+                blurPaint.color = AuroraEmerald
+                    .copy(alpha = if (isRecording) (0.24f + smoothedVoiceLevel * 0.24f).coerceAtMost(0.52f) else 0.16f)
                     .toArgb()
-                val cyanCenterX = w * (0.5f + phase2100 * 0.20f)
+                val emeraldCenterX = w * (0.5f + phase2100 * 0.20f)
                 nativeCanvas.drawOval(
-                    cyanCenterX - w * 0.38f,
-                    h - domeHeight * (0.42f + breathPhase * 0.08f),
-                    cyanCenterX + w * 0.38f,
-                    h + domeHeight * 0.70f,
+                    emeraldCenterX - w * 0.38f,
+                    h - domeHeight * (0.38f + breathPhase * 0.08f),
+                    emeraldCenterX + w * 0.38f,
+                    h + domeHeight * 0.72f,
                     blurPaint
                 )
             }
 
-            // Слой 1 (Глубокая база): Мягкая лента Deep Indigo / Royal Blue вдоль нижней границы капсулы
+            // Слой 1 (Глубокая база): Мягкая лента Deep Emerald / Emerald вдоль нижней границы капсулы
             val baseCenterX = w * (0.50f + phase2100 * 0.08f + orbitalX * 0.04f)
-            val baseCenterY = h + domeHeight * 0.32f
+            val baseCenterY = h + domeHeight * 0.34f
             val baseRadius = (w * 0.58f).coerceAtLeast(domeHeight * 2.2f)
-            val baseScaleY = ((domeHeight * 0.95f) / baseRadius).coerceIn(0.06f, 0.45f)
+            val baseScaleY = ((domeHeight * 0.92f) / baseRadius).coerceIn(0.05f, 0.40f)
 
             drawEllipticalAuroraCloud(
                 center = Offset(baseCenterX, baseCenterY),
@@ -235,19 +238,19 @@ fun VolumetricLiquidAuroraGlow(
                 scaleX = 1.18f + breathPhase * 0.08f,
                 scaleY = baseScaleY,
                 colors = listOf(
-                    AuroraDeepIndigo.copy(alpha = if (isRecording) (0.52f + smoothedVoiceLevel * 0.22f).coerceAtMost(0.78f) else 0.36f),
-                    AuroraRoyalBlue.copy(alpha = if (isRecording) (0.38f + smoothedVoiceLevel * 0.18f).coerceAtMost(0.62f) else 0.24f),
-                    AuroraRoyalBlue.copy(alpha = 0.08f),
+                    AuroraDeepEmerald.copy(alpha = if (isRecording) (0.54f + smoothedVoiceLevel * 0.22f).coerceAtMost(0.78f) else 0.34f),
+                    AuroraEmerald.copy(alpha = if (isRecording) (0.36f + smoothedVoiceLevel * 0.18f).coerceAtMost(0.60f) else 0.22f),
+                    AuroraTealCyan.copy(alpha = 0.08f),
                     Color.Transparent
                 ),
                 blendMode = BlendMode.Screen
             )
 
-            // Слой 2 (Левый/Центральный краевой сгусток Cyan & Emerald вдоль нижнего края)
+            // Слой 2 (Левый/Центральный краевой сгусток Emerald & NeonMint вдоль нижнего края)
             val plasma1CenterX = w * (0.32f + phase2100 * 0.22f + orbitalY * 0.06f)
-            val plasma1CenterY = h + domeHeight * (0.24f - smoothedVoiceLevel * 0.08f)
+            val plasma1CenterY = h + domeHeight * (0.26f - smoothedVoiceLevel * 0.07f)
             val plasma1Radius = (w * (0.40f + smoothedVoiceLevel * 0.10f)).coerceAtLeast(70f)
-            val plasma1ScaleY = ((domeHeight * (0.82f + smoothedVoiceLevel * 0.18f)) / plasma1Radius).coerceIn(0.06f, 0.42f)
+            val plasma1ScaleY = ((domeHeight * (0.78f + smoothedVoiceLevel * 0.16f)) / plasma1Radius).coerceIn(0.05f, 0.38f)
 
             drawEllipticalAuroraCloud(
                 center = Offset(plasma1CenterX, plasma1CenterY),
@@ -255,19 +258,19 @@ fun VolumetricLiquidAuroraGlow(
                 scaleX = 1.12f + orbitalX * 0.12f,
                 scaleY = plasma1ScaleY,
                 colors = listOf(
-                    AuroraCyan.copy(alpha = if (isRecording) (0.42f + smoothedVoiceLevel * 0.26f).coerceAtMost(0.72f) else 0.26f),
-                    AuroraSkyBlue.copy(alpha = if (isRecording) (0.28f + smoothedVoiceLevel * 0.20f).coerceAtMost(0.54f) else 0.16f),
-                    AuroraEmeraldHint.copy(alpha = if (isRecording) (0.14f + smoothedVoiceLevel * 0.14f).coerceAtMost(0.32f) else 0.08f),
+                    AuroraEmerald.copy(alpha = if (isRecording) (0.44f + smoothedVoiceLevel * 0.26f).coerceAtMost(0.72f) else 0.26f),
+                    AuroraNeonMint.copy(alpha = if (isRecording) (0.28f + smoothedVoiceLevel * 0.20f).coerceAtMost(0.52f) else 0.16f),
+                    AuroraTealCyan.copy(alpha = if (isRecording) (0.14f + smoothedVoiceLevel * 0.14f).coerceAtMost(0.30f) else 0.08f),
                     Color.Transparent
                 ),
                 blendMode = BlendMode.Plus
             )
 
-            // Слой 3 (Правый/Асимметричный краевой сгусток SkyBlue & Violet вдоль нижнего края)
+            // Слой 3 (Правый/Асимметричный краевой сгусток TealCyan & SubtleIndigo вдоль нижнего края)
             val plasma2CenterX = w * (0.68f + phase2700 * 0.22f - orbitalX * 0.07f)
-            val plasma2CenterY = h + domeHeight * (0.26f - smoothedVoiceLevel * 0.08f)
+            val plasma2CenterY = h + domeHeight * (0.28f - smoothedVoiceLevel * 0.07f)
             val plasma2Radius = (w * (0.38f + smoothedVoiceLevel * 0.12f)).coerceAtLeast(65f)
-            val plasma2ScaleY = ((domeHeight * (0.78f + smoothedVoiceLevel * 0.18f)) / plasma2Radius).coerceIn(0.06f, 0.42f)
+            val plasma2ScaleY = ((domeHeight * (0.74f + smoothedVoiceLevel * 0.16f)) / plasma2Radius).coerceIn(0.05f, 0.38f)
 
             drawEllipticalAuroraCloud(
                 center = Offset(plasma2CenterX, plasma2CenterY),
@@ -275,23 +278,23 @@ fun VolumetricLiquidAuroraGlow(
                 scaleX = 1.14f - orbitalY * 0.12f,
                 scaleY = plasma2ScaleY,
                 colors = listOf(
-                    AuroraSkyBlue.copy(alpha = if (isRecording) (0.40f + smoothedVoiceLevel * 0.24f).coerceAtMost(0.68f) else 0.24f),
-                    AuroraViolet.copy(alpha = if (isRecording) (0.32f + smoothedVoiceLevel * 0.20f).coerceAtMost(0.56f) else 0.18f),
-                    AuroraCyan.copy(alpha = if (isRecording) (0.14f + smoothedVoiceLevel * 0.14f).coerceAtMost(0.32f) else 0.08f),
+                    AuroraTealCyan.copy(alpha = if (isRecording) (0.40f + smoothedVoiceLevel * 0.24f).coerceAtMost(0.66f) else 0.22f),
+                    AuroraEmerald.copy(alpha = if (isRecording) (0.30f + smoothedVoiceLevel * 0.20f).coerceAtMost(0.54f) else 0.16f),
+                    AuroraSubtleIndigo.copy(alpha = if (isRecording) (0.12f + smoothedVoiceLevel * 0.12f).coerceAtMost(0.26f) else 0.06f),
                     Color.Transparent
                 ),
                 blendMode = BlendMode.Plus
             )
 
-            // Слой 4 (Тонкая неоновая кромка по самому краю снизу без белой засветки контента)
+            // Слой 4 (Тонкая изумрудно-мятная кромка по самому краю снизу без белой засветки контента)
             val coreCenterX = w * (0.50f + (phase2100 + phase2700) * 0.08f)
-            val coreCenterY = h + domeHeight * 0.28f
+            val coreCenterY = h + domeHeight * 0.30f
             val coreRadius = (w * (0.36f + smoothedVoiceLevel * 0.14f)).coerceAtLeast(60f)
-            val coreScaleY = ((domeHeight * (0.48f + smoothedVoiceLevel * 0.16f)) / coreRadius).coerceIn(0.04f, 0.26f)
+            val coreScaleY = ((domeHeight * (0.44f + smoothedVoiceLevel * 0.14f)) / coreRadius).coerceIn(0.04f, 0.24f)
             val coreIntensity = if (isRecording) {
-                (0.38f + breathPhase * 0.08f + smoothedVoiceLevel * 0.34f).coerceIn(0.35f, 0.80f)
+                (0.36f + breathPhase * 0.08f + smoothedVoiceLevel * 0.34f).coerceIn(0.32f, 0.76f)
             } else {
-                0.24f + breathPhase * 0.06f
+                0.22f + breathPhase * 0.06f
             }
 
             drawEllipticalAuroraCloud(
@@ -300,9 +303,9 @@ fun VolumetricLiquidAuroraGlow(
                 scaleX = 1.08f + smoothedVoiceLevel * 0.15f,
                 scaleY = coreScaleY,
                 colors = listOf(
-                    AuroraCoreIce.copy(alpha = (0.58f * coreIntensity).coerceAtMost(0.65f)),
-                    AuroraCyan.copy(alpha = (0.42f * coreIntensity).coerceAtMost(0.52f)),
-                    AuroraRoyalBlue.copy(alpha = (0.18f * coreIntensity).coerceAtMost(0.28f)),
+                    AuroraCoreMint.copy(alpha = (0.52f * coreIntensity).coerceAtMost(0.60f)),
+                    AuroraNeonMint.copy(alpha = (0.40f * coreIntensity).coerceAtMost(0.48f)),
+                    AuroraDeepEmerald.copy(alpha = (0.18f * coreIntensity).coerceAtMost(0.26f)),
                     Color.Transparent
                 ),
                 blendMode = BlendMode.Plus
