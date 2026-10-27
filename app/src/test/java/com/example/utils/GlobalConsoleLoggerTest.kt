@@ -273,7 +273,7 @@ class GlobalConsoleLoggerTest {
         assertEquals(3, geminiCallCounter.get())
         assertTrue(aiResult is GeminiChainResult.Success)
         assertEquals("Записано с 3-й модели без дублей в БД!", (aiResult as GeminiChainResult.Success).value)
-        assertEquals(1, GlobalConsoleLogger.dbTraces.value.size)
+        assertEquals(1, GlobalConsoleLogger.dbOperations.value.size)
     }
 
     @Test
