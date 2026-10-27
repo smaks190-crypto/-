@@ -8,9 +8,11 @@
 
 ## Скачать последнюю версию
 
-[📥 Скачать последний Release APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
+<!-- LATEST_RELEASE_START -->
+[📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
-APK автоматически публикуется после успешной сборки изменений в `main`. Ссылка остаётся постоянной и ведёт на последний опубликованный GitHub Release. До первой успешной публикации она может быть недоступна.
+Версия и список изменений появятся здесь после первой успешной автоматической публикации.
+<!-- LATEST_RELEASE_END -->
 
 ## Возможности
 
