@@ -94,15 +94,15 @@ jobs:
           base=$(sed -n 's/^VERSION_CODE=//p' version.properties)
           echo "CI_VERSION_CODE=$((base + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
 
-      # APK И AAB В ОДНОМ GRADLE ЗАПУСКЕ
-      - name: Build Release APK and AAB
+      # СНАЧАЛА APK, ЗАТЕМ AAB В ОДНОМ GRADLE ЗАПУСКЕ
+      - name: Build Release APK then AAB
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           KEYSTORE_PATH: my-upload-key.jks
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        run: gradle bundleRelease assembleRelease --no-configuration-cache
+        run: gradle assembleRelease bundleRelease --no-configuration-cache
 
       # СОХРАНЯЕМ ГОТОВЫЕ РЕЛИЗНЫЕ ФАЙЛЫ
       - name: Upload Release Artifacts
