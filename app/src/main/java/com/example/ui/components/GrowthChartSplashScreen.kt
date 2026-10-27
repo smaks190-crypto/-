@@ -459,7 +459,7 @@ private fun SplashCanvasOverlay(
         val currentFrogScaleY = tossScaleY * contactScaleY
 
         // Точная посадка монетки в нижней челюсти жабы (как на системной иконке ic_launcher_foreground.xml)
-        val mouthOriginY = currentFrogCenterY + (frogBaseRadius * 0.35f) * currentFrogScaleY
+        val mouthOriginY = currentFrogCenterY + (frogBaseRadius * 0.43f) * currentFrogScaleY
 
         if (t <= PHASE_1_END && p1 <= PHASE_1_HOLD_RATIO) {
             // --- Первые 6% Фазы 1 (p1 <= 0.06f): монетка плотно сидит во рту и НЕ движется вверх сквозь губу ---
@@ -474,7 +474,7 @@ private fun SplashCanvasOverlay(
             val offscreenTopTargetY = -baseCoinRadius * 2.4f
             coinY = lerpFloat(mouthOriginY, offscreenTopTargetY, easedUp)
 
-            // Один читаемый полный оборот при взлёте: ₽ -> ребро -> жаба -> ребро -> ₽
+            // Непрерывный оборот вокруг вертикальной оси: ₽ -> ребро -> жаба -> ребро -> ₽
             coinSpinAngle = launchProgress * 2.0f * PI.toFloat()
             coinScale = lerpFloat(0.82f, 1.06f, easedUp)
             coinGlowIntensity = (0.35f + launchProgress * 0.50f).coerceIn(0f, 1f)
@@ -580,18 +580,12 @@ private fun SplashCanvasOverlay(
         // 3. РИСУЕМ ДВУСТОРОННЮЮ ОБЪЕМНУЮ 3D-ЗОЛОТУЮ МОНЕТКУ (Аверс: ₽ с короной / Реверс: золотая жаба Давид)
         if (coinY + effectiveCoinRadius * 2f >= 0f && coinY - effectiveCoinRadius * 2f <= h) {
             if (t <= PHASE_1_END && p1 <= PHASE_1_HOLD_RATIO) {
-                // Clip the coin to the actual mouth cavity. No second painted-on upper lip.
-                val mouthR = frogBaseRadius.coerceAtLeast(16f)
-                val mouthHalfWidth = mouthR * 0.66f * currentFrogScaleX
-                val mouthTop = currentFrogCenterY + mouthR * 0.16f * currentFrogScaleY
-                val mouthHeight = mouthR * (0.18f + 0.30f * mouthOpenFactor) * currentFrogScaleY
-                val mouthClip = reusablePaths.upperLipOverlapPath
-                mouthClip.reset()
-                mouthClip.moveTo(centerX - mouthHalfWidth, mouthTop)
-                mouthClip.quadraticTo(centerX, mouthTop - mouthR * 0.10f * currentFrogScaleY, centerX + mouthHalfWidth, mouthTop)
-                mouthClip.quadraticTo(centerX, mouthTop + mouthHeight, centerX - mouthHalfWidth, mouthTop)
-                mouthClip.close()
-                clipPath(mouthClip) {
+                // Hide only the upper part behind the real upper lip. The lower half
+                // remains visible BELOW the mouth, as if the frog is gripping the coin.
+                // Never clip to the entire mouth path: that hides the protruding half.
+                val lipEdgeY = currentFrogCenterY +
+                    frogBaseRadius * 0.07f * currentFrogScaleY
+                clipRect(top = lipEdgeY) {
                     drawGoldenCoin(
                         paths = reusablePaths,
                         brushes = cachedBrushes,
@@ -964,7 +958,7 @@ private fun DrawScope.drawEmojiFrog(
 }
 
 /**
- * Отрисовка двусторонней объемной 3D-золотой монетки с вертикальным кувырком вокруг горизонтальной оси X:
+ * Отрисовка двусторонней объемной 3D-золотой монетки вокруг вертикальной оси Y:
  * - Аверс (`flipCos >= 0f`): рельефный знак рубля `₽` с короной.
  * - Реверс (`flipCos < 0f`): чеканный золотой барельеф головы жабы Давида (`drawEmbossedFrogEmblem`).
  * (0 аллокаций `Brush` внутри `onDraw`).
@@ -980,19 +974,19 @@ private fun DrawScope.drawGoldenCoin(
     timeProgress: Float
 ) {
     val r = baseRadius.coerceAtLeast(10f)
+    // Rotate about the VERTICAL axis: the silhouette passes through a narrow
+    // edge, then the opposite face. sin() keeps the rim motion directional
+    // through every half-turn rather than reversing at the edge.
     val flipCos = cos(spinAngle)
     val flipSin = sin(spinAngle)
-
-    // Монетка всегда сохраняет полную горизонтальную ширину (scaleX = 1f) и сжимается ТОЛЬКО по вертикали!
-    val faceScaleY = abs(flipCos).coerceAtLeast(0.015f)
-    val rimThickness = r * 0.46f // Толщина 3D-гурта монеты
-    val rimOffsetY = flipSin * rimThickness // Вертикальный сдвиг задней стенки ребра
+    val faceScaleX = abs(flipCos).coerceAtLeast(0.015f)
+    val rimThickness = r * 0.34f
+    val rimOffsetX = flipSin * rimThickness
 
     withTransform({
         translate(left = center.x, top = center.y)
         scale(scaleX = coinScale, scaleY = coinScale, pivot = Offset.Zero)
     }) {
-        // Внешнее золотое свечение
         drawCircle(
             brush = brushes.coinOuterGlowBrush,
             radius = r * 2.6f,
@@ -1000,45 +994,44 @@ private fun DrawScope.drawGoldenCoin(
             alpha = (0.45f + 0.55f * glowIntensity).coerceIn(0f, 1f)
         )
 
-        // Слой 1 — Массивный цилиндрический 3D-гурт (боковое золотое ребро из 7 промежуточных овалов)
-        val steps = 6
+        // Layered cylindrical edge: its horizontal displacement changes sign
+        // as the coin passes each edge-on position.
+        val steps = 8
         for (step in 0..steps) {
             val fraction = step.toFloat() / steps
-            val sliceY = lerpFloat(rimOffsetY, -rimOffsetY * 0.25f, fraction)
+            val sliceX = lerpFloat(rimOffsetX, -rimOffsetX * 0.25f, fraction)
             drawOval(
                 brush = brushes.coin3dRimBrush,
-                topLeft = Offset(-r, sliceY - r * faceScaleY),
-                size = Size(r * 2f, r * 2f * faceScaleY)
+                topLeft = Offset(sliceX - r * faceScaleX, -r),
+                size = Size(r * 2f * faceScaleX, r * 2f)
             )
         }
 
-        // Рифление ребра (9 вертикальных насечек гурта вдоль ширины монеты)
-        if (abs(rimOffsetY) > 1.5f) {
-            val notchStroke = (r * 0.055f).coerceAtLeast(1.5f)
+        // Horizontal grooves across the exposed vertical edge.
+        if (abs(rimOffsetX) > 1.5f) {
+            val notchStroke = (r * 0.05f).coerceAtLeast(1.5f)
             for (notch in -4..4) {
-                val notchX = notch * (r * 0.20f)
-                val normalizedX = (notchX / r).coerceIn(-0.95f, 0.95f)
-                val curveY = sqrt((1f - normalizedX * normalizedX).coerceAtLeast(0f)) * r * faceScaleY
-                val frontEdgeY = -rimOffsetY * 0.25f + if (rimOffsetY > 0f) curveY else -curveY
-                val backEdgeY = rimOffsetY + if (rimOffsetY > 0f) curveY else -curveY
+                val notchY = notch * (r * 0.20f)
+                val normalizedY = (notchY / r).coerceIn(-0.95f, 0.95f)
+                val curveX = sqrt((1f - normalizedY * normalizedY).coerceAtLeast(0f)) * r * faceScaleX
+                val nearX = -rimOffsetX * 0.25f + if (rimOffsetX > 0f) curveX else -curveX
+                val farX = rimOffsetX + if (rimOffsetX > 0f) curveX else -curveX
                 drawLine(
-                    color = if (notch % 2 == 0) {
-                        Color(0xFF78350F).copy(alpha = 0.82f)
-                    } else {
-                        Color(0xFFFEF08A).copy(alpha = 0.65f)
-                    },
-                    start = Offset(notchX, frontEdgeY),
-                    end = Offset(notchX, backEdgeY),
+                    color = if (notch % 2 == 0) Color(0xFF78350F).copy(alpha = 0.82f)
+                        else Color(0xFFFEF08A).copy(alpha = 0.65f),
+                    start = Offset(nearX, notchY),
+                    end = Offset(farX, notchY),
                     strokeWidth = notchStroke,
                     cap = StrokeCap.Round
                 )
             }
         }
 
-        // Слой 2 — Лицевая / оборотная грань монеты с 3D-фаской и двусторонней чеканкой
+        // Front (ruble) and reverse (frog) have different emblems.
+        // Only the horizontal projection is compressed; rotation never changes direction.
         withTransform({
-            translate(left = 0f, top = -rimOffsetY * 0.25f)
-            scale(scaleX = 1f, scaleY = faceScaleY, pivot = Offset.Zero)
+            translate(left = -rimOffsetX * 0.25f, top = 0f)
+            scale(scaleX = faceScaleX, scaleY = 1f, pivot = Offset.Zero)
         }) {
             // Внешний золотой обод
             drawCircle(
