@@ -12,14 +12,14 @@ sections = {
     "Документация и сборка": [],
 }
 patterns = [
-    ("Исправлено", re.compile(r"^(fix|bugfix|hotfix)(?:\\b|[(:])", re.I), "Исправления ошибок"),
-    ("Добавлено", re.compile(r"^(feat|feature|add)(?:\\b|[(:])", re.I), "Новые возможности"),
-    ("Документация и сборка", re.compile(r"^(ci|build|docs|chore|test|refactor)(?:\\b|[(:])", re.I), "Обновления проекта и сборки"),
+    ("Исправлено", re.compile(r"^(fix|bugfix|hotfix)(?:\b|[(:])", re.I), "Исправления ошибок"),
+    ("Добавлено", re.compile(r"^(feat|feature|add)(?:\b|[(:])", re.I), "Новые возможности"),
+    ("Документация и сборка", re.compile(r"^(ci|build|docs|chore|test|refactor)(?:\b|[(:])", re.I), "Обновления проекта и сборки"),
 ]
 for line in original.splitlines():
     if not line.startswith("* "):
         continue
-    match = re.search(r"https://github\\.com/[^\\s)]+/pull/(\\d+)", line)
+    match = re.search(r"https://github\.com/[^\s)]+/pull/(\d+)", line)
     if not match:
         continue
     number = match.group(1)
@@ -32,7 +32,7 @@ for line in original.splitlines():
     # Keep already Russian PR descriptions. For English titles, avoid pretending to translate
     # them: show a Russian category and link to the source PR instead.
     if re.search(r"[А-Яа-яЁё]", title):
-        title = re.sub(r"^(feat|fix|ci|build|docs|chore|test|refactor)(?:\\([^)]*\\))?:\\s*", "", title, flags=re.I)
+        title = re.sub(r"^(feat|fix|ci|build|docs|chore|test|refactor)(?:\([^)]*\))?:\s*", "", title, flags=re.I)
         summary = title or summary
     sections[category].append(f"- {summary} ([PR #{number}]({match.group(0)}))")
 
@@ -42,7 +42,7 @@ for heading, entries in sections.items():
         output.extend([f"### {heading}", *entries, ""])
 if not any(sections.values()):
     output.extend(["Изменения этого выпуска не содержат описанных pull request.", ""])
-comparison = re.search(r"https://github\\.com/[^\\s)]+/compare/[^\\s)]+", original)
+comparison = re.search(r"https://github\.com/[^\s)]+/compare/[^\s)]+", original)
 if comparison:
     output.append(f"**Полная история изменений:** {comparison.group(0)}")
-Path(sys.argv[2]).write_text("\\n".join(output).rstrip() + "\\n", encoding="utf-8")
+Path(sys.argv[2]).write_text("\n".join(output).rstrip() + "\n", encoding="utf-8")
