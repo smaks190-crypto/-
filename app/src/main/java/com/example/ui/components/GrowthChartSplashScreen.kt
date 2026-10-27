@@ -470,14 +470,23 @@ private fun SplashCanvasOverlay(
         } else if (t <= PHASE_1_END) {
             // --- Подъем монетки вверх начинается с p1 > 0.06f ---
             val launchProgress = ((p1 - 0.06f) / 0.94f).coerceIn(0f, 1f)
-            val easedUp = FastOutSlowInEasing.transform(launchProgress)
+            // The lips grip the coin while it rotates to its first edge-on pose.
+            // The coin does NOT travel upwards until that quarter turn is complete.
+            val gripRatio = 0.22f
+            val gripProgress = (launchProgress / gripRatio).coerceIn(0f, 1f)
+            val freeFlight = ((launchProgress - gripRatio) / (1f - gripRatio)).coerceIn(0f, 1f)
+            val easedUp = FastOutSlowInEasing.transform(freeFlight)
             val offscreenTopTargetY = -baseCoinRadius * 2.4f
             coinY = lerpFloat(mouthOriginY, offscreenTopTargetY, easedUp)
-
-            // Один полный кувырок в обратном направлении: положительный угол без разворота на ребре.
-            coinSpinAngle = launchProgress * 2.0f * PI.toFloat()
+            // 0 -> PI/2 in the lips, then PI/2 -> 2PI during free flight.
+            // No restart or reversal at release.
+            coinSpinAngle = if (launchProgress < gripRatio) {
+                gripProgress * (PI.toFloat() * 0.5f)
+            } else {
+                PI.toFloat() * (0.5f + freeFlight * 1.5f)
+            }
             coinScale = lerpFloat(0.82f, 1.06f, easedUp)
-            coinGlowIntensity = (0.35f + launchProgress * 0.50f).coerceIn(0f, 1f)
+            coinGlowIntensity = (0.35f + freeFlight * 0.50f).coerceIn(0f, 1f)
         } else {
             // --- ФАЗА 2: Падение сверху из-за экрана и синхронный захват темной шторки ---
             val easedFall = CoinFallAndPullEasing.transform(p2)
@@ -556,7 +565,8 @@ private fun SplashCanvasOverlay(
 
         // 2. РИСУЕМ СВЕТО-ШЛЕЙФ И СКОРОСТНЫЕ ЛИНИИ МОНЕТКИ БЕЗ СОЗДАНИЯ BRUSH
         val effectiveCoinRadius = baseCoinRadius * coinScale
-        if (t <= PHASE_1_END && p1 > PHASE_1_HOLD_RATIO) {
+        if (t <= PHASE_1_END && p1 > PHASE_1_HOLD_RATIO &&
+            ((p1 - PHASE_1_HOLD_RATIO) / (1f - PHASE_1_HOLD_RATIO)) > 0.22f) {
             drawUpwardTossArcs(
                 centerX = centerX,
                 coinY = coinY,
@@ -579,7 +589,10 @@ private fun SplashCanvasOverlay(
 
         // 3. РИСУЕМ ДВУСТОРОННЮЮ ОБЪЕМНУЮ 3D-ЗОЛОТУЮ МОНЕТКУ (Аверс: ₽ с короной / Реверс: золотая жаба Давид)
         if (coinY + effectiveCoinRadius * 2f >= 0f && coinY - effectiveCoinRadius * 2f <= h) {
-            if (t <= PHASE_1_END && p1 <= PHASE_1_HOLD_RATIO) {
+            if (t <= PHASE_1_END &&
+                (p1 <= PHASE_1_HOLD_RATIO ||
+                    ((p1 - PHASE_1_HOLD_RATIO) / (1f - PHASE_1_HOLD_RATIO)) < 0.22f)) {
+                // Keep the coin gripped by the lip through its first quarter turn.
                 // Hide only the upper part behind the real upper lip. The lower half
                 // remains visible BELOW the mouth, as if the frog is gripping the coin.
                 // Never clip to the entire mouth path: that hides the protruding half.
