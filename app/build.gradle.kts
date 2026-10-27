@@ -30,13 +30,14 @@ val isReleaseBuild = gradle.startParameter.taskNames.any {
         it.contains("bundle", ignoreCase = true)
     )
 }
-if (isReleaseBuild) {
+val ciVersionCode = System.getenv("CI_VERSION_CODE")?.toIntOrNull()?.takeIf { it > 0 }
+if (isReleaseBuild && ciVersionCode == null) {
     manualVersionCode += 1
     versionProps.setProperty("VERSION_CODE", manualVersionCode.toString())
     versionPropsFile.outputStream().use { versionProps.store(it, "Auto-incremented build version.") }
 }
 
-val buildNum = manualVersionCode
+val buildNum = ciVersionCode ?: manualVersionCode
 
 // Функция расчета: x.xx (до 100, после 99 идет 0)
 fun getVersionLetterName(number: Int): String {
