@@ -1109,6 +1109,47 @@ private fun DrawScope.drawGoldenCoin(
                 }
             }
         }
+
+        // Foreground half of the cylindrical edge MUST be painted after the face.
+        // Previously the face covered the rim at oblique angles, leaving grooves
+        // visible only when the coin was exactly edge-on.
+        val visibleRim = abs(flipSin)
+        if (visibleRim > 0.025f) {
+            val rimSide = if (flipSin >= 0f) 1f else -1f
+            val rimNearY = rimSide * abs(depthShift)
+            val faceEdgeY = capY + rimSide * r * faceHeight
+            val rimOuterY = rimNearY + rimSide * r * faceHeight
+            val rimBand = paths.upperLipOverlapPath
+            rimBand.reset()
+            rimBand.moveTo(-r, faceEdgeY)
+            rimBand.quadraticTo(0f, faceEdgeY + rimSide * r * faceHeight * 0.10f, r, faceEdgeY)
+            rimBand.lineTo(r, rimOuterY)
+            rimBand.quadraticTo(0f, rimOuterY + rimSide * r * faceHeight * 0.10f, -r, rimOuterY)
+            rimBand.close()
+            drawPath(
+                path = rimBand,
+                brush = brushes.coin3dRimBrush,
+                alpha = visibleRim.coerceIn(0f, 1f)
+            )
+            val grooveTop = minOf(faceEdgeY, rimOuterY)
+            val grooveBottom = maxOf(faceEdgeY, rimOuterY)
+            if (grooveBottom - grooveTop > 0.8f) {
+                for (notch in -5..5) {
+                    val x = notch * r * 0.16f
+                    val roundness = sqrt((1f - (x / r) * (x / r)).coerceAtLeast(0f))
+                    val y1 = lerpFloat(faceEdgeY, rimOuterY, 0.12f) * roundness
+                    val y2 = lerpFloat(faceEdgeY, rimOuterY, 0.88f) * roundness
+                    drawLine(
+                        color = if (notch % 2 == 0) Color(0xFF78350F) else Color(0xFFFFE88B),
+                        start = Offset(x, y1),
+                        end = Offset(x, y2),
+                        strokeWidth = (r * 0.026f).coerceAtLeast(1f),
+                        alpha = visibleRim * 0.8f,
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
+        }
     }
 }
 
