@@ -1,17 +1,14 @@
 package com.example.utils
 
-import com.example.data.api.GeminiApiService
 import com.example.data.api.GeminiCandidate
+import com.example.data.api.GeminiChainResult
 import com.example.data.api.GeminiContent
 import com.example.data.api.GeminiFallbackExecutor
 import com.example.data.api.GeminiPart
-import com.example.data.api.GeminiRequest
 import com.example.data.api.GeminiResponse
-import com.example.data.api.GeminiTimeoutProfile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.ResponseBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -34,14 +31,14 @@ class GlobalConsoleLoggerTest {
     fun setUp() {
         GlobalConsoleLogger.setPaused(false)
         GlobalConsoleLogger.clear()
-        GeminiFallbackExecutor.clearHealthCache()
+        GeminiFallbackExecutor.clearCooldowns()
     }
 
     @After
     fun tearDown() {
         GlobalConsoleLogger.setPaused(false)
         GlobalConsoleLogger.clear()
-        GeminiFallbackExecutor.clearHealthCache()
+        GeminiFallbackExecutor.clearCooldowns()
     }
 
     private fun buildSuccessGeminiResponse(text: String): GeminiResponse {
@@ -66,41 +63,24 @@ class GlobalConsoleLoggerTest {
     @Test
     fun `scenario 1 - primary model responds HTTP 200 immediately with SUCCESS status`() = runBlocking {
         val calledModels = mutableListOf<String>()
-        val fakeApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): GeminiResponse {
-                calledModels.add(model)
-                return buildSuccessGeminiResponse("Комментарий Давида с первой попытки")
-            }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
-        }
 
         val result = GeminiFallbackExecutor.executeWithFallback(
-            operationPrefix = "DAVID",
             operationType = "Комментарий Давида",
-            modelsChain = listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"),
-            timeoutProfile = GeminiTimeoutProfile.FAST_BACKGROUND,
-            apiKey = "test-api-key",
-            request = GeminiRequest(contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "test"))))),
-            apiService = fakeApi,
+            operationPrefix = "DAVID",
+            models = listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"),
+            details = "cat=Фастфуд",
             extractResult = { res -> res.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text }
-        )
+        ) { model ->
+            calledModels.add(model)
+            buildSuccessGeminiResponse("Комментарий Давида с первой попытки")
+        }
 
-        assertEquals("Комментарий Давида с первой попытки", result.value)
-        assertEquals(NetworkCallStatus.SUCCESS, result.finalStatus)
-        assertEquals("gemini-3.5-flash", result.winningModel)
-        assertEquals(1, result.attemptsCount)
+        assertTrue(result is GeminiChainResult.Success)
+        val success = result as GeminiChainResult.Success
+        assertEquals("Комментарий Давида с первой попытки", success.value)
+        assertEquals(NetworkCallStatus.SUCCESS, success.chainOutcome)
+        assertEquals("gemini-3.5-flash", success.modelUsed)
+        assertEquals(1, success.attemptsMade)
         assertEquals(listOf("gemini-3.5-flash"), calledModels)
         assertTrue("No error entries must be logged on primary model success", GlobalConsoleLogger.errors.value.isEmpty())
 
@@ -113,44 +93,27 @@ class GlobalConsoleLoggerTest {
     @Test
     fun `scenario 2 - primary model returns HTTP 404 then fallback model responds HTTP 200 with SUCCESS_AFTER_FALLBACK`() = runBlocking {
         val calledModels = mutableListOf<String>()
-        val fakeApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): GeminiResponse {
-                calledModels.add(model)
-                if (model == "gemini-2.5-flash") {
-                    throw buildHttpException(404, "models/gemini-2.5-flash is not found for API version v1beta")
-                }
-                return buildSuccessGeminiResponse("""[{"title":"Кофе","type":"expense","amount":300.0,"category":"Кафе"}]""")
-            }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
-        }
 
         val result = GeminiFallbackExecutor.executeWithFallback(
-            operationPrefix = "VOICE-WAV",
             operationType = "Gemini Live Аудио (WAV)",
-            modelsChain = listOf("gemini-2.5-flash", "gemini-3.5-flash-lite"),
-            timeoutProfile = GeminiTimeoutProfile.VOICE_PARSE,
-            apiKey = "test-api-key",
-            request = GeminiRequest(contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "audio"))))),
-            apiService = fakeApi,
+            operationPrefix = "VOICE-WAV",
+            models = listOf("gemini-2.5-flash", "gemini-3.5-flash-lite"),
+            details = "bytes=32000",
             extractResult = { res -> res.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text }
-        )
+        ) { model ->
+            calledModels.add(model)
+            if (model == "gemini-2.5-flash") {
+                throw buildHttpException(404, "models/gemini-2.5-flash is not found for API version v1beta")
+            }
+            buildSuccessGeminiResponse("""[{"title":"Кофе","type":"expense","amount":300.0,"category":"Кафе"}]""")
+        }
 
-        assertNotNull(result.value)
-        assertEquals(NetworkCallStatus.SUCCESS_AFTER_FALLBACK, result.finalStatus)
-        assertEquals("gemini-3.5-flash-lite", result.winningModel)
-        assertEquals(2, result.attemptsCount)
+        assertTrue(result is GeminiChainResult.Success)
+        val success = result as GeminiChainResult.Success
+        assertNotNull(success.value)
+        assertEquals(NetworkCallStatus.SUCCESS_AFTER_FALLBACK, success.chainOutcome)
+        assertEquals("gemini-3.5-flash-lite", success.modelUsed)
+        assertEquals(2, success.attemptsMade)
         assertEquals(listOf("gemini-2.5-flash", "gemini-3.5-flash-lite"), calledModels)
 
         // Intermediate 404 must NOT pollute GlobalConsoleLogger.errors when fallback succeeds!
@@ -160,9 +123,9 @@ class GlobalConsoleLoggerTest {
         )
 
         // Model that returned 404 must now be on cooldown and moved to the end of subsequent chains
-        assertFalse(
+        assertNotNull(
             "Model returning HTTP 404 should be placed on cooldown",
-            GeminiFallbackExecutor.isModelHealthy("gemini-2.5-flash")
+            GeminiFallbackExecutor.getModelCooldown("gemini-2.5-flash")
         )
         val reordered = GeminiFallbackExecutor.orderModelsByHealth(listOf("gemini-2.5-flash", "gemini-3.5-flash-lite"))
         assertEquals("gemini-3.5-flash-lite", reordered.first())
@@ -170,48 +133,30 @@ class GlobalConsoleLoggerTest {
 
     @Test
     fun `scenario 3 - SocketTimeoutException then HTTP 503 then HTTP 200 records SUCCESS_AFTER_FALLBACK without false ERROR logs`() = runBlocking {
-        val fakeApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): GeminiResponse {
-                return when (model) {
-                    "gemini-3.8-flash" -> throw SocketTimeoutException("timeout in Http2Stream.takeHeaders")
-                    "gemini-3.6-flash" -> throw buildHttpException(503, "The model is overloaded. Please try again later.")
-                    "gemini-3.5-flash-lite" -> buildSuccessGeminiResponse("Два косаря на бургер? Раскольников бы заплакал, ква-ква! 🐸")
-                    else -> throw IllegalStateException("Unexpected model $model")
-                }
+        val result = GeminiFallbackExecutor.executeWithFallback(
+            operationType = "Комментарий Давида",
+            operationPrefix = "DAVID",
+            models = listOf("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"),
+            details = "cat=Фастфуд | sum=2000",
+            extractResult = { res -> res.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text }
+        ) { model ->
+            when (model) {
+                "gemini-3.8-flash" -> throw SocketTimeoutException("timeout in Http2Stream.takeHeaders")
+                "gemini-3.6-flash" -> throw buildHttpException(503, "The model is overloaded. Please try again later.")
+                "gemini-3.5-flash-lite" -> buildSuccessGeminiResponse("Два косаря на бургер? Раскольников бы заплакал, ква-ква! 🐸")
+                else -> throw IllegalStateException("Unexpected model $model")
             }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
         }
 
-        val result = GeminiFallbackExecutor.executeWithFallback(
-            operationPrefix = "DAVID",
-            operationType = "Комментарий Давида",
-            modelsChain = listOf("gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"),
-            timeoutProfile = GeminiTimeoutProfile.FAST_BACKGROUND,
-            apiKey = "test-api-key",
-            request = GeminiRequest(contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Бургер 2000 ₽"))))),
-            apiService = fakeApi,
-            extractResult = { res -> res.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text }
-        )
-
-        assertEquals("Два косаря на бургер? Раскольников бы заплакал, ква-ква! 🐸", result.value)
-        assertEquals(NetworkCallStatus.SUCCESS_AFTER_FALLBACK, result.finalStatus)
-        assertEquals("gemini-3.5-flash-lite", result.winningModel)
-        assertEquals(3, result.attemptsCount)
+        assertTrue(result is GeminiChainResult.Success)
+        val success = result as GeminiChainResult.Success
+        assertEquals("Два косаря на бургер? Раскольников бы заплакал, ква-ква! 🐸", success.value)
+        assertEquals(NetworkCallStatus.SUCCESS_AFTER_FALLBACK, success.chainOutcome)
+        assertEquals("gemini-3.5-flash-lite", success.modelUsed)
+        assertEquals(3, success.attemptsMade)
 
         // Verify all 3 attempts share the same operationId and have chainOutcome == SUCCESS_AFTER_FALLBACK
-        val traces = GlobalConsoleLogger.networkTraces.value.filter { it.operationId == result.operationId }
+        val traces = GlobalConsoleLogger.networkTraces.value.filter { it.operationId == success.operationId }
         assertEquals(3, traces.size)
         assertEquals(NetworkCallStatus.FALLBACK, traces[0].status)
         assertEquals(NetworkCallStatus.FALLBACK, traces[1].status)
@@ -219,7 +164,7 @@ class GlobalConsoleLoggerTest {
         assertTrue(traces.all { it.chainOutcome == NetworkCallStatus.SUCCESS_AFTER_FALLBACK })
         assertEquals(
             NetworkCallStatus.SUCCESS_AFTER_FALLBACK,
-            GlobalConsoleLogger.getChainOutcomeForOperation(result.operationId)
+            GlobalConsoleLogger.getChainOutcomeForOperation(success.operationId)
         )
 
         // Verify 0 terminal errors in GlobalConsoleLogger.errors
@@ -231,46 +176,26 @@ class GlobalConsoleLoggerTest {
 
     @Test
     fun `scenario 4 - all models fail records terminal FAILED status and logs single terminal ERROR`() = runBlocking {
-        val fakeApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): GeminiResponse {
-                return when (model) {
-                    "gemini-3.5-flash" -> throw SocketTimeoutException("read timed out")
-                    "gemini-3.5-flash-lite" -> throw buildHttpException(503, "Service Unavailable")
-                    else -> throw buildHttpException(429, "Quota exceeded")
-                }
+        val result = GeminiFallbackExecutor.executeWithFallback(
+            operationType = "Комментарий Давида",
+            operationPrefix = "DAVID",
+            models = listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"),
+            details = "cat=Фастфуд | sum=2000",
+            extractResult = { res -> res.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text }
+        ) { model ->
+            when (model) {
+                "gemini-3.5-flash" -> throw SocketTimeoutException("read timed out")
+                "gemini-3.5-flash-lite" -> throw buildHttpException(503, "Service Unavailable")
+                else -> throw buildHttpException(429, "Quota exceeded")
             }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
         }
 
-        val result = GeminiFallbackExecutor.executeWithFallback(
-            operationPrefix = "DAVID",
-            operationType = "Комментарий Давида",
-            modelsChain = listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"),
-            timeoutProfile = GeminiTimeoutProfile.FAST_BACKGROUND,
-            apiKey = "test-api-key",
-            request = GeminiRequest(contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Бургер 2000 ₽"))))),
-            apiService = fakeApi,
-            extractResult = { res -> res.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text }
-        )
+        assertTrue(result is GeminiChainResult.Failure)
+        val failure = result as GeminiChainResult.Failure
+        assertEquals(NetworkCallStatus.FAILED, failure.chainOutcome)
+        assertEquals(3, failure.attemptsMade)
 
-        assertNull(result.value)
-        assertEquals(NetworkCallStatus.FAILED, result.finalStatus)
-        assertNull(result.winningModel)
-        assertEquals(3, result.attemptsCount)
-
-        val traces = GlobalConsoleLogger.networkTraces.value.filter { it.operationId == result.operationId }
+        val traces = GlobalConsoleLogger.networkTraces.value.filter { it.operationId == failure.operationId }
         assertEquals(3, traces.size)
         assertEquals(NetworkCallStatus.FALLBACK, traces[0].status)
         assertEquals(NetworkCallStatus.FALLBACK, traces[1].status)
@@ -280,43 +205,24 @@ class GlobalConsoleLoggerTest {
         // Exactly 1 terminal error entry must be recorded when the entire chain fails
         val errors = GlobalConsoleLogger.errors.value
         assertEquals(1, errors.size)
-        assertEquals(result.operationId, errors.first().operationId)
+        assertEquals(failure.operationId, errors.first().operationId)
     }
 
     @Test
     fun `scenario 5 - CancellationException immediately aborts chain without calling subsequent models`() = runBlocking {
         val calledModels = mutableListOf<String>()
-        val fakeApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): GeminiResponse {
-                calledModels.add(model)
-                throw CancellationException("User closed screen or cancelled voice input")
-            }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
-        }
 
         try {
             GeminiFallbackExecutor.executeWithFallback(
-                operationPrefix = "VOICE-WAV",
                 operationType = "Gemini Live Аудио (WAV)",
-                modelsChain = listOf("gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"),
-                timeoutProfile = GeminiTimeoutProfile.VOICE_PARSE,
-                apiKey = "test-api-key",
-                request = GeminiRequest(contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "audio"))))),
-                apiService = fakeApi,
+                operationPrefix = "VOICE-WAV",
+                models = listOf("gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite"),
+                details = "bytes=32000",
                 extractResult = { res -> res.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text }
-            )
+            ) { model ->
+                calledModels.add(model)
+                throw CancellationException("User closed screen or cancelled voice input")
+            }
             fail("Expected CancellationException to be rethrown")
         } catch (_: CancellationException) {
             // Expected
@@ -337,29 +243,6 @@ class GlobalConsoleLoggerTest {
         val dbInsertCounter = AtomicInteger(0)
         val geminiCallCounter = AtomicInteger(0)
 
-        val fakeApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): GeminiResponse {
-                val attempt = geminiCallCounter.incrementAndGet()
-                if (attempt < 3) {
-                    throw buildHttpException(503, "Temporary overload on $model")
-                }
-                return buildSuccessGeminiResponse("Записано с 3-й модели без дублей в БД!")
-            }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest,
-                timeoutProfile: String
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
-        }
-
         // Simulate the exact flow of TransactionStateDelegate.addTransaction:
         // 1. Insert transaction into Room once
         dbInsertCounter.incrementAndGet()
@@ -373,19 +256,23 @@ class GlobalConsoleLoggerTest {
 
         // 2. Run Gemini fallback chain (3 attempts)
         val aiResult = GeminiFallbackExecutor.executeWithFallback(
-            operationPrefix = "DAVID",
             operationType = "Комментарий Давида",
-            modelsChain = listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"),
-            timeoutProfile = GeminiTimeoutProfile.FAST_BACKGROUND,
-            apiKey = "test-api-key",
-            request = GeminiRequest(contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Бургер 2000 ₽"))))),
-            apiService = fakeApi,
+            operationPrefix = "DAVID",
+            models = listOf("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"),
+            details = "cat=Фастфуд | sum=2000",
             extractResult = { res -> res.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text }
-        )
+        ) { model ->
+            val attempt = geminiCallCounter.incrementAndGet()
+            if (attempt < 3) {
+                throw buildHttpException(503, "Temporary overload on $model")
+            }
+            buildSuccessGeminiResponse("Записано с 3-й модели без дублей в БД!")
+        }
 
         assertEquals(1, dbInsertCounter.get())
         assertEquals(3, geminiCallCounter.get())
-        assertEquals("Записано с 3-й модели без дублей в БД!", aiResult.value)
+        assertTrue(aiResult is GeminiChainResult.Success)
+        assertEquals("Записано с 3-й модели без дублей в БД!", (aiResult as GeminiChainResult.Success).value)
         assertEquals(1, GlobalConsoleLogger.dbTraces.value.size)
     }
 

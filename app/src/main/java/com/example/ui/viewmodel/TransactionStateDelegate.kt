@@ -8,6 +8,8 @@ import com.example.data.db.TransactionEntity
 import com.example.data.repository.BudgetRepository
 import com.example.data.repository.ParsedVoiceOperation
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -318,8 +320,8 @@ class TransactionStateDelegate(
                     }
                 }
 
-                val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
-                    val phraseDeferred = kotlinx.coroutines.async {
+                val (userPhrase, comment) = coroutineScope {
+                    val phraseDeferred = async {
                         repository.generateUserPhrase(
                             apiKey = effectiveKey,
                             type = type,
@@ -329,7 +331,7 @@ class TransactionStateDelegate(
                             isFirstToday = isFirstToday
                         )
                     }
-                    val commentDeferred = kotlinx.coroutines.async {
+                    val commentDeferred = async {
                         repository.generateDavidComment(
                             apiKey = effectiveKey,
                             type = type,
@@ -432,8 +434,8 @@ class TransactionStateDelegate(
                 val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
                 try {
                     val isFirstToday = transactions.value.none { it.date == finalDate && it.id != tx.id }
-                    val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
-                        val phraseDeferred = kotlinx.coroutines.async {
+                    val (userPhrase, comment) = coroutineScope {
+                        val phraseDeferred = async {
                             repository.generateUserPhrase(
                                 apiKey = effectiveKey,
                                 type = op.type,
@@ -443,7 +445,7 @@ class TransactionStateDelegate(
                                 isFirstToday = isFirstToday
                             )
                         }
-                        val commentDeferred = kotlinx.coroutines.async {
+                        val commentDeferred = async {
                             repository.generateDavidComment(
                                 apiKey = effectiveKey,
                                 type = op.type,
@@ -514,14 +516,14 @@ class TransactionStateDelegate(
 
                 val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
                 try {
-                    val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
-                        val phraseDeferred = kotlinx.coroutines.async {
+                    val (userPhrase, comment) = coroutineScope {
+                        val phraseDeferred = async {
                             repository.generateUserPhraseMulti(
                                 apiKey = effectiveKey,
                                 operations = processedOps
                             )
                         }
-                        val commentDeferred = kotlinx.coroutines.async {
+                        val commentDeferred = async {
                             repository.generateDavidCommentMulti(
                                 apiKey = effectiveKey,
                                 operations = processedOps,
@@ -611,8 +613,8 @@ class TransactionStateDelegate(
                 } else {
                     "Это взнос в цель '${goal.name}'. Собрано $updatedCurrent из ${goal.targetAmount} руб. Осталось: ${goal.targetAmount - updatedCurrent} руб."
                 }
-                val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
-                    val phraseDeferred = kotlinx.coroutines.async {
+                val (userPhrase, comment) = coroutineScope {
+                    val phraseDeferred = async {
                         repository.generateUserPhrase(
                             apiKey = apiKey.value,
                             type = "expense",
@@ -622,7 +624,7 @@ class TransactionStateDelegate(
                             isFirstToday = transactions.value.none { it.date == todayIso && it.id != tx.id }
                         )
                     }
-                    val commentDeferred = kotlinx.coroutines.async {
+                    val commentDeferred = async {
                         repository.generateDavidComment(
                             apiKey = apiKey.value,
                             type = "expense",
@@ -699,8 +701,8 @@ class TransactionStateDelegate(
                 try {
                     val goalSubcategory = "Цель: $name (Целевая сумма: ${target.toInt()} ₽, Внесено: ${current.toInt()} ₽)"
                     val extraCtx = "Создана новая финансовая цель '$name'. Целевая сумма: ${target.toInt()} руб. Первоначальный взнос: ${current.toInt()} руб. (Осталось собрать: ${(target - current).toInt()} руб.). В комментарии ОБЯЗАТЕЛЬНО раздели и учти общую сумму цели (${target.toInt()} ₽) и сколько из неё было внесено первым взносом (${current.toInt()} ₽)!"
-                    val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
-                        val phraseDeferred = kotlinx.coroutines.async {
+                    val (userPhrase, comment) = coroutineScope {
+                        val phraseDeferred = async {
                             repository.generateUserPhrase(
                                 apiKey = apiKey.value,
                                 type = "expense",
@@ -710,7 +712,7 @@ class TransactionStateDelegate(
                                 isFirstToday = false
                             )
                         }
-                        val commentDeferred = kotlinx.coroutines.async {
+                        val commentDeferred = async {
                             repository.generateDavidComment(
                                 apiKey = apiKey.value,
                                 type = "expense",
@@ -781,8 +783,8 @@ class TransactionStateDelegate(
                         "Пользователь создал новый долг '$name' на сумму ${initialBalance.toInt()} руб."
                     }
 
-                    val (userPhrase, comment) = kotlinx.coroutines.coroutineScope {
-                        val phraseDeferred = kotlinx.coroutines.async {
+                    val (userPhrase, comment) = coroutineScope {
+                        val phraseDeferred = async {
                             repository.generateUserPhrase(
                                 apiKey = apiKey.value,
                                 type = if (type == "we_owe") "income" else "expense",
@@ -792,7 +794,7 @@ class TransactionStateDelegate(
                                 isFirstToday = false
                             )
                         }
-                        val commentDeferred = kotlinx.coroutines.async {
+                        val commentDeferred = async {
                             repository.generateDavidComment(
                                 apiKey = apiKey.value,
                                 type = if (type == "we_owe") "expense" else "income",

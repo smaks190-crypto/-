@@ -1171,7 +1171,7 @@ class BudgetRepository(
                     apiKey = apiKey,
                     alt = "sse",
                     request = request,
-                    timeoutProfile = GeminiTimeoutProfile.STREAMING_AUDIT.headerValue
+                    timeoutProfile = GeminiTimeoutProfile.STREAMING_AUDIT.name
                 )
                 if (response.isSuccessful) {
                     val body = response.body()
@@ -1217,6 +1217,7 @@ class BudgetRepository(
                         }
                     }
                     hadPriorFallback = true
+                    GeminiFallbackExecutor.markModelFailure(model, httpCode = response.code(), errorType = "EmptyStreamBody")
                     GlobalConsoleLogger.recordNetworkCall(
                         operationType = "Аудит бюджета (SSE Stream)",
                         modelName = model,
@@ -1232,10 +1233,12 @@ class BudgetRepository(
                     )
                 } else {
                     val code = response.code()
-                    GeminiFallbackExecutor.markModelUnhealthyForHttpCode(
-                        model = model,
+                    val retryAfterMs = GeminiFallbackExecutor.parseRetryAfterMs(response.headers()["Retry-After"])
+                    GeminiFallbackExecutor.markModelFailure(
+                        modelName = model,
                         httpCode = code,
-                        retryAfterHeader = response.headers()["Retry-After"]
+                        errorType = "HTTP_$code",
+                        retryAfterMs = retryAfterMs
                     )
                     hadPriorFallback = true
                     GlobalConsoleLogger.recordNetworkCall(
@@ -1267,7 +1270,11 @@ class BudgetRepository(
                 )
                 throw ce
             } catch (e: Exception) {
-                GeminiFallbackExecutor.markModelUnhealthyForThrowable(model, e)
+                GeminiFallbackExecutor.markModelFailure(
+                    modelName = model,
+                    httpCode = null,
+                    errorType = e.javaClass.simpleName
+                )
                 hadPriorFallback = true
                 GlobalConsoleLogger.recordNetworkCall(
                     operationType = "Аудит бюджета (SSE Stream)",
@@ -1379,23 +1386,25 @@ class BudgetRepository(
         )
 
         val chainResult = GeminiFallbackExecutor.executeWithFallback(
-            operationPrefix = "AUDIT",
             operationType = "Аудит бюджета",
-            modelsChain = GeminiModelChains.AUDIT_MODELS,
-            timeoutProfile = GeminiTimeoutProfile.STREAMING_AUDIT,
-            apiKey = apiKey,
-            request = request,
-            apiService = apiService,
-            detailsBuilder = { "period=$periodName" },
+            operationPrefix = "AUDIT",
+            models = GeminiModelChains.AUDIT_MODELS,
+            details = "period=$periodName",
             extractResult = { response ->
                 response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.takeIf { it.isNotBlank() }
             }
-        )
+        ) { model ->
+            apiService.generateContent(
+                model = model,
+                apiKey = apiKey,
+                request = request,
+                timeoutProfile = GeminiTimeoutProfile.STREAMING_AUDIT.name
+            )
+        }
 
-        return if (chainResult.value != null) {
-            Result.success(chainResult.value)
-        } else {
-            Result.failure(Exception("ERROR_NO_CONNECTION"))
+        return when (chainResult) {
+            is GeminiChainResult.Success -> Result.success(chainResult.value)
+            is GeminiChainResult.Failure -> Result.failure(Exception("ERROR_NO_CONNECTION"))
         }
     }
 
@@ -1510,14 +1519,10 @@ class BudgetRepository(
         )
 
         val chainResult = GeminiFallbackExecutor.executeWithFallback(
-            operationPrefix = "CAT-AI",
             operationType = "Автоподбор категории (ИИ)",
-            modelsChain = GeminiModelChains.CATEGORY_SUGGEST_MODELS,
-            timeoutProfile = GeminiTimeoutProfile.FAST_BACKGROUND,
-            apiKey = apiKey,
-            request = request,
-            apiService = apiService,
-            detailsBuilder = { cat -> "name=$transactionName -> ${cat ?: ""}" },
+            operationPrefix = "CAT-AI",
+            models = GeminiModelChains.CATEGORY_SUGGEST_MODELS,
+            details = "name=$transactionName",
             extractResult = { response ->
                 response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                     ?.trim()
@@ -1528,9 +1533,19 @@ class BudgetRepository(
                     ?.trim()
                     ?.takeIf { it.isNotEmpty() }
             }
-        )
+        ) { model ->
+            apiService.generateContent(
+                model = model,
+                apiKey = apiKey,
+                request = request,
+                timeoutProfile = GeminiTimeoutProfile.FAST_BACKGROUND.name
+            )
+        }
 
-        return chainResult.value ?: localCategorySuggestion(transactionName, type, categories)
+        return when (chainResult) {
+            is GeminiChainResult.Success -> chainResult.value
+            is GeminiChainResult.Failure -> localCategorySuggestion(transactionName, type, categories)
+        }
     }
 
     private fun localCategorySuggestion(name: String, type: String, categories: List<String>): String {
@@ -1656,14 +1671,10 @@ class BudgetRepository(
         )
 
         val chainResult = GeminiFallbackExecutor.executeWithFallback(
-            operationPrefix = "VOICE-TXT",
             operationType = "Разбор голоса (Текст)",
-            modelsChain = GeminiModelChains.VOICE_TEXT_MODELS,
-            timeoutProfile = GeminiTimeoutProfile.VOICE_PARSE,
-            apiKey = apiKey,
-            request = request,
-            apiService = apiService,
-            detailsBuilder = { parsed -> "распознано=${parsed?.size ?: 0} шт." },
+            operationPrefix = "VOICE-TXT",
+            models = GeminiModelChains.VOICE_TEXT_MODELS,
+            details = "chars=${trimmedText.length}",
             extractResult = { response ->
                 val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 if (!responseText.isNullOrEmpty()) {
@@ -1674,13 +1685,21 @@ class BudgetRepository(
                     } else null
                 } else null
             }
-        )
-
-        if (chainResult.value != null) {
-            return chainResult.value
+        ) { model ->
+            apiService.generateContent(
+                model = model,
+                apiKey = apiKey,
+                request = request,
+                timeoutProfile = GeminiTimeoutProfile.VOICE_PARSE.name
+            )
         }
 
-        throw IllegalStateException("Не удалось разбрать операции из текста. Попробуйте сформулировать точнее.")
+        return when (chainResult) {
+            is GeminiChainResult.Success -> chainResult.value
+            is GeminiChainResult.Failure -> throw IllegalStateException(
+                chainResult.lastErrorMessage ?: "Не удалось разбрать операции из текста. Попробуйте сформулировать точнее."
+            )
+        }
     }
 
     suspend fun parseVoiceAudioOperations(
@@ -1752,14 +1771,10 @@ class BudgetRepository(
         )
 
         val chainResult = GeminiFallbackExecutor.executeWithFallback(
-            operationPrefix = "VOICE-WAV",
             operationType = "Gemini Live Аудио (WAV)",
-            modelsChain = GeminiModelChains.VOICE_AUDIO_MODELS,
-            timeoutProfile = GeminiTimeoutProfile.VOICE_PARSE,
-            apiKey = apiKey,
-            request = request,
-            apiService = apiService,
-            detailsBuilder = { parsed -> "bytes=${audioBytes.size} | распознано=${parsed?.size ?: 0}" },
+            operationPrefix = "VOICE-WAV",
+            models = GeminiModelChains.VOICE_AUDIO_MODELS,
+            details = "bytes=${audioBytes.size}",
             extractResult = { response ->
                 val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                 if (!responseText.isNullOrEmpty()) {
@@ -1769,9 +1784,19 @@ class BudgetRepository(
                     } else null
                 } else null
             }
-        )
+        ) { model ->
+            apiService.generateContent(
+                model = model,
+                apiKey = apiKey,
+                request = request,
+                timeoutProfile = GeminiTimeoutProfile.VOICE_PARSE.name
+            )
+        }
 
-        return@withContext chainResult.value ?: emptyList()
+        return@withContext when (chainResult) {
+            is GeminiChainResult.Success -> chainResult.value
+            is GeminiChainResult.Failure -> emptyList()
+        }
     }
 
     private fun extractJsonArray(rawText: String): String {
