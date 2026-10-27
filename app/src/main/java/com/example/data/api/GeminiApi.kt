@@ -1,9 +1,11 @@
 package com.example.data.api
 
 import com.example.BuildConfig
+import com.example.utils.GlobalConsoleLogger
 import com.squareup.moshi.Json
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.ResponseBody
 import okhttp3.logging.HttpLoggingInterceptor
@@ -77,12 +79,54 @@ object RetrofitClient {
         .add(KotlinJsonAdapterFactory())
         .build()
 
+    private val diagnosticTelemetryInterceptor = Interceptor { chain ->
+        val request = chain.request()
+        if (!BuildConfig.DEBUG) {
+            return@Interceptor chain.proceed(request)
+        }
+
+        val startNs = System.nanoTime()
+        val path = request.url.encodedPath
+        val modelSegment = path.substringAfter("/models/", "gemini")
+            .substringBefore(":")
+        val actionSegment = path.substringAfter(":", "request")
+
+        try {
+            val response = chain.proceed(request)
+            val durationMs = (System.nanoTime() - startNs) / 1_000_000L
+            val code = response.code
+            if (response.isSuccessful) {
+                GlobalConsoleLogger.d(
+                    tag = "NETWORK",
+                    message = "HTTP $code ${request.method} $actionSegment ($modelSegment) за ${durationMs}ms",
+                    details = "host=${request.url.host} | protocol=${response.protocol}"
+                )
+            } else {
+                GlobalConsoleLogger.w(
+                    tag = "NETWORK",
+                    message = "HTTP $code ${request.method} $actionSegment ($modelSegment) за ${durationMs}ms",
+                    details = "message=${response.message.ifBlank { "HTTP Error" }}"
+                )
+            }
+            response
+        } catch (e: Exception) {
+            val durationMs = (System.nanoTime() - startNs) / 1_000_000L
+            GlobalConsoleLogger.e(
+                tag = "NETWORK",
+                message = "Сбой HTTP ${request.method} $actionSegment ($modelSegment) через ${durationMs}ms: ${e.javaClass.simpleName}",
+                throwable = e
+            )
+            throw e
+        }
+    }
+
     private val okHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
+        .addInterceptor(diagnosticTelemetryInterceptor)
         .addInterceptor(HttpLoggingInterceptor { message ->
-            com.example.utils.GlobalConsoleLogger.i("NETWORK", message)
+            GlobalConsoleLogger.d("HTTP", message)
         }.apply {
             redactHeader("x-goog-api-key")
             redactHeader("Authorization")
@@ -99,4 +143,3 @@ object RetrofitClient {
             .create(GeminiApiService::class.java)
     }
 }
-
