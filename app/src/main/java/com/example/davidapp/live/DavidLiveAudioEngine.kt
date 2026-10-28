@@ -26,6 +26,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.sqrt
 
@@ -61,6 +62,8 @@ class DavidLiveAudioEngine(
     private val isRunning = AtomicBoolean(false)
     private val isMicMuted = AtomicBoolean(false)
     private val lastOutputChunkTimestamp = AtomicLong(0L)
+    // Invalidate a chunk already taken by the playback worker after a queue flush.
+    private val playbackGeneration = AtomicInteger(0)
 
     private val _rayMagnitudes = MutableStateFlow(
          defaultRestingRays()
@@ -134,6 +137,7 @@ class DavidLiveAudioEngine(
      * Immediately flushes any queued or playing model audio (used on barge-in interruption).
      */
     fun clearModelPlaybackQueue() {
+        playbackGeneration.incrementAndGet()
         playbackQueue.clear()
         lastOutputChunkTimestamp.set(0L)
         try {
@@ -239,6 +243,7 @@ class DavidLiveAudioEngine(
             // 1024 samples @ 16 kHz = 64 ms chunk
             val shortBuffer = ShortArray(1024)
             var consecutiveVoiceFrames = 0
+            var userBargedIn = false
 
             while (isActive && isRunning.get()) {
                 val readCount = record.read(shortBuffer, 0, shortBuffer.size)
@@ -266,12 +271,14 @@ class DavidLiveAudioEngine(
                 val rms = sqrt(sumSq / readCount).toFloat()
 
                 val davidCurrentlyPlaying =
-                    System.currentTimeMillis() - lastOutputChunkTimestamp.get() <= 180L ||
+                    System.currentTimeMillis() - lastOutputChunkTimestamp.get() <= PLAYBACK_ECHO_TAIL_MS ||
                         playbackQueue.isNotEmpty()
+                if (!davidCurrentlyPlaying) userBargedIn = false
 
                 if (rms > BARGE_IN_RMS_THRESHOLD) {
                     consecutiveVoiceFrames++
-                    if (davidCurrentlyPlaying && consecutiveVoiceFrames >= 3) {
+                    if (davidCurrentlyPlaying && !userBargedIn && consecutiveVoiceFrames >= BARGE_IN_MIN_FRAMES) {
+                        userBargedIn = true
                         clearModelPlaybackQueue()
                         onUserBargeIn()
                         consecutiveVoiceFrames = 0
@@ -294,6 +301,9 @@ class DavidLiveAudioEngine(
                         DavidLiveSpeaker.NONE
                     }
                 }
+
+                // Suppress speaker echo while David is playing, except after confirmed user barge-in.
+                if (davidCurrentlyPlaying && !userBargedIn) continue
 
                 // Convert ShortArray to little-endian PCM16 ByteArray and stream to Gemini Live
                 val pcmBytes = ByteArray(readCount * 2)
@@ -401,6 +411,7 @@ class DavidLiveAudioEngine(
             }
 
             while (isActive && isRunning.get()) {
+                val generation = playbackGeneration.get()
                 val samples = playbackQueue.poll()
                 if (samples == null) {
                     if (System.currentTimeMillis() - lastOutputChunkTimestamp.get() > 220L &&
@@ -415,7 +426,7 @@ class DavidLiveAudioEngine(
                 // Slice into ~1024-sample windows so the circular visualizer animates smoothly at ~23 fps
                 var offset = 0
                 val step = 1024
-                while (offset < samples.size && isRunning.get()) {
+                while (offset < samples.size && isRunning.get() && generation == playbackGeneration.get()) {
                     val len = (samples.size - offset).coerceAtMost(step)
                     val window = samples.copyOfRange(offset, offset + len)
                     lastOutputChunkTimestamp.set(System.currentTimeMillis())
@@ -443,7 +454,9 @@ class DavidLiveAudioEngine(
         const val AUDIO_USAGE_ASSISTANT = AudioAttributes.USAGE_ASSISTANT
         const val AUDIO_CONTENT_TYPE_SPEECH = AudioAttributes.CONTENT_TYPE_SPEECH
         private const val USER_SPEECH_RMS_THRESHOLD = 0.009f
-        private const val BARGE_IN_RMS_THRESHOLD = 0.055f
+        private const val BARGE_IN_RMS_THRESHOLD = 0.08f
+        private const val BARGE_IN_MIN_FRAMES = 4
+        private const val PLAYBACK_ECHO_TAIL_MS = 320L
 
         /**
          * Builds the [AudioAttributes] tied to the AI Assistant / Neural Network volume channel
