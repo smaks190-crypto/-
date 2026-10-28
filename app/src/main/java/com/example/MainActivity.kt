@@ -156,7 +156,10 @@ class MainActivity : FragmentActivity() {
     private val viewModel: BudgetViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        com.example.utils.GlobalConsoleLogger.setupUncaughtExceptionHandler()
+        com.example.utils.GlobalConsoleLogger.setupUncaughtExceptionHandler(this)
+        lifecycle.addObserver(androidx.lifecycle.LifecycleEventObserver { _, event ->
+            com.example.utils.GlobalConsoleLogger.onLifecycleEvent(event.name)
+        })
         com.example.davidapp.AchievementManager.initIfNeeded(this)
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -1105,10 +1108,16 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 onDismiss = { showDebugConsole = false }
             )
 
-            if (!showDebugConsole && activeModal == com.example.ui.viewmodel.BottomCapsuleModal.None) {
+            if (!showDebugConsole &&
+                activeModal == com.example.ui.viewmodel.BottomCapsuleModal.None &&
+                splashStage == "done" &&
+                !isAppLocked
+            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .navigationBarsPadding()
+                        .imePadding()
                         .padding(bottom = 86.dp, end = 12.dp),
                     contentAlignment = Alignment.BottomEnd
                 ) {

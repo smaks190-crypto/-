@@ -85,12 +85,22 @@
 
 # Release Isolation & GlobalConsoleLogger Stripping
 -assumenosideeffects class com.example.utils.GlobalConsoleLogger {
-    public static *** d(...);
-    public static *** i(...);
-    public static *** w(...);
-    public static *** e(...);
-    public static *** clear(...);
-    public static *** setupUncaughtExceptionHandler(...);
+    public *** d(...);
+    public *** i(...);
+    public *** w(...);
+    public *** e(...);
+    public *** f(...);
+    public *** log(...);
+    public *** recordNetworkCall(...);
+    public *** recordDbOperation(...);
+    public *** updateDatabaseSnapshot(...);
+    public *** updateSystemState(...);
+    public *** onLifecycleEvent(...);
+    public *** clear(...);
+    public *** clearErrors(...);
+    public *** clearNetworkTraces(...);
+    public *** clearDbOperations(...);
+    public *** setupUncaughtExceptionHandler(...);
 }
 -assumenosideeffects class com.yourdomain.davidbudget.utils.GlobalConsoleLogger {
     public static *** d(...);

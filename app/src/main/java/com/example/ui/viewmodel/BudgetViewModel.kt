@@ -356,6 +356,53 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
+        // Live Room Database & Background Task Diagnostics for Developer Console (No-Op in Release)
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                budgetProfiles,
+                transactions,
+                accounts,
+                categories,
+                goals
+            ) { profs, txs, accs, cats, gls ->
+                mapOf(
+                    "budget_profiles" to profs.size,
+                    "transactions" to txs.size,
+                    "accounts" to accs.size,
+                    "categories" to cats.size,
+                    "goals" to gls.size,
+                    "notifications" to notifications.value.size
+                )
+            }.collect { countsMap ->
+                com.example.utils.GlobalConsoleLogger.updateDatabaseSnapshot(
+                    isInitialized = true,
+                    isOpen = database.isOpen,
+                    schemaVersion = 5,
+                    activeBudgetId = _selectedBudgetId.value ?: "default",
+                    tableCounts = countsMap
+                )
+            }
+        }
+
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                _activeModal,
+                _isVoiceActive,
+                _isAnalyzingVoice,
+                _aiAuditLoading,
+                _isGeneratingReaction
+            ) { modal, voiceRec, voiceAi, auditRun, davidReact ->
+                com.example.utils.GlobalConsoleLogger.updateSystemState(
+                    activeModalName = modal::class.simpleName ?: "None",
+                    activeBudgetId = _selectedBudgetId.value ?: "—",
+                    isVoiceRecording = voiceRec,
+                    isAnalyzingVoice = voiceAi,
+                    isAiAuditRunning = auditRun,
+                    isGeneratingDavidReaction = davidReact
+                )
+            }.collect {}
+        }
+
         viewModelScope.launch {
             repository.ensureDefaultProfileExists()
             val profilesList = repository.allProfiles.first()

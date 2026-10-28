@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import com.example.utils.GlobalConsoleLogger
+import com.example.utils.NetworkCallStatus
 import com.example.data.api.GeminiApiService
 import com.example.data.api.GeminiContent
 import com.example.data.api.GeminiPart
@@ -80,19 +81,41 @@ class BudgetRepository(
         fromName: String,
         toName: String
     ) {
-        db.withTransaction {
-            accountDao.updateBalance(fromAccountId, -amount)
-            accountDao.updateBalance(toAccountId, amount)
-            notificationDao.insertNotification(
-                NotificationEntity(
-                    budgetId = budgetId,
-                    title = "Перевод между счетами",
-                    description = "Переведено ${String.format(Locale.US, "%.0f", amount)} ₽ со счета \"$fromName\" на счет \"$toName\"",
-                    icon = "repeat",
-                    color = "indigo500",
-                    timestamp = System.currentTimeMillis()
+        val opId = GlobalConsoleLogger.newOperationId("DB")
+        val startMs = System.currentTimeMillis()
+        try {
+            db.withTransaction {
+                accountDao.updateBalance(fromAccountId, -amount)
+                accountDao.updateBalance(toAccountId, amount)
+                notificationDao.insertNotification(
+                    NotificationEntity(
+                        budgetId = budgetId,
+                        title = "Перевод между счетами",
+                        description = "Переведено ${String.format(Locale.US, "%.0f", amount)} ₽ со счета \"$fromName\" на счет \"$toName\"",
+                        icon = "repeat",
+                        color = "indigo500",
+                        timestamp = System.currentTimeMillis()
+                    )
                 )
+            }
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "TRANSFER accounts",
+                tableName = "accounts",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = true,
+                details = "budgetId=$budgetId | $fromName -> $toName",
+                operationId = opId
             )
+        } catch (e: Exception) {
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "TRANSFER accounts",
+                tableName = "accounts",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = false,
+                errorMessage = e.localizedMessage ?: e.javaClass.simpleName,
+                operationId = opId
+            )
+            throw e
         }
     }
 
@@ -220,8 +243,11 @@ class BudgetRepository(
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite"
         )
+        val opId = GlobalConsoleLogger.newOperationId("DAVID")
 
-        for (model in modelsToTry) {
+        for ((idx, model) in modelsToTry.withIndex()) {
+            val attempt = idx + 1
+            val startMs = System.currentTimeMillis()
             try {
                 val response = apiService.generateContent(model, apiKey, request)
                 if (response.error == null) {
@@ -233,11 +259,47 @@ class BudgetRepository(
                         ?.removeSuffix("»")
                         ?.trim()
                     if (!responseText.isNullOrEmpty()) {
+                        GlobalConsoleLogger.recordNetworkCall(
+                            operationType = "Реакция Давида Жабова",
+                            modelName = model,
+                            durationMs = System.currentTimeMillis() - startMs,
+                            status = NetworkCallStatus.SUCCESS,
+                            httpCode = 200,
+                            attemptNumber = attempt,
+                            totalModelsInChain = modelsToTry.size,
+                            details = "cat=$category",
+                            operationId = opId
+                        )
                         return responseText
                     }
+                } else {
+                    GlobalConsoleLogger.recordNetworkCall(
+                        operationType = "Реакция Давида Жабова",
+                        modelName = model,
+                        durationMs = System.currentTimeMillis() - startMs,
+                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                        httpCode = response.error.code,
+                        errorType = response.error.status ?: "GeminiError",
+                        errorMessage = response.error.message,
+                        attemptNumber = attempt,
+                        totalModelsInChain = modelsToTry.size,
+                        details = "cat=$category",
+                        operationId = opId
+                    )
                 }
-            } catch (_: Exception) {
-                // Try next model or fallback
+            } catch (e: Exception) {
+                GlobalConsoleLogger.recordNetworkCall(
+                    operationType = "Реакция Давида Жабова",
+                    modelName = model,
+                    durationMs = System.currentTimeMillis() - startMs,
+                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                    errorType = e.javaClass.simpleName,
+                    errorMessage = e.localizedMessage ?: e.message,
+                    attemptNumber = attempt,
+                    totalModelsInChain = modelsToTry.size,
+                    details = "cat=$category",
+                    operationId = opId
+                )
             }
         }
 
@@ -412,8 +474,11 @@ class BudgetRepository(
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite"
         )
+        val opId = GlobalConsoleLogger.newOperationId("CAT-AI")
 
-        for (model in modelsToTry) {
+        for ((idx, model) in modelsToTry.withIndex()) {
+            val attempt = idx + 1
+            val startMs = System.currentTimeMillis()
             try {
                 val response = apiService.generateContent(model, apiKey, request)
                 if (response.error == null) {
@@ -425,11 +490,45 @@ class BudgetRepository(
                         ?.removeSuffix("»")
                         ?.trim()
                     if (!responseText.isNullOrEmpty()) {
+                        GlobalConsoleLogger.recordNetworkCall(
+                            operationType = "Автоподбор категории (ИИ)",
+                            modelName = model,
+                            durationMs = System.currentTimeMillis() - startMs,
+                            status = NetworkCallStatus.SUCCESS,
+                            httpCode = 200,
+                            attemptNumber = attempt,
+                            totalModelsInChain = modelsToTry.size,
+                            details = "result=$responseText",
+                            operationId = opId
+                        )
                         return responseText
                     }
+                } else {
+                    GlobalConsoleLogger.recordNetworkCall(
+                        operationType = "Автоподбор категории (ИИ)",
+                        modelName = model,
+                        durationMs = System.currentTimeMillis() - startMs,
+                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                        httpCode = response.error.code,
+                        errorType = response.error.status ?: "GeminiError",
+                        errorMessage = response.error.message,
+                        attemptNumber = attempt,
+                        totalModelsInChain = modelsToTry.size,
+                        operationId = opId
+                    )
                 }
-            } catch (_: Exception) {
-                // Try next model or fallback
+            } catch (e: Exception) {
+                GlobalConsoleLogger.recordNetworkCall(
+                    operationType = "Автоподбор категории (ИИ)",
+                    modelName = model,
+                    durationMs = System.currentTimeMillis() - startMs,
+                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                    errorType = e.javaClass.simpleName,
+                    errorMessage = e.localizedMessage ?: e.message,
+                    attemptNumber = attempt,
+                    totalModelsInChain = modelsToTry.size,
+                    operationId = opId
+                )
             }
         }
 
@@ -642,8 +741,29 @@ class BudgetRepository(
 
 
     suspend fun insertTransaction(transaction: TransactionEntity) {
-        GlobalConsoleLogger.i("ROOM", "Insert Transaction: ${transaction.type.uppercase()} ${transaction.amount} ₽ (${transaction.category} / ${transaction.subcategory})")
-        transactionDao.insertTransaction(transaction)
+        val opId = GlobalConsoleLogger.newOperationId("DB")
+        val startMs = System.currentTimeMillis()
+        try {
+            transactionDao.insertTransaction(transaction)
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "INSERT transaction",
+                tableName = "transactions",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = true,
+                details = "type=${transaction.type.uppercase()} | cat=${transaction.category}",
+                operationId = opId
+            )
+        } catch (e: Exception) {
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "INSERT transaction",
+                tableName = "transactions",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = false,
+                errorMessage = e.localizedMessage ?: e.javaClass.simpleName,
+                operationId = opId
+            )
+            throw e
+        }
         if (transaction.type.equals("expense", ignoreCase = true) &&
             !transaction.category.equals("Сбережения", ignoreCase = true)
         ) {
@@ -660,28 +780,133 @@ class BudgetRepository(
     }
 
     suspend fun deleteTransaction(id: String) {
-        GlobalConsoleLogger.i("ROOM", "Delete Transaction ID: $id")
-        transactionDao.deleteTransactionById(id)
+        val opId = GlobalConsoleLogger.newOperationId("DB")
+        val startMs = System.currentTimeMillis()
+        try {
+            transactionDao.deleteTransactionById(id)
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "DELETE transaction",
+                tableName = "transactions",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = true,
+                details = "id=$id",
+                operationId = opId
+            )
+        } catch (e: Exception) {
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "DELETE transaction",
+                tableName = "transactions",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = false,
+                errorMessage = e.localizedMessage ?: e.javaClass.simpleName,
+                operationId = opId
+            )
+            throw e
+        }
     }
 
     suspend fun insertGoal(goal: GoalEntity) {
-        GlobalConsoleLogger.i("ROOM", "Insert Goal: ${goal.name} (${goal.targetAmount} ₽)")
-        goalDao.insertGoal(goal)
+        val opId = GlobalConsoleLogger.newOperationId("DB")
+        val startMs = System.currentTimeMillis()
+        try {
+            goalDao.insertGoal(goal)
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "INSERT goal",
+                tableName = "goals",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = true,
+                details = "name=${goal.name}",
+                operationId = opId
+            )
+        } catch (e: Exception) {
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "INSERT goal",
+                tableName = "goals",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = false,
+                errorMessage = e.localizedMessage ?: e.javaClass.simpleName,
+                operationId = opId
+            )
+            throw e
+        }
     }
 
     suspend fun deleteGoal(id: String) {
-        GlobalConsoleLogger.i("ROOM", "Delete Goal ID: $id")
-        goalDao.deleteGoalById(id)
+        val opId = GlobalConsoleLogger.newOperationId("DB")
+        val startMs = System.currentTimeMillis()
+        try {
+            goalDao.deleteGoalById(id)
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "DELETE goal",
+                tableName = "goals",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = true,
+                details = "id=$id",
+                operationId = opId
+            )
+        } catch (e: Exception) {
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "DELETE goal",
+                tableName = "goals",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = false,
+                errorMessage = e.localizedMessage ?: e.javaClass.simpleName,
+                operationId = opId
+            )
+            throw e
+        }
     }
 
     suspend fun insertCategory(category: CategoryEntity) {
-        GlobalConsoleLogger.i("ROOM", "Insert Category: ${category.name} (${category.type})")
-        categoryDao.insertCategory(category)
+        val opId = GlobalConsoleLogger.newOperationId("DB")
+        val startMs = System.currentTimeMillis()
+        try {
+            categoryDao.insertCategory(category)
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "INSERT category",
+                tableName = "categories",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = true,
+                details = "name=${category.name} (${category.type})",
+                operationId = opId
+            )
+        } catch (e: Exception) {
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "INSERT category",
+                tableName = "categories",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = false,
+                errorMessage = e.localizedMessage ?: e.javaClass.simpleName,
+                operationId = opId
+            )
+            throw e
+        }
     }
 
     suspend fun deleteCategory(id: String) {
-        GlobalConsoleLogger.i("ROOM", "Delete Category ID: $id")
-        categoryDao.deleteCategoryById(id)
+        val opId = GlobalConsoleLogger.newOperationId("DB")
+        val startMs = System.currentTimeMillis()
+        try {
+            categoryDao.deleteCategoryById(id)
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "DELETE category",
+                tableName = "categories",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = true,
+                details = "id=$id",
+                operationId = opId
+            )
+        } catch (e: Exception) {
+            GlobalConsoleLogger.recordDbOperation(
+                operationName = "DELETE category",
+                tableName = "categories",
+                durationMs = System.currentTimeMillis() - startMs,
+                isSuccess = false,
+                errorMessage = e.localizedMessage ?: e.javaClass.simpleName,
+                operationId = opId
+            )
+            throw e
+        }
     }
 
     suspend fun initializeDefaultCategories(budgetId: String = "default") {
@@ -1002,8 +1227,11 @@ class BudgetRepository(
             "gemini-2.5-flash"
         )
 
+        val opId = GlobalConsoleLogger.newOperationId("AUDIT")
         var success = false
-        for (model in modelsToTry) {
+        for ((idx, model) in modelsToTry.withIndex()) {
+            val attempt = idx + 1
+            val startMs = System.currentTimeMillis()
             try {
                 val response = apiService.streamGenerateContent(model, apiKey, "sse", request)
                 if (response.isSuccessful) {
@@ -1022,21 +1250,57 @@ class BudgetRepository(
                                             emit(text)
                                             success = true
                                         }
-                                    } catch (e: Exception) {
+                                    } catch (_: Exception) {
                                         // Ignore JSON parsing exceptions for non-json lines or incomplete data
                                     }
                                 }
                             }
                         }
                         if (success) {
+                            GlobalConsoleLogger.recordNetworkCall(
+                                operationType = "Аудит бюджета (SSE Stream)",
+                                modelName = model,
+                                durationMs = System.currentTimeMillis() - startMs,
+                                status = NetworkCallStatus.SUCCESS,
+                                httpCode = response.code(),
+                                attemptNumber = attempt,
+                                totalModelsInChain = modelsToTry.size,
+                                details = "period=$periodName",
+                                operationId = opId
+                            )
                             return@flow
                         }
                     }
                 } else {
                     lastExceptionMessage = "HTTP ${response.code()}: ${response.message()}"
+                    GlobalConsoleLogger.recordNetworkCall(
+                        operationType = "Аудит бюджета (SSE Stream)",
+                        modelName = model,
+                        durationMs = System.currentTimeMillis() - startMs,
+                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                        httpCode = response.code(),
+                        errorType = "HTTP_${response.code()}",
+                        errorMessage = response.message(),
+                        attemptNumber = attempt,
+                        totalModelsInChain = modelsToTry.size,
+                        details = "period=$periodName",
+                        operationId = opId
+                    )
                 }
             } catch (e: Exception) {
                 lastExceptionMessage = e.message ?: e.toString()
+                GlobalConsoleLogger.recordNetworkCall(
+                    operationType = "Аудит бюджета (SSE Stream)",
+                    modelName = model,
+                    durationMs = System.currentTimeMillis() - startMs,
+                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                    errorType = e.javaClass.simpleName,
+                    errorMessage = e.localizedMessage ?: e.message,
+                    attemptNumber = attempt,
+                    totalModelsInChain = modelsToTry.size,
+                    details = "period=$periodName",
+                    operationId = opId
+                )
             }
         }
 
@@ -1433,11 +1697,13 @@ class BudgetRepository(
             "gemini-3.1-flash-lite"
         )
 
-        GlobalConsoleLogger.i("GEMINI", "Запрос к Gemini API для разбора голоса: «$trimmedText»")
+        val opId = GlobalConsoleLogger.newOperationId("VOICE-TXT")
+        GlobalConsoleLogger.i("GEMINI", "Запрос к Gemini API для разбора текста (${trimmedText.length} симв.)", operationId = opId)
 
-        for (model in modelsToTry) {
+        for ((idx, model) in modelsToTry.withIndex()) {
+            val attempt = idx + 1
+            val startMs = System.currentTimeMillis()
             try {
-                GlobalConsoleLogger.d("GEMINI", "Пробуем модель: $model")
                 val response = apiService.generateContent(model, apiKey, request)
                 if (response.error == null) {
                     val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
@@ -1446,18 +1712,49 @@ class BudgetRepository(
                         if (jsonString.isNotBlank()) {
                             val parsed = parseJsonOperations(jsonString, todayStr)
                             if (parsed.isNotEmpty()) {
-                                GlobalConsoleLogger.i("GEMINI", "Успешный ответ Gemini ($model): распознано ${parsed.size} операций")
+                                GlobalConsoleLogger.recordNetworkCall(
+                                    operationType = "Разбор голоса (Текст)",
+                                    modelName = model,
+                                    durationMs = System.currentTimeMillis() - startMs,
+                                    status = NetworkCallStatus.SUCCESS,
+                                    httpCode = 200,
+                                    attemptNumber = attempt,
+                                    totalModelsInChain = modelsToTry.size,
+                                    details = "распознано=${parsed.size} шт.",
+                                    operationId = opId
+                                )
                                 return parsed
                             }
                         }
                     }
                 } else {
                     lastError = response.error.message
-                    GlobalConsoleLogger.w("GEMINI", "Ошибка от Gemini ($model): ${response.error.message}")
+                    GlobalConsoleLogger.recordNetworkCall(
+                        operationType = "Разбор голоса (Текст)",
+                        modelName = model,
+                        durationMs = System.currentTimeMillis() - startMs,
+                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                        httpCode = response.error.code,
+                        errorType = response.error.status ?: "GeminiError",
+                        errorMessage = response.error.message,
+                        attemptNumber = attempt,
+                        totalModelsInChain = modelsToTry.size,
+                        operationId = opId
+                    )
                 }
             } catch (e: Exception) {
                 lastError = e.message
-                GlobalConsoleLogger.e("GEMINI", "Исключение при обращении к $model: ${e.localizedMessage}", e)
+                GlobalConsoleLogger.recordNetworkCall(
+                    operationType = "Разбор голоса (Текст)",
+                    modelName = model,
+                    durationMs = System.currentTimeMillis() - startMs,
+                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                    errorType = e.javaClass.simpleName,
+                    errorMessage = e.localizedMessage ?: e.message,
+                    attemptNumber = attempt,
+                    totalModelsInChain = modelsToTry.size,
+                    operationId = opId
+                )
             }
         }
 
@@ -1540,11 +1837,13 @@ class BudgetRepository(
             "gemini-3.1-flash-lite"
         )
 
-        GlobalConsoleLogger.i("GEMINI", "Отправка Live-аудиофрагмента (${audioBytes.size} байт) в Gemini API...")
+        val opId = GlobalConsoleLogger.newOperationId("VOICE-WAV")
+        GlobalConsoleLogger.i("GEMINI", "Отправка Live-аудиофрагмента (${audioBytes.size} байт) в Gemini API...", operationId = opId)
 
-        for (model in modelsToTry) {
+        for ((idx, model) in modelsToTry.withIndex()) {
+            val attempt = idx + 1
+            val startMs = System.currentTimeMillis()
             try {
-                GlobalConsoleLogger.d("GEMINI", "Live-анализ аудио моделью: $model")
                 val response = apiService.generateContent(model, apiKey, request)
                 if (response.error == null) {
                     val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
@@ -1552,17 +1851,50 @@ class BudgetRepository(
                         val jsonString = extractJsonArray(responseText)
                         if (jsonString.isNotBlank()) {
                             val parsed = parseJsonOperations(jsonString, todayStr)
-                            GlobalConsoleLogger.i("GEMINI", "Live-ответ ($model): распознано ${parsed.size} операций")
+                            GlobalConsoleLogger.recordNetworkCall(
+                                operationType = "Gemini Live Аудио (WAV)",
+                                modelName = model,
+                                durationMs = System.currentTimeMillis() - startMs,
+                                status = NetworkCallStatus.SUCCESS,
+                                httpCode = 200,
+                                attemptNumber = attempt,
+                                totalModelsInChain = modelsToTry.size,
+                                details = "bytes=${audioBytes.size} | распознано=${parsed.size}",
+                                operationId = opId
+                            )
                             return@withContext parsed
                         }
                     }
                 } else {
                     lastError = response.error.message
-                    GlobalConsoleLogger.w("GEMINI", "Ошибка от Gemini ($model) при разборе аудио: ${response.error.message}")
+                    GlobalConsoleLogger.recordNetworkCall(
+                        operationType = "Gemini Live Аудио (WAV)",
+                        modelName = model,
+                        durationMs = System.currentTimeMillis() - startMs,
+                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                        httpCode = response.error.code,
+                        errorType = response.error.status ?: "GeminiError",
+                        errorMessage = response.error.message,
+                        attemptNumber = attempt,
+                        totalModelsInChain = modelsToTry.size,
+                        details = "bytes=${audioBytes.size}",
+                        operationId = opId
+                    )
                 }
             } catch (e: Exception) {
                 lastError = e.message
-                GlobalConsoleLogger.e("GEMINI", "Исключение при отправке аудио в $model: ${e.localizedMessage}", e)
+                GlobalConsoleLogger.recordNetworkCall(
+                    operationType = "Gemini Live Аудио (WAV)",
+                    modelName = model,
+                    durationMs = System.currentTimeMillis() - startMs,
+                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                    errorType = e.javaClass.simpleName,
+                    errorMessage = e.localizedMessage ?: e.message,
+                    attemptNumber = attempt,
+                    totalModelsInChain = modelsToTry.size,
+                    details = "bytes=${audioBytes.size}",
+                    operationId = opId
+                )
             }
         }
 
