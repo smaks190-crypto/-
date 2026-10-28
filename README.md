@@ -9,7 +9,7 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v10.64 (сборка 155)
+### Версия v10.73 (сборка 164)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
@@ -17,10 +17,10 @@
 
 ## Что изменилось
 
-### Документация и сборка
-- русскоязычные описания релизов и обновлений README ([PR #14](https://github.com/smaks190-crypto/-/pull/14))
+### Добавлено
+- полноценная 5-вкладочная Developer Console с изоляцией Debug/Release и экспортом для ИИ ([PR #13](https://github.com/smaks190-crypto/-/pull/13))
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v10.60-build.151...v10.64-build.155
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v10.64-build.155...v10.73-build.164
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
