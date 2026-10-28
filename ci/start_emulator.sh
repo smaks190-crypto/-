@@ -12,6 +12,9 @@ fi
 SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
 export ANDROID_HOME="$SDK_ROOT"
 export ANDROID_SDK_ROOT="$SDK_ROOT"
+export ANDROID_USER_HOME="$HOME/.android"
+export ANDROID_AVD_HOME="$HOME/.android/avd"
+mkdir -p "$ANDROID_AVD_HOME"
 
 SDKMANAGER=$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager | head -n 1)
 AVDMANAGER=$(find "$SDK_ROOT/cmdline-tools" -name avdmanager | head -n 1)
@@ -19,6 +22,7 @@ ADB="$SDK_ROOT/platform-tools/adb"
 EMULATOR="$SDK_ROOT/emulator/emulator"
 
 echo "Using SDK_ROOT=$SDK_ROOT"
+echo "Using ANDROID_AVD_HOME=$ANDROID_AVD_HOME"
 echo "Using SDKMANAGER=$SDKMANAGER"
 echo "Using AVDMANAGER=$AVDMANAGER"
 echo "Using EMULATOR=$EMULATOR"
@@ -29,9 +33,9 @@ yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
 "$SDKMANAGER" --install "$SYS_IMG" "platforms;android-30"
 
 echo "=== [CI Android Emulator] Creating AVD ci_pixel_6 ==="
-echo "no" | "$AVDMANAGER" create avd --force --name ci_pixel_6 --package "$SYS_IMG" --device "pixel"
+echo "no" | "$AVDMANAGER" create avd --force --name ci_pixel_6 --package "$SYS_IMG" --device "pixel" --path "$ANDROID_AVD_HOME/ci_pixel_6.avd"
 
-AVD_CONFIG="$HOME/.android/avd/ci_pixel_6.avd/config.ini"
+AVD_CONFIG="$ANDROID_AVD_HOME/ci_pixel_6.avd/config.ini"
 if [ -f "$AVD_CONFIG" ]; then
   {
     echo "hw.lcd.density=420"
@@ -41,6 +45,9 @@ if [ -f "$AVD_CONFIG" ]; then
     echo "hw.keyboard=yes"
   } >> "$AVD_CONFIG"
 fi
+
+echo "Available AVDs:"
+"$EMULATOR" -list-avds || true
 
 echo "=== [CI Android Emulator] Starting headless Android Emulator with KVM (detached FDs) ==="
 python3 - "$ADB" "$EMULATOR" << 'PYEOF'
