@@ -61,7 +61,7 @@ class DavidLiveSummaryGenerator(
             val role = when (turn.speaker) {
                 DavidLiveSpeaker.USER -> "Пользователь"
                 DavidLiveSpeaker.DAVID -> "Давид Жабов"
-                DavidLiveSpeaker.NONE -> "Система"
+                DavidLiveSpeaker.SYSTEM, DavidLiveSpeaker.NONE -> "Система"
             }
             "$role: ${turn.text.trim()}"
         }
