@@ -207,8 +207,5 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
 
 tasks.matching { it.name == "assembleDebug" }.configureEach {
   dependsOn("compileReleaseKotlin", "testDebugUnitTest")
-  if (System.getenv("GITHUB_ACTIONS") == "true") {
-    finalizedBy("connectedDebugAndroidTest")
-  }
 }
 
