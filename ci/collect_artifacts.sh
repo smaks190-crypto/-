@@ -31,16 +31,19 @@ for xml in $(find "$ART_DIR/reports/xml" -name "TEST-*.xml" 2>/dev/null); do
 done
 
 echo "4. Shutting down Android Emulator..."
-"$ADB" emu kill >/dev/null 2>&1 || true
+timeout 5 "$ADB" emu kill >/dev/null 2>&1 || true
 if [ -f /tmp/android_emulator.pid ]; then
   kill -9 "$(cat /tmp/android_emulator.pid)" >/dev/null 2>&1 || true
 fi
+timeout 5 "$ADB" kill-server >/dev/null 2>&1 || true
 
 # Publish collected artifacts (XML reports, HTML reports, Logcat, and PNG screenshots) to branch ci-artifacts/pr-19
 if [ "${GITHUB_ACTIONS:-false}" = "true" ]; then
   echo "5. Archiving and publishing UI test artifacts to ci-artifacts/pr-19 branch..."
   ZIP_PATH="$ART_DIR/android-ui-test-artifacts.zip"
   (cd "$ART_DIR" && zip -r "android-ui-test-artifacts.zip" reports logcat.txt screenshots) || true
+  mkdir -p app/build/outputs/apk/debug
+  cp -f "$ZIP_PATH" app/build/outputs/apk/debug/android-ui-test-artifacts.zip 2>/dev/null || true
 
   TMP_ART_REPO="/tmp/ci_artifacts_publish"
   rm -rf "$TMP_ART_REPO"
