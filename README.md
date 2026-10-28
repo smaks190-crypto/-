@@ -15,7 +15,7 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v10.88 (сборка 179)
+### Версия v11.01 (сборка 192)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
@@ -24,9 +24,9 @@
 ## Что изменилось
 
 ### Добавлено
-- рефакторинг дизайна «Все операции», исправление багов свайпа/скролла/графиков и авто-группировка дублей ([PR #19](https://github.com/smaks190-crypto/-/pull/19))
+- 32-полосный спектральный FFT-визуализатор голоса (Hann window + Spatial Envelope) ([PR #24](https://github.com/smaks190-crypto/-/pull/24))
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v10.78-build.169...v10.88-build.179
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v10.88-build.179...v11.01-build.192
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
