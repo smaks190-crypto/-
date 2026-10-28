@@ -3,10 +3,18 @@ package com.example.davidapp
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.api.RetrofitClient
 import com.example.data.db.AppDatabase
 import com.example.data.db.NotificationEntity
 import com.example.data.db.TransactionEntity
 import com.example.data.repository.BudgetRepository
+import com.example.davidapp.live.DavidLiveConnectionState
+import com.example.davidapp.live.DavidLiveFinancialToolsProvider
+import com.example.davidapp.live.DavidLiveSessionController
+import com.example.davidapp.live.DavidLiveSpeaker
+import com.example.davidapp.live.DavidLiveSummaryGenerator
+import com.example.davidapp.live.DavidLiveToolFact
+import com.example.davidapp.live.DavidLiveTranscriptTurn
 import com.example.ui.components.extractOpsAndComment
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -57,6 +65,34 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     private val _hasApiKey = MutableStateFlow(false)
     val hasApiKey: StateFlow<Boolean> = _hasApiKey.asStateFlow()
 
+    // --- David Live (Голосовой диалог в реальном времени) ---
+    val liveFinancialToolsProvider = DavidLiveFinancialToolsProvider(
+        budgetId = "default",
+        transactionDao = database.transactionDao(),
+        categoryDao = database.categoryDao(),
+        goalDao = database.goalDao(),
+        accountDao = database.accountDao()
+    )
+
+    val liveSessionController = DavidLiveSessionController(
+        financialToolsProvider = liveFinancialToolsProvider
+    )
+
+    private val liveSummaryGenerator = DavidLiveSummaryGenerator(
+        geminiApiService = RetrofitClient.service
+    )
+
+    private val _isLiveOverlayVisible = MutableStateFlow(false)
+    val isLiveOverlayVisible: StateFlow<Boolean> = _isLiveOverlayVisible.asStateFlow()
+
+    val liveConnectionState: StateFlow<DavidLiveConnectionState> = liveSessionController.connectionState
+    val liveSubtitle: StateFlow<String> = liveSessionController.liveSubtitle
+    val liveRayMagnitudes: StateFlow<List<Float>> = liveSessionController.audioEngine.rayMagnitudes
+    val liveOverallEnergy: StateFlow<Float> = liveSessionController.audioEngine.overallEnergy
+    val liveActiveSpeaker: StateFlow<DavidLiveSpeaker> = liveSessionController.audioEngine.activeSpeaker
+    val isLiveMicMuted: StateFlow<Boolean> = liveSessionController.isMicMuted
+    val liveErrorMessage: StateFlow<String?> = liveSessionController.errorMessage
+
     private var currentBudgetId: String = "default"
     private var currentProfileName: String = "Максим"
     private var currentApiKey: String = ""
@@ -72,6 +108,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         val isDifferentBudget = budgetId != currentBudgetId || profileName != currentProfileName
         currentBudgetId = budgetId
         currentProfileName = if (profileName.isNotBlank()) profileName else "Пользователь"
+        liveFinancialToolsProvider.setBudgetId(currentBudgetId)
         val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
         val effectiveKey = apiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
         currentApiKey = effectiveKey
@@ -897,6 +934,147 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         sessionMessages.clear()
         _stage.value = DavidStage.INITIAL
         rebuildChronologicalMessages()
+    }
+
+    // --- Управление голосовым режимом David Live и пост-резюме разговора ---
+
+    fun startDavidLive(soundManager: SoundManager? = null) {
+        soundManager?.playClick()
+        liveFinancialToolsProvider.setBudgetId(currentBudgetId)
+        _isLiveOverlayVisible.value = true
+        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
+        val userKey = currentApiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        liveSessionController.startSession(userKey)
+    }
+
+    fun toggleLiveMicMute() {
+        liveSessionController.toggleMicMute()
+    }
+
+    fun retryLiveConnection() {
+        liveSessionController.retryConnection()
+    }
+
+    fun endDavidLiveSession(soundManager: SoundManager? = null) {
+        soundManager?.playClick()
+        val (turns, facts) = liveSessionController.endSession()
+        _isLiveOverlayVisible.value = false
+        processCompletedLiveSession(turns, facts, soundManager)
+    }
+
+    internal fun processCompletedLiveSession(
+        turns: List<DavidLiveTranscriptTurn>,
+        facts: List<DavidLiveToolFact>,
+        soundManager: SoundManager? = null
+    ) {
+        if (!liveSummaryGenerator.hasEnoughSubstanceForSummary(turns, facts)) {
+            // Слишком короткий или пустой вызов — завершаем аккуратно без засорения чата резюме
+            return
+        }
+
+        val summaryMsgId = "live_summary_${System.currentTimeMillis()}"
+        val loadingMsg = ChatMessage(
+            id = summaryMsgId,
+            sender = "Давид Жабов 🐸",
+            type = ChatMessageType.LiveSessionSummary(
+                summary = null,
+                isGenerating = true,
+                errorMessage = null,
+                capturedTurns = turns,
+                capturedFacts = facts
+            ),
+            timestamp = currentTime(),
+            isUser = false,
+            timestampMillis = System.currentTimeMillis()
+        )
+        addSessionMessage(loadingMsg)
+
+        generateAndApplyLiveSummary(summaryMsgId, turns, facts, soundManager)
+    }
+
+    fun retryLiveSummary(messageId: String, soundManager: SoundManager? = null) {
+        val index = sessionMessages.indexOfFirst { it.id == messageId }
+        if (index == -1) return
+        val existingMsg = sessionMessages[index]
+        val existingType = existingMsg.type as? ChatMessageType.LiveSessionSummary ?: return
+
+        soundManager?.playClick()
+        sessionMessages[index] = existingMsg.copy(
+            type = existingType.copy(
+                isGenerating = true,
+                errorMessage = null
+            )
+        )
+        rebuildChronologicalMessages()
+
+        generateAndApplyLiveSummary(
+            messageId = messageId,
+            turns = existingType.capturedTurns,
+            facts = existingType.capturedFacts,
+            soundManager = soundManager
+        )
+    }
+
+    private fun generateAndApplyLiveSummary(
+        messageId: String,
+        turns: List<DavidLiveTranscriptTurn>,
+        facts: List<DavidLiveToolFact>,
+        soundManager: SoundManager?
+    ) {
+        viewModelScope.launch {
+            val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
+            val userKey = currentApiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+
+            val outcome = liveSummaryGenerator.generateSummary(
+                userApiKey = userKey,
+                turns = turns,
+                verifiedFacts = facts
+            )
+
+            val index = sessionMessages.indexOfFirst { it.id == messageId }
+            if (index == -1) return@launch
+            val currentMsg = sessionMessages[index]
+
+            when (outcome) {
+                is DavidLiveSummaryGenerator.SummaryOutcome.SkippedTooShort -> {
+                    sessionMessages.removeAt(index)
+                    rebuildChronologicalMessages()
+                }
+                is DavidLiveSummaryGenerator.SummaryOutcome.Success -> {
+                    soundManager?.playReceive()
+                    sessionMessages[index] = currentMsg.copy(
+                        type = ChatMessageType.LiveSessionSummary(
+                            summary = outcome.summary,
+                            isGenerating = false,
+                            errorMessage = null,
+                            capturedTurns = turns,
+                            capturedFacts = facts
+                        )
+                    )
+                    rebuildChronologicalMessages()
+                }
+                is DavidLiveSummaryGenerator.SummaryOutcome.Error -> {
+                    sessionMessages[index] = currentMsg.copy(
+                        type = ChatMessageType.LiveSessionSummary(
+                            summary = null,
+                            isGenerating = false,
+                            errorMessage = outcome.message,
+                            capturedTurns = turns,
+                            capturedFacts = facts
+                        )
+                    )
+                    rebuildChronologicalMessages()
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        try {
+            liveSessionController.endSession()
+        } catch (_: Exception) {
+        }
     }
 }
 
