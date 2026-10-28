@@ -26,9 +26,9 @@ import kotlin.math.sqrt
 /**
  * Потоковый менеджер голосового ввода в стиле Gemini Live.
  * Непрерывно считывает PCM-аудио (16 kHz, 16-bit, Mono) через AudioRecord без системных звуков,
- * вычисляет живую амплитуду для 32-полосной неоновой волны и с помощью умного детектора речи (VAD)
- * отправляет каждую законченную фразу (по паузе ~0.85 сек) в Gemini в реальном времени,
- * не прерывая запись микрофона.
+ * выполняет реальный спектральный FFT-анализ (32 частотные полосы с окном Ханна) вне UI-потока
+ * и с помощью умного детектора речи (VAD) отправляет каждую законченную фразу (по паузе ~0.83 сек)
+ * в Gemini в реальном времени, не прерывая запись микрофона.
  */
 class VoiceInputManager(context: Context) {
     private val context: Context = context.applicationContext
@@ -36,6 +36,9 @@ class VoiceInputManager(context: Context) {
 
     private var audioRecord: AudioRecord? = null
     private var recordingJob: Job? = null
+
+    // Единый переиспользуемый FFT-анализатор спектра (без аллокаций на каждый аудиокадр)
+    private val spectrumAnalyzer = VoiceSpectrumAnalyzer(sampleRate = SAMPLE_RATE)
 
     private val _isListening = MutableStateFlow(false)
     val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
@@ -52,6 +55,12 @@ class VoiceInputManager(context: Context) {
     private val _voiceLevel = MutableStateFlow(0f)
     val voiceLevel: StateFlow<Float> = _voiceLevel.asStateFlow()
 
+    private val _spectrumBands = MutableStateFlow(FloatArray(VoiceSpectrumAnalyzer.BAND_COUNT))
+    val spectrumBands: StateFlow<FloatArray> = _spectrumBands.asStateFlow()
+
+    private val _rawSpectrumBands = MutableStateFlow(FloatArray(VoiceSpectrumAnalyzer.BAND_COUNT))
+    val rawSpectrumBands: StateFlow<FloatArray> = _rawSpectrumBands.asStateFlow()
+
     private val _errorState = MutableStateFlow<String?>(null)
     val errorState: StateFlow<String?> = _errorState.asStateFlow()
 
@@ -63,9 +72,9 @@ class VoiceInputManager(context: Context) {
     private var activeSpeechFrames = 0
 
     companion object {
-        private const val SAMPLE_RATE = 16000
-        private const val FRAME_SAMPLES = 512 // 32 мс при 16000 Гц
-        private const val FRAME_BYTES = FRAME_SAMPLES * 2 // 1024 байта (16-bit PCM)
+        const val SAMPLE_RATE = 16000
+        const val FRAME_SAMPLES = 512 // 32 мс при 16000 Гц
+        const val FRAME_BYTES = FRAME_SAMPLES * 2 // 1024 байта (16-bit PCM)
         private const val PRE_ROLL_FRAMES = 8 // ~256 мс предзаписи до начала фразы
         private const val SILENCE_FRAMES_TO_SPLIT = 26 // ~830 мс паузы для отправки готовой фразы в Gemini Live
         private const val MIN_SPEECH_FRAMES = 11 // ~350 мс минимальной длительности речи во фразе
@@ -97,6 +106,7 @@ class VoiceInputManager(context: Context) {
         _recognizedText.value = ""
         _partialText.value = "Говорите..."
         _errorState.value = null
+        spectrumAnalyzer.reset()
 
         try {
             val minBufferSize = AudioRecord.getMinBufferSize(
@@ -122,8 +132,10 @@ class VoiceInputManager(context: Context) {
             record.startRecording()
             audioRecord = record
             _isListening.value = true
-            _rmsDb.value = 1.5f
-            _voiceLevel.value = 0.08f
+            _rmsDb.value = 1.0f
+            _voiceLevel.value = 0.0f
+            _spectrumBands.value = FloatArray(VoiceSpectrumAnalyzer.BAND_COUNT)
+            _rawSpectrumBands.value = FloatArray(VoiceSpectrumAnalyzer.BAND_COUNT)
 
             synchronized(chunkLock) {
                 activeSpeechBuffer.reset()
@@ -145,7 +157,7 @@ class VoiceInputManager(context: Context) {
                         val frameCopy = frameBuf.copyOf(readBytes)
                         val rms = calculatePcmRms(frameCopy, readBytes)
 
-                        // Плавная нормализация амплитуды (1..12) и уровня голоса (0f..1f) для Volumetric Liquid Aurora
+                        // Плавная нормализация амплитуды (1..12) и уровня голоса (0f..1f)
                         val visualDb = if (rms > 80.0) {
                             val db = 20f * log10((rms / 80.0).toFloat())
                             (db * 0.35f).coerceIn(1.5f, 12f)
@@ -154,6 +166,10 @@ class VoiceInputManager(context: Context) {
                         }
                         _rmsDb.value = visualDb
                         _voiceLevel.value = ((visualDb - 1.0f) / 9.5f).coerceIn(0f, 1f)
+
+                        // Реальный спектральный анализ (FFT + Hann window -> 32 частотные полосы) вне UI-потока
+                        _spectrumBands.value = spectrumAnalyzer.processPcm16LeFrame(frameCopy, readBytes)
+                        _rawSpectrumBands.value = spectrumAnalyzer.getRawFrequencyBands()
 
                         val isSpeechFrame = rms >= SPEECH_RMS_THRESHOLD
 
@@ -220,6 +236,27 @@ class VoiceInputManager(context: Context) {
     }
 
     /**
+     * Позволяет подать синтетический PCM-кадр (16-bit LE Mono, 16 кГц) для инструментального/эмуляторного тестирования
+     * без физического микрофона.
+     */
+    fun processSyntheticPcmFrame(pcmBytes: ByteArray, length: Int = pcmBytes.size): FloatArray {
+        val safeLen = length.coerceIn(0, pcmBytes.size)
+        val rms = calculatePcmRms(pcmBytes, safeLen)
+        val visualDb = if (rms > 80.0) {
+            val db = 20f * log10((rms / 80.0).toFloat())
+            (db * 0.35f).coerceIn(1.5f, 12f)
+        } else {
+            1.0f
+        }
+        _rmsDb.value = visualDb
+        _voiceLevel.value = ((visualDb - 1.0f) / 9.5f).coerceIn(0f, 1f)
+        val bands = spectrumAnalyzer.processPcm16LeFrame(pcmBytes, safeLen)
+        _spectrumBands.value = bands
+        _rawSpectrumBands.value = spectrumAnalyzer.getRawFrequencyBands()
+        return bands
+    }
+
+    /**
      * Останавливает запись и возвращает последний оставшийся фрагмент речи (если пользователь говорил
      * прямо перед нажатием кнопки завершения), чтобы ни одно слово в конце не потерялось.
      */
@@ -245,6 +282,9 @@ class VoiceInputManager(context: Context) {
         }
         _rmsDb.value = 0f
         _voiceLevel.value = 0f
+        spectrumAnalyzer.reset()
+        _spectrumBands.value = FloatArray(VoiceSpectrumAnalyzer.BAND_COUNT)
+        _rawSpectrumBands.value = FloatArray(VoiceSpectrumAnalyzer.BAND_COUNT)
 
         synchronized(chunkLock) {
             val remainingPcm = activeSpeechBuffer.toByteArray()
@@ -292,6 +332,9 @@ class VoiceInputManager(context: Context) {
         }
         _rmsDb.value = 0f
         _voiceLevel.value = 0f
+        spectrumAnalyzer.reset()
+        _spectrumBands.value = FloatArray(VoiceSpectrumAnalyzer.BAND_COUNT)
+        _rawSpectrumBands.value = FloatArray(VoiceSpectrumAnalyzer.BAND_COUNT)
     }
 
     private fun calculatePcmRms(buffer: ByteArray, length: Int): Double {

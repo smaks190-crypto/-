@@ -180,6 +180,7 @@ fun MorphingBottomBar(
     val recognizedText by voiceManager.recognizedText.collectAsState()
     val partialText by voiceManager.partialText.collectAsState()
     val rmsDb by voiceManager.rmsDb.collectAsState()
+    val spectrumBands by voiceManager.spectrumBands.collectAsState()
     val errorState by voiceManager.errorState.collectAsState()
 
     val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
@@ -367,10 +368,11 @@ fun MorphingBottomBar(
 
     val borderBrush = when (activeModal) {
         BottomCapsuleModal.None -> Brush.horizontalGradient(listOf(GlassHighlight, GlassHighlight))
-        is BottomCapsuleModal.VoiceInput -> Brush.verticalGradient(
+        is BottomCapsuleModal.VoiceInput -> Brush.horizontalGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.22f),
-                Color(0xFF38BDF8).copy(alpha = 0.45f)
+                Emerald400.copy(alpha = 0.45f),
+                Color(0xFF10B981).copy(alpha = 0.38f),
+                Color(0xFF06B6D4).copy(alpha = 0.45f)
             )
         )
         else -> Brush.linearGradient(
@@ -751,15 +753,15 @@ fun MorphingBottomBar(
                                         .background(Color(0xFF080C14)),
                                     contentAlignment = Alignment.BottomCenter
                                 ) {
-                                    // Живое объемное северное сияние Gemini Live (Volumetric Liquid Aurora Glow):
-                                    // заполняет всю 84.dp капсулу при слушании и переливается в нижней части при росте списка операций
+                                    // Мягкое второстепенное северное сияние вдоль нижней кромки капсулы (Volumetric Liquid Aurora Glow)
                                     VolumetricLiquidAuroraGlow(
                                         isRecording = isListening || isAnalyzingVoice,
-                                        rmsLevel = if (isListening) rmsDb else if (isAnalyzingVoice) 5.2f else 2.2f,
+                                        rmsLevel = if (isListening) rmsDb else if (isAnalyzingVoice) 4.2f else 1.8f,
                                         cornerRadius = 36.dp,
                                         maxAuroraHeight = if (voiceSubState == VoiceSubState.RECORDING) null else 190.dp,
                                         showGlassBorder = false,
                                         fillBackground = false,
+                                        auroraIntensityScale = 0.52f,
                                         modifier = Modifier.matchParentSize()
                                     )
 
@@ -827,39 +829,39 @@ fun MorphingBottomBar(
 
                                                 val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
                                                 val micPulse by infiniteTransition.animateFloat(
-                                                    initialValue = 0.94f,
-                                                    targetValue = 1.08f,
+                                                    initialValue = 0.96f,
+                                                    targetValue = 1.05f,
                                                     animationSpec = infiniteRepeatable(
-                                                        animation = tween(850, easing = FastOutSlowInEasing),
+                                                        animation = tween(900, easing = FastOutSlowInEasing),
                                                         repeatMode = RepeatMode.Reverse
                                                     ),
                                                     label = "mic_pulse_scale"
                                                 )
 
-                                                // Капсула Gemini Live (height = 84.dp со скруглением 36.dp), целиком залитая сиянием
+                                                // Капсула голосового ввода (height = 84.dp, скругление 36.dp) с 32-полосным спектральным визуализатором
                                                 Row(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .height(84.dp)
-                                                        .padding(horizontal = 18.dp, vertical = 12.dp),
+                                                        .padding(horizontal = 16.dp, vertical = 10.dp),
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
                                                     Box(
                                                         modifier = Modifier
-                                                            .size(44.dp)
+                                                            .size(46.dp)
                                                             .graphicsLayer {
                                                                 val s = if (isListening) micPulse else 1f
                                                                 scaleX = s
                                                                 scaleY = s
                                                             }
                                                             .clip(CircleShape)
-                                                            .background(Color.White.copy(alpha = 0.14f))
+                                                            .background(Color(0xFF10B981).copy(alpha = 0.16f))
                                                             .border(
-                                                                width = 1.dp,
+                                                                width = 1.2.dp,
                                                                 brush = Brush.verticalGradient(
                                                                     colors = listOf(
-                                                                        Color.White.copy(alpha = 0.45f),
-                                                                        Color(0xFF38BDF8).copy(alpha = 0.55f)
+                                                                        Emerald400.copy(alpha = 0.65f),
+                                                                        Color(0xFF06B6D4).copy(alpha = 0.55f)
                                                                     )
                                                                 ),
                                                                 shape = CircleShape
@@ -874,7 +876,7 @@ fun MorphingBottomBar(
                                                     ) {
                                                         if (isAnalyzingVoice && !isListening) {
                                                             CircularProgressIndicator(
-                                                                color = Color.White,
+                                                                color = Emerald400,
                                                                 strokeWidth = 2.2.dp,
                                                                 modifier = Modifier.size(20.dp)
                                                             )
@@ -882,73 +884,82 @@ fun MorphingBottomBar(
                                                             Icon(
                                                                 imageVector = Icons.Default.Mic,
                                                                 contentDescription = "Остановить запись",
-                                                                tint = Color.White,
+                                                                tint = Emerald400,
                                                                 modifier = Modifier.size(22.dp)
                                                             )
                                                         }
                                                     }
 
-                                                    Spacer(modifier = Modifier.width(14.dp))
+                                                    Spacer(modifier = Modifier.width(12.dp))
 
                                                     Column(
                                                         modifier = Modifier
                                                             .weight(1f)
+                                                            .fillMaxHeight()
                                                             .clickable {
                                                                 if (isListening) {
                                                                     viewModel.stopVoiceRecordingAndProcess()
                                                                 }
                                                             },
-                                                        verticalArrangement = Arrangement.Center
+                                                        verticalArrangement = Arrangement.SpaceBetween
                                                     ) {
-                                                        Text(
-                                                            text = liveStatusText,
-                                                            color = Color.White,
-                                                            fontSize = 15.sp,
-                                                            fontFamily = ManropeFontFamily,
-                                                            fontWeight = FontWeight.Bold,
-                                                            maxLines = 2,
-                                                            overflow = TextOverflow.Ellipsis,
-                                                            style = TextStyle(
-                                                                shadow = Shadow(
-                                                                    color = Color.Black.copy(alpha = 0.75f),
-                                                                    offset = Offset(0f, 2f),
-                                                                    blurRadius = 10f
+                                                        Row(
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                                            verticalAlignment = Alignment.CenterVertically
+                                                        ) {
+                                                            Text(
+                                                                text = liveStatusText,
+                                                                color = Color.White.copy(alpha = 0.94f),
+                                                                fontSize = 12.sp,
+                                                                fontFamily = ManropeFontFamily,
+                                                                fontWeight = FontWeight.Bold,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis,
+                                                                modifier = Modifier.weight(1f, fill = false),
+                                                                style = TextStyle(
+                                                                    shadow = Shadow(
+                                                                        color = Color.Black.copy(alpha = 0.75f),
+                                                                        offset = Offset(0f, 1.5f),
+                                                                        blurRadius = 6f
+                                                                    )
                                                                 )
                                                             )
-                                                        )
-                                                        Spacer(modifier = Modifier.height(2.dp))
-                                                        Text(
-                                                            text = if (isAnalyzingVoice) {
-                                                                "Gemini Live • разбор операций"
-                                                            } else {
-                                                                "Gemini Live • нажмите для завершения"
-                                                            },
-                                                            color = Color(0xFFE0F2FE).copy(alpha = 0.82f),
-                                                            fontSize = 11.sp,
-                                                            fontFamily = ManropeFontFamily,
-                                                            fontWeight = FontWeight.Medium,
-                                                            maxLines = 1,
-                                                            style = TextStyle(
-                                                                shadow = Shadow(
-                                                                    color = Color.Black.copy(alpha = 0.65f),
-                                                                    offset = Offset(0f, 1.5f),
-                                                                    blurRadius = 6f
-                                                                )
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                            Text(
+                                                                text = if (isAnalyzingVoice) "ИИ разбор" else "Нажмите для стопа",
+                                                                color = Color(0xFF94A3B8).copy(alpha = 0.78f),
+                                                                fontSize = 10.sp,
+                                                                fontFamily = ManropeFontFamily,
+                                                                fontWeight = FontWeight.Medium,
+                                                                maxLines = 1
                                                             )
+                                                        }
+
+                                                        // 32-полосный горизонтальный спектральный визуализатор реального голоса (FFT + Hann)
+                                                        SpectralVoiceVisualizer(
+                                                            spectrumBands = spectrumBands,
+                                                            isRecording = isListening || isAnalyzingVoice,
+                                                            rmsLevel = rmsDb,
+                                                            barCount = 32,
+                                                            compact = false,
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(40.dp)
                                                         )
                                                     }
 
-                                                    Spacer(modifier = Modifier.width(12.dp))
+                                                    Spacer(modifier = Modifier.width(10.dp))
 
-                                                    // Аккуратная круглая кнопка закрытия ✕ справа поверх сияния
+                                                    // Аккуратная круглая кнопка закрытия ✕ справа
                                                     Box(
                                                         modifier = Modifier
-                                                            .size(40.dp)
+                                                            .size(38.dp)
                                                             .clip(CircleShape)
-                                                            .background(Color(0xFF080C14).copy(alpha = 0.48f))
+                                                            .background(Color(0xFF080C14).copy(alpha = 0.55f))
                                                             .border(
                                                                 width = 1.dp,
-                                                                color = Color.White.copy(alpha = 0.24f),
+                                                                color = Color.White.copy(alpha = 0.20f),
                                                                 shape = CircleShape
                                                             )
                                                             .clickable { cancelAndCollapseToNav() }
@@ -958,8 +969,8 @@ fun MorphingBottomBar(
                                                         Icon(
                                                             imageVector = Icons.Default.Close,
                                                             contentDescription = "Отменить голосовой ввод",
-                                                            tint = Color.White.copy(alpha = 0.92f),
-                                                            modifier = Modifier.size(18.dp)
+                                                            tint = Color.White.copy(alpha = 0.90f),
+                                                            modifier = Modifier.size(17.dp)
                                                         )
                                                     }
                                                 }
@@ -1240,14 +1251,15 @@ private fun VoiceApiKeyPane(
 fun Neon32BandVoiceVisualizer(
     amplitude: Float,
     modifier: Modifier = Modifier,
-    barCount: Int = 32
+    barCount: Int = 32,
+    spectrumBands: FloatArray = remember(barCount) { FloatArray(barCount) },
+    isRecording: Boolean = true
 ) {
-    VolumetricLiquidAuroraGlow(
-        isRecording = true,
+    SpectralVoiceVisualizer(
+        spectrumBands = spectrumBands,
+        isRecording = isRecording,
         rmsLevel = amplitude,
-        cornerRadius = 18.dp,
-        showGlassBorder = false,
-        fillBackground = false,
+        barCount = barCount,
         modifier = modifier
     )
 }

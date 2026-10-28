@@ -37,9 +37,10 @@ if [ -f /tmp/android_emulator.pid ]; then
 fi
 timeout 5 "$ADB" kill-server >/dev/null 2>&1 || true
 
-# Publish collected artifacts (XML reports, HTML reports, Logcat, and PNG screenshots) to branch ci-artifacts/pr-19
+# Publish collected artifacts (XML reports, HTML reports, Logcat, and PNG screenshots) to branch ci-artifacts/latest
 if [ "${GITHUB_ACTIONS:-false}" = "true" ]; then
-  echo "5. Archiving and publishing UI test artifacts to ci-artifacts/pr-19 branch..."
+  ART_BRANCH="ci-artifacts/latest"
+  echo "5. Archiving and publishing UI test artifacts to $ART_BRANCH branch..."
   ZIP_PATH="$ART_DIR/android-ui-test-artifacts.zip"
   (cd "$ART_DIR" && zip -r "android-ui-test-artifacts.zip" reports logcat.txt screenshots) || true
   mkdir -p app/build/outputs/apk/debug
@@ -55,7 +56,7 @@ if [ "${GITHUB_ACTIONS:-false}" = "true" ]; then
 
   (
     cd "$TMP_ART_REPO"
-    git init -b ci-artifacts/pr-19
+    git init -b "$ART_BRANCH"
     git config user.name "github-actions[bot]"
     git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
     if [ -n "$AUTH_HEADER" ]; then
@@ -63,7 +64,7 @@ if [ "${GITHUB_ACTIONS:-false}" = "true" ]; then
     fi
     git add -A
     git commit -m "chore(ci): upload Android Emulator UI test reports, logcat, and screenshots for run ${GITHUB_RUN_ID:-local}"
-    git push --force "$REMOTE_URL" ci-artifacts/pr-19:refs/heads/ci-artifacts/pr-19 || true
+    git push --force "$REMOTE_URL" "$ART_BRANCH:refs/heads/$ART_BRANCH" || true
   )
 fi
 

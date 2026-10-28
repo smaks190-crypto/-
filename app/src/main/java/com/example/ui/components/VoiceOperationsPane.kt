@@ -256,6 +256,7 @@ fun VoiceOperationsPane(
     val voiceManager = viewModel.voiceInputManager
     val isListening by voiceManager.isListening.collectAsState()
     val rmsDb by voiceManager.rmsDb.collectAsState()
+    val spectrumBands by voiceManager.spectrumBands.collectAsState()
     val recognizedText by voiceManager.recognizedText.collectAsState()
     val partialText by voiceManager.partialText.collectAsState()
     val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
@@ -580,10 +581,11 @@ fun VoiceOperationsPane(
                     cornerRadius = 20.dp,
                     showGlassBorder = true,
                     fillBackground = true,
+                    auroraIntensityScale = 0.50f,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 10.dp)
-                        .height(64.dp)
+                        .height(68.dp)
                         .clickable {
                             if (isListening) {
                                 viewModel.stopVoiceRecordingAndProcess()
@@ -593,7 +595,7 @@ fun VoiceOperationsPane(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
@@ -625,7 +627,7 @@ fun VoiceOperationsPane(
                                 text = liveHint,
                                 color = Color.White,
                                 fontFamily = ManropeFontFamily,
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -637,17 +639,16 @@ fun VoiceOperationsPane(
                                     )
                                 )
                             )
-                            Text(
-                                text = if (!isListening && isAnalyzingVoice) {
-                                    "Gemini Live • финальный разбор"
-                                } else {
-                                    "Gemini Live • слушаю в реальном времени"
-                                },
-                                color = Emerald400.copy(alpha = 0.85f),
-                                fontFamily = ManropeFontFamily,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1
+                            Spacer(modifier = Modifier.height(2.dp))
+                            SpectralVoiceVisualizer(
+                                spectrumBands = spectrumBands,
+                                isRecording = isListening || isAnalyzingVoice,
+                                rmsLevel = rmsDb,
+                                barCount = 32,
+                                compact = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(26.dp)
                             )
                         }
 

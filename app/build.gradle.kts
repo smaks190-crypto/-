@@ -179,9 +179,10 @@ dependencies {
   // implementation("com.alphacephei:vosk-android:0.3.47")
 }
 
-// Автоматическая верификация Unit-тестов Developer Console и компиляции Release Source Set при сборке Debug APK
+// Автоматическая верификация Unit-тестов (DSP FFT, Developer Console и базовых проверок) при сборке Debug APK
 tasks.withType<Test>().configureEach {
   filter {
+    includeTestsMatching("com.example.utils.VoiceSpectrumAnalyzerTest")
     includeTestsMatching("com.example.utils.GlobalConsoleLoggerTest")
     includeTestsMatching("com.example.ExampleUnitTest")
   }
@@ -207,8 +208,6 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
 
 tasks.matching { it.name == "assembleDebug" }.configureEach {
   dependsOn("compileReleaseKotlin", "testDebugUnitTest")
-  if (System.getenv("GITHUB_ACTIONS") == "true") {
-    finalizedBy("connectedDebugAndroidTest")
-  }
 }
+
 
