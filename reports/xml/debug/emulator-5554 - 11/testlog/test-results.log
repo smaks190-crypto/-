@@ -1,0 +1,95 @@
+INSTRUMENTATION_STATUS: class=com.example.ExampleInstrumentedTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=
+com.example.ExampleInstrumentedTest:
+INSTRUMENTATION_STATUS: test=useAppContext
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.example.ExampleInstrumentedTest
+INSTRUMENTATION_STATUS: current=1
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=useAppContext
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.example.ui.components.dialogs.AllTransactionsDialogUiTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=
+com.example.ui.components.dialogs.AllTransactionsDialogUiTest:
+INSTRUMENTATION_STATUS: test=test3_swipeChartToPreviousMonthsSynchronouslyUpdatesListWithoutLockingPeriod
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.example.ui.components.dialogs.AllTransactionsDialogUiTest
+INSTRUMENTATION_STATUS: current=2
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=test3_swipeChartToPreviousMonthsSynchronouslyUpdatesListWithoutLockingPeriod
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.example.ui.components.dialogs.AllTransactionsDialogUiTest
+INSTRUMENTATION_STATUS: current=3
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=test2_topSummaryCardsFilterByTypeAndPeriodSelectorHasNoAllTabOrFalseHighlight
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.example.ui.components.dialogs.AllTransactionsDialogUiTest
+INSTRUMENTATION_STATUS: current=3
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=test2_topSummaryCardsFilterByTypeAndPeriodSelectorHasNoAllTabOrFalseHighlight
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.example.ui.components.dialogs.AllTransactionsDialogUiTest
+INSTRUMENTATION_STATUS: current=4
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=test1_initialOpenShowsCurrentMonthOnlyAndNoDuplicateChipsUnderSearch
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.example.ui.components.dialogs.AllTransactionsDialogUiTest
+INSTRUMENTATION_STATUS: current=4
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=test1_initialOpenShowsCurrentMonthOnlyAndNoDuplicateChipsUnderSearch
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.example.ui.components.dialogs.AllTransactionsDialogUiTest
+INSTRUMENTATION_STATUS: current=5
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=test5_toggleWeekAndYearPeriodsAndReturnToMonthlyView
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.example.ui.components.dialogs.AllTransactionsDialogUiTest
+INSTRUMENTATION_STATUS: current=5
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=test5_toggleWeekAndYearPeriodsAndReturnToMonthlyView
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_STATUS: class=com.example.ui.components.dialogs.AllTransactionsDialogUiTest
+INSTRUMENTATION_STATUS: current=6
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=
+INSTRUMENTATION_STATUS: test=test4_lockDisplayedMonthWithMesAndUnlockOnSecondTapWithoutShowingAllTimeHistory
+INSTRUMENTATION_STATUS_CODE: 1
+INSTRUMENTATION_STATUS: class=com.example.ui.components.dialogs.AllTransactionsDialogUiTest
+INSTRUMENTATION_STATUS: current=6
+INSTRUMENTATION_STATUS: id=AndroidJUnitRunner
+INSTRUMENTATION_STATUS: numtests=6
+INSTRUMENTATION_STATUS: stream=.
+INSTRUMENTATION_STATUS: test=test4_lockDisplayedMonthWithMesAndUnlockOnSecondTapWithoutShowingAllTimeHistory
+INSTRUMENTATION_STATUS_CODE: 0
+INSTRUMENTATION_RESULT: stream=
+
+Time: 16.78
+
+OK (6 tests)
+
+
+INSTRUMENTATION_CODE: -1
+

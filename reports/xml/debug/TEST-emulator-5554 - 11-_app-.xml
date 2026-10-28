@@ -1,0 +1,23 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuites tests="6" failures="0" errors="0" skipped="0" time="18.141" timestamp="2026-10-28T11:19:02" hostname="localhost">
+  <testsuite name="com.example.ExampleInstrumentedTest" tests="1" failures="0" errors="0" skipped="0" time="0.016" timestamp="2026-10-28T11:19:02" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 11" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="useAppContext" classname="com.example.ExampleInstrumentedTest" time="0.016" />
+  </testsuite>
+  <testsuite name="com.example.ui.components.dialogs.AllTransactionsDialogUiTest" tests="5" failures="0" errors="0" skipped="0" time="16.655" timestamp="2026-10-28T11:19:02" hostname="localhost">
+    <properties>
+      <property name="device" value="emulator-5554 - 11" />
+      <property name="flavor" value="" />
+      <property name="project" value=":app" />
+    </properties>
+    <testcase name="test3_swipeChartToPreviousMonthsSynchronouslyUpdatesListWithoutLockingPeriod" classname="com.example.ui.components.dialogs.AllTransactionsDialogUiTest" time="4.225" />
+    <testcase name="test2_topSummaryCardsFilterByTypeAndPeriodSelectorHasNoAllTabOrFalseHighlight" classname="com.example.ui.components.dialogs.AllTransactionsDialogUiTest" time="3.134" />
+    <testcase name="test1_initialOpenShowsCurrentMonthOnlyAndNoDuplicateChipsUnderSearch" classname="com.example.ui.components.dialogs.AllTransactionsDialogUiTest" time="2.428" />
+    <testcase name="test5_toggleWeekAndYearPeriodsAndReturnToMonthlyView" classname="com.example.ui.components.dialogs.AllTransactionsDialogUiTest" time="3.962" />
+    <testcase name="test4_lockDisplayedMonthWithMesAndUnlockOnSecondTapWithoutShowingAllTimeHistory" classname="com.example.ui.components.dialogs.AllTransactionsDialogUiTest" time="2.906" />
+  </testsuite>
+</testsuites>

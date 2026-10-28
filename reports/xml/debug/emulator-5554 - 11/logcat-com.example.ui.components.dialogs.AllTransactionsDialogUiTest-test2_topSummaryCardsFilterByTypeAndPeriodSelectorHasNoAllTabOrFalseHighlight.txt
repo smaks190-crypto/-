@@ -1,0 +1,193 @@
+10-28 11:18:48.584  2357  2378 I TestRunner: started: test2_topSummaryCardsFilterByTypeAndPeriodSelectorHasNoAllTabOrFalseHighlight(com.example.ui.components.dialogs.AllTransactionsDialogUiTest)
+10-28 11:18:48.586  2396  2416 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_has_shared_slots_host_memory_allocator ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_read_color_buffer_dma ANDROID_EMU_hwc_color_transform GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object GL_KHR_texture_compression_astc_ldr ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_0
+10-28 11:18:48.591   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3f8000000 0x3f89e4000]
+10-28 11:18:48.592   298   332 D goldfish-address-space: claimShared: Ask to claim region [0x3f89e4000 0x3f93c8000]
+10-28 11:18:48.602  2357  2378 D IdlingRegistry: Registering idling resources: [androidx.compose.ui.test.EspressoLink@9519ff3]
+10-28 11:18:48.611  2357  2378 W Settings: Setting always_finish_activities has moved from android.provider.Settings.System to android.provider.Settings.Global, returning read-only value.
+10-28 11:18:48.614   506   541 D EventSequenceValidator: Transition from ACTIVITY_CANCELLED to INTENT_STARTED
+10-28 11:18:48.618   417   417 I perfetto: ing_service_impl.cc:758 Configured tracing session 7, #sources:1, duration:5000 ms, #buffers:1, total buffer size:4096 KB, total sessions:3, uid:1071 session name: ""
+10-28 11:18:48.618   399   399 I perfetto: probes_producer.cc:230  Ftrace setup (target_buf=7)
+10-28 11:18:48.637   720   734 I ndroid.systemu: NativeAlloc concurrent copying GC freed 82215(4676KB) AllocSpace objects, 35(892KB) LOS objects, 49% free, 7098KB/13MB, paused 70us total 419.629ms
+10-28 11:18:48.670   506   541 D EventSequenceValidator: Transition from INTENT_STARTED to ACTIVITY_LAUNCHED
+10-28 11:18:48.693   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3fc9e4000 0x3fd3c8000]
+10-28 11:18:48.775   506   541 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.775   506   541 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.775   506   541 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.775   506   541 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.775   506   541 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.775   506   541 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.776   506   541 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.787  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@7c76986 in: PRE_ON_CREATE
+10-28 11:18:48.787  2357  2357 V ActivityScenario: Activity lifecycle changed event received but ignored because the reported transition was not ON_CREATE while the last known transition was PRE_ON_CREATE
+10-28 11:18:48.814  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@7c76986 in: CREATED
+10-28 11:18:48.814  2357  2357 V ActivityScenario: Update currentActivityStage to CREATED, currentActivity=androidx.activity.ComponentActivity@7c76986
+10-28 11:18:48.816  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@7c76986 in: STARTED
+10-28 11:18:48.816  2357  2357 V ActivityScenario: Update currentActivityStage to STARTED, currentActivity=androidx.activity.ComponentActivity@7c76986
+10-28 11:18:48.817  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@7c76986 in: RESUMED
+10-28 11:18:48.817  2357  2357 V ActivityScenario: Update currentActivityStage to RESUMED, currentActivity=androidx.activity.ComponentActivity@7c76986
+10-28 11:18:48.863   345   562 W ServiceManager: Permission failure: android.permission.ACCESS_SURFACE_FLINGER from uid=10131 pid=2396
+10-28 11:18:48.863   345   562 D PermissionCache: checking android.permission.ACCESS_SURFACE_FLINGER for uid=10131 => denied (107 us)
+10-28 11:18:48.873   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3fd3c8000 0x3fddac000]
+10-28 11:18:48.952   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3f8000000 0x3f89e4000]
+10-28 11:18:48.984   298   332 D goldfish-address-space: claimShared: Ask to claim region [0x3f89e4000 0x3f93c8000]
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: Error inserting format=12289 owner_package_name=null parent=-1 volume_name=internal date_modified=1683213674 _display_name=media _data=/product/media is_download=0 relative_path=null
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: android.database.sqlite.SQLiteDatabaseLockedException: database is locked (code 5 SQLITE_BUSY)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.database.sqlite.SQLiteConnection.nativeExecuteForLastInsertedRowId(Native Method)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.database.sqlite.SQLiteConnection.executeForLastInsertedRowId(SQLiteConnection.java:938)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.database.sqlite.SQLiteSession.executeForLastInsertedRowId(SQLiteSession.java:790)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.database.sqlite.SQLiteStatement.executeInsert(SQLiteStatement.java:88)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.database.sqlite.SQLiteDatabase.insertWithOnConflict(SQLiteDatabase.java:1701)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.database.sqlite.SQLiteDatabase.insert(SQLiteDatabase.java:1570)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaProvider.insertDirectory(MediaProvider.java:2773)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaProvider.getParent(MediaProvider.java:2794)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaProvider.lambda$insertAllowingUpsert$14(MediaProvider.java:3060)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaProvider.lambda$insertAllowingUpsert$14$MediaProvider(Unknown Source:0)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.-$$Lambda$MediaProvider$FjHWs2-fjgG761OzVFzdTX4EWZg.apply(Unknown Source:13)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.DatabaseHelper.runWithTransaction(DatabaseHelper.java:555)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaProvider.insertAllowingUpsert(MediaProvider.java:3056)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaProvider.insertFile(MediaProvider.java:3038)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaProvider.insertInternal(MediaProvider.java:3470)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaProvider.insert(MediaProvider.java:3198)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.content.ContentProviderOperation.applyInternal(ContentProviderOperation.java:375)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.content.ContentProviderOperation.apply(ContentProviderOperation.java:347)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.content.ContentProvider.applyBatch(ContentProvider.java:2422)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaProvider.applyBatch(MediaProvider.java:3522)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.content.ContentProvider.applyBatch(ContentProvider.java:2413)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.content.ContentResolver.applyBatch(ContentResolver.java:2186)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.scan.ModernMediaScanner$Scan.applyPending(ModernMediaScanner.java:699)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.scan.ModernMediaScanner$Scan.maybeApplyPending(ModernMediaScanner.java:689)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.scan.ModernMediaScanner$Scan.visitFile(ModernMediaScanner.java:649)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.scan.ModernMediaScanner$Scan.visitFile(ModernMediaScanner.java:272)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at java.nio.file.Files.walkFileTree(Files.java:2670)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at java.nio.file.Files.walkFileTree(Files.java:2742)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.scan.ModernMediaScanner$Scan.walkFileTree(ModernMediaScanner.java:366)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.scan.ModernMediaScanner$Scan.run(ModernMediaScanner.java:329)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.scan.ModernMediaScanner.scanDirectory(ModernMediaScanner.java:226)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaProvider.scanDirectory(MediaProvider.java:1111)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaService.onScanVolume(MediaService.java:148)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaService.onScanVolume(MediaService.java:117)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaService.onScanVolume(MediaService.java:108)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at com.android.providers.media.MediaService.onHandleWork(MediaService.java:71)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at androidx.core.app.JobIntentService$CommandProcessor.doInBackground(JobIntentService.java:391)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at androidx.core.app.JobIntentService$CommandProcessor.doInBackground(JobIntentService.java:382)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at android.os.AsyncTask$3.call(AsyncTask.java:394)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at java.util.concurrent.FutureTask.run(FutureTask.java:266)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1167)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:641)
+10-28 11:18:48.984  1508  1933 E SQLiteDatabase: 	at java.lang.Thread.run(Thread.java:923)
+10-28 11:18:48.997   506   546 D ArtManagerInternalImpl: /data/misc/iorapd/ru.personalbudget.app.aadece/809/androidx.activity.ComponentActivity/compiled_traces/compiled_trace.pb doesn't exist
+10-28 11:18:48.998   506   546 I ActivityTaskManager: Displayed ru.personalbudget.app.aadece/androidx.activity.ComponentActivity: +382ms
+10-28 11:18:48.998   506   541 D EventSequenceValidator: Transition from ACTIVITY_LAUNCHED to ACTIVITY_FINISHED
+10-28 11:18:49.025   506  2419 D HostConnection: HostConnection::get() New Host Connection established 0x707067f5cf50, tid 2419
+10-28 11:18:49.046   506  2419 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_has_shared_slots_host_memory_allocator ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_read_color_buffer_dma ANDROID_EMU_hwc_color_transform GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object GL_KHR_texture_compression_astc_ldr ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_0
+10-28 11:18:49.048   506  2419 D EGL_emulation: eglCreateContext: 0x707057f73990: maj 3 min 0 rcv 3
+10-28 11:18:49.055   506  2419 D EGL_emulation: eglMakeCurrent: 0x707057f73990: ver 3 0 (tinfo 0x706ff80a37c0) (first time)
+10-28 11:18:49.210  2357  2368 I dget.app.aadec: JIT allocated 57KB for compiled code of void com.example.ui.components.dialogs.TransactionDialogsKt.AllTransactionsDialog(java.util.List, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, java.lang.String, java.lang.String, kotlin.jvm.functions.Function0, androidx.compose.runtime.Composer, int, int)
+10-28 11:18:49.210  2357  2368 I dget.app.aadec: Compiler allocated 9041KB to compile void com.example.ui.components.dialogs.TransactionDialogsKt.AllTransactionsDialog(java.util.List, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, java.lang.String, java.lang.String, kotlin.jvm.functions.Function0, androidx.compose.runtime.Composer, int, int)
+10-28 11:18:49.291  2357  2368 I dget.app.aadec: Compiler allocated 8003KB to compile void com.example.ui.components.dialogs.TransactionComparisonCardKt.DoubleSummaryComparisonCards(double, double, java.lang.String, java.lang.String, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, boolean, androidx.compose.ui.Modifier, androidx.compose.runtime.Composer, int, int)
+10-28 11:18:49.372   399   399 I perfetto: probes_producer.cc:329  Producer stop (id=5)
+10-28 11:18:49.373   417   417 I perfetto: ng_service_impl.cc:1948 Tracing session 5 ended, total sessions:2
+10-28 11:18:49.463   506   516 I system_server: NativeAlloc concurrent copying GC freed 98530(5453KB) AllocSpace objects, 37(1684KB) LOS objects, 49% free, 9857KB/19MB, paused 25us total 221.263ms
+10-28 11:18:49.598  2357  2431 D ProfileInstaller: Installing profile for ru.personalbudget.app.aadece
+10-28 11:18:49.614  2357  2368 I dget.app.aadec: Compiler allocated 6996KB to compile void com.example.ui.components.dialogs.TransactionComparisonCardKt.SingleHeroComparisonCard(java.lang.String, double, double, java.lang.String, int, int, java.util.List, java.lang.String, java.lang.String, java.lang.String, java.lang.String, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function3, androidx.compose.runtime.Composer, int, int, int)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor:  Hit PackageManager exception
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: android.content.pm.PackageManager$NameNotFoundException: com.google.android.wifi
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at android.app.ApplicationPackageManager.getPackageInfoAsUser(ApplicationPackageManager.java:206)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at android.app.ApplicationPackageManager.getPackageInfo(ApplicationPackageManager.java:178)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at com.android.server.wifi.WifiHealthMonitor.extractCurrentSoftwareBuildInfo(WifiHealthMonitor.java:545)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at com.android.server.wifi.WifiHealthMonitor.postBootSwBuildCheck(WifiHealthMonitor.java:477)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at com.android.server.wifi.WifiHealthMonitor.postBootDetectionHandler(WifiHealthMonitor.java:468)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at com.android.server.wifi.WifiHealthMonitor.access$200(WifiHealthMonitor.java:70)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at com.android.server.wifi.WifiHealthMonitor$2.onAlarm(WifiHealthMonitor.java:163)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at android.app.AlarmManager$ListenerWrapper.run(AlarmManager.java:239)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at android.os.Handler.handleCallback(Handler.java:938)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at android.os.Handler.dispatchMessage(Handler.java:99)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at android.os.Looper.loop(Looper.java:223)
+10-28 11:18:49.645   506   654 E WifiHealthMonitor: 	at android.os.HandlerThread.run(HandlerThread.java:67)
+10-28 11:18:49.708   506  1004 D WifiNl80211Manager: Scan result ready event
+10-28 11:18:49.708   506  1004 D WifiNative: Scan result ready event
+10-28 11:18:49.766  2357  2368 I dget.app.aadec: JIT allocated 63KB for compiled code of void com.example.ui.components.dialogs.TransactionDialogsKt.AllTransactionsDialog(java.util.List, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, java.lang.String, java.lang.String, kotlin.jvm.functions.Function0, androidx.compose.runtime.Composer, int, int)
+10-28 11:18:49.766  2357  2368 I dget.app.aadec: Compiler allocated 9126KB to compile void com.example.ui.components.dialogs.TransactionDialogsKt.AllTransactionsDialog(java.util.List, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, java.lang.String, java.lang.String, kotlin.jvm.functions.Function0, androidx.compose.runtime.Composer, int, int)
+10-28 11:18:51.006   506   541 D EventSequenceValidator: Transition from ACTIVITY_FINISHED to INTENT_STARTED
+10-28 11:18:51.012   506   541 D EventSequenceValidator: Transition from INTENT_STARTED to ACTIVITY_LAUNCHED
+10-28 11:18:51.025  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@7c76986 in: PAUSED
+10-28 11:18:51.025  2357  2357 V ActivityScenario: Update currentActivityStage to PAUSED, currentActivity=androidx.activity.ComponentActivity@7c76986
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.030   506  2427 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.037   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3fa3df000 0x3fadc3000]
+10-28 11:18:51.107   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3fb2d3000 0x3fbcb7000]
+10-28 11:18:51.109   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3fc9e4000 0x3fd3c8000]
+10-28 11:18:51.110   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3fddac000 0x3fe790000]
+10-28 11:18:51.129   506   541 D EventSequenceValidator: Transition from ACTIVITY_LAUNCHED to ACTIVITY_CANCELLED
+10-28 11:18:51.130   506  1692 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.130   506  1692 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.130   506  1692 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.130   506  1692 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.130   506  1692 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.130   506  1692 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.130   506  1692 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.130   506  1692 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.130   506  1692 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.130   506  1692 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.131   506  1692 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.131   506  1692 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.131   506  1692 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.131   506  1692 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.131   506  1692 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.131   506  1692 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.131   506  1692 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.131   506  1692 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.131   506  1692 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.131   506  1692 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:51.210   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3fa3df000 0x3fadc3000]
+10-28 11:18:51.232   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3fe790000 0x3ff174000]
+10-28 11:18:51.237   298   332 D goldfish-address-space: claimShared: Ask to claim region [0x3f4000000 0x3f49e4000]
+10-28 11:18:51.301   298   332 D goldfish-address-space: claimShared: Ask to claim region [0x3f49e4000 0x3f53c8000]
+10-28 11:18:51.355   506  2419 D HostConnection: HostConnection::get() New Host Connection established 0x707067f5cf50, tid 2419
+10-28 11:18:51.391   506  2419 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_has_shared_slots_host_memory_allocator ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_read_color_buffer_dma ANDROID_EMU_hwc_color_transform GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object GL_KHR_texture_compression_astc_ldr ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_0
+10-28 11:18:51.445   720   734 I ndroid.systemu: NativeAlloc concurrent copying GC freed 9644(522KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 6753KB/13MB, paused 24us total 102.952ms
+10-28 11:18:51.459  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@7c76986 in: STOPPED
+10-28 11:18:51.459  2357  2357 V ActivityScenario: Update currentActivityStage to STOPPED, currentActivity=androidx.activity.ComponentActivity@7c76986
+10-28 11:18:51.481   345   345 E Layer   : [Surface(name=Task=11)/@0x273b7bc - animation-leash#0] No local sync point found
+10-28 11:18:51.481   345   345 E Layer   : [Surface(name=Task=1)/@0xa3468af - animation-leash#0] No local sync point found
+10-28 11:18:51.487  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@7c76986 in: DESTROYED
+10-28 11:18:51.487  2357  2357 V ActivityScenario: Update currentActivityStage to DESTROYED, currentActivity=null
+10-28 11:18:51.487   506  2419 D EGL_emulation: eglCreateContext: 0x707058005430: maj 3 min 0 rcv 3
+10-28 11:18:51.535   345   345 E Layer   : [Surface(name=Task=11)/@0x273b7bc - animation-leash#0] No local sync point found
+10-28 11:18:51.535   345   345 E Layer   : [Surface(name=Task=11)/@0x273b7bc - animation-leash#0] No local sync point found
+10-28 11:18:51.535   345   345 E Layer   : [Surface(name=Task=1)/@0xa3468af - animation-leash#0] No local sync point found
+10-28 11:18:51.535   345   345 E Layer   : [Surface(name=Task=1)/@0xa3468af - animation-leash#0] No local sync point found
+10-28 11:18:51.652   506  2419 D EGL_emulation: eglMakeCurrent: 0x707058005430: ver 3 0 (tinfo 0x706ff80a37c0) (first time)
+10-28 11:18:51.722  2357  2378 D IdlingRegistry: Unregistering idling resources: [androidx.compose.ui.test.EspressoLink@9519ff3]
+10-28 11:18:51.723  2357  2378 I TestRunner: finished: test2_topSummaryCardsFilterByTypeAndPeriodSelectorHasNoAllTabOrFalseHighlight(com.example.ui.components.dialogs.AllTransactionsDialogUiTest)

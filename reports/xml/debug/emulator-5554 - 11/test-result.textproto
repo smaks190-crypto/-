@@ -1,0 +1,357 @@
+# proto-message: google.testing.platform.proto.api.core.TestSuiteResult
+# 2026-10-28T11:19:02.884929148Z:
+test_suite_meta_data {
+  scheduled_test_case_count: 6
+  device {
+    id: "emulator-5554"
+    friendly_name: "primary"
+  }
+}
+test_status: PASSED
+test_result {
+  test_case {
+    test_class: "ExampleInstrumentedTest"
+    test_package: "com.example"
+    test_method: "useAppContext"
+    start_time {
+      seconds: 1793186324
+      nanos: 717000000
+    }
+    end_time {
+      seconds: 1793186324
+      nanos: 747000000
+    }
+    device {
+      id: "emulator-5554"
+      friendly_name: "primary"
+    }
+  }
+  test_status: PASSED
+  output_artifact {
+    label {
+      label: "logcat"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/logcat-com.example.ExampleInstrumentedTest-useAppContext.txt"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/device-info.pb"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.meminfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/meminfo"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.cpuinfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/cpuinfo"
+    }
+  }
+}
+test_result {
+  test_case {
+    test_class: "AllTransactionsDialogUiTest"
+    test_package: "com.example.ui.components.dialogs"
+    test_method: "test3_swipeChartToPreviousMonthsSynchronouslyUpdatesListWithoutLockingPeriod"
+    start_time {
+      seconds: 1793186324
+      nanos: 763000000
+    }
+    end_time {
+      seconds: 1793186328
+      nanos: 985000000
+    }
+    device {
+      id: "emulator-5554"
+      friendly_name: "primary"
+    }
+  }
+  test_status: PASSED
+  output_artifact {
+    label {
+      label: "logcat"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/logcat-com.example.ui.components.dialogs.AllTransactionsDialogUiTest-test3_swipeChartToPreviousMonthsSynchronouslyUpdatesListWithoutLockingPeriod.txt"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/device-info.pb"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.meminfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/meminfo"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.cpuinfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/cpuinfo"
+    }
+  }
+}
+test_result {
+  test_case {
+    test_class: "AllTransactionsDialogUiTest"
+    test_package: "com.example.ui.components.dialogs"
+    test_method: "test2_topSummaryCardsFilterByTypeAndPeriodSelectorHasNoAllTabOrFalseHighlight"
+    start_time {
+      seconds: 1793186329
+      nanos: 14000000
+    }
+    end_time {
+      seconds: 1793186332
+      nanos: 146000000
+    }
+    device {
+      id: "emulator-5554"
+      friendly_name: "primary"
+    }
+  }
+  test_status: PASSED
+  output_artifact {
+    label {
+      label: "logcat"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/logcat-com.example.ui.components.dialogs.AllTransactionsDialogUiTest-test2_topSummaryCardsFilterByTypeAndPeriodSelectorHasNoAllTabOrFalseHighlight.txt"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/device-info.pb"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.meminfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/meminfo"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.cpuinfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/cpuinfo"
+    }
+  }
+}
+test_result {
+  test_case {
+    test_class: "AllTransactionsDialogUiTest"
+    test_package: "com.example.ui.components.dialogs"
+    test_method: "test1_initialOpenShowsCurrentMonthOnlyAndNoDuplicateChipsUnderSearch"
+    start_time {
+      seconds: 1793186332
+      nanos: 148000000
+    }
+    end_time {
+      seconds: 1793186334
+      nanos: 578000000
+    }
+    device {
+      id: "emulator-5554"
+      friendly_name: "primary"
+    }
+  }
+  test_status: PASSED
+  output_artifact {
+    label {
+      label: "logcat"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/logcat-com.example.ui.components.dialogs.AllTransactionsDialogUiTest-test1_initialOpenShowsCurrentMonthOnlyAndNoDuplicateChipsUnderSearch.txt"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/device-info.pb"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.meminfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/meminfo"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.cpuinfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/cpuinfo"
+    }
+  }
+}
+test_result {
+  test_case {
+    test_class: "AllTransactionsDialogUiTest"
+    test_package: "com.example.ui.components.dialogs"
+    test_method: "test5_toggleWeekAndYearPeriodsAndReturnToMonthlyView"
+    start_time {
+      seconds: 1793186334
+      nanos: 681000000
+    }
+    end_time {
+      seconds: 1793186338
+      nanos: 642000000
+    }
+    device {
+      id: "emulator-5554"
+      friendly_name: "primary"
+    }
+  }
+  test_status: PASSED
+  output_artifact {
+    label {
+      label: "logcat"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/logcat-com.example.ui.components.dialogs.AllTransactionsDialogUiTest-test5_toggleWeekAndYearPeriodsAndReturnToMonthlyView.txt"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/device-info.pb"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.meminfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/meminfo"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.cpuinfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/cpuinfo"
+    }
+  }
+}
+test_result {
+  test_case {
+    test_class: "AllTransactionsDialogUiTest"
+    test_package: "com.example.ui.components.dialogs"
+    test_method: "test4_lockDisplayedMonthWithMesAndUnlockOnSecondTapWithoutShowingAllTimeHistory"
+    start_time {
+      seconds: 1793186338
+      nanos: 643000000
+    }
+    end_time {
+      seconds: 1793186341
+      nanos: 544000000
+    }
+    device {
+      id: "emulator-5554"
+      friendly_name: "primary"
+    }
+  }
+  test_status: PASSED
+  output_artifact {
+    label {
+      label: "logcat"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/logcat-com.example.ui.components.dialogs.AllTransactionsDialogUiTest-test4_lockDisplayedMonthWithMesAndUnlockOnSecondTapWithoutShowingAllTimeHistory.txt"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/device-info.pb"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.meminfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/meminfo"
+    }
+  }
+  output_artifact {
+    label {
+      label: "device-info.cpuinfo"
+      namespace: "android"
+    }
+    source_path {
+      path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/cpuinfo"
+    }
+  }
+}
+output_artifact {
+  label {
+    label: "test-results.log"
+    namespace: "com.google.testing.platform.runtime.android.driver.AndroidInstrumentationDriver"
+  }
+  source_path {
+    path: "/home/runner/work/-/-/app/build/outputs/androidTest-results/connected/debug/emulator-5554 - 11/testlog/test-results.log"
+  }
+  type: TEST_DATA
+  mime_type: "text/plain"
+}

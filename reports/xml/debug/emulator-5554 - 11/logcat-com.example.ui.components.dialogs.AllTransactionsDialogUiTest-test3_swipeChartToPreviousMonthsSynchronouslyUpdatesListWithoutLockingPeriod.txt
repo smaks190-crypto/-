@@ -1,0 +1,144 @@
+10-28 11:18:44.287  2357  2378 I TestRunner: started: test3_swipeChartToPreviousMonthsSynchronouslyUpdatesListWithoutLockingPeriod(com.example.ui.components.dialogs.AllTransactionsDialogUiTest)
+10-28 11:18:44.327  2357  2378 W dget.app.aadec: Accessing hidden method Landroid/os/Trace;->setAppTracingAllowed(Z)V (greylist, reflection, allowed)
+10-28 11:18:44.328  2357  2378 I Tracing : Tracer added: class androidx.test.platform.tracing.AndroidXTracer
+10-28 11:18:44.335  2357  2357 W dget.app.aadec: Accessing hidden method Landroid/os/MessageQueue;->next()Landroid/os/Message; (greylist, reflection, allowed)
+10-28 11:18:44.335  2357  2357 W dget.app.aadec: Accessing hidden field Landroid/os/MessageQueue;->mMessages:Landroid/os/Message; (greylist, reflection, allowed)
+10-28 11:18:44.335  2357  2357 W dget.app.aadec: Accessing hidden method Landroid/os/Message;->recycleUnchecked()V (greylist, reflection, allowed)
+10-28 11:18:44.336  2357  2378 D IdlingRegistry: Registering idling resources: [androidx.compose.ui.test.EspressoLink@60e2495]
+10-28 11:18:44.350  2357  2378 W Settings: Setting always_finish_activities has moved from android.provider.Settings.System to android.provider.Settings.Global, returning read-only value.
+10-28 11:18:44.356   506   541 D EventSequenceValidator: Transition from ACTIVITY_FINISHED to INTENT_STARTED
+10-28 11:18:44.369   506   535 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.369   506   535 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.369   506   535 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.369   506   535 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.370   506   535 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:44.371   417   417 I perfetto: ing_service_impl.cc:758 Configured tracing session 5, #sources:1, duration:5000 ms, #buffers:1, total buffer size:4096 KB, total sessions:1, uid:1071 session name: ""
+10-28 11:18:44.373   399   399 I perfetto: probes_producer.cc:230  Ftrace setup (target_buf=5)
+10-28 11:18:44.376   506   541 D EventSequenceValidator: Transition from INTENT_STARTED to ACTIVITY_LAUNCHED
+10-28 11:18:44.389   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3f89e4000 0x3f93c8000]
+10-28 11:18:44.482  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@e325b6f in: PRE_ON_CREATE
+10-28 11:18:44.482  2357  2357 V ActivityScenario: Activity lifecycle changed event received but ignored because the reported transition was not ON_CREATE while the last known transition was PRE_ON_CREATE
+10-28 11:18:44.500  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@e325b6f in: CREATED
+10-28 11:18:44.500  2357  2357 V ActivityScenario: Update currentActivityStage to CREATED, currentActivity=androidx.activity.ComponentActivity@e325b6f
+10-28 11:18:44.503  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@e325b6f in: STARTED
+10-28 11:18:44.503  2357  2357 V ActivityScenario: Update currentActivityStage to STARTED, currentActivity=androidx.activity.ComponentActivity@e325b6f
+10-28 11:18:44.507   399   399 I perfetto: ftrace_procfs.cc:176    enabled ftrace
+10-28 11:18:44.508  2357  2386 D libEGL  : loaded /vendor/lib64/egl/libEGL_emulation.so
+10-28 11:18:44.509  2357  2386 D libEGL  : loaded /vendor/lib64/egl/libGLESv1_CM_emulation.so
+10-28 11:18:44.509  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@e325b6f in: RESUMED
+10-28 11:18:44.509  2357  2357 V ActivityScenario: Update currentActivityStage to RESUMED, currentActivity=androidx.activity.ComponentActivity@e325b6f
+10-28 11:18:44.511  2357  2386 D libEGL  : loaded /vendor/lib64/egl/libGLESv2_emulation.so
+10-28 11:18:44.568  1338  1338 I LatinIME: Timeout waiting for dictionary load
+10-28 11:18:44.616  2357  2385 D HostConnection: HostConnection::get() New Host Connection established 0x707067f54c10, tid 2385
+10-28 11:18:44.631  2357  2385 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_has_shared_slots_host_memory_allocator ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_read_color_buffer_dma ANDROID_EMU_hwc_color_transform GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object GL_KHR_texture_compression_astc_ldr ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_0
+10-28 11:18:44.653   160   160 I hwservicemanager: getTransport: Cannot find entry android.hardware.configstore@1.0::ISurfaceFlingerConfigs/default in either framework or device manifest.
+10-28 11:18:44.655  2357  2385 D EGL_emulation: eglCreateContext: 0x707057f70810: maj 3 min 0 rcv 3
+10-28 11:18:44.659  2357  2385 D EGL_emulation: eglMakeCurrent: 0x707057f70810: ver 3 0 (tinfo 0x706ff7f81e10) (first time)
+10-28 11:18:44.723   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3f8000000 0x3f89e4000]
+10-28 11:18:44.769   160   160 I hwservicemanager: getTransport: Cannot find entry android.hardware.graphics.mapper@4.0::IMapper/default in either framework or device manifest.
+10-28 11:18:44.769  2357  2385 I Gralloc4: mapper 4.x is not supported
+10-28 11:18:44.770  2357  2385 D HostConnection: createUnique: call
+10-28 11:18:44.770  2357  2385 D HostConnection: HostConnection::get() New Host Connection established 0x707067f56ad0, tid 2385
+10-28 11:18:44.770  2357  2385 D goldfish-address-space: allocate: Ask for block of size 0x100
+10-28 11:18:44.790  2357  2385 D goldfish-address-space: allocate: ioctl allocate returned offset 0x3f7ffe000 size 0x2000
+10-28 11:18:44.810  2357  2385 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_has_shared_slots_host_memory_allocator ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_read_color_buffer_dma ANDROID_EMU_hwc_color_transform GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object GL_KHR_texture_compression_astc_ldr ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_0
+10-28 11:18:44.811   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3f940b000 0x3f9def000]
+10-28 11:18:44.812   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3fa3df000 0x3fadc3000]
+10-28 11:18:44.968   345   562 W ServiceManager: Permission failure: android.permission.ACCESS_SURFACE_FLINGER from uid=10130 pid=2357
+10-28 11:18:44.968   345   562 D PermissionCache: checking android.permission.ACCESS_SURFACE_FLINGER for uid=10130 => denied (224 us)
+10-28 11:18:44.970   506   546 D ArtManagerInternalImpl: /data/misc/iorapd/ru.personalbudget.app.aadece/809/androidx.activity.ComponentActivity/compiled_traces/compiled_trace.pb doesn't exist
+10-28 11:18:44.973   506   541 D EventSequenceValidator: Transition from ACTIVITY_LAUNCHED to ACTIVITY_FINISHED
+10-28 11:18:44.993   506   546 I ActivityTaskManager: Displayed ru.personalbudget.app.aadece/androidx.activity.ComponentActivity: +613ms
+10-28 11:18:45.100   427   700 E IPCThreadState: binder thread pool (1 threads) starved for 127 ms
+10-28 11:18:46.504  2357  2385 I OpenGLRenderer: Davey! duration=1429ms; Flags=0, IntendedVsync=44572964562, Vsync=45022964544, OldestInputEvent=9223372036854775807, NewestInputEvent=0, HandleInputStart=45038861636, AnimationStart=45038863149, PerformTraversalsStart=45038864041, DrawStart=45177906795, SyncQueued=45201406077, SyncStart=45201644382, IssueDrawCommandsStart=45201731705, SwapBuffers=45991590914, FrameCompleted=46003035971, DequeueBufferDuration=235509, QueueBufferDuration=805403, GpuCompleted=32772522036388713,
+10-28 11:18:46.669  2357  2368 I dget.app.aadec: JIT allocated 57KB for compiled code of void com.example.ui.components.dialogs.TransactionDialogsKt.AllTransactionsDialog(java.util.List, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, java.lang.String, java.lang.String, kotlin.jvm.functions.Function0, androidx.compose.runtime.Composer, int, int)
+10-28 11:18:46.670  2357  2368 I dget.app.aadec: Compiler allocated 9041KB to compile void com.example.ui.components.dialogs.TransactionDialogsKt.AllTransactionsDialog(java.util.List, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, java.lang.String, java.lang.String, kotlin.jvm.functions.Function0, androidx.compose.runtime.Composer, int, int)
+10-28 11:18:46.691  2357  2368 I dget.app.aadec: Compiler allocated 7205KB to compile void com.example.ui.components.dialogs.TransactionComparisonCardKt.SingleHeroComparisonCard(java.lang.String, double, double, java.lang.String, int, int, java.util.List, java.lang.String, java.lang.String, java.lang.String, java.lang.String, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function3, androidx.compose.runtime.Composer, int, int, int)
+10-28 11:18:46.719  2357  2368 I dget.app.aadec: Compiler allocated 10040KB to compile void com.example.ui.components.dialogs.TransactionSortAndSearchBarKt.TransactionSortAndSearchBar(java.lang.String, kotlin.jvm.functions.Function1, androidx.compose.ui.focus.FocusRequester, java.lang.String, boolean, java.util.List, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function1, java.lang.String, java.lang.String, java.lang.String, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, java.lang.String, kotlin.jvm.functions.Function1, androidx.compose.runtime.Composer, int, int)
+10-28 11:18:46.746  2357  2368 I dget.app.aadec: JIT allocated 63KB for compiled code of void com.example.ui.components.dialogs.TransactionDialogsKt.AllTransactionsDialog(java.util.List, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, java.lang.String, java.lang.String, kotlin.jvm.functions.Function0, androidx.compose.runtime.Composer, int, int)
+10-28 11:18:46.746  2357  2368 I dget.app.aadec: Compiler allocated 9126KB to compile void com.example.ui.components.dialogs.TransactionDialogsKt.AllTransactionsDialog(java.util.List, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, kotlin.jvm.functions.Function1, java.lang.String, java.lang.String, kotlin.jvm.functions.Function0, androidx.compose.runtime.Composer, int, int)
+10-28 11:18:46.874  2357  2378 W dget.app.aadec: Accessing hidden method Landroid/graphics/HardwareRenderer;->isDrawingEnabled()Z (greylist, reflection, allowed)
+10-28 11:18:47.560  2357  2368 I dget.app.aadec: JIT allocated 50KB for compiled code of kotlin.Unit com.example.ui.components.SwipeToRevealBoxKt.SwipeToRevealBox$lambda$51$lambda$50(androidx.compose.ui.unit.Density, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, androidx.compose.animation.core.Animatable, androidx.compose.ui.hapticfeedback.HapticFeedback, boolean, androidx.compose.ui.graphics.Shape, com.example.ui.components.SwipeDirection, androidx.compose.runtime.MutableState, kotlinx.coroutines.CoroutineScope, androidx.compose.runtime.MutableState, kotlin.jvm.functions.Function2, androidx.compose.foundation.layout.BoxWithConstraintsScope, androidx.compose.runtime.Composer, int)
+10-28 11:18:47.560  2357  2368 I dget.app.aadec: Compiler allocated 7590KB to compile kotlin.Unit com.example.ui.components.SwipeToRevealBoxKt.SwipeToRevealBox$lambda$51$lambda$50(androidx.compose.ui.unit.Density, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, kotlin.jvm.functions.Function0, androidx.compose.animation.core.Animatable, androidx.compose.ui.hapticfeedback.HapticFeedback, boolean, androidx.compose.ui.graphics.Shape, com.example.ui.components.SwipeDirection, androidx.compose.runtime.MutableState, kotlinx.coroutines.CoroutineScope, androidx.compose.runtime.MutableState, kotlin.jvm.functions.Function2, androidx.compose.foundation.layout.BoxWithConstraintsScope, androidx.compose.runtime.Composer, int)
+10-28 11:18:47.885   506   541 D EventSequenceValidator: Transition from ACTIVITY_FINISHED to INTENT_STARTED
+10-28 11:18:47.909   417   417 I perfetto: ing_service_impl.cc:758 Configured tracing session 6, #sources:1, duration:5000 ms, #buffers:1, total buffer size:4096 KB, total sessions:2, uid:1071 session name: ""
+10-28 11:18:47.909   399   399 I perfetto: probes_producer.cc:230  Ftrace setup (target_buf=6)
+10-28 11:18:47.913   506   541 D EventSequenceValidator: Transition from INTENT_STARTED to ACTIVITY_LAUNCHED
+10-28 11:18:47.913   280   280 D Zygote  : Forked child process 2396
+10-28 11:18:47.922  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@e325b6f in: PAUSED
+10-28 11:18:47.922  2357  2357 V ActivityScenario: Update currentActivityStage to PAUSED, currentActivity=androidx.activity.ComponentActivity@e325b6f
+10-28 11:18:47.939  2396  2396 I app.aadece.tes: Late-enabling -Xcheck:jni
+10-28 11:18:47.962   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3f89e4000 0x3f93c8000]
+10-28 11:18:47.972   280   280 I Zygote  : Process 1294 exited due to signal 9 (Killed)
+10-28 11:18:47.985  2396  2396 I app.aadece.tes: Unquickening 12 vdex files!
+10-28 11:18:47.986  2396  2396 W app.aadece.tes: Unexpected CPU variant for X86 using defaults: x86_64
+10-28 11:18:48.001   506   549 I libprocessgroup: Successfully killed process cgroup uid 10064 pid 1294 in 49ms
+10-28 11:18:48.016   384   398 I adbd    : jdwp connection from 2396
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_8 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_6 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_3 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_10 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_7 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_4 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_11 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_5 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_2 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.022   506   611 W InputReader: Device virtio_input_multi_touch_9 is associated with display ADISPLAY_ID_NONE.
+10-28 11:18:48.056   345   562 D PermissionCache: checking android.permission.READ_FRAME_BUFFER for uid=1000 => granted (75 us)
+10-28 11:18:48.056   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3fb2d3000 0x3fbcb7000]
+10-28 11:18:48.082  2396  2396 D NetworkSecurityConfig: No Network Security Config specified, using platform default
+10-28 11:18:48.083  2396  2396 D NetworkSecurityConfig: No Network Security Config specified, using platform default
+10-28 11:18:48.204  2396  2417 D libEGL  : loaded /vendor/lib64/egl/libEGL_emulation.so
+10-28 11:18:48.209  2396  2417 D libEGL  : loaded /vendor/lib64/egl/libGLESv1_CM_emulation.so
+10-28 11:18:48.209   506   541 W system_server: Long monitor contention with owner android.anim (542) at void com.android.server.wm.TaskChangeNotificationController.forAllLocalListeners(com.android.server.wm.TaskChangeNotificationController$TaskStackConsumer, android.os.Message)(TaskChangeNotificationController.java:351) waiters=0 in void com.android.server.wm.WindowManagerService$H.handleMessage(android.os.Message) for 155ms
+10-28 11:18:48.212  2396  2417 D libEGL  : loaded /vendor/lib64/egl/libGLESv2_emulation.so
+10-28 11:18:48.226   506  2419 D libEGL  : loaded /vendor/lib64/egl/libEGL_emulation.so
+10-28 11:18:48.226   506  2419 D libEGL  : loaded /vendor/lib64/egl/libGLESv1_CM_emulation.so
+10-28 11:18:48.228   506  2419 D libEGL  : loaded /vendor/lib64/egl/libGLESv2_emulation.so
+10-28 11:18:48.244   506  2419 D HostConnection: HostConnection::get() New Host Connection established 0x707067f5bf90, tid 2419
+10-28 11:18:48.254   506  2419 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_has_shared_slots_host_memory_allocator ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_read_color_buffer_dma ANDROID_EMU_hwc_color_transform GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object GL_KHR_texture_compression_astc_ldr ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_0
+10-28 11:18:48.255   160   160 I hwservicemanager: getTransport: Cannot find entry android.hardware.configstore@1.0::ISurfaceFlingerConfigs/default in either framework or device manifest.
+10-28 11:18:48.259   506  2419 D EGL_emulation: eglCreateContext: 0x707057fc3e80: maj 3 min 0 rcv 3
+10-28 11:18:48.259  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@e325b6f in: STOPPED
+10-28 11:18:48.259  2357  2357 V ActivityScenario: Update currentActivityStage to STOPPED, currentActivity=androidx.activity.ComponentActivity@e325b6f
+10-28 11:18:48.261   506  2419 D EGL_emulation: eglMakeCurrent: 0x707057fc3e80: ver 3 0 (tinfo 0x706ff80a37c0) (first time)
+10-28 11:18:48.264   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3f940b000 0x3f9def000]
+10-28 11:18:48.278   506   541 D EventSequenceValidator: Transition from ACTIVITY_LAUNCHED to ACTIVITY_CANCELLED
+10-28 11:18:48.365  2396  2416 D HostConnection: HostConnection::get() New Host Connection established 0x707067f58e10, tid 2416
+10-28 11:18:48.374  2396  2416 D HostConnection: HostComposition ext ANDROID_EMU_CHECKSUM_HELPER_v1 ANDROID_EMU_native_sync_v2 ANDROID_EMU_dma_v1 ANDROID_EMU_direct_mem ANDROID_EMU_host_composition_v1 ANDROID_EMU_host_composition_v2 ANDROID_EMU_vulkan ANDROID_EMU_deferred_vulkan_commands ANDROID_EMU_vulkan_null_optional_strings ANDROID_EMU_vulkan_create_resources_with_requirements ANDROID_EMU_YUV_Cache ANDROID_EMU_vulkan_ignored_handles ANDROID_EMU_has_shared_slots_host_memory_allocator ANDROID_EMU_vulkan_free_memory_sync ANDROID_EMU_vulkan_shader_float16_int8 ANDROID_EMU_vulkan_async_queue_submit ANDROID_EMU_sync_buffer_data ANDROID_EMU_vulkan_async_qsri ANDROID_EMU_read_color_buffer_dma ANDROID_EMU_hwc_color_transform GL_OES_EGL_image_external_essl3 GL_OES_vertex_array_object GL_KHR_texture_compression_astc_ldr ANDROID_EMU_host_side_tracing ANDROID_EMU_gles_max_version_3_0
+10-28 11:18:48.378   970   995 I droid.launcher: NativeAlloc concurrent copying GC freed 74793(5189KB) AllocSpace objects, 73(5424KB) LOS objects, 49% free, 3769KB/7538KB, paused 28us total 162.484ms
+10-28 11:18:48.394   160   160 I hwservicemanager: getTransport: Cannot find entry android.hardware.configstore@1.0::ISurfaceFlingerConfigs/default in either framework or device manifest.
+10-28 11:18:48.397  2396  2416 D EGL_emulation: eglCreateContext: 0x707057f93f40: maj 3 min 0 rcv 3
+10-28 11:18:48.399  2396  2416 D EGL_emulation: eglMakeCurrent: 0x707057f93f40: ver 3 0 (tinfo 0x706ff7f95cd0) (first time)
+10-28 11:18:48.441   298   337 D goldfish-address-space: claimShared: Ask to claim region [0x3fa3df000 0x3fadc3000]
+10-28 11:18:48.482  2357  2357 D LifecycleMonitor: Lifecycle status change: androidx.activity.ComponentActivity@e325b6f in: DESTROYED
+10-28 11:18:48.483  2357  2357 V ActivityScenario: Update currentActivityStage to DESTROYED, currentActivity=null
+10-28 11:18:48.568   160   160 I hwservicemanager: getTransport: Cannot find entry android.hardware.graphics.mapper@4.0::IMapper/default in either framework or device manifest.
+10-28 11:18:48.568  2396  2416 I Gralloc4: mapper 4.x is not supported
+10-28 11:18:48.572  2357  2378 D IdlingRegistry: Unregistering idling resources: [androidx.compose.ui.test.EspressoLink@60e2495]
+10-28 11:18:48.573  2357  2378 I TestRunner: finished: test3_swipeChartToPreviousMonthsSynchronouslyUpdatesListWithoutLockingPeriod(com.example.ui.components.dialogs.AllTransactionsDialogUiTest)
