@@ -171,6 +171,10 @@ dependencies {
 
   // Автоматический парсинг Markdown для Jetpack Compose
   implementation("com.github.jeziellago:compose-markdown:0.5.0")
+
+  // Jetpack Glance для виджетов рабочего стола Android с Давидом Жабовым
+  implementation(libs.androidx.glance.appwidget)
+  implementation(libs.androidx.glance.material3)
   
   // Google Generative AI SDK отключен, т.к. запросы идут напрямую через Retrofit
   // implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
@@ -179,11 +183,11 @@ dependencies {
   // implementation("com.alphacephei:vosk-android:0.3.47")
 }
 
-// Автоматическая верификация Unit-тестов Developer Console и компиляции Release Source Set при сборке Debug APK
+// Автоматическая параллельная верификация всех Unit и быстрых Robolectric/Compose UI-тестов
 tasks.withType<Test>().configureEach {
+  maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
   filter {
-    includeTestsMatching("com.example.utils.GlobalConsoleLoggerTest")
-    includeTestsMatching("com.example.ExampleUnitTest")
+    includeTestsMatching("com.example.*")
   }
 }
 
@@ -205,10 +209,8 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
   }
 }
 
+// Быстрая сборка Debug APK + компиляция Release + все Unit/UI-тесты без блокировки эмулятором
 tasks.matching { it.name == "assembleDebug" }.configureEach {
   dependsOn("compileReleaseKotlin", "testDebugUnitTest")
-  if (System.getenv("GITHUB_ACTIONS") == "true") {
-    finalizedBy("connectedDebugAndroidTest")
-  }
 }
 

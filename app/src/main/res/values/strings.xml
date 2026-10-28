@@ -1,3 +1,15 @@
 <resources>
     <string name="app_name">David Finance AI</string>
+    <string name="widget_david_today_label">Давид сегодня</string>
+    <string name="widget_david_today_desc">Маскот Давид Жабов, расходы за сегодня, остаток дневного лимита и комментарий</string>
+    <string name="widget_quick_operation_label">Быстрая операция</string>
+    <string name="widget_quick_operation_desc">Мгновенное добавление расхода, дохода и голосовой ввод в 1 тап</string>
+    <string name="widget_my_budget_label">Мой бюджет</string>
+    <string name="widget_my_budget_desc">Текущий бюджет на месяц, потрачено, остаток и индикатор превышения</string>
+    <string name="widget_financial_goal_label">Финансовая цель</string>
+    <string name="widget_financial_goal_desc">Прогресс выбранной копилки: накоплено, осталось и процент выполнения</string>
+    <string name="widget_mini_analytics_label">Мини-аналитика</string>
+    <string name="widget_mini_analytics_desc">Компактный график доходов и расходов за неделю, месяц или год</string>
+    <string name="widget_zhabometer_label">Жабометр</string>
+    <string name="widget_zhabometer_desc">Эмоциональное состояние Давида Жабова по метрикам вашего бюджета и целей</string>
 </resources>

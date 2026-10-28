@@ -52,6 +52,94 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".widgets.GoalWidgetConfigActivity"
+            android:exported="true"
+            android:label="@string/widget_financial_goal_label"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <!-- 1. Виджет «Давид сегодня» (2x2 и 4x2) -->
+        <receiver
+            android:name=".widgets.DavidTodayWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_david_today_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_david_today_info" />
+        </receiver>
+
+        <!-- 2. Виджет «Быстрая операция» (2x1 и 4x1) -->
+        <receiver
+            android:name=".widgets.QuickOperationWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_quick_operation_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_quick_operation_info" />
+        </receiver>
+
+        <!-- 3. Виджет «Мой бюджет» (2x2 и 4x2) -->
+        <receiver
+            android:name=".widgets.MyBudgetWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_my_budget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_my_budget_info" />
+        </receiver>
+
+        <!-- 4. Виджет «Финансовая цель» (2x2 и 4x2) -->
+        <receiver
+            android:name=".widgets.FinancialGoalWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_financial_goal_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_financial_goal_info" />
+        </receiver>
+
+        <!-- 5. Виджет «Мини-аналитика» (4x2) -->
+        <receiver
+            android:name=".widgets.MiniAnalyticsWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_mini_analytics_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_mini_analytics_info" />
+        </receiver>
+
+        <!-- 6. Виджет «Жабометр» (2x2 и 4x2) -->
+        <receiver
+            android:name=".widgets.ZhabometerWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_zhabometer_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_zhabometer_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.provider"

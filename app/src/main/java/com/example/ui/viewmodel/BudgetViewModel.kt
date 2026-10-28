@@ -381,6 +381,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                     activeBudgetId = _selectedBudgetId.value ?: "default",
                     tableCounts = countsMap
                 )
+                com.example.widgets.DavidWidgetsUpdater.updateAll(getApplication())
             }
         }
 

@@ -164,10 +164,56 @@ class MainActivity : FragmentActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleWidgetIntent(intent)
 
         setContent {
             BudgetTheme {
                 MainAppScreen(viewModel = viewModel)
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleWidgetIntent(intent)
+    }
+
+    private fun handleWidgetIntent(intent: android.content.Intent?) {
+        val action = intent?.getStringExtra(com.example.widgets.WidgetActions.EXTRA_WIDGET_ACTION)
+            ?: return
+        intent.removeExtra(com.example.widgets.WidgetActions.EXTRA_WIDGET_ACTION)
+        when (action) {
+            com.example.widgets.WidgetActions.ACTION_OPEN_TODAY -> {
+                viewModel.setActiveTab(1)
+                viewModel.closeModal()
+            }
+            com.example.widgets.WidgetActions.ACTION_ADD_EXPENSE -> {
+                viewModel.setActiveTab(1)
+                viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.ManualAddTransaction("expense"))
+            }
+            com.example.widgets.WidgetActions.ACTION_ADD_INCOME -> {
+                viewModel.setActiveTab(1)
+                viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.ManualAddTransaction("income"))
+            }
+            com.example.widgets.WidgetActions.ACTION_VOICE_INPUT -> {
+                viewModel.setActiveTab(1)
+                viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.VoiceInput)
+            }
+            com.example.widgets.WidgetActions.ACTION_OPEN_BUDGET -> {
+                viewModel.setActiveTab(1)
+                viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.CategoryLimits)
+            }
+            com.example.widgets.WidgetActions.ACTION_OPEN_GOALS -> {
+                viewModel.setActiveTab(3)
+                viewModel.closeModal()
+            }
+            com.example.widgets.WidgetActions.ACTION_OPEN_ANALYTICS -> {
+                viewModel.setActiveTab(4)
+                viewModel.closeModal()
+            }
+            com.example.widgets.WidgetActions.ACTION_OPEN_DAVID_CHAT -> {
+                viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.DavidChat)
             }
         }
     }
