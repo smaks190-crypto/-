@@ -1,10 +1,13 @@
 package com.example.davidapp.live
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.media.AudioManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -35,15 +38,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -53,7 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.components.BrandFrogAvatar
 
-private val ObsidianLiveBg = Color(0xFF090D14)
+private val ObsidianLiveBg = Color(0xFF080C14)
 private val SpeechBubbleBg = Color(0xFF131924)
 private val SpeechBubbleBorder = Color(0xFF1E293B)
 private val CancelPillBg = Color(0xFF131924)
@@ -62,13 +65,14 @@ private val CancelCircleBg = Color(0xFF1B2536)
 
 /**
  * Full-screen voice session overlay for **David Live**, matching the approved visual reference:
- * 1. Top header with David Zhabov 3D frog avatar, title **"Давид Жабов"**, subtitle **"AI-помощник по финансам"**,
+ * 1. Binds hardware volume buttons to the Android AI Assistant / Neural Network volume stream
+ *    (`AudioAttributes.USAGE_ASSISTANT`) while active.
+ * 2. Top header with David Zhabov 3D frog avatar, title **"Давид Жабов"**, subtitle **"AI-помощник по финансам"**,
  *    and settings/key action icon on the right.
- * 2. Dark speech bubble with bottom-left pointer tail displaying live subtitles / voice status
- *    (`"Говорите, я слушаю..."`, `"Слушаю вас..."`, `"Отлично, продолжаю..."`, or live transcription).
- * 3. Central 48-ray circular spectral visualizer [DavidLiveCircularVisualizer] with central microphone mute toggle.
- * 4. Network error / missing API key recovery bar when needed.
- * 5. Bottom `[ ✕  Отменить ]` pill button that cleanly ends the session and triggers post-session summary generation.
+ * 3. Dark speech bubble with bottom-left pointer tail displaying live Russian subtitles / voice status.
+ * 4. Central 48-ray circular spectral visualizer [DavidLiveCircularVisualizer] with central microphone mute toggle.
+ * 5. Network error / missing API key recovery bar when needed.
+ * 6. Bottom `[ ✕  Отменить ]` pill button that cleanly ends the session and triggers post-session summary generation.
  */
 @Composable
 fun DavidLiveSheet(
@@ -85,6 +89,22 @@ fun DavidLiveSheet(
     onEndSession: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+
+    // Bind hardware volume keys to the AI Assistant / Neural Network volume channel (Android 17+ USAGE_ASSISTANT)
+    DisposableEffect(context) {
+        val activity = context.findActivity()
+        val previousVolumeStream = activity?.volumeControlStream ?: AudioManager.USE_DEFAULT_STREAM_TYPE
+        val assistantStreamType = DavidLiveAudioEngine.getAssistantVolumeStreamType()
+        activity?.volumeControlStream = assistantStreamType
+        val focusRequest = DavidLiveAudioEngine.requestAssistantAudioFocus(context)
+
+        onDispose {
+            DavidLiveAudioEngine.abandonAssistantAudioFocus(context, focusRequest)
+            activity?.volumeControlStream = previousVolumeStream
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -92,7 +112,7 @@ fun DavidLiveSheet(
                 Brush.verticalGradient(
                     colors = listOf(
                         ObsidianLiveBg,
-                        Color(0xFF070A10),
+                        Color(0xFF060A10),
                         ObsidianLiveBg
                     )
                 )
@@ -308,11 +328,14 @@ private fun DavidLiveSpeechBubble(
     connectionState: DavidLiveConnectionState,
     errorMessage: String?
 ) {
-    val displayedText = when {
+    val rawDisplayedText = when {
         !errorMessage.isNullOrBlank() -> errorMessage
         subtitleText.isNotBlank() -> subtitleText
         else -> "Говорите, я слушаю..."
     }
+    // Keep a sliding window of the most recent ~190 characters when a live spoken utterance is long,
+    // so the user always sees the words David is speaking right now rather than clipping after 4 lines.
+    val displayedText = formatSlidingLiveSubtitle(rawDisplayedText)
 
     val isError = connectionState == DavidLiveConnectionState.ERROR ||
         connectionState == DavidLiveConnectionState.NO_API_KEY
@@ -357,6 +380,24 @@ private fun DavidLiveSpeechBubble(
             drawPath(path = path, color = SpeechBubbleBg)
         }
     }
+}
+
+internal fun formatSlidingLiveSubtitle(text: String, maxChars: Int = 185): String {
+    val clean = text.trim()
+    if (clean.length <= maxChars) return clean
+    val tail = clean.takeLast(maxChars)
+    val firstSpace = tail.indexOf(' ')
+    return if (firstSpace in 1..35) {
+        "…" + tail.substring(firstSpace + 1).trim()
+    } else {
+        "…" + tail
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 @Composable

@@ -1,6 +1,7 @@
 package com.example.davidapp.live
 
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -28,6 +29,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -38,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.sin
 
@@ -46,22 +49,23 @@ private val IdleRayColor = Color(0xFF2A2F3A)
 private val ListeningEmerald = Color(0xFF00E5A8)
 private val ActiveSpeechCyan = Color(0xFF00B4FF)
 private val PeakMint = Color(0xFF00F0A0)
-private val DeepTealGlow = Color(0xFF059669)
-private val CenterCircleSurface = Color(0xFF121824)
-private val OuterRingBorder = Color(0xFF192838)
+private val NeonAqua = Color(0xFF00D9F5)
+private val DeepEmeraldGlow = Color(0xFF059669)
+private val DeepCyanGlow = Color(0xFF0284C7)
+private val CenterCircleSurface = Color(0xFF101722)
+private val OuterRingBorder = Color(0xFF163840)
 private val MutedAccent = Color(0xFFEF4444)
 
 /**
  * Circular 48-ray spectral voice visualizer for **David Live**, built on Jetpack Compose [Canvas]
  * and driven by real FFT frequency magnitudes from [DavidLiveSpectrumAnalyzer].
  *
- * Visual Hierarchy & Reference Alignment:
- * - **Center Poles (Top 90° & Bottom 270°)**: High & upper-mid vocal frequencies extend largest (`центр, крупнее`).
- * - **Horizontal Sides (Left 180° & Right 0°)**: Low frequencies taper smoothly (`к краям, меньше`)
- *   with segmented glowing dots/capsules.
- * - **Idle / Pause (`#2A2F3A`)**: Calm, minimal ring activity with soft ambient breathing.
- * - **User Speaking (`#00E5A8` -> `#00F0A0`)**: Rich Emerald & Mint radial rays with segmented outer tips.
- * - **David Speaking (`#00B4FF` -> `#00E5A8`)**: Electric Cyan & Teal spectrum rays responding to 24 kHz output audio.
+ * Matches the approved visual concept:
+ * - **Index 0 (12 o'clock) & Index 24 (6 o'clock)**: High & upper-mid vocal frequencies extend largest (`центр, крупнее`).
+ * - **Index 12 (3 o'clock) & Index 36 (9 o'clock)**: Low frequencies taper smoothly (`к краям, меньше`).
+ * - **Vivid Neon Palette (`#00F0A0`, `#00E5A8`, `#00D9F5`, `#00B4FF`)**:
+ *   Rich multi-stop Emerald, Mint, Aqua, and Electric Cyan radial rays with 3 concentric rings of glowing
+ *   outer capsule segments and atmospheric neon bloom.
  */
 @Composable
 fun DavidLiveCircularVisualizer(
@@ -79,15 +83,25 @@ fun DavidLiveCircularVisualizer(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2600, easing = FastOutSlowInEasing),
+            animation = tween(durationMillis = 2200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "ambient_pulse"
+    )
+    val organicWavePhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2.0 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 4800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "organic_wave_phase"
     )
 
     val energyClamped = overallEnergy.coerceIn(0f, 1f)
     val isDavidSpeaking = connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
         activeSpeaker == DavidLiveSpeaker.DAVID
+    val isUserSpeaking = activeSpeaker == DavidLiveSpeaker.USER || energyClamped > 0.18f
 
     Box(
         modifier = modifier
@@ -100,46 +114,66 @@ fun DavidLiveCircularVisualizer(
     ) {
         Canvas(modifier = Modifier.matchParentSize()) {
             val center = Offset(size.width / 2f, size.height / 2f)
-            val outerRingRadius = size.minDimension * 0.485f
-            val innerCoreRadius = size.minDimension * 0.165f
-            val rayStartRadius = innerCoreRadius + size.minDimension * 0.032f
-            val maxRaySpan = outerRingRadius - rayStartRadius - size.minDimension * 0.025f
+            val outerRingRadius = size.minDimension * 0.488f
+            val innerCoreRadius = size.minDimension * 0.162f
+            val rayStartRadius = innerCoreRadius + size.minDimension * 0.028f
+            val maxRaySpan = outerRingRadius - rayStartRadius - size.minDimension * 0.020f
 
-            // 1. Subtle dark circular plate & outer ring border (matching reference)
+            // 1. Deep atmospheric neon aura behind the circular visualizer (matching reference glow)
+            val auraPrimary = when {
+                isMicMuted && !isDavidSpeaking -> IdleRayColor.copy(alpha = 0.15f)
+                isDavidSpeaking -> ActiveSpeechCyan.copy(alpha = 0.22f + 0.24f * energyClamped)
+                else -> ListeningEmerald.copy(alpha = 0.20f + 0.24f * energyClamped)
+            }
+            val auraSecondary = when {
+                isMicMuted && !isDavidSpeaking -> Color(0xFF0B111B).copy(alpha = 0.70f)
+                isDavidSpeaking -> PeakMint.copy(alpha = 0.12f + 0.16f * energyClamped)
+                else -> ActiveSpeechCyan.copy(alpha = 0.10f + 0.16f * energyClamped)
+            }
+
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                         (if (isDavidSpeaking) ActiveSpeechCyan else ListeningEmerald)
-                            .copy(alpha = 0.06f + 0.16f * energyClamped),
-                        Color(0xFF0B111B).copy(alpha = 0.72f),
+                        auraPrimary,
+                        auraSecondary,
+                        Color(0xFF0A121E).copy(alpha = 0.78f),
                         Color.Transparent
                     ),
                     center = center,
-                    radius = outerRingRadius
+                    radius = outerRingRadius * 1.04f
                 ),
-                radius = outerRingRadius,
+                radius = outerRingRadius * 1.04f,
                 center = center
             )
 
+            // Outer glowing ring border (Emerald-Teal tint like the reference)
+            val outerRingColor = when {
+                isMicMuted && !isDavidSpeaking -> IdleRayColor.copy(alpha = 0.55f)
+                isDavidSpeaking -> lerp(ListeningEmerald, ActiveSpeechCyan, 0.55f)
+                    .copy(alpha = 0.38f + 0.32f * energyClamped)
+                else -> lerp(ListeningEmerald, NeonAqua, 0.35f)
+                    .copy(alpha = 0.34f + 0.28f * energyClamped)
+            }
             drawCircle(
-                color = OuterRingBorder.copy(alpha = 0.75f + 0.2f * energyClamped),
+                color = outerRingColor,
                 radius = outerRingRadius,
                 center = center,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.3.dp.toPx())
+                style = Stroke(width = 1.4.dp.toPx())
             )
 
-            // 2. Inner ambient halo around the central microphone circle
-            val haloRadius = innerCoreRadius * (1.28f + 0.06f * ambientPulse + 0.22f * energyClamped)
-            val haloPrimary = when {
-                isMicMuted -> IdleRayColor.copy(alpha = 0.18f)
-                isDavidSpeaking -> ActiveSpeechCyan.copy(alpha = 0.22f + 0.24f * energyClamped)
-                else -> ListeningEmerald.copy(alpha = 0.20f + 0.25f * energyClamped)
+            // 2. Inner neon halo around the central microphone button
+            val haloRadius = innerCoreRadius * (1.36f + 0.08f * ambientPulse + 0.28f * energyClamped)
+            val haloCoreColor = when {
+                isMicMuted && !isDavidSpeaking -> IdleRayColor.copy(alpha = 0.20f)
+                isDavidSpeaking -> ActiveSpeechCyan.copy(alpha = 0.34f + 0.28f * energyClamped)
+                else -> PeakMint.copy(alpha = 0.30f + 0.28f * energyClamped)
             }
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        haloPrimary,
-                        DeepTealGlow.copy(alpha = 0.08f + 0.12f * energyClamped),
+                        haloCoreColor,
+                        (if (isDavidSpeaking) DeepCyanGlow else DeepEmeraldGlow)
+                            .copy(alpha = 0.16f + 0.18f * energyClamped),
                         Color.Transparent
                     ),
                     center = center,
@@ -149,50 +183,68 @@ fun DavidLiveCircularVisualizer(
                 center = center
             )
 
-            // 3. 48 radial frequency rays + segmented outer capsules
+            // 3. 48 radial frequency rays + 3 concentric rings of glowing capsule segments
             val rayCount = DavidLiveSpectrumAnalyzer.RAY_COUNT
-            val baseStrokeWidth = (size.minDimension * 0.0135f).coerceAtLeast(3.2f)
+            val baseStrokeWidth = (size.minDimension * 0.0138f).coerceAtLeast(3.4f)
 
             for (i in 0 until rayCount) {
-                val rawMag = rayMagnitudes.getOrElse(i) { 0.04f }.coerceIn(0.03f, 1f)
-                val angleDeg = (i.toFloat() / rayCount.toFloat()) * 360f
-                val angleRad = (angleDeg * PI / 180.0).toFloat()
-                val dirX = cos(angleRad)
-                val dirY = sin(angleRad)
+                val fftMag = rayMagnitudes.getOrElse(i) { 0.12f }.coerceIn(0f, 1f)
 
-                // Verticality factor: 1.0 at top/bottom poles (90°/270° - "Высокие частоты, центр крупнее"),
-                // 0.0 at horizontal sides (0°/180° - "Низкие частоты, к краям меньше")
-                val verticalFocus = abs(sin(angleRad)).pow(1.25f)
+                // Index 0 = 12 o'clock (-PI/2 in Canvas), clockwise around the circle.
+                // This matches DavidLiveSpectrumAnalyzer's polar topology 1:1!
+                val angleFromTopRad = (2.0 * PI * i.toDouble() / rayCount.toDouble()).toFloat()
+                val canvasAngleRad = angleFromTopRad - (PI / 2.0).toFloat()
+                val dirX = cos(canvasAngleRad)
+                val dirY = sin(canvasAngleRad)
 
-                val effectiveMag = if (isMicMuted && !isDavidSpeaking) {
-                    0.04f + 0.02f * verticalFocus * ambientPulse
-                } else {
-                    rawMag
+                // 1.0 at top (12h) and bottom (6h) poles ("Высокие частоты, центр крупнее"),
+                // 0.0 at horizontal right (3h) and left (9h) edges ("Низкие частоты, к краям меньше")
+                val verticalFocus = abs(cos(angleFromTopRad)).pow(1.15f)
+
+                // Organic wave so the visualizer breathes with life in "Говорите, я слушаю..." & "Тихая речь"
+                val organicShimmer = 0.5f + 0.5f * sin(organicWavePhase + i * 0.42f)
+                val restingVivaMag = (0.16f + 0.20f * verticalFocus + 0.07f * organicShimmer * (0.4f + 0.6f * verticalFocus))
+                    .coerceIn(0.14f, 0.44f)
+
+                val effectiveMag = when {
+                    isMicMuted && !isDavidSpeaking -> 0.08f + 0.04f * verticalFocus
+                    else -> max(fftMag * 1.12f, restingVivaMag).coerceIn(0.14f, 1.0f)
                 }
 
-                // Determine color blend per ray from reference specification
-                val activeBaseColor = if (isDavidSpeaking) {
-                    lerp(ListeningEmerald, ActiveSpeechCyan, 0.45f + 0.45f * (1f - verticalFocus))
-                } else {
-                    lerp(
-                        ActiveSpeechCyan,
-                        lerp(ListeningEmerald, PeakMint, effectiveMag),
-                        0.38f + 0.62f * verticalFocus
-                    )
+                // Multi-tone color mapping matching the reference artwork:
+                // Top pole & upper hemisphere favor PeakMint (#00F0A0) & ListeningEmerald (#00E5A8);
+                // Bottom pole & active speech blend NeonAqua (#00D9F5) & ActiveSpeechCyan (#00B4FF).
+                val bottomHemisphere = (0.5f - 0.5f * cos(angleFromTopRad)).coerceIn(0f, 1f)
+                val cyanMix = when {
+                    isDavidSpeaking -> (0.38f + 0.48f * bottomHemisphere + 0.14f * (1f - verticalFocus)).coerceIn(0.25f, 0.92f)
+                    isUserSpeaking -> (0.18f + 0.46f * bottomHemisphere + 0.22f * effectiveMag).coerceIn(0.15f, 0.82f)
+                    else -> (0.14f + 0.34f * bottomHemisphere).coerceIn(0.10f, 0.55f)
                 }
 
-                val rayColor = lerp(
-                    IdleRayColor,
-                    activeBaseColor,
-                    ((effectiveMag - 0.04f) / 0.85f).coerceIn(0f, 1f)
-                )
+                val innerNeonColor = if (isMicMuted && !isDavidSpeaking) {
+                    IdleRayColor
+                } else {
+                    lerp(PeakMint, ListeningEmerald, 0.35f + 0.35f * (1f - verticalFocus))
+                }
+
+                val outerNeonColor = if (isMicMuted && !isDavidSpeaking) {
+                    IdleRayColor
+                } else {
+                    lerp(ListeningEmerald, ActiveSpeechCyan, cyanMix)
+                }
+
+                val tipNeonColor = if (isMicMuted && !isDavidSpeaking) {
+                    IdleRayColor
+                } else {
+                    lerp(NeonAqua, ActiveSpeechCyan, (cyanMix + 0.2f).coerceIn(0f, 1f))
+                }
 
                 // Polar envelope scales max span so center poles extend furthest and sides stay compact
-                val polarScale = 0.46f + 0.54f * verticalFocus
-                val totalSpan = maxRaySpan * polarScale * effectiveMag.coerceIn(0.06f, 1f)
+                val polarScale = 0.48f + 0.52f * verticalFocus
+                val totalSpan = maxRaySpan * polarScale * effectiveMag.coerceIn(0.14f, 1f)
 
-                // Primary inner continuous bar segment (62% of active ray length)
-                val primaryBarLen = (totalSpan * 0.62f).coerceAtLeast(baseStrokeWidth * 0.9f)
+                // Primary inner continuous bar segment (56% of active ray length)
+                val primaryBarLen = (totalSpan * 0.56f).coerceAtLeast(baseStrokeWidth * 1.15f)
                 val barStart = Offset(
                     x = center.x + dirX * rayStartRadius,
                     y = center.y + dirY * rayStartRadius
@@ -202,82 +254,130 @@ fun DavidLiveCircularVisualizer(
                     y = center.y + dirY * (rayStartRadius + primaryBarLen)
                 )
 
-                // Soft glow under active rays
-                if (effectiveMag > 0.22f) {
+                // Soft neon bloom behind each ray (gives the lush glowing look from the reference)
+                if (!isMicMuted || isDavidSpeaking) {
+                    val bloomEndDist = (rayStartRadius + totalSpan * 0.95f).coerceAtMost(outerRingRadius - baseStrokeWidth)
                     drawLine(
-                        color = rayColor.copy(alpha = 0.24f * effectiveMag),
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                innerNeonColor.copy(alpha = (0.20f + 0.28f * effectiveMag).coerceIn(0.15f, 0.48f)),
+                                outerNeonColor.copy(alpha = (0.12f + 0.22f * effectiveMag).coerceIn(0.08f, 0.34f)),
+                                Color.Transparent
+                            ),
+                            start = barStart,
+                            end = Offset(
+                                x = center.x + dirX * bloomEndDist,
+                                y = center.y + dirY * bloomEndDist
+                            )
+                        ),
                         start = barStart,
                         end = Offset(
-                            x = center.x + dirX * (rayStartRadius + totalSpan),
-                            y = center.y + dirY * (rayStartRadius + totalSpan)
+                            x = center.x + dirX * bloomEndDist,
+                            y = center.y + dirY * bloomEndDist
                         ),
-                        strokeWidth = baseStrokeWidth * 2.2f,
+                        strokeWidth = baseStrokeWidth * 2.55f,
                         cap = StrokeCap.Round
                     )
                 }
 
-                // Draw primary inner radial bar
+                // Draw primary inner radial bar with vibrant neon gradient
+                val barAlpha = if (isMicMuted && !isDavidSpeaking) {
+                    0.45f
+                } else {
+                    (0.74f + 0.26f * effectiveMag).coerceIn(0.74f, 1f)
+                }
                 drawLine(
-                    color = rayColor.copy(alpha = (0.45f + 0.55f * effectiveMag).coerceIn(0.35f, 1f)),
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            innerNeonColor.copy(alpha = barAlpha),
+                            outerNeonColor.copy(alpha = barAlpha)
+                        ),
+                        start = barStart,
+                        end = barEnd
+                    ),
                     start = barStart,
                     end = barEnd,
                     strokeWidth = baseStrokeWidth,
                     cap = StrokeCap.Round
                 )
 
-                // Segmented outer capsules / dots (matching the reference artwork's beaded radial tails)
-                val dotGap = baseStrokeWidth * 1.65f
-                val firstBeadDist = rayStartRadius + primaryBarLen + dotGap
-                if (effectiveMag > 0.10f && firstBeadDist < outerRingRadius - baseStrokeWidth) {
-                    val bead1Len = (totalSpan * 0.16f).coerceIn(baseStrokeWidth * 0.35f, baseStrokeWidth * 1.7f)
+                // Segmented outer capsules / beaded radial tails (3 concentric capsule rings as in the reference)
+                val segmentGap = baseStrokeWidth * 1.48f
+                val bead1Dist = rayStartRadius + primaryBarLen + segmentGap
+                if (bead1Dist < outerRingRadius - baseStrokeWidth) {
+                    val bead1Len = (totalSpan * 0.17f).coerceIn(baseStrokeWidth * 0.55f, baseStrokeWidth * 2.0f)
                     val b1Start = Offset(
-                        x = center.x + dirX * firstBeadDist,
-                        y = center.y + dirY * firstBeadDist
+                        x = center.x + dirX * bead1Dist,
+                        y = center.y + dirY * bead1Dist
                     )
                     val b1End = Offset(
-                        x = center.x + dirX * (firstBeadDist + bead1Len),
-                        y = center.y + dirY * (firstBeadDist + bead1Len)
+                        x = center.x + dirX * (bead1Dist + bead1Len).coerceAtMost(outerRingRadius - baseStrokeWidth),
+                        y = center.y + dirY * (bead1Dist + bead1Len).coerceAtMost(outerRingRadius - baseStrokeWidth)
                     )
+                    val bead1Alpha = if (isMicMuted && !isDavidSpeaking) {
+                        0.30f
+                    } else {
+                        (0.58f + 0.38f * effectiveMag).coerceIn(0.55f, 0.96f)
+                    }
                     drawLine(
-                        color = rayColor.copy(alpha = (0.35f + 0.55f * effectiveMag).coerceIn(0.25f, 0.92f)),
+                        color = outerNeonColor.copy(alpha = bead1Alpha),
                         start = b1Start,
                         end = b1End,
                         strokeWidth = baseStrokeWidth * 0.92f,
                         cap = StrokeCap.Round
                     )
 
-                    // Second outer bead dot for medium/high energy rays
-                    val secondBeadDist = firstBeadDist + bead1Len + dotGap * 0.95f
-                    if (effectiveMag > 0.26f && secondBeadDist < outerRingRadius - baseStrokeWidth) {
-                        val bead2Len = (baseStrokeWidth * 0.45f).coerceAtLeast(2f)
+                    // Second outer capsule segment
+                    val bead2Dist = bead1Dist + bead1Len + segmentGap * 0.92f
+                    if (bead2Dist < outerRingRadius - baseStrokeWidth) {
+                        val bead2Len = (totalSpan * 0.11f).coerceIn(baseStrokeWidth * 0.42f, baseStrokeWidth * 1.35f)
                         val b2Start = Offset(
-                            x = center.x + dirX * secondBeadDist,
-                            y = center.y + dirY * secondBeadDist
+                            x = center.x + dirX * bead2Dist,
+                            y = center.y + dirY * bead2Dist
                         )
                         val b2End = Offset(
-                            x = center.x + dirX * (secondBeadDist + bead2Len),
-                            y = center.y + dirY * (secondBeadDist + bead2Len)
+                            x = center.x + dirX * (bead2Dist + bead2Len).coerceAtMost(outerRingRadius - baseStrokeWidth),
+                            y = center.y + dirY * (bead2Dist + bead2Len).coerceAtMost(outerRingRadius - baseStrokeWidth)
                         )
+                        val bead2Alpha = if (isMicMuted && !isDavidSpeaking) {
+                            0.20f
+                        } else {
+                            (0.40f + 0.45f * effectiveMag).coerceIn(0.38f, 0.88f)
+                        }
                         drawLine(
-                            color = rayColor.copy(alpha = (0.22f + 0.48f * effectiveMag).coerceIn(0.18f, 0.78f)),
+                            color = tipNeonColor.copy(alpha = bead2Alpha),
                             start = b2Start,
                             end = b2End,
-                            strokeWidth = baseStrokeWidth * 0.82f,
+                            strokeWidth = baseStrokeWidth * 0.84f,
                             cap = StrokeCap.Round
                         )
+
+                        // Third outer glowing dot / capsule tip (completes the multi-ring star halo on the concept)
+                        val bead3Dist = bead2Dist + bead2Len + segmentGap * 0.88f
+                        if (bead3Dist < outerRingRadius - baseStrokeWidth * 0.8f) {
+                            val bead3Len = (baseStrokeWidth * 0.48f).coerceAtLeast(2.2f)
+                            val b3Start = Offset(
+                                x = center.x + dirX * bead3Dist,
+                                y = center.y + dirY * bead3Dist
+                            )
+                            val b3End = Offset(
+                                x = center.x + dirX * (bead3Dist + bead3Len),
+                                y = center.y + dirY * (bead3Dist + bead3Len)
+                            )
+                            val bead3Alpha = if (isMicMuted && !isDavidSpeaking) {
+                                0.14f
+                            } else {
+                                (0.26f + 0.44f * effectiveMag).coerceIn(0.24f, 0.76f)
+                            }
+                            drawLine(
+                                color = tipNeonColor.copy(alpha = bead3Alpha),
+                                start = b3Start,
+                                end = b3End,
+                                strokeWidth = baseStrokeWidth * 0.76f,
+                                cap = StrokeCap.Round
+                            )
+                        }
                     }
-                } else {
-                    // Subtle resting outer dot in quiet/idle state
-                    val idleDotDist = rayStartRadius + primaryBarLen + dotGap * 0.85f
-                    val dotPos = Offset(
-                        x = center.x + dirX * idleDotDist,
-                        y = center.y + dirY * idleDotDist
-                    )
-                    drawCircle(
-                        color = IdleRayColor.copy(alpha = 0.55f),
-                        radius = baseStrokeWidth * 0.38f,
-                        center = dotPos
-                    )
                 }
             }
         }
@@ -285,9 +385,9 @@ fun DavidLiveCircularVisualizer(
         // 4. Central interactive microphone button (matching the dark circular core in the reference)
         val coreButtonSize = visualizerSize * 0.31f
         val borderTint = when {
-            isMicMuted -> MutedAccent.copy(alpha = 0.65f)
-            isDavidSpeaking -> ActiveSpeechCyan.copy(alpha = 0.55f + 0.35f * energyClamped)
-            else -> ListeningEmerald.copy(alpha = 0.45f + 0.40f * energyClamped)
+            isMicMuted -> MutedAccent.copy(alpha = 0.72f)
+            isDavidSpeaking -> ActiveSpeechCyan.copy(alpha = 0.68f + 0.30f * energyClamped)
+            else -> ListeningEmerald.copy(alpha = 0.58f + 0.36f * energyClamped)
         }
 
         Box(
@@ -297,12 +397,12 @@ fun DavidLiveCircularVisualizer(
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF1A2333),
+                            Color(0xFF1A2636),
                             CenterCircleSurface
                         )
                     )
                 )
-                .border(width = 1.5.dp, color = borderTint, shape = CircleShape)
+                .border(width = 1.6.dp, color = borderTint, shape = CircleShape)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -321,7 +421,7 @@ fun DavidLiveCircularVisualizer(
                 tint = when {
                     isMicMuted -> MutedAccent
                     isDavidSpeaking -> ActiveSpeechCyan
-                    energyClamped > 0.25f -> PeakMint
+                    energyClamped > 0.22f -> PeakMint
                     else -> Color(0xFF93C5FD)
                 },
                 modifier = Modifier.size(coreButtonSize * 0.38f)

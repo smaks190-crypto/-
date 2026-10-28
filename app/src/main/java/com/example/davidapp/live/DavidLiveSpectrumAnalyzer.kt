@@ -22,18 +22,18 @@ import kotlin.math.sqrt
  * - Поддерживает как входной поток микрофона (16 кГц PCM), так и выходной голосовой поток Давида (24 кГц PCM).
  * - Рассчитывает 32 базовые частотные полосы речи (85 Гц .. 7600 Гц) и отображает их
  *   на 48 радиальных лучей кругового визуализатора в соответствии со схемой «Детали» референса:
- *   - Верхний и нижний полюса (вертикальный центр круга) акцентируют средние и высокие частоты речи
- *     («Высокие частоты (центр, крупнее)»);
- *   - Боковые экваториальные зоны (левый и правый края) отражают низкие частоты с плавным затуханием
- *     («Низкие частоты (к краям, меньше)»).
+ *   - Индекс 0 (12 часов, верхний полюс) и индекс 24 (6 часов, нижний полюс) акцентируют
+ *     средние и высокие частоты речи («Высокие частоты (центр, крупнее)»);
+ *   - Индекс 12 (3 часа, правый край) и индекс 36 (9 часов, левый край) отражают
+ *     низкие частоты с плавным затуханием («Низкие частоты (к краям, меньше)»).
  * - Использует раздельное сглаживание атаки (быстрый отклик) и затухания (плавный возврат в покой).
  */
 class DavidLiveSpectrumAnalyzer(
     val sampleRate: Int = 16_000,
     val fftSize: Int = 1024,
     val radialRayCount: Int = DEFAULT_RADIAL_RAY_COUNT,
-    private val attackAlpha: Float = 0.64f,
-    private val releaseAlpha: Float = 0.20f
+    private val attackAlpha: Float = 0.72f,
+    private val releaseAlpha: Float = 0.22f
 ) {
     companion object {
         const val DEFAULT_RADIAL_RAY_COUNT = 48
@@ -42,10 +42,10 @@ class DavidLiveSpectrumAnalyzer(
 
         private const val MIN_FREQ_HZ = 85.0f
         private const val MAX_FREQ_HZ = 7600.0f
-        private const val NOISE_FLOOR_DB = -54.0f
-        private const val CEILING_DB = -8.0f
+        private const val NOISE_FLOOR_DB = -62.0f
+        private const val CEILING_DB = -12.0f
         private const val DYNAMIC_RANGE_DB = CEILING_DB - NOISE_FLOOR_DB
-        private const val SILENCE_RMS_GATE = 0.0024f
+        private const val SILENCE_RMS_GATE = 0.0020f
     }
 
     init {
@@ -78,7 +78,8 @@ class DavidLiveSpectrumAnalyzer(
     private val rawFreqBands = FloatArray(INTERNAL_FREQ_BANDS)
 
     // Пространственная огибающая для каждого из 48 радиальных лучей круга:
-    // максимум на вертикальной оси (12 часов и 6 часов), плавное уменьшение к 3 и 9 часам
+    // максимум на вертикальной оси (индекс 0 = 12 часов, индекс 24 = 6 часов),
+    // плавное уменьшение к горизонтальным краям (индекс 12 = 3 часа, индекс 36 = 9 часов)
     private val radialSpatialEnvelope = FloatArray(radialRayCount)
     // Индекс частотной полосы [0..31] для каждого радиального луча
     private val radialFreqBandMap = IntArray(radialRayCount)
@@ -157,26 +158,26 @@ class DavidLiveSpectrumAnalyzer(
             bandEndBin[b] = eBin
 
             val normFreq = (hzCenter / 1000.0f).coerceIn(0.08f, 8.0f)
-            bandPreEmphasis[b] = (0.90f + 0.30f * ln(1.0f + normFreq)).coerceIn(0.88f, 1.58f)
+            bandPreEmphasis[b] = (0.96f + 0.34f * ln(1.0f + normFreq)).coerceIn(0.92f, 1.68f)
         }
     }
 
     /**
-     * Строит круговую топологию лучей (угол 0 = 12 часов / верхний центр, по часовой стрелке):
-     * - Около 12 часов (индекс 0) и 6 часов (индекс radialRayCount/2) расположены высокие и центральные
+     * Строит круговую топологию лучей (индекс 0 = 12 часов / верхний центр, обход по часовой стрелке):
+     * - Около 12 часов (индекс 0) и 6 часов (индекс radialRayCount/2 = 24) расположены высокие и центральные
      *   речевые частоты с максимальной пространственной огибающей (1.0).
-     * - По направлению к 3 часам (radialRayCount/4) и 9 часам (3*radialRayCount/4) расположены
-     *   средние и низкие частоты с плавным затуханием огибающей (до 0.36).
+     * - По направлению к 3 часам (индекс 12) и 9 часам (индекс 36) расположены
+     *   средние и низкие частоты с плавным затуханием огибающей (до 0.38).
      */
     private fun initRadialTopology() {
         for (i in 0 until radialRayCount) {
-            val angleRad = 2.0 * PI * i.toDouble() / radialRayCount.toDouble()
-            val verticalness = abs(cos(angleRad)).toFloat()
+            val angleFromTopRad = 2.0 * PI * i.toDouble() / radialRayCount.toDouble()
+            val verticalness = abs(cos(angleFromTopRad)).toFloat()
 
-            val gaussianPole = exp(-1.65 * (1.0 - verticalness) * (1.0 - verticalness)).toFloat()
-            radialSpatialEnvelope[i] = (0.36f + 0.64f * (0.60f * verticalness + 0.40f * gaussianPole)).coerceIn(0.36f, 1.0f)
+            val gaussianPole = exp(-1.55 * (1.0 - verticalness) * (1.0 - verticalness)).toFloat()
+            radialSpatialEnvelope[i] = (0.38f + 0.62f * (0.58f * verticalness + 0.42f * gaussianPole)).coerceIn(0.38f, 1.0f)
 
-            val hemisphereOffset = if (sin(angleRad) >= 0.0) 0 else 1
+            val hemisphereOffset = if (sin(angleFromTopRad) >= 0.0) 0 else 1
             val mappedBand = ((verticalness * (INTERNAL_FREQ_BANDS - 2)).roundToInt() + hemisphereOffset)
                 .coerceIn(0, INTERNAL_FREQ_BANDS - 1)
             radialFreqBandMap[i] = mappedBand
@@ -342,6 +343,7 @@ class DavidLiveSpectrumAnalyzer(
 
         val normScale = 2.0f / (fftSize.toFloat() * 0.5f)
         binMagnitudes[0] = 0f
+        var maxBandEnergy = 0f
         for (bin in 1 until halfFftSize) {
             val re = fftReal[bin]
             val im = fftImag[bin]
@@ -362,31 +364,34 @@ class DavidLiveSpectrumAnalyzer(
                 count++
             }
             val rmsMag = if (count > 0) sqrt(energySum / count.toFloat()) else 0.0f
-            val combined = (0.58f * peak + 0.42f * rmsMag) * bandPreEmphasis[b]
+            val combined = (0.62f * peak + 0.38f * rmsMag) * bandPreEmphasis[b]
             val db = 20.0f * log10(max(combined, 1e-7f))
             val normDb = ((db - NOISE_FLOOR_DB) / DYNAMIC_RANGE_DB).coerceIn(0.0f, 1.0f)
-            val compressed = (normDb * 1.30f) / (1.0f + 0.30f * normDb * normDb)
-            rawFreqBands[b] = sanitizeUnit(compressed)
+            val compressed = (normDb * 1.42f) / (1.0f + 0.42f * normDb * normDb)
+            val unitVal = sanitizeUnit(compressed)
+            rawFreqBands[b] = unitVal
+            if (unitVal > maxBandEnergy) maxBandEnergy = unitVal
         }
 
-        val overallGain = ((rms - SILENCE_RMS_GATE) / 0.15f).coerceIn(0.20f, 1.0f)
-        val softGain = 0.54f + 0.46f * sqrt(overallGain)
+        val overallGain = ((rms - SILENCE_RMS_GATE) / 0.065f).coerceIn(0.38f, 1.0f)
+        val softGain = 0.72f + 0.28f * sqrt(overallGain)
 
         // Отображаем 32 частотные полосы на 48 радиальных лучей с учётом круговой пространственной огибающей
+        // и гармонической поддержки, чтобы вся корона лучей жила при речи, а полюса доминировали
         for (r in 0 until radialRayCount) {
             val bandIdx = radialFreqBandMap[r]
             val prevBand = rawFreqBands[(bandIdx - 1).coerceAtLeast(0)]
             val currBand = rawFreqBands[bandIdx]
             val nextBand = rawFreqBands[(bandIdx + 1).coerceAtMost(INTERNAL_FREQ_BANDS - 1)]
 
-            val midSpeechSupport = if (bandIdx >= 18) {
-                val midIdx = (bandIdx - 8).coerceIn(10, 21)
-                0.32f * rawFreqBands[midIdx]
+            val midSpeechSupport = if (bandIdx >= 14) {
+                val midIdx = (bandIdx - 7).coerceIn(6, 20)
+                0.38f * rawFreqBands[midIdx]
             } else {
-                0f
+                0.22f * maxBandEnergy
             }
 
-            val blendedFreq = (0.72f * currBand + 0.14f * prevBand + 0.14f * nextBand + midSpeechSupport)
+            val blendedFreq = (0.68f * currBand + 0.16f * prevBand + 0.16f * nextBand + midSpeechSupport)
                 .coerceIn(0f, 1f)
             targetRays[r] = sanitizeUnit(blendedFreq * radialSpatialEnvelope[r] * softGain)
         }

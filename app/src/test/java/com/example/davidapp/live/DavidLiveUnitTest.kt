@@ -1,5 +1,6 @@
 package com.example.davidapp.live
 
+import android.media.AudioAttributes
 import com.example.data.db.AccountDao
 import com.example.data.db.AccountEntity
 import com.example.data.db.CategoryDao
@@ -58,6 +59,90 @@ class DavidLiveUnitTest {
         assertTrue(longPressWithDraft.shouldTriggerHaptic)
         assertEquals("Черновик вопроса про бюджет", longPressWithDraft.resultingDraftText)
         assertNull(longPressWithDraft.messageSent)
+    }
+
+    @Test
+    fun `audio engine binds output attributes to Android USAGE_ASSISTANT for neural network volume control`() {
+        val engine = DavidLiveAudioEngine()
+        val attrs = engine.buildAssistantAudioAttributes()
+        assertEquals(AudioAttributes.USAGE_ASSISTANT, attrs.usage)
+        assertEquals(AudioAttributes.CONTENT_TYPE_SPEECH, attrs.contentType)
+        assertEquals(AudioAttributes.USAGE_ASSISTANT, DavidLiveAudioEngine.AUDIO_USAGE_ASSISTANT)
+    }
+
+    @Test
+    fun `session controller filters out English model thought blocks and displays clean Russian outputTranscription subtitles`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+
+        // 1. Модель присылает внутренние размышления (Chain-of-Thought) в modelTurn.parts
+        val thoughtFrameJson = """
+            {
+              "serverContent": {
+                "modelTurn": {
+                  "parts": [
+                    {
+                      "text": "**Crafting The Greeting**\n\nI'm working on the appropriate response, focusing on a lively and slightly playful tone.",
+                      "thought": true
+                    },
+                    {
+                      "text": "**Providing Budget Details**\n\nI need to use the 'get_financial_overview' tool. My goal is to summarize the user's balance."
+                    }
+                  ]
+                }
+              }
+            }
+        """.trimIndent()
+        controller.processServerMessageForTest(thoughtFrameJson)
+
+        // Субтитры НЕ должны показывать английские мысли модели
+        assertFalse(controller.liveSubtitle.value.contains("Crafting The Greeting"))
+        assertFalse(controller.liveSubtitle.value.contains("Providing Budget Details"))
+        assertFalse(controller.liveSubtitle.value.contains("I'm working on"))
+
+        // 2. Следом приходит реальная русская речь Давида через outputTranscription
+        val russianSpeechChunk1 = """
+            {
+              "serverContent": {
+                "outputTranscription": {
+                  "text": "Слушай, цифры интересные! "
+                }
+              }
+            }
+        """.trimIndent()
+        val russianSpeechChunk2 = """
+            {
+              "serverContent": {
+                "outputTranscription": {
+                  "text": "Твой общий баланс — 217 тысяч рублей."
+                },
+                "turnComplete": true
+              }
+            }
+        """.trimIndent()
+
+        controller.processServerMessageForTest(russianSpeechChunk1)
+        assertEquals("Слушай, цифры интересные!", controller.liveSubtitle.value)
+
+        controller.processServerMessageForTest(russianSpeechChunk2)
+        assertEquals(
+            "Слушай, цифры интересные! Твой общий баланс — 217 тысяч рублей.",
+            controller.liveSubtitle.value
+        )
+
+        // В истории реплик для итогового резюме сохранён только чистый русский ответ Давида без мыслей
+        assertEquals(1, controller.transcriptTurns.size)
+        assertEquals(DavidLiveSpeaker.DAVID, controller.transcriptTurns.first().speaker)
+        assertEquals(
+            "Слушай, цифры интересные! Твой общий баланс — 217 тысяч рублей.",
+            controller.transcriptTurns.first().text
+        )
     }
 
     @Test

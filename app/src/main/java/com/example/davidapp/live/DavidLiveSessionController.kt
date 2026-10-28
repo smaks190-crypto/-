@@ -142,7 +142,7 @@ class DavidLiveSessionController(
      * Appends a transcript turn (also accessible for unit/UI tests to verify summary generation).
      */
     fun recordTranscriptTurn(speaker: DavidLiveSpeaker, text: String) {
-        val clean = text.trim()
+        val clean = sanitizeSpokenSubtitle(text)
         if (clean.isEmpty()) return
         synchronized(_transcriptTurns) {
             val last = _transcriptTurns.lastOrNull()
@@ -159,6 +159,13 @@ class DavidLiveSessionController(
                 )
             }
         }
+    }
+
+    /**
+     * Processes a raw JSON message from the Gemini Live server (exposed as `internal` for unit testing).
+     */
+    internal fun processServerMessageForTest(rawJson: String) {
+        handleServerJsonMessage(ws = null, rawJson = rawJson)
     }
 
     private fun connectWebSocket(modelIndex: Int) {
@@ -232,7 +239,7 @@ class DavidLiveSessionController(
             Ты — Давид Жабов 🐸, харизматичный, ироничный и острый на ум ИИ-аудитор личных финансов в приложении David Finance AI.
             Сейчас ты работаешь в голосовом режиме реального времени David Live.
             Правила общения в David Live:
-            1. Отвечай живо, естественно и лаконично (2–4 предложения за реплику), чтобы голосовой диалог был динамичным.
+            1. Всегда говори и отвечай ТОЛЬКО на русском языке. Отвечай живо, естественно и лаконично (2–4 предложения за реплику).
             2. Для любых вопросов про баланс, расходы, доходы, категории, бюджеты, цели, сравнение периодов или прогноз остатка бюджета ОБЯЗАТЕЛЬНО вызывай предоставленные инструменты (tools).
             3. НИКОГДА не выдумывай суммы, категории, проценты или операции, которых нет в ответах инструментов. Если данных недостаточно — честно скажи об этом.
             4. Ты работаешь строго в режиме чтения: никогда не утверждай, что ты сам создал, изменил или удалил финансовую операцию без подтверждения пользователя.
@@ -293,7 +300,7 @@ class DavidLiveSessionController(
         }
     }
 
-    private fun handleServerJsonMessage(ws: WebSocket, rawJson: String) {
+    private fun handleServerJsonMessage(ws: WebSocket?, rawJson: String) {
         val root = try {
             JSONObject(rawJson)
         } catch (_: Exception) {
@@ -305,7 +312,9 @@ class DavidLiveSessionController(
             setupCompleted.set(true)
             _connectionState.value = DavidLiveConnectionState.LISTENING
             _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Говорите, я слушаю..."
-            startAudioStreaming(ws)
+            if (ws != null) {
+                startAudioStreaming(ws)
+            }
             return
         }
 
@@ -344,7 +353,7 @@ class DavidLiveSessionController(
                             }
                         )
                     }
-                    ws.send(toolResponseMsg.toString())
+                    ws?.send(toolResponseMsg.toString())
                 }
             }
             return
@@ -361,14 +370,23 @@ class DavidLiveSessionController(
             return
         }
 
+        // User's live speech transcription
         val inputTranscription = serverContent.optJSONObject("inputTranscription")
             ?.optString("text")
             ?.takeIf { it.isNotBlank() }
         if (inputTranscription != null) {
+            if (pendingDavidTranscript.isNotEmpty()) {
+                recordTranscriptTurn(DavidLiveSpeaker.DAVID, pendingDavidTranscript.toString())
+                pendingDavidTranscript.clear()
+            }
             pendingUserTranscript.append(inputTranscription)
-            _liveSubtitle.value = pendingUserTranscript.toString().trim()
+            val cleanedUserText = sanitizeSpokenSubtitle(pendingUserTranscript.toString())
+            if (cleanedUserText.isNotBlank()) {
+                _liveSubtitle.value = cleanedUserText
+            }
         }
 
+        // David's actual spoken voice transcription (outputTranscription)
         val outputTranscription = serverContent.optJSONObject("outputTranscription")
             ?.optString("text")
             ?.takeIf { it.isNotBlank() }
@@ -379,7 +397,10 @@ class DavidLiveSessionController(
             }
             pendingDavidTranscript.append(outputTranscription)
             _connectionState.value = DavidLiveConnectionState.DAVID_SPEAKING
-            _liveSubtitle.value = pendingDavidTranscript.toString().trim()
+            val cleanedDavidText = sanitizeSpokenSubtitle(pendingDavidTranscript.toString())
+            if (cleanedDavidText.isNotBlank()) {
+                _liveSubtitle.value = cleanedDavidText
+            }
         }
 
         val modelTurn = serverContent.optJSONObject("modelTurn")
@@ -387,10 +408,20 @@ class DavidLiveSessionController(
         if (parts != null) {
             for (i in 0 until parts.length()) {
                 val part = parts.optJSONObject(i) ?: continue
+
+                // IMPORTANT: Native audio thinking models (like gemini-2.5-flash-native-audio-preview)
+                // send internal Chain-of-Thought reasoning in `modelTurn.parts[i].text` (often with `"thought": true`
+                // or English markdown headers like `**Crafting The Greeting**\nI'm working on...`),
+                // while the real Russian spoken response arrives via `serverContent.outputTranscription`.
+                // We must NEVER display internal thought parts in the user's subtitle bubble!
+                val isThoughtPart = isInternalThoughtPart(part)
                 val textPart = part.optString("text").takeIf { it.isNotBlank() }
-                if (textPart != null && outputTranscription == null) {
-                    pendingDavidTranscript.append(textPart)
-                    _liveSubtitle.value = pendingDavidTranscript.toString().trim()
+                if (!isThoughtPart && textPart != null && outputTranscription == null && ! part.has("inlineData")) {
+                    val cleanedPart = sanitizeSpokenSubtitle(textPart)
+                    if (cleanedPart.isNotBlank()) {
+                        pendingDavidTranscript.append(cleanedPart)
+                        _liveSubtitle.value = sanitizeSpokenSubtitle(pendingDavidTranscript.toString())
+                    }
                 }
 
                 val inlineData = part.optJSONObject("inlineData")
@@ -404,9 +435,13 @@ class DavidLiveSessionController(
                             null
                         }
                         if (pcmBytes != null && pcmBytes.isNotEmpty()) {
+                            if (pendingUserTranscript.isNotEmpty()) {
+                                recordTranscriptTurn(DavidLiveSpeaker.USER, pendingUserTranscript.toString())
+                                pendingUserTranscript.clear()
+                            }
                             _connectionState.value = DavidLiveConnectionState.DAVID_SPEAKING
                             if (pendingDavidTranscript.isEmpty()) {
-                                _liveSubtitle.value = "Отлично, продолжаю..."
+                                _liveSubtitle.value = "Давид отвечает..."
                             }
                             audioEngine.enqueueModelAudioPcm24k(pcmBytes)
                         }
@@ -422,6 +457,70 @@ class DavidLiveSessionController(
                 _liveSubtitle.value = "Говорите, я слушаю..."
             }
         }
+    }
+
+    /**
+     * Detects whether a `modelTurn` part represents internal model reasoning (`thought`)
+     * rather than spoken dialogue.
+     */
+    internal fun isInternalThoughtPart(part: JSONObject): Boolean {
+        if (part.optBoolean("thought", false)) return true
+        if (part.has("thoughtSignature")) return true
+        val rawText = part.optString("text", "").trim()
+        if (rawText.isEmpty()) return false
+        return isInternalThoughtText(rawText)
+    }
+
+    /**
+     * Filters out internal English Chain-of-Thought blocks (e.g. `**Crafting The Greeting**\nI'm working on...`,
+     * `**Providing Budget Details**\nI need to use the 'get_financial_overview' tool...`).
+     */
+    internal fun isInternalThoughtText(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return false
+        // Markdown bold title at the start of a reasoning block: `**Title**`
+        if (trimmed.startsWith("**") && trimmed.indexOf("**", startIndex = 2) in 3..80) {
+            return true
+        }
+        val lower = trimmed.lowercase()
+        val thoughtMarkers = listOf(
+            "i'm working on",
+            "i am working on",
+            "i need to use",
+            "i realize my",
+            "my goal is",
+            "i'll start by",
+            "i will start by",
+            "i should respond",
+            "let's formulate",
+            "crafting the",
+            "de-escalating the",
+            "providing budget",
+            "analyzing the user"
+        )
+        if (thoughtMarkers.any { lower.contains(it) }) {
+            return true
+        }
+        // In David Live, David always speaks Russian. If a modelTurn.part text has no Cyrillic characters
+        // at all and contains multiple Latin words, it is internal English reasoning/metadata.
+        val hasCyrillic = trimmed.any { it in '\u0400'..'\u04FF' }
+        val latinCount = trimmed.count { it in 'A'..'Z' || it in 'a'..'z' }
+        if (!hasCyrillic && latinCount > 12) {
+            return true
+        }
+        return false
+    }
+
+    /**
+     * Strips any accidental markdown thought headers or control tags from spoken subtitle text.
+     */
+    internal fun sanitizeSpokenSubtitle(raw: String): String {
+        val withoutBoldHeaders = raw
+            .replace(Regex("\\*\\*[^*]+\\*\\*"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (isInternalThoughtText(withoutBoldHeaders)) return ""
+        return withoutBoldHeaders
     }
 
     private fun startAudioStreaming(ws: WebSocket) {

@@ -1,11 +1,18 @@
 package com.example.davidapp.live
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
+import android.os.Build
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -25,10 +32,14 @@ import kotlin.math.sqrt
 /**
  * Full-duplex audio streaming and real-time FFT spectrum engine for David Live.
  *
- * - Captures 16 kHz / 16-bit / Mono PCM microphone audio via [AudioRecord] (VOICE_COMMUNICATION)
- *   and streams chunks to Gemini Live while feeding [DavidLiveSpectrumAnalyzer].
+ * - Uses [AudioAttributes.USAGE_ASSISTANT] + [AudioAttributes.CONTENT_TYPE_SPEECH] so Android (including Android 17)
+ *   binds hardware volume buttons directly to the AI Assistant / Neural Network volume slider
+ *   instead of the phone call stream.
+ * - Captures 16 kHz / 16-bit / Mono PCM microphone audio via [AudioRecord] with hardware
+ *   [AcousticEchoCanceler], [NoiseSuppressor], and [AutomaticGainControl] without switching the system
+ *   into phone-call mode (`MODE_IN_COMMUNICATION`).
  * - Plays 24 kHz / 16-bit / Mono PCM voice chunks from Gemini Live via [AudioTrack]
- *   while feeding [DavidLiveSpectrumAnalyzer] so the circular visualizer responds to
+ *   while feeding [DavidLiveSpectrumAnalyzer] so the circular visualizer responds vividly to
  *   both the user's voice and David's voice.
  * - Supports instant barge-in (flushing playback queue when user interrupts David)
  *   and microphone mute/unmute without dropping the Live session.
@@ -42,6 +53,9 @@ class DavidLiveAudioEngine(
 
     private var audioRecord: AudioRecord? = null
     private var audioTrack: AudioTrack? = null
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private var autoGainControl: AutomaticGainControl? = null
 
     private val playbackQueue = ConcurrentLinkedQueue<ShortArray>()
     private val isRunning = AtomicBoolean(false)
@@ -49,15 +63,24 @@ class DavidLiveAudioEngine(
     private val lastOutputChunkTimestamp = AtomicLong(0L)
 
     private val _rayMagnitudes = MutableStateFlow(
-        List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.04f }
+         defaultRestingRays()
     )
     val rayMagnitudes: StateFlow<List<Float>> = _rayMagnitudes.asStateFlow()
 
-    private val _overallEnergy = MutableStateFlow(0f)
+    private val _overallEnergy = MutableStateFlow(0.14f)
     val overallEnergy: StateFlow<Float> = _overallEnergy.asStateFlow()
 
     private val _activeSpeaker = MutableStateFlow(DavidLiveSpeaker.NONE)
     val activeSpeaker: StateFlow<DavidLiveSpeaker> = _activeSpeaker.asStateFlow()
+
+    /**
+     * Builds the official Android [AudioAttributes] for AI / Voice Assistants (`USAGE_ASSISTANT`).
+     * In Android 17 (and modern Android versions with dedicated Assistant volume), this routes
+     * audio and hardware volume controls to the AI / Neural Network volume channel.
+     */
+    fun buildAssistantAudioAttributes(): AudioAttributes {
+        return Companion.buildAssistantAudioAttributes()
+    }
 
     /**
      * Starts full-duplex audio capture and playback loops.
@@ -144,6 +167,8 @@ class DavidLiveAudioEngine(
         engineScope.coroutineContext.cancelChildren()
         playbackQueue.clear()
 
+        releaseAudioEffects()
+
         try {
             audioRecord?.stop()
         } catch (_: Exception) {
@@ -166,8 +191,8 @@ class DavidLiveAudioEngine(
 
         spectrumAnalyzer.reset()
         _activeSpeaker.value = DavidLiveSpeaker.NONE
-        _rayMagnitudes.value = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.04f }
-        _overallEnergy.value = 0f
+        _rayMagnitudes.value = defaultRestingRays()
+        _overallEnergy.value = 0.14f
     }
 
     @SuppressLint("MissingPermission")
@@ -182,24 +207,16 @@ class DavidLiveAudioEngine(
                 AudioFormat.ENCODING_PCM_16BIT
             ).coerceAtLeast(3200)
 
-            val record = try {
-                AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                    INPUT_SAMPLE_RATE_HZ,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    minBuf * 2
-                )
-            } catch (_: Exception) {
-                null
-            }
+            // Use VOICE_RECOGNITION (with fallback to MIC) instead of VOICE_COMMUNICATION
+            // so Android does NOT switch the volume slider into phone-call receiver mode.
+            val record = tryCreateAudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, minBuf)
+                ?: tryCreateAudioRecord(MediaRecorder.AudioSource.MIC, minBuf)
 
             if (record == null || record.state != AudioRecord.STATE_INITIALIZED) {
                 try {
                     record?.release()
                 } catch (_: Exception) {
                 }
-                // Keep decay loop active even on emulator without hardware mic
                 while (isActive && isRunning.get()) {
                     if (System.currentTimeMillis() - lastOutputChunkTimestamp.get() > 160L) {
                         _rayMagnitudes.value = spectrumAnalyzer.decayFrame()
@@ -211,6 +228,8 @@ class DavidLiveAudioEngine(
             }
 
             audioRecord = record
+            attachAudioEffects(record.audioSessionId)
+
             try {
                 record.startRecording()
             } catch (_: Exception) {
@@ -290,6 +309,65 @@ class DavidLiveAudioEngine(
         }
     }
 
+    @SuppressLint("MissingPermission")
+    private fun tryCreateAudioRecord(audioSource: Int, minBuf: Int): AudioRecord? {
+        return try {
+            val rec = AudioRecord(
+                audioSource,
+                INPUT_SAMPLE_RATE_HZ,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                minBuf * 2
+            )
+            if (rec.state == AudioRecord.STATE_INITIALIZED) rec else {
+                rec.release()
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun attachAudioEffects(sessionId: Int) {
+        releaseAudioEffects()
+        try {
+            if (AcousticEchoCanceler.isAvailable()) {
+                echoCanceler = AcousticEchoCanceler.create(sessionId)?.apply { enabled = true }
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            if (NoiseSuppressor.isAvailable()) {
+                noiseSuppressor = NoiseSuppressor.create(sessionId)?.apply { enabled = true }
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            if (AutomaticGainControl.isAvailable()) {
+                autoGainControl = AutomaticGainControl.create(sessionId)?.apply { enabled = true }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun releaseAudioEffects() {
+        try {
+            echoCanceler?.release()
+        } catch (_: Exception) {
+        }
+        echoCanceler = null
+        try {
+            noiseSuppressor?.release()
+        } catch (_: Exception) {
+        }
+        noiseSuppressor = null
+        try {
+            autoGainControl?.release()
+        } catch (_: Exception) {
+        }
+        autoGainControl = null
+    }
+
     private fun startPlaybackWorker() {
         playbackJob = engineScope.launch {
             val minOutBuf = AudioTrack.getMinBufferSize(
@@ -298,14 +376,10 @@ class DavidLiveAudioEngine(
                 AudioFormat.ENCODING_PCM_16BIT
             ).coerceAtLeast(4800)
 
+            val assistantAttrs = buildAssistantAudioAttributes()
             val track = try {
                 AudioTrack.Builder()
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .build()
-                    )
+                    .setAudioAttributes(assistantAttrs)
                     .setAudioFormat(
                         AudioFormat.Builder()
                             .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -329,6 +403,11 @@ class DavidLiveAudioEngine(
             while (isActive && isRunning.get()) {
                 val samples = playbackQueue.poll()
                 if (samples == null) {
+                    if (System.currentTimeMillis() - lastOutputChunkTimestamp.get() > 220L &&
+                        _activeSpeaker.value == DavidLiveSpeaker.DAVID
+                    ) {
+                        _activeSpeaker.value = DavidLiveSpeaker.NONE
+                    }
                     delay(12L)
                     continue
                 }
@@ -361,7 +440,78 @@ class DavidLiveAudioEngine(
     companion object {
         const val INPUT_SAMPLE_RATE_HZ = 16_000
         const val OUTPUT_SAMPLE_RATE_HZ = 24_000
-        private const val USER_SPEECH_RMS_THRESHOLD = 0.015f
+        const val AUDIO_USAGE_ASSISTANT = AudioAttributes.USAGE_ASSISTANT
+        const val AUDIO_CONTENT_TYPE_SPEECH = AudioAttributes.CONTENT_TYPE_SPEECH
+        private const val USER_SPEECH_RMS_THRESHOLD = 0.009f
         private const val BARGE_IN_RMS_THRESHOLD = 0.055f
+
+        /**
+         * Builds the [AudioAttributes] tied to the AI Assistant / Neural Network volume channel
+         * (`AudioAttributes.USAGE_ASSISTANT` + `AudioAttributes.CONTENT_TYPE_SPEECH`).
+         */
+        fun buildAssistantAudioAttributes(): AudioAttributes {
+            return AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+        }
+
+        /**
+         * Resolves the Android volume control stream for the AI Assistant (`USAGE_ASSISTANT`),
+         * ensuring hardware volume buttons adjust the Neural Network / Assistant volume slider on Android 17+.
+         */
+        fun getAssistantVolumeStreamType(): Int {
+            return try {
+                buildAssistantAudioAttributes().volumeControlStream
+            } catch (_: Exception) {
+                AudioManager.STREAM_MUSIC
+            }
+        }
+
+        /**
+         * Requests transient assistant audio focus so the OS routes hardware volume keys
+         * to the AI Assistant stream while the David Live overlay is open.
+         */
+        fun requestAssistantAudioFocus(context: Context): AudioFocusRequest? {
+            return try {
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                    ?: return null
+                // Ensure the device is in MODE_NORMAL so it never hijacks volume buttons to STREAM_VOICE_CALL
+                if (audioManager.mode == AudioManager.MODE_IN_COMMUNICATION) {
+                    audioManager.mode = AudioManager.MODE_NORMAL
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val focusReq = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                        .setAudioAttributes(buildAssistantAudioAttributes())
+                        .setAcceptsDelayedFocusGain(false)
+                        .setOnAudioFocusChangeListener { }
+                        .build()
+                    audioManager.requestAudioFocus(focusReq)
+                    focusReq
+                } else {
+                    null
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        fun abandonAssistantAudioFocus(context: Context, request: AudioFocusRequest?) {
+            if (request == null) return
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                    audioManager?.abandonAudioFocusRequest(request)
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        private fun defaultRestingRays(): List<Float> {
+            val env = DavidLiveSpectrumAnalyzer().getRadialSpatialEnvelope()
+            return List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { idx ->
+                (0.14f * env.getOrElse(idx) { 0.5f }).coerceIn(0.05f, 0.22f)
+            }
+        }
     }
 }
