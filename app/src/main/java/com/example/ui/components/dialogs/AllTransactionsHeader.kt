@@ -275,6 +275,7 @@ fun CompactScrolledSummaryHeader(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .background(Slate800.copy(alpha = 0.85f))
+                    .testTag("compact_expand_chart_button")
                     .clickable { onExpandChart() }
                     .padding(horizontal = 8.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,

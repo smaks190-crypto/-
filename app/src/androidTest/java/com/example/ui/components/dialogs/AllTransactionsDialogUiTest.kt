@@ -419,11 +419,20 @@ class AllTransactionsDialogUiTest {
         composeTestRule.onNodeWithTag("period_tab_year").assertIsSelected()
         composeTestRule.onNodeWithTag("period_tab_week").assertIsNotSelected()
         composeTestRule.onNodeWithText("Показано 4 из 7 операций").assertIsDisplayed()
+
+        saveUiScreenshot("08_year_period_active")
+
         assertTransactionDisplayedInList("Октябрьский Раф")
         assertTransactionDisplayedInList("Сентябрьский Супермаркет")
         assertTransactionDisplayedInList("Августовский Отель")
 
-        saveUiScreenshot("08_year_period_active")
+        // При прокрутке списка вниз к августовской операции карточка графика автоматически сворачивается в компактную шапку;
+        // разворачиваем её обратно перед повторным нажатием «Год»
+        try {
+            composeTestRule.onNodeWithTag("compact_expand_chart_button").performClick()
+            composeTestRule.waitForIdle()
+        } catch (_: Throwable) {
+        }
 
         // Повторное нажатие «Год» -> снимает годовой фильтр и возвращает к просмотру Октября (2 расхода из 3 операций)
         composeTestRule.onNodeWithTag("period_tab_year").performClick()
