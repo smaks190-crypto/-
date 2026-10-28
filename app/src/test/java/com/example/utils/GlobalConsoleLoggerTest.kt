@@ -393,4 +393,98 @@ class GlobalConsoleLoggerTest {
         assertTrue(aiPrompt.contains("## 5. Задача для ИИ"))
         assertFalse("AI prompt must never contain raw API key", aiPrompt.contains("AIzaSyTestKey1234567890123456"))
     }
+
+    @Test
+    fun `formatLastAddedVoiceOperationText returns only the latest operation in Gemini Live`() {
+        val operations = listOf(
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Фастфуд и Доставка",
+                subcategory = "Бургер",
+                title = "Бургер",
+                amount = 500.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Продукты и Выживание",
+                subcategory = "Продукты",
+                title = "Продукты",
+                amount = 5000.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "income",
+                category = "Зарплата",
+                subcategory = "Зарплата",
+                title = "Зарплата",
+                amount = 50000.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Шмотки и Тяги",
+                subcategory = "Футболка",
+                title = "Футболка",
+                amount = 25000.0
+            )
+        )
+
+        val liveText = com.example.ui.components.formatLastAddedVoiceOperationText(operations)
+        assertEquals("Футболка 25 000 ₽", liveText)
+        assertFalse("Must not concatenate previous operations", liveText.contains("Бургер"))
+        assertFalse("Must not concatenate previous operations", liveText.contains("Продукты"))
+    }
+
+    @Test
+    fun `calculateVoiceBatchSummary separates incomes and expenses instead of summing absolute values`() {
+        val mixedOps = listOf(
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Фастфуд и Доставка",
+                subcategory = "Бургер",
+                title = "Бургер",
+                amount = 500.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Продукты и Выживание",
+                subcategory = "Продукты",
+                title = "Продукты",
+                amount = 5000.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "income",
+                category = "Зарплата",
+                subcategory = "Зарплата",
+                title = "Зарплата",
+                amount = 50000.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Шмотки и Тяги",
+                subcategory = "Футболка",
+                title = "Футболка",
+                amount = 25000.0
+            )
+        )
+
+        val summary = com.example.ui.components.calculateVoiceBatchSummary(mixedOps)
+        assertTrue(summary.isMixed)
+        assertEquals(50000.0, summary.totalIncome, 0.001)
+        assertEquals(30500.0, summary.totalExpense, 0.001)
+        assertEquals(19500.0, summary.netBalance, 0.001)
+        assertEquals("Итог: +19 500 ₽", summary.headerSubtitleText)
+        assertEquals("Сохранить (4) • +50 000 ₽ / -30 500 ₽", summary.saveButtonPlainText)
+        assertFalse("Must never show gross sum 80 500 ₽", summary.saveButtonPlainText.contains("80 500"))
+
+        val expensesOnly = mixedOps.filter { it.type == "expense" }
+        val expSummary = com.example.ui.components.calculateVoiceBatchSummary(expensesOnly)
+        assertFalse(expSummary.isMixed)
+        assertEquals("-30 500 ₽", expSummary.headerSubtitleText)
+        assertEquals("Сохранить (3) • -30 500 ₽", expSummary.saveButtonPlainText)
+
+        val incomesOnly = mixedOps.filter { it.type == "income" }
+        val incSummary = com.example.ui.components.calculateVoiceBatchSummary(incomesOnly)
+        assertFalse(incSummary.isMixed)
+        assertEquals("+50 000 ₽", incSummary.headerSubtitleText)
+        assertEquals("Сохранить (1) • +50 000 ₽", incSummary.saveButtonPlainText)
+    }
 }
