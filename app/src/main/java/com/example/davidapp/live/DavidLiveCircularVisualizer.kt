@@ -4,6 +4,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -40,7 +41,6 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.max
 import kotlin.math.pow
 import kotlin.math.sin
 
@@ -57,12 +57,23 @@ private val OuterRingBorder = Color(0xFF163840)
 private val MutedAccent = Color(0xFFEF4444)
 
 /**
+ * Луч [index] без «вертикальной» огибающей анализатора (она умножает лучи на 0.38..1.0, из-за чего
+ * силуэт вытягивался по вертикали) и с лёгким сглаживанием соседей по кругу — получается ровная окружность.
+ */
+private fun normalizedRay(rays: List<Float>, envelope: FloatArray, index: Int): Float {
+    val count = DavidLiveSpectrumAnalyzer.RAY_COUNT
+    val k = ((index % count) + count) % count
+    val env = envelope.getOrElse(k) { 1f }.coerceAtLeast(0.38f)
+    return (rays.getOrElse(k) { 0f } / env).coerceIn(0f, 1f)
+}
+
+/**
  * Circular 48-ray spectral voice visualizer for **David Live**, built on Jetpack Compose [Canvas]
  * and driven by real FFT frequency magnitudes from [DavidLiveSpectrumAnalyzer].
  *
  * Matches the approved visual concept:
- * - **Index 0 (12 o'clock) & Index 24 (6 o'clock)**: High & upper-mid vocal frequencies extend largest (`центр, крупнее`).
- * - **Index 12 (3 o'clock) & Index 36 (9 o'clock)**: Low frequencies taper smoothly (`к краям, меньше`).
+ * - Силуэт круглый: лучи равномерно расставлены по окружности, вертикальная огибающая анализатора снята.
+ * - Лучи видны ТОЛЬКО пока слышен голос (пользователь или Давид); в тишине остаются кольцо, ореол и кнопка микрофона.
  * - **Vivid Neon Palette (`#00F0A0`, `#00E5A8`, `#00D9F5`, `#00B4FF`)**:
  *   Rich multi-stop Emerald, Mint, Aqua, and Electric Cyan radial rays with 3 concentric rings of glowing
  *   outer capsule segments and atmospheric neon bloom.
@@ -88,20 +99,20 @@ fun DavidLiveCircularVisualizer(
         ),
         label = "ambient_pulse"
     )
-    val organicWavePhase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2.0 * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 4800, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "organic_wave_phase"
-    )
 
     val energyClamped = overallEnergy.coerceIn(0f, 1f)
     val isDavidSpeaking = connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
         activeSpeaker == DavidLiveSpeaker.DAVID
     val isUserSpeaking = activeSpeaker == DavidLiveSpeaker.USER || energyClamped > 0.18f
+
+    // Лучи показываем только пока реально слышен голос (activeSpeaker идёт от аудио-потока, а не от состояния сессии).
+    val voiceActive = activeSpeaker != DavidLiveSpeaker.NONE
+    val rayVisibility by animateFloatAsState(
+        targetValue = if (voiceActive) 1f else 0f,
+        animationSpec = tween(durationMillis = if (voiceActive) 90 else 280, easing = LinearEasing),
+        label = "ray_visibility"
+    )
+    val radialEnvelope = remember { DavidLiveSpectrumAnalyzer().getRadialSpatialEnvelope() }
 
     Box(
         modifier = modifier
@@ -187,8 +198,12 @@ fun DavidLiveCircularVisualizer(
             val rayCount = DavidLiveSpectrumAnalyzer.RAY_COUNT
             val baseStrokeWidth = (size.minDimension * 0.0138f).coerceAtLeast(3.4f)
 
-            for (i in 0 until rayCount) {
-                val fftMag = rayMagnitudes.getOrElse(i) { 0.12f }.coerceIn(0f, 1f)
+            val raysToDraw = if (rayVisibility > 0.02f) rayCount else 0
+
+            for (i in 0 until raysToDraw) {
+                val fftMag = 0.5f * normalizedRay(rayMagnitudes, radialEnvelope, i) +
+                    0.25f * normalizedRay(rayMagnitudes, radialEnvelope, i - 1) +
+                    0.25f * normalizedRay(rayMagnitudes, radialEnvelope, i + 1)
 
                 // Index 0 = 12 o'clock (-PI/2 in Canvas), clockwise around the circle.
                 // This matches DavidLiveSpectrumAnalyzer's polar topology 1:1!
@@ -201,15 +216,8 @@ fun DavidLiveCircularVisualizer(
                 // 0.0 at horizontal right (3h) and left (9h) edges ("Низкие частоты, к краям меньше")
                 val verticalFocus = abs(cos(angleFromTopRad)).pow(1.15f)
 
-                // Organic wave so the visualizer breathes with life in "Говорите, я слушаю..." & "Тихая речь"
-                val organicShimmer = 0.5f + 0.5f * sin(organicWavePhase + i * 0.42f)
-                val restingVivaMag = (0.16f + 0.20f * verticalFocus + 0.07f * organicShimmer * (0.4f + 0.6f * verticalFocus))
-                    .coerceIn(0.14f, 0.44f)
-
-                val effectiveMag = when {
-                    isMicMuted && !isDavidSpeaking -> 0.08f + 0.04f * verticalFocus
-                    else -> max(fftMag * 1.12f, restingVivaMag).coerceIn(0.14f, 1.0f)
-                }
+                // В тишине лучей нет (rayVisibility → 0), «дыхания» в покое больше нет.
+                val effectiveMag = (fftMag * 1.12f * rayVisibility).coerceIn(0.05f, 1.0f)
 
                 // Multi-tone color mapping matching the reference artwork:
                 // Top pole & upper hemisphere favor PeakMint (#00F0A0) & ListeningEmerald (#00E5A8);
@@ -239,9 +247,8 @@ fun DavidLiveCircularVisualizer(
                     lerp(NeonAqua, ActiveSpeechCyan, (cyanMix + 0.2f).coerceIn(0f, 1f))
                 }
 
-                // Polar envelope scales max span so center poles extend furthest and sides stay compact
-                val polarScale = 0.48f + 0.52f * verticalFocus
-                val totalSpan = maxRaySpan * polarScale * effectiveMag.coerceIn(0.14f, 1f)
+                // Круглый силуэт: одинаковая максимальная длина луча по всей окружности.
+                val totalSpan = maxRaySpan * effectiveMag.coerceIn(0.05f, 1f)
 
                 // Primary inner continuous bar segment (56% of active ray length)
                 val primaryBarLen = (totalSpan * 0.56f).coerceAtLeast(baseStrokeWidth * 1.15f)
