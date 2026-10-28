@@ -1759,8 +1759,8 @@ class BudgetRepository(
         )
 
         var lastError: String? = null
-        // WAV voice input has its own model chain; do not start every chunk with the unavailable 2.5 model.
         val modelsToTry = listOf(
+            "gemini-2.5-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite"
         )
