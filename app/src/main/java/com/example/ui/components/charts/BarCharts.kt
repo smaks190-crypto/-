@@ -3,13 +3,11 @@ package com.example.ui.components.charts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,40 +29,36 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.text.DecimalFormat
-import java.text.DecimalFormatSymbols
-import java.util.Locale
-
+import com.example.ui.components.formatShortCurrency
+import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Indigo500
+import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.ManropeFontFamily
+import com.example.ui.theme.ObsidianSurface
 import com.example.ui.theme.Rose500
+import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
-import com.example.ui.theme.Slate500
 import com.example.ui.theme.Slate600
 import com.example.ui.theme.Slate800
-import com.example.ui.theme.Slate900
-import com.example.ui.theme.DarkBg
-import com.example.ui.components.RollingCurrencyText
-import com.example.ui.components.formatShortCurrency
-import com.example.ui.components.formatFullCurrency
+import com.example.ui.theme.SpaceGroteskFontFamily
+import kotlin.math.roundToInt
 
 @Composable
 fun MonthlyBarChart(
@@ -73,46 +67,84 @@ fun MonthlyBarChart(
     expenseValues: List<Double>,
     modifier: Modifier = Modifier
 ) {
-    val maxVal = (incomeValues + expenseValues).maxOrNull()?.coerceAtLeast(100.0) ?: 100.0
+    val safeMonths = if (months.isEmpty()) HomeChartDataEngine.MonthsNominativeRu else months
+    val maxVal = remember(incomeValues, expenseValues) {
+        val rawMax = (incomeValues + expenseValues).filter { !it.isNaN() && !it.isInfinite() }.maxOrNull() ?: 0.0
+        if (rawMax <= 0.0) 100.0 else rawMax * 1.12
+    }
 
-    var chartProgressTarget by remember(months, incomeValues, expenseValues) { mutableFloatStateOf(0f) }
+    var selectedBarIdx by remember(safeMonths, incomeValues, expenseValues) { mutableStateOf<Int?>(null) }
+    var chartProgressTarget by remember(safeMonths, incomeValues, expenseValues) { mutableFloatStateOf(0f) }
     val animatedProgress by animateFloatAsState(
         targetValue = chartProgressTarget,
-        animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
         label = "bar_chart_anim"
     )
 
-    LaunchedEffect(months, incomeValues, expenseValues) {
+    LaunchedEffect(safeMonths, incomeValues, expenseValues) {
         chartProgressTarget = 1f
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End,
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Emerald400)
-                    .shadow(elevation = 4.dp, shape = RoundedCornerShape(3.dp), ambientColor = Emerald400, spotColor = Emerald400)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Доходы", color = Slate400, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            val activeIdx = selectedBarIdx
+            if (activeIdx != null && activeIdx in safeMonths.indices) {
+                val mName = safeMonths[activeIdx]
+                val inc = incomeValues.getOrElse(activeIdx) { 0.0 }
+                val exp = expenseValues.getOrElse(activeIdx) { 0.0 }
+                Text(
+                    text = "$mName: +${HomeChartDataEngine.formatCompactChartAmount(inc)} / −${HomeChartDataEngine.formatCompactChartAmount(exp)}",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            } else {
+                Text(
+                    text = "Нажмите на месяц для деталей",
+                    color = Slate400,
+                    fontSize = 11.sp,
+                    fontFamily = ManropeFontFamily
+                )
+            }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(Emerald400)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Доходы",
+                    color = Slate300,
+                    fontSize = 11.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Medium
+                )
 
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(Rose500)
-                    .shadow(elevation = 4.dp, shape = RoundedCornerShape(3.dp), ambientColor = Rose500, spotColor = Rose500)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Расходы", color = Slate400, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(Rose500)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Расходы",
+                    color = Slate300,
+                    fontSize = 11.sp,
+                    fontFamily = ManropeFontFamily,
+                    fontWeight = FontWeight.Medium
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -122,56 +154,76 @@ fun MonthlyBarChart(
                 .fillMaxWidth()
                 .height(160.dp)
         ) {
-            Canvas(modifier = Modifier.fillMaxWidth().height(160.dp)) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .pointerInput(safeMonths) {
+                        detectTapGestures { offset ->
+                            val count = safeMonths.size.coerceAtLeast(1)
+                            val groupW = size.width / count.toFloat()
+                            val idx = (offset.x / groupW).toInt().coerceIn(0, count - 1)
+                            selectedBarIdx = if (selectedBarIdx == idx) null else idx
+                        }
+                    }
+            ) {
                 val canvasWidth = size.width
                 val canvasHeight = size.height
-                val count = months.size
+                val count = safeMonths.size.coerceAtLeast(1)
                 val groupWidth = canvasWidth / count
-                val barWidth = (groupWidth * 0.35f).coerceAtMost(12.dp.toPx())
+                val barWidth = (groupWidth * 0.34f).coerceAtMost(12.dp.toPx()).coerceAtLeast(3.dp.toPx())
+                val gap = 2.dp.toPx()
 
-                // Draw horizontal background grid lines with cyberpunk Slate800 color
-                val gridLines = 4
+                val gridLines = 3
                 for (i in 0..gridLines) {
                     val y = canvasHeight * (1f - i.toFloat() / gridLines)
                     drawLine(
-                        color = Slate800,
+                        color = Slate800.copy(alpha = 0.75f),
                         start = Offset(0f, y),
                         end = Offset(canvasWidth, y),
                         strokeWidth = 1.dp.toPx()
                     )
                 }
 
-                months.forEachIndexed { i, _ ->
-                    val inc = incomeValues.getOrElse(i) { 0.0 }
-                    val exp = expenseValues.getOrElse(i) { 0.0 }
+                safeMonths.forEachIndexed { i, _ ->
+                    val inc = incomeValues.getOrElse(i) { 0.0 }.coerceAtLeast(0.0)
+                    val exp = expenseValues.getOrElse(i) { 0.0 }.coerceAtLeast(0.0)
+                    val isSelected = selectedBarIdx == i
 
-                    val incHeight = if (inc > 0) {
-                        (((inc / maxVal) * canvasHeight).toFloat() * animatedProgress).coerceAtLeast(6.dp.toPx())
-                    } else 0f
-
-                    val expHeight = if (exp > 0) {
-                        (((exp / maxVal) * canvasHeight).toFloat() * animatedProgress).coerceAtLeast(6.dp.toPx())
-                    } else 0f
-
-                    val groupX = i * groupWidth + (groupWidth - (barWidth * 2 + 2.dp.toPx())) / 2
-
-                    // Income Bar with slight neon glow style
-                    if (incHeight > 0) {
+                    if (isSelected) {
                         drawRoundRect(
-                            color = Emerald400,
-                            topLeft = Offset(groupX, canvasHeight - incHeight),
-                            size = Size(barWidth, incHeight),
-                            cornerRadius = CornerRadius(3.dp.toPx())
+                            color = Color.White.copy(alpha = 0.05f),
+                            topLeft = Offset(i * groupWidth + 1.dp.toPx(), 0f),
+                            size = Size((groupWidth - 2.dp.toPx()).coerceAtLeast(2f), canvasHeight),
+                            cornerRadius = CornerRadius(6.dp.toPx())
                         )
                     }
 
-                    // Expense Bar with slight neon glow style
-                    if (expHeight > 0) {
+                    val incHeight = if (inc > 0.0) {
+                        (((inc / maxVal) * canvasHeight).toFloat() * animatedProgress).coerceAtLeast(5.dp.toPx())
+                    } else 0f
+
+                    val expHeight = if (exp > 0.0) {
+                        (((exp / maxVal) * canvasHeight).toFloat() * animatedProgress).coerceAtLeast(5.dp.toPx())
+                    } else 0f
+
+                    val groupX = i * groupWidth + (groupWidth - (barWidth * 2 + gap)) / 2f
+
+                    if (incHeight > 0f) {
                         drawRoundRect(
-                            color = Rose500,
-                            topLeft = Offset(groupX + barWidth + 2.dp.toPx(), canvasHeight - expHeight),
+                            color = if (isSelected || selectedBarIdx == null) Emerald400 else Emerald400.copy(alpha = 0.55f),
+                            topLeft = Offset(groupX, canvasHeight - incHeight),
+                            size = Size(barWidth, incHeight),
+                            cornerRadius = CornerRadius(3.5.dp.toPx())
+                        )
+                    }
+
+                    if (expHeight > 0f) {
+                        drawRoundRect(
+                            color = if (isSelected || selectedBarIdx == null) Rose500 else Rose500.copy(alpha = 0.55f),
+                            topLeft = Offset(groupX + barWidth + gap, canvasHeight - expHeight),
                             size = Size(barWidth, expHeight),
-                            cornerRadius = CornerRadius(3.dp.toPx())
+                            cornerRadius = CornerRadius(3.5.dp.toPx())
                         )
                     }
                 }
@@ -180,18 +232,16 @@ fun MonthlyBarChart(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Month Labels aligned evenly
-        Row(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            months.forEach { m ->
-                val shortName = m.take(3)
+        Row(modifier = Modifier.fillMaxWidth()) {
+            safeMonths.forEachIndexed { idx, m ->
+                val isSelected = selectedBarIdx == idx
+                val shortName = m.take(3).uppercase()
                 Text(
-                    text = shortName.uppercase(),
-                    color = Slate400,
+                    text = shortName,
+                    color = if (isSelected) Emerald400 else Slate400,
                     fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
+                    fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
+                    fontFamily = SpaceGroteskFontFamily,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.weight(1f)
                 )
@@ -207,20 +257,18 @@ fun IncomeExpenseComparisonCard(
     title: String = "Сравнение доходов и расходов",
     modifier: Modifier = Modifier
 ) {
-    val maxVal = maxOf(income, expense).coerceAtLeast(1.0)
-    val symbols = DecimalFormatSymbols(Locale("ru", "RU")).apply {
-        groupingSeparator = ' '
-        decimalSeparator = ','
-    }
-    val df = DecimalFormat("#,##0.##", symbols).apply { isGroupingUsed = true }
+    val safeIncome = income.coerceAtLeast(0.0)
+    val safeExpense = expense.coerceAtLeast(0.0)
+    val maxVal = maxOf(safeIncome, safeExpense).coerceAtLeast(1.0)
+    val diff = safeIncome - safeExpense
 
     Card(
-        colors = CardDefaults.cardColors(containerColor = DarkBg.copy(alpha = 0.85f)),
-        shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Slate800),
+        colors = CardDefaults.cardColors(containerColor = ObsidianSurface),
+        shape = RoundedCornerShape(22.dp),
+        border = BorderStroke(1.dp, GlassBorder),
         modifier = modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(18.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -228,19 +276,19 @@ fun IncomeExpenseComparisonCard(
             ) {
                 Text(
                     text = title.uppercase(),
-                    color = Color.White,
-                    fontSize = 12.sp,
+                    color = Slate300,
+                    fontSize = 11.sp,
+                    fontFamily = ManropeFontFamily,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp
                 )
-                val diff = income - expense
-                val diffStr = if (diff >= 0) "+${df.format(diff)} ₽" else "${df.format(diff)} ₽"
+                val diffPrefix = if (diff >= 0.0) "+" else "−"
                 Text(
-                    text = diffStr,
-                    color = if (diff >= 0) Emerald400 else Rose500,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace
+                    text = "$diffPrefix${HomeChartDataEngine.formatCompactChartAmount(kotlin.math.abs(diff))}",
+                    color = if (diff >= 0.0) Emerald400 else Rose500,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = SpaceGroteskFontFamily
                 )
             }
 
@@ -252,8 +300,21 @@ fun IncomeExpenseComparisonCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("ДОХОДЫ", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
-                    Text("${df.format(income)} ₽", color = Emerald400, fontSize = 11.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                    Text(
+                        text = "ДОХОДЫ",
+                        color = Slate400,
+                        fontSize = 10.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+                    Text(
+                        text = "+${formatShortCurrency(safeIncome)}",
+                        color = Emerald400,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = SpaceGroteskFontFamily
+                    )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Box(
@@ -261,16 +322,18 @@ fun IncomeExpenseComparisonCard(
                         .fillMaxWidth()
                         .height(8.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(Slate900)
+                        .background(DarkBg)
                 ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(fraction = (income / maxVal).toFloat().coerceIn(0.02f, 1f))
+                            .fillMaxWidth(
+                                fraction = if (safeIncome > 0.0) (safeIncome / maxVal).toFloat().coerceIn(0.04f, 1f) else 0f
+                            )
                             .height(8.dp)
                             .clip(RoundedCornerShape(4.dp))
                             .background(
                                 brush = Brush.horizontalGradient(
-                                    colors = listOf(Emerald400.copy(alpha = 0.7f), Emerald400)
+                                    colors = listOf(Emerald400.copy(alpha = 0.75f), Emerald400)
                                 )
                             )
                     )
@@ -285,8 +348,21 @@ fun IncomeExpenseComparisonCard(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("РАСХОДЫ", color = Slate400, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
-                    Text("${df.format(expense)} ₽", color = Rose500, fontSize = 11.sp, fontWeight = FontWeight.Black, fontFamily = FontFamily.Monospace)
+                    Text(
+                        text = "РАСХОДЫ",
+                        color = Slate400,
+                        fontSize = 10.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+                    Text(
+                        text = "−${formatShortCurrency(safeExpense)}",
+                        color = Rose500,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = SpaceGroteskFontFamily
+                    )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
                 Box(
@@ -294,16 +370,18 @@ fun IncomeExpenseComparisonCard(
                         .fillMaxWidth()
                         .height(8.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(Slate900)
+                        .background(DarkBg)
                 ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(fraction = (expense / maxVal).toFloat().coerceIn(0.02f, 1f))
+                            .fillMaxWidth(
+                                fraction = if (safeExpense > 0.0) (safeExpense / maxVal).toFloat().coerceIn(0.04f, 1f) else 0f
+                            )
                             .height(8.dp)
                             .clip(RoundedCornerShape(4.dp))
                             .background(
                                 brush = Brush.horizontalGradient(
-                                    colors = listOf(Rose500.copy(alpha = 0.7f), Rose500)
+                                    colors = listOf(Rose500.copy(alpha = 0.75f), Rose500)
                                 )
                             )
                     )
@@ -331,7 +409,7 @@ fun ComparativeMetricRow(
 
     val diffSign = if (diff > 0) "+" else ""
     val formattedDiff = "$diffSign${formatShortCurrency(diff)}"
-    val formattedPct = "$diffSign${Math.round(diffPct)}%"
+    val formattedPct = "$diffSign${diffPct.roundToInt()}%"
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -344,15 +422,15 @@ fun ComparativeMetricRow(
                     text = label.uppercase(),
                     color = Color.White,
                     fontSize = 11.sp,
+                    fontFamily = ManropeFontFamily,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp
                 )
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Change point badge
                 Surface(
                     color = pointColor.copy(alpha = 0.12f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, pointColor.copy(alpha = 0.4f)),
+                    border = BorderStroke(1.dp, pointColor.copy(alpha = 0.4f)),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Row(
@@ -371,7 +449,7 @@ fun ComparativeMetricRow(
                             color = pointColor,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace
+                            fontFamily = SpaceGroteskFontFamily
                         )
                     }
                 }
@@ -382,17 +460,16 @@ fun ComparativeMetricRow(
                 color = Slate400,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
-                fontFamily = FontFamily.Monospace
+                fontFamily = SpaceGroteskFontFamily
             )
         }
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Visual Canvas Chart with glowing point on top of current value
         var animProgress by remember { mutableFloatStateOf(0f) }
         val animatedProgress by animateFloatAsState(
             targetValue = animProgress,
-            animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+            animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
             label = "metric_anim"
         )
         LaunchedEffect(prevVal, currentVal) {
@@ -403,8 +480,8 @@ fun ComparativeMetricRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(65.dp)
-                .background(DarkBg.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
-                .border(1.dp, Slate800, RoundedCornerShape(12.dp))
+                .background(ObsidianSurface, RoundedCornerShape(14.dp))
+                .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
                 .padding(horizontal = 20.dp, vertical = 8.dp)
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -417,10 +494,8 @@ fun ComparativeMetricRow(
 
                 val prevX = w * 0.25f - barWidth / 2
                 val curX = w * 0.75f - barWidth / 2
-
                 val baselineY = h - 4.dp.toPx()
 
-                // Baseline
                 drawLine(
                     color = Slate800,
                     start = Offset(0f, baselineY),
@@ -428,7 +503,6 @@ fun ComparativeMetricRow(
                     strokeWidth = 1.dp.toPx()
                 )
 
-                // Previous Bar
                 val prevTopY = baselineY - prevH.coerceAtLeast(4.dp.toPx())
                 drawRoundRect(
                     color = prevColor,
@@ -437,7 +511,6 @@ fun ComparativeMetricRow(
                     cornerRadius = CornerRadius(4.dp.toPx())
                 )
 
-                // Current Bar
                 val curTopY = baselineY - curH.coerceAtLeast(4.dp.toPx())
                 drawRoundRect(
                     color = curColor,
@@ -446,7 +519,6 @@ fun ComparativeMetricRow(
                     cornerRadius = CornerRadius(4.dp.toPx())
                 )
 
-                // Connecting trend line
                 val p1 = Offset(prevX + barWidth / 2, prevTopY)
                 val p2 = Offset(curX + barWidth / 2, curTopY)
 
@@ -458,7 +530,6 @@ fun ComparativeMetricRow(
                     pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 6f), 0f)
                 )
 
-                // Glowing Point
                 drawCircle(
                     color = pointColor.copy(alpha = 0.35f),
                     radius = 9.dp.toPx() * animatedProgress,

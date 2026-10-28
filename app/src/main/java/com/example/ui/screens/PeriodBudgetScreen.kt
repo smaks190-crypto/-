@@ -733,10 +733,13 @@ fun PeriodBudgetScreen(
             }
         }
 
-        // --- EXPENSE DYNAMICS AREA CHART ---
+        // --- EXPENSE & INCOME DYNAMICS CHART (Synchronized with selectedMonthIdx & selectedYear) ---
         com.example.ui.components.charts.ExpenseDynamicsAreaChartCard(
-            transactions = monthTransactions,
+            transactions = if (allTransactions.isNotEmpty()) allTransactions else monthTransactions,
             title = "ДИНАМИКА РАСХОДОВ",
+            selectedMonthIdx = selectedMonthIdx,
+            selectedYear = selectedYear,
+            referenceDateIso = selectedDateDay,
             onClick = null
         )
 
