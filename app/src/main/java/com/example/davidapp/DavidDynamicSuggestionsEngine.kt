@@ -131,8 +131,8 @@ object DavidDynamicSuggestionsEngine {
         var goalsHash = 19L
         goals.forEach { g ->
             goalsHash = goalsHash * 31L + g.id.hashCode()
-            goalsHash = goalsHash * 31L + g.saved.toLong()
-            goalsHash = goalsHash * 31L + g.target.toLong()
+            goalsHash = goalsHash * 31L + g.currentAmount.toLong()
+            goalsHash = goalsHash * 31L + g.targetAmount.toLong()
         }
 
         var catLimitHash = 23L
@@ -367,13 +367,13 @@ object DavidDynamicSuggestionsEngine {
         }
 
         // 4. Активные финансовые цели (ТОЛЬКО если у пользователя реально созданы незакрытые цели)
-        val activeGoals = goals.filter { it.target > 0.0 && it.saved < it.target }
-            .sortedByDescending { (it.saved / it.target) }
+        val activeGoals = goals.filter { it.targetAmount > 0.0 && it.currentAmount < it.targetAmount }
+            .sortedByDescending { (it.currentAmount / it.targetAmount) }
 
         if (activeGoals.isNotEmpty()) {
             val topGoal = activeGoals.first()
-            val remainingGoal = (topGoal.target - topGoal.saved).coerceAtLeast(0.0)
-            val pct = ((topGoal.saved / topGoal.target) * 100.0).roundToInt()
+            val remainingGoal = (topGoal.targetAmount - topGoal.currentAmount).coerceAtLeast(0.0)
+            val pct = ((topGoal.currentAmount / topGoal.targetAmount) * 100.0).roundToInt()
             val shortGoalName = shortenTitle(topGoal.name, 16)
 
             candidates.add(
@@ -383,10 +383,10 @@ object DavidDynamicSuggestionsEngine {
                     topicKey = "goal_${topGoal.id}",
                     priority = 85,
                     chipLabel = "🎯 Как быстрее накопить на «$shortGoalName»?",
-                    userQuestion = "Как мне быстрее накопить на цель «${topGoal.name}»? Сейчас накоплено ${formatRub(topGoal.saved)} из ${formatRub(topGoal.target)} ($pct%).",
-                    geminiContextFacts = "Финансовая цель '${topGoal.name}': цель ${formatRub(topGoal.target)}, уже накоплено ${formatRub(topGoal.saved)} ($pct%), осталось накопить ${formatRub(remainingGoal)}.",
+                    userQuestion = "Как мне быстрее накопить на цель «${topGoal.name}»? Сейчас накоплено ${formatRub(topGoal.currentAmount)} из ${formatRub(topGoal.targetAmount)} ($pct%).",
+                    geminiContextFacts = "Финансовая цель '${topGoal.name}': цель ${formatRub(topGoal.targetAmount)}, уже накоплено ${formatRub(topGoal.currentAmount)} ($pct%), осталось накопить ${formatRub(remainingGoal)}.",
                     localDetailedAnswer = "🐸 **План ускорения цели «${topGoal.name}» ($pct%):**\n" +
-                        "Уже в копилке: **${formatRub(topGoal.saved)}** из **${formatRub(topGoal.target)}**. Осталось собрать: **${formatRub(remainingGoal)}**.\n\n" +
+                        "Уже в копилке: **${formatRub(topGoal.currentAmount)}** из **${formatRub(topGoal.targetAmount)}**. Осталось собрать: **${formatRub(remainingGoal)}**.\n\n" +
                         "• Чтобы закрыть цель за **3 месяца**, откладывай по **${formatRub(remainingGoal / 3.0)}/мес.** (или **${formatRub(remainingGoal / 90.0)}/день**).\n" +
                         "• Переводи 15% от каждого поступления дохода в «${topGoal.name}» в день получения."
                 )

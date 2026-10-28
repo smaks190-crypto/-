@@ -122,7 +122,7 @@ class GoalWidgetConfigActivity : ComponentActivity() {
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            BrandFrogAvatar(size = 48.dp, withAura = true)
+                            BrandFrogAvatar(size = 48.dp)
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
                                 Text(
@@ -217,7 +217,7 @@ class GoalWidgetConfigActivity : ComponentActivity() {
                             ) {
                                 items(goals, key = { it.id }) { goal ->
                                     val isSelected = goal.id == selectedGoalId
-                                    val pct = ((goal.saved / goal.target.coerceAtLeast(1.0)) * 100.0)
+                                    val pct = ((goal.currentAmount / goal.targetAmount.coerceAtLeast(1.0)) * 100.0)
                                         .roundToInt()
                                         .coerceIn(0, 100)
 
@@ -247,7 +247,7 @@ class GoalWidgetConfigActivity : ComponentActivity() {
                                                 )
                                                 Spacer(modifier = Modifier.height(4.dp))
                                                 Text(
-                                                    text = "Накоплено ${formatShortCurrency(goal.saved)} из ${formatShortCurrency(goal.target)}",
+                                                    text = "Накоплено ${formatShortCurrency(goal.currentAmount)} из ${formatShortCurrency(goal.targetAmount)}",
                                                     color = Slate300,
                                                     fontSize = 12.sp,
                                                     fontFamily = SpaceGroteskFontFamily

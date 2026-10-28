@@ -114,8 +114,8 @@ class DavidWidgetStateCalculatorTest {
         assertEquals(0, emptyState.totalGoalsCount)
 
         val goals = listOf(
-            GoalEntity(id = "g1", budgetId = "b1", name = "MacBook Pro", target = 200_000.0, saved = 50_000.0),
-            GoalEntity(id = "g2", budgetId = "b1", name = "Отпуск в Японии", target = 300_000.0, saved = 240_000.0)
+            GoalEntity(id = "g1", budgetId = "b1", name = "MacBook Pro", targetAmount = 200_000.0, currentAmount = 50_000.0),
+            GoalEntity(id = "g2", budgetId = "b1", name = "Отпуск в Японии", targetAmount = 300_000.0, currentAmount = 240_000.0)
         )
 
         // Exact selected goal
@@ -170,7 +170,7 @@ class DavidWidgetStateCalculatorTest {
             CategoryEntity(id = "c1", budgetId = "b1", type = "expense", name = "Еда", monthlyLimit = 50_000.0)
         )
         val goals = listOf(
-            GoalEntity(id = "g1", budgetId = "b1", name = "Подушка", target = 100_000.0, saved = 85_000.0)
+            GoalEntity(id = "g1", budgetId = "b1", name = "Подушка", targetAmount = 100_000.0, currentAmount = 85_000.0)
         )
         val prosperousTxs = listOf(
             TransactionEntity(id = "t1", budgetId = "b1", type = "income", date = "2026-10-01", category = "Зарплата", subcategory = "", amount = 120_000.0),

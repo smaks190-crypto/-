@@ -131,19 +131,19 @@ object WidgetDataLoader {
         }
 
         val transactions = try {
-            db.transactionDao().getTransactionsForBudget(activeBudgetId).first()
+            db.transactionDao().getTransactionsByBudgetId(activeBudgetId).first()
         } catch (_: Exception) {
             emptyList()
         }
 
         val categories = try {
-            db.categoryDao().getCategoriesForBudget(activeBudgetId).first()
+            db.categoryDao().getCategoriesByBudgetId(activeBudgetId).first()
         } catch (_: Exception) {
             emptyList()
         }
 
         val goals = try {
-            db.goalDao().getGoalsForBudget(activeBudgetId).first()
+            db.goalDao().getGoalsByBudgetId(activeBudgetId).first()
         } catch (_: Exception) {
             emptyList()
         }

@@ -11,7 +11,6 @@ import androidx.compose.ui.test.performClick
 import com.example.data.db.TransactionEntity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -21,7 +20,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [36])
 class HomeChartDataEngineTest {
 
     @get:Rule
@@ -31,37 +30,37 @@ class HomeChartDataEngineTest {
     fun `buildHomeChartState for MONTH synchronizes selectedMonthIdx and selectedYear with exact sums`() {
         val transactions = listOf(
             TransactionEntity(
-                id = 1,
+                id = "1",
                 type = "expense",
                 category = "Продукты",
+                subcategory = "Супермаркет",
                 amount = 4_200.0,
-                date = "2026-10-05",
-                note = "Супермаркет"
+                date = "2026-10-05"
             ),
             TransactionEntity(
-                id = 2,
+                id = "2",
                 type = "expense",
                 category = "Рестораны",
+                subcategory = "Ужин",
                 amount = 1_800.0,
-                date = "2026-10-18",
-                note = "Ужин"
+                date = "2026-10-18"
             ),
             TransactionEntity(
-                id = 3,
+                id = "3",
                 type = "income",
                 category = "Зарплата",
+                subcategory = "Аванс",
                 amount = 120_000.0,
-                date = "2026-10-10",
-                note = "Аванс"
+                date = "2026-10-10"
             ),
             // Чужой месяц (сентябрь) не должен попадать в октябрьский график:
             TransactionEntity(
-                id = 4,
+                id = "4",
                 type = "expense",
                 category = "Шоппинг",
+                subcategory = "Куртка",
                 amount = 50_000.0,
-                date = "2026-09-28",
-                note = "Куртка"
+                date = "2026-09-28"
             )
         )
 
@@ -90,37 +89,37 @@ class HomeChartDataEngineTest {
         val transactions = listOf(
             // Неделя ПН 12 окт 2026 .. ВС 18 окт 2026
             TransactionEntity(
-                id = 1,
+                id = "1",
                 type = "expense",
                 category = "Кофе",
+                subcategory = "",
                 amount = 350.0,
-                date = "2026-10-12", // ПН
-                note = ""
+                date = "2026-10-12" // ПН
             ),
             TransactionEntity(
-                id = 2,
+                id = "2",
                 type = "expense",
                 category = "Такси",
+                subcategory = "",
                 amount = 950.0,
-                date = "2026-10-15", // ЧТ
-                note = ""
+                date = "2026-10-15" // ЧТ
             ),
             TransactionEntity(
-                id = 3,
+                id = "3",
                 type = "income",
                 category = "Кэшбэк",
+                subcategory = "",
                 amount = 500.0,
-                date = "2026-10-17", // СБ
-                note = ""
+                date = "2026-10-17" // СБ
             ),
             // Операция на предыдущей неделе не должна попадать в эту неделю:
             TransactionEntity(
-                id = 4,
+                id = "4",
                 type = "expense",
                 category = "Аренда",
+                subcategory = "",
                 amount = 45_000.0,
-                date = "2026-10-02",
-                note = ""
+                date = "2026-10-02"
             )
         )
 
@@ -146,11 +145,11 @@ class HomeChartDataEngineTest {
     @Test
     fun `buildHomeChartState for YEAR aggregates all 12 months for selectedYear`() {
         val transactions = listOf(
-            TransactionEntity(id = 1, type = "expense", category = "Еда", amount = 25_000.0, date = "2026-01-15", note = ""),
-            TransactionEntity(id = 2, type = "expense", category = "Отпуск", amount = 180_000.0, date = "2026-07-20", note = ""),
-            TransactionEntity(id = 3, type = "income", category = "Зарплата", amount = 500_000.0, date = "2026-07-05", note = ""),
+            TransactionEntity(id = "1", type = "expense", category = "Еда", subcategory = "", amount = 25_000.0, date = "2026-01-15"),
+            TransactionEntity(id = "2", type = "expense", category = "Отпуск", subcategory = "", amount = 180_000.0, date = "2026-07-20"),
+            TransactionEntity(id = "3", type = "income", category = "Зарплата", subcategory = "", amount = 500_000.0, date = "2026-07-05"),
             // Другой год (2025) игнорируется:
-            TransactionEntity(id = 4, type = "expense", category = "Ремонт", amount = 300_000.0, date = "2025-12-10", note = "")
+            TransactionEntity(id = "4", type = "expense", category = "Ремонт", subcategory = "", amount = 300_000.0, date = "2025-12-10")
         )
 
         val state = HomeChartDataEngine.buildHomeChartState(
@@ -184,8 +183,8 @@ class HomeChartDataEngineTest {
 
         // Экстремально малые и большие значения
         val extremeTransactions = listOf(
-            TransactionEntity(id = 1, type = "expense", category = "Копейки", amount = 0.45, date = "2026-02-01", note = ""),
-            TransactionEntity(id = 2, type = "income", category = "Инвестиции", amount = 15_500_000.0, date = "2026-02-14", note = "")
+            TransactionEntity(id = "1", type = "expense", category = "Копейки", subcategory = "", amount = 0.45, date = "2026-02-01"),
+            TransactionEntity(id = "2", type = "income", category = "Инвестиции", subcategory = "", amount = 15_500_000.0, date = "2026-02-14")
         )
         val extremeState = HomeChartDataEngine.buildHomeChartState(
             transactions = extremeTransactions,
@@ -225,28 +224,28 @@ class HomeChartDataEngineTest {
         var txList by mutableStateOf(
             listOf(
                 TransactionEntity(
-                    id = 1,
+                    id = "1",
                     type = "expense",
                     category = "Продукты",
+                    subcategory = "",
                     amount = 5_000.0,
-                    date = "2026-10-15",
-                    note = ""
+                    date = "2026-10-15"
                 ),
                 TransactionEntity(
-                    id = 2,
+                    id = "2",
                     type = "income",
                     category = "Зарплата",
+                    subcategory = "",
                     amount = 80_000.0,
-                    date = "2026-10-01",
-                    note = ""
+                    date = "2026-10-01"
                 ),
                 TransactionEntity(
-                    id = 3,
+                    id = "3",
                     type = "expense",
                     category = "Отпуск",
+                    subcategory = "",
                     amount = 40_000.0,
-                    date = "2026-05-10",
-                    note = ""
+                    date = "2026-05-10"
                 )
             )
         )
@@ -282,12 +281,12 @@ class HomeChartDataEngineTest {
         composeTestRule.waitForIdle()
 
         txList = txList + TransactionEntity(
-            id = 4,
+            id = "4",
             type = "expense",
             category = "Такси",
+            subcategory = "",
             amount = 2_500.0,
-            date = "2026-10-16",
-            note = ""
+            date = "2026-10-16"
         )
         composeTestRule.waitForIdle()
 

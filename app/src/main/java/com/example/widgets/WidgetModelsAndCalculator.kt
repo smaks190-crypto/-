@@ -401,12 +401,12 @@ object DavidWidgetStateCalculator {
 
         val wasDeleted = !selectedGoalId.isNullOrBlank() && exactMatch == null
         val targetGoal = exactMatch ?: goals.maxByOrNull { goal ->
-            val t = goal.target.coerceAtLeast(1.0)
-            (goal.saved / t).coerceAtMost(0.999)
+            val t = goal.targetAmount.coerceAtLeast(1.0)
+            (goal.currentAmount / t).coerceAtMost(0.999)
         } ?: goals.first()
 
-        val target = targetGoal.target.coerceAtLeast(1.0)
-        val saved = targetGoal.saved.coerceAtLeast(0.0)
+        val target = targetGoal.targetAmount.coerceAtLeast(1.0)
+        val saved = targetGoal.currentAmount.coerceAtLeast(0.0)
         val remaining = (target - saved).coerceAtLeast(0.0)
         val ratio = (saved / target).toFloat().coerceIn(0f, 1f)
         val percent = ((saved / target) * 100.0).roundToInt().coerceIn(0, 100)
@@ -643,8 +643,8 @@ object DavidWidgetStateCalculator {
 
         val avgGoalPct = if (goals.isNotEmpty()) {
             goals.map { g ->
-                val t = g.target.coerceAtLeast(1.0)
-                ((g.saved / t) * 100.0).coerceIn(0.0, 100.0)
+                val t = g.targetAmount.coerceAtLeast(1.0)
+                ((g.currentAmount / t) * 100.0).coerceIn(0.0, 100.0)
             }.average().roundToInt()
         } else null
 

@@ -72,7 +72,7 @@ class DavidDynamicSuggestionsTest {
             CategoryEntity(id = "c_food", budgetId = "b1", type = "expense", name = "Рестораны", monthlyLimit = 10_000.0)
         )
         val goals = listOf(
-            GoalEntity(id = "g_mac", budgetId = "b1", name = "MacBook M4", target = 200_000.0, saved = 120_000.0)
+            GoalEntity(id = "g_mac", budgetId = "b1", name = "MacBook M4", targetAmount = 200_000.0, currentAmount = 120_000.0)
         )
         val accounts = listOf(
             AccountEntity(id = "d_card", budgetId = "b1", name = "Кредитка Т-Банк", type = "we_owe", balance = 45_000.0)
