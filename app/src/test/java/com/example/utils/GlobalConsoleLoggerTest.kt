@@ -555,8 +555,8 @@ class GlobalConsoleLoggerTest {
             dayTotalIncome = 55000.0,
             dayTotalExpense = 26000.0
         )
-        assertEquals("+55 000 ₽", mixedAll.incomeBadgeText)
-        assertEquals("-26 000 ₽", mixedAll.expenseBadgeText)
+        assertEquals("+55 000\u00A0₽", mixedAll.incomeBadgeText)
+        assertEquals("-26 000\u00A0₽", mixedAll.expenseBadgeText)
 
         val expenseOnlyFilter = com.example.ui.components.dialogs.computeDayHeaderTotals(
             filterType = "expense",
@@ -564,14 +564,14 @@ class GlobalConsoleLoggerTest {
             dayTotalExpense = 26000.0
         )
         assertNull(expenseOnlyFilter.incomeBadgeText)
-        assertEquals("-26 000 ₽", expenseOnlyFilter.expenseBadgeText)
+        assertEquals("-26 000\u00A0₽", expenseOnlyFilter.expenseBadgeText)
 
         val incomeOnlyFilter = com.example.ui.components.dialogs.computeDayHeaderTotals(
             filterType = "income",
             dayTotalIncome = 55000.0,
             dayTotalExpense = 26000.0
         )
-        assertEquals("+55 000 ₽", incomeOnlyFilter.incomeBadgeText)
+        assertEquals("+55 000\u00A0₽", incomeOnlyFilter.incomeBadgeText)
         assertNull(incomeOnlyFilter.expenseBadgeText)
     }
 }
