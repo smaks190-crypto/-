@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
@@ -26,8 +25,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
 import com.example.data.db.TransactionEntity
+import com.example.ui.theme.BudgetTheme
 import com.example.ui.theme.DarkBg
-import com.example.ui.theme.MyApplicationTheme
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -152,7 +151,7 @@ class AllTransactionsDialogUiTest {
     @Test
     fun test1_initialOpenShowsCurrentMonthOnlyAndNoDuplicateChipsUnderSearch() {
         composeTestRule.setContent {
-            MyApplicationTheme {
+            BudgetTheme {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -210,7 +209,7 @@ class AllTransactionsDialogUiTest {
     @Test
     fun test2_topSummaryCardsFilterByTypeAndPeriodSelectorHasNoAllTabOrFalseHighlight() {
         composeTestRule.setContent {
-            MyApplicationTheme {
+            BudgetTheme {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -269,7 +268,7 @@ class AllTransactionsDialogUiTest {
     @Test
     fun test3_swipeChartToPreviousMonthsSynchronouslyUpdatesListWithoutLockingPeriod() {
         composeTestRule.setContent {
-            MyApplicationTheme {
+            BudgetTheme {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -327,7 +326,7 @@ class AllTransactionsDialogUiTest {
     @Test
     fun test4_lockDisplayedMonthWithMesAndUnlockOnSecondTapWithoutShowingAllTimeHistory() {
         composeTestRule.setContent {
-            MyApplicationTheme {
+            BudgetTheme {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -382,7 +381,7 @@ class AllTransactionsDialogUiTest {
     @Test
     fun test5_toggleWeekAndYearPeriodsAndReturnToMonthlyView() {
         composeTestRule.setContent {
-            MyApplicationTheme {
+            BudgetTheme {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()

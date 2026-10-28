@@ -190,6 +190,7 @@ tasks.withType<Test>().configureEach {
 val startCiAndroidEmulator = tasks.register<Exec>("startCiAndroidEmulator") {
   workingDir = rootProject.projectDir
   commandLine("bash", "${rootProject.projectDir}/ci/start_emulator.sh")
+  mustRunAfter("packageDebugAndroidTest", "packageDebug")
 }
 
 val collectCiEmulatorArtifacts = tasks.register<Exec>("collectCiEmulatorArtifacts") {
