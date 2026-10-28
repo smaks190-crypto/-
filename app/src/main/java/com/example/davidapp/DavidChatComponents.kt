@@ -1705,8 +1705,9 @@ fun DavidSmartActionStrip(
                                 else -> TextLight
                             },
                             onClick = {
-                                if (perm.periodArg != null) {
-                                    onPeriodSelect(perm.periodArg)
+                                val periodArg = perm.type.periodArg
+                                if (periodArg != null) {
+                                    onPeriodSelect(periodArg)
                                 } else {
                                     onOpenApiKeyDialog()
                                 }
