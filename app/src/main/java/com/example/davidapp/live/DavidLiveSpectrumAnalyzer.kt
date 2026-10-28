@@ -396,6 +396,7 @@ class DavidLiveSpectrumAnalyzer(
 
     private fun applySmoothing(): FloatArray {
         var energyAcc = 0f
+        var peakRay = 0f
         for (i in 0 until radialRayCount) {
             val target = sanitizeUnit(targetRays[i])
             val current = sanitizeUnit(smoothedRays[i])
@@ -406,8 +407,10 @@ class DavidLiveSpectrumAnalyzer(
             smoothedRays[i] = next
             outputSnapshot[i] = next
             energyAcc += next
+            if (next > peakRay) peakRay = next
         }
-        overallEnergy = sanitizeUnit(energyAcc / radialRayCount.toFloat())
+        val meanRay = energyAcc / radialRayCount.toFloat()
+        overallEnergy = sanitizeUnit(0.55f * meanRay + 0.45f * peakRay)
         return outputSnapshot.copyOf()
     }
 
