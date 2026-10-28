@@ -1540,8 +1540,14 @@ fun DavidSmartActionStrip(
     onActionClick: (String) -> Unit,
     onExportPdf: () -> Unit,
     onOpenApiKeyDialog: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    dynamicSuggestions: List<DynamicChatSuggestion> = emptyList(),
+    onSelectDynamicSuggestion: (DynamicChatSuggestion) -> Unit = { onSendPrompt(it.userQuestion) }
 ) {
+    val permanentChips = remember(hasApiKey) {
+        DavidDynamicSuggestionsEngine.getPermanentChips(hasApiKey)
+    }
+
     AnimatedVisibility(
         visible = stage != DavidStage.PROCESSING,
         enter = fadeIn(tween(180)),
@@ -1633,23 +1639,16 @@ fun DavidSmartActionStrip(
                     }
                 }
             } else {
-                // Единая горизонтальная лента быстрых чипов
+                // Единая горизонтальная лента: Постоянные чипы + визуально отделённые Умные контекстные подсказки
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
+                        .horizontalScroll(rememberScrollState())
+                        .testTag("david_smart_action_strip_row"),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 1. Главный акцентный чип запуска разбора с выбором периода
-                    ObsidianQuickChip(
-                        text = "🔥 Разбор трат",
-                        isAccent = true,
-                        onClick = { onTogglePeriodSelector(true) },
-                        tag = "action_start_report"
-                    )
-
-                    // 2. Если аудит уже проведен — компактный чип экспорта в PDF прямо в этом же ряду
+                    // Если аудит уже проведен — компактный чип экспорта в PDF
                     if (stage == DavidStage.FOLLOW_UP) {
                         ObsidianQuickChip(
                             text = "📄 Скачать PDF",
@@ -1661,34 +1660,116 @@ fun DavidSmartActionStrip(
                         )
                     }
 
-                    // 3. Поиск утечек бюджета
+                    // 1. Динамические контекстно-зависимые подсказки (если есть реальные данные)
+                    if (dynamicSuggestions.isNotEmpty()) {
+                        dynamicSuggestions.forEach { suggestion ->
+                            ObsidianDynamicContextChip(
+                                suggestion = suggestion,
+                                onClick = { onSelectDynamicSuggestion(suggestion) }
+                            )
+                        }
+
+                        // Аккуратный визуальный разделитель между динамическими и базовыми постоянными чипами
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(22.dp)
+                                .background(GlassHighlight)
+                                .testTag("chips_section_divider")
+                        )
+                    }
+
+                    // 2. Главная кнопка запуска селектора периода (сохранена для обратной совместимости)
                     ObsidianQuickChip(
-                        text = "💡 Где утечки бюджета?",
-                        onClick = { onSendPrompt("На чём мне сэкономить и какие главные утечки бюджета?") }
+                        text = "🔥 Разбор трат",
+                        isAccent = true,
+                        onClick = { onTogglePeriodSelector(true) },
+                        tag = "action_start_report"
                     )
 
-                    // 4. Финансовые цели
-                    ObsidianQuickChip(
-                        text = "🎯 Статус целей",
-                        onClick = { onActionClick("GOALS") }
-                    )
-
-                    // 5. Сводка баланса и трендов
-                    ObsidianQuickChip(
-                        text = "📊 Баланс и тренды",
-                        onClick = { onSendPrompt("Покажи мой баланс и аналитику трендов") }
-                    )
-
-                    // 6. Настройка API ключа
-                    ObsidianQuickChip(
-                        text = if (hasApiKey) "🔑 API ключ" else "🔑 Подключить Gemini",
-                        borderColor = if (!hasApiKey) Amber400.copy(alpha = 0.55f) else GlassBorder,
-                        textColor = if (!hasApiKey) Amber400 else Slate400,
-                        onClick = onOpenApiKeyDialog
-                    )
+                    // 3. Обязательные 5 постоянных чипов:
+                    //    Анализ за день, Анализ за неделю, Анализ за месяц, Анализ за год, Сменить/Активировать API
+                    permanentChips.forEach { perm ->
+                        val isApiChip = perm.type == PermanentChipType.API_CONFIG
+                        ObsidianQuickChip(
+                            text = perm.label,
+                            isAccent = false,
+                            borderColor = when {
+                                isApiChip && !hasApiKey -> Amber400.copy(alpha = 0.55f)
+                                isApiChip -> GlassBorder
+                                else -> Emerald400.copy(alpha = 0.35f)
+                            },
+                            textColor = when {
+                                isApiChip && !hasApiKey -> Amber400
+                                isApiChip -> Slate400
+                                else -> TextLight
+                            },
+                            onClick = {
+                                if (perm.periodArg != null) {
+                                    onPeriodSelect(perm.periodArg)
+                                } else {
+                                    onOpenApiKeyDialog()
+                                }
+                            },
+                            tag = perm.testTag
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ObsidianDynamicContextChip(
+    suggestion: DynamicChatSuggestion,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val accentColor = when (suggestion.topic) {
+        DynamicSuggestionTopic.LIMIT_ALERT -> Rose500
+        DynamicSuggestionTopic.EXPENSE_GROWTH -> Amber400
+        DynamicSuggestionTopic.DEBT_STRATEGY -> Rose500
+        DynamicSuggestionTopic.GOAL_ACCELERATION -> Indigo400
+        DynamicSuggestionTopic.TOP_CATEGORY_SAVE -> Emerald400
+        DynamicSuggestionTopic.UNUSUAL_EXPENSE -> Amber400
+        DynamicSuggestionTopic.RECURRING_LEAK -> Indigo400
+        DynamicSuggestionTopic.SAVINGS_CAPACITY -> Emerald400
+    }
+
+    Row(
+        modifier = modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        accentColor.copy(alpha = 0.16f),
+                        ObsidianSurface
+                    )
+                )
+            )
+            .border(1.dp, accentColor.copy(alpha = 0.50f), RoundedCornerShape(18.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp)
+            .testTag("dynamic_chip_${suggestion.id}"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(accentColor)
+        )
+        Text(
+            text = suggestion.chipLabel,
+            color = TextLight,
+            fontSize = 12.sp,
+            fontFamily = ManropeFontFamily,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+        )
     }
 }
 

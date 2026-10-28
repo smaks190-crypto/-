@@ -150,7 +150,9 @@ fun DavidChatScreen(
                     .padding(top = 8.dp, bottom = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Единая морфинг-полоса быстрых действий и выбора периода
+    val dynamicSuggestions by viewModel.dynamicSuggestions.collectAsState()
+
+                // Единая морфинг-полоса быстрых действий, постоянных чипов и умных контекстных подсказок
                 DavidSmartActionStrip(
                     stage = stage,
                     hasApiKey = hasApiKey,
@@ -177,7 +179,12 @@ fun DavidChatScreen(
                         isSelectingPeriod = false
                         viewModel.exportPdf(effectiveSoundManager)
                     },
-                    onOpenApiKeyDialog = { showApiKeyDialog = true }
+                    onOpenApiKeyDialog = { showApiKeyDialog = true },
+                    dynamicSuggestions = dynamicSuggestions,
+                    onSelectDynamicSuggestion = { suggestion ->
+                        isSelectingPeriod = false
+                        viewModel.sendDynamicSuggestion(suggestion, effectiveSoundManager)
+                    }
                 )
 
                 // Капсула ввода текста в стиле Obsidian Neo-Bank

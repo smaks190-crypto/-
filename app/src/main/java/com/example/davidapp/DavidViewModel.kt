@@ -57,11 +57,15 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     private val _hasApiKey = MutableStateFlow(false)
     val hasApiKey: StateFlow<Boolean> = _hasApiKey.asStateFlow()
 
+    private val _dynamicSuggestions = MutableStateFlow<List<DynamicChatSuggestion>>(emptyList())
+    val dynamicSuggestions: StateFlow<List<DynamicChatSuggestion>> = _dynamicSuggestions.asStateFlow()
+
     private var currentBudgetId: String = "default"
     private var currentProfileName: String = "Максим"
     private var currentApiKey: String = ""
 
     private var notificationsJob: Job? = null
+    private var suggestionsJob: Job? = null
     private var currentNotifications: List<NotificationEntity> = emptyList()
     private val sessionMessages = mutableListOf<ChatMessage>()
 
@@ -81,6 +85,31 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
             sessionMessages.clear()
             _stage.value = DavidStage.INITIAL
             observeNotifications()
+            observeFinancialContextForChips()
+        }
+    }
+
+    private fun observeFinancialContextForChips() {
+        suggestionsJob?.cancel()
+        suggestionsJob = viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(
+                repository.getTransactionsForBudget(currentBudgetId),
+                repository.getCategoriesForBudget(currentBudgetId),
+                repository.getGoalsForBudget(currentBudgetId),
+                repository.getAccountsForBudget(currentBudgetId)
+            ) { txs, cats, goals, accounts ->
+                val todayIso = isoFormat.format(Date())
+                DavidDynamicSuggestionsEngine.getDynamicSuggestions(
+                    budgetId = currentBudgetId,
+                    todayIso = todayIso,
+                    transactions = txs,
+                    categories = cats,
+                    goals = goals,
+                    accounts = accounts
+                )
+            }.collect { suggestions ->
+                _dynamicSuggestions.value = suggestions
+            }
         }
     }
 
@@ -796,11 +825,66 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
     }
 
 
-    private suspend fun generateGeminiReply(query: String): String {
+    fun sendDynamicSuggestion(suggestion: DynamicChatSuggestion, soundManager: SoundManager? = null) {
+        AchievementManager.unlock(getApplication(), "first_chat")
+        viewModelScope.launch {
+            soundManager?.playSend()
+            val userMsg = ChatMessage(
+                sender = currentProfileName,
+                type = ChatMessageType.Text(suggestion.userQuestion),
+                timestamp = currentTime(),
+                isUser = true,
+                timestampMillis = System.currentTimeMillis()
+            )
+            addSessionMessage(userMsg)
+
+            val prevStage = _stage.value
+            _isDavidTyping.value = true
+            _stage.value = DavidStage.PROCESSING
+
+            val reply = if (currentApiKey.isNotBlank()) {
+                generateGeminiReply(
+                    query = suggestion.userQuestion,
+                    extraContextFacts = suggestion.geminiContextFacts,
+                    fallbackAnswer = suggestion.localDetailedAnswer
+                )
+            } else {
+                suggestion.localDetailedAnswer
+            }
+
+            delay(550)
+            _isDavidTyping.value = false
+            soundManager?.playReceive()
+
+            val botMsg = ChatMessage(
+                sender = "Давид Жабов 🐸",
+                type = ChatMessageType.Text(reply),
+                timestamp = currentTime(),
+                isUser = false,
+                timestampMillis = System.currentTimeMillis()
+            )
+            addSessionMessage(botMsg)
+            _stage.value = if (prevStage == DavidStage.INITIAL) DavidStage.FILE_SELECTION else prevStage
+        }
+    }
+
+    private suspend fun generateGeminiReply(
+        query: String,
+        extraContextFacts: String = "",
+        fallbackAnswer: String? = null
+    ): String {
         return try {
             val recentTxs = repository.getTransactionsForBudget(currentBudgetId).first()
             val debts = repository.getAccountsForBudget(currentBudgetId).first()
             val goals = repository.getGoalsForBudget(currentBudgetId).first()
+
+            val contextPrompt = buildString {
+                append("Пользователь $currentProfileName задает вопрос в чате: \"$query\". ")
+                if (extraContextFacts.isNotBlank()) {
+                    append("Фактические данные по этому вопросу из БД: $extraContextFacts. ")
+                }
+                append("Ответь остроумно, с конкретными цифрами и практическим советом по его финансам.")
+            }
 
             val comment = repository.generateDavidComment(
                 apiKey = currentApiKey,
@@ -811,26 +895,34 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
                 recentTransactions = recentTxs.take(5),
                 activeDebts = debts,
                 activeGoals = goals,
-                extraContext = "Пользователь $currentProfileName задает вопрос в чате: \"$query\". Ответь остроумно и по существу его финансов.",
+                extraContext = contextPrompt,
                 allTransactions = recentTxs
             )
-            comment.ifBlank { generateSmartDavidReply(query) }
+            comment.ifBlank { fallbackAnswer ?: generateSmartDavidReply(query) }
         } catch (_: Exception) {
-            generateSmartDavidReply(query)
+            fallbackAnswer ?: generateSmartDavidReply(query)
         }
     }
 
     private fun generateSmartDavidReply(query: String): String {
+        val matchedDynamic = _dynamicSuggestions.value.firstOrNull {
+            it.userQuestion.equals(query.trim(), ignoreCase = true) ||
+                it.chipLabel.equals(query.trim(), ignoreCase = true)
+        }
+        if (matchedDynamic != null) {
+            return matchedDynamic.localDetailedAnswer
+        }
+
         val q = query.lowercase(Locale.getDefault())
         return when {
             q.contains("привет") || q.contains("салют") || q.contains("здравствуй") ->
-                "Салют, $currentProfileName! Хватит любезностей, давай проверим твои расходы. Нажми **«🐸 Давид, сделай отчет»**!"
+                "Салют, $currentProfileName! Хватит любезностей, давай проверим твои расходы. Выбирай период разбора: **День**, **Неделя**, **Месяц** или **Год**!"
 
             q.contains("отчет") || q.contains("выписк") || q.contains("аудит") || q.contains("трат") ->
                 "Готов провести жесткий разбор трат для профиля **$currentProfileName**. Выбери интервал: **День**, **Неделя**, **Месяц** или **Год**!"
 
             q.contains("цел") || q.contains("накоп") || q.contains("копилк") ->
-                "Финансовые цели любят дисциплину. Нажми кнопку **«🎯 Цели»** для статуса накоплений!"
+                "Финансовые цели любят дисциплину. Нажми на умную подсказку по цели или выбери период для полного аудита накоплений!"
 
             q.contains("долг") || q.contains("кредит") || q.contains("займ") ->
                 "Долги — это аренда чужой свободы. Закрывай их в первую очередь, пока проценты не сожрали твой бюджет!"
@@ -838,11 +930,11 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             q.contains("кофе") || q.contains("шаурм") || q.contains("еда") || q.contains("ресторан") ->
                 "Ага, опять гастрономические слабости! Каждая третья чашка навынос отдаляет тебя от финансовой независимости."
 
-            q.contains("совет") || q.contains("как сэконом") || q.contains("что делать") ->
+            q.contains("совет") || q.contains("как сэконом") || q.contains("что делать") || q.contains("утечк") ->
                 "Золотое правило Жабова: сначала отложи 20% дохода на накопительный счет, а уже потом распределяй остаток по категориям."
 
             else ->
-                "Запрос принят к сведению, $currentProfileName! Но лучший способ навести порядок в кошельке — сформировать полный PDF-аудит. Выбирай период выше!"
+                "Запрос принят к сведению, $currentProfileName! Но лучший способ навести порядок в кошельке — сформировать полный аудит. Выбирай период выше!"
         }
     }
 
