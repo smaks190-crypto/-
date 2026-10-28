@@ -40,7 +40,6 @@ import com.example.ui.components.DateRangePickerDialog
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.Slate900
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -58,20 +57,14 @@ fun AllTransactionsDialog(
     val lazyListState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    val isScrolled by remember {
-        derivedStateOf {
-            lazyListState.firstVisibleItemIndex > 0 || lazyListState.firstVisibleItemScrollOffset > 40
-        }
-    }
+
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
     var sortOption by remember { mutableStateOf("date") }
     var filterType by remember { mutableStateOf(initialFilterType) } // "all", "income", "expense"
-    var selectedPeriod by remember { mutableStateOf("month") } // "all", "week", "month", "year", "custom"
     var chartViewMode by remember { mutableStateOf("donut") } // "donut", "bar"
     var showDatePickerModal by remember { mutableStateOf(false) }
     var isDrilledDownToMixed by remember { mutableStateOf(false) }
-    var isSearchExpandedInPlace by remember { mutableStateOf(false) }
     var showMixedCategoriesDialog by remember { mutableStateOf(false) }
     var isChartCollapsed by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -118,52 +111,54 @@ fun AllTransactionsDialog(
         }
     }
 
-    // Custom date range bounds
-    var customStartStr by remember { mutableStateOf<String?>(null) }
-    var customEndStr by remember { mutableStateOf<String?>(null) }
-    var customLabelStr by remember { mutableStateOf<String?>(null) }
+    // Initial anchor date: uses initialDate if provided, otherwise current calendar date.
+    val defaultAnchor = remember(initialDate) {
+        resolveInitialAnchorDate(initialDate)
+    }
 
-    val visibleDateStr = remember(transactions) {
+    // Separated period state:
+    // - displayedMonthDateStr / swipeMonthOffset controls the currently displayed month
+    // - selectedPeriod (null by default) controls whether a period lock ("week", "month", "year", "custom") is active
+    var periodState by remember(defaultAnchor) {
+        mutableStateOf(AllTransactionsPeriodState(stableAnchorDateStr = defaultAnchor))
+    }
+
+    val stableAnchorDateStr = periodState.stableAnchorDateStr
+    val selectedPeriod = periodState.selectedPeriod
+    val swipeMonthOffset = periodState.swipeMonthOffset
+    val swipeWeekOffset = periodState.swipeWeekOffset
+    val swipeYearOffset = periodState.swipeYearOffset
+    val customStartStr = periodState.customStartStr
+    val customEndStr = periodState.customEndStr
+    val customLabelStr = periodState.customLabelStr
+    val currentOffsetInt = periodState.currentOffsetInt
+
+    var headerDragOffsetY by remember { mutableFloatStateOf(0f) }
+
+    val visibleDateStr = remember(transactions, periodState.displayedMonthDateStr) {
         derivedStateOf {
             if (transactions.isNotEmpty()) {
                 val idx = (lazyListState.firstVisibleItemIndex - 2).coerceIn(0, transactions.size - 1)
-                transactions.getOrNull(idx)?.date ?: transactions.first().date
-            } else "2026-08-01"
+                transactions.getOrNull(idx)?.date ?: periodState.displayedMonthDateStr
+            } else {
+                periodState.displayedMonthDateStr
+            }
         }
     }
 
-    val defaultAnchor = remember(initialDate, transactions) {
-        if (!initialDate.isNullOrBlank()) {
-            initialDate
-        } else if (transactions.isNotEmpty()) {
-            transactions.maxByOrNull { it.date }?.date ?: transactions.first().date
-        } else {
-            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        }
-    }
-
-    var stableAnchorDateStr by remember(defaultAnchor) { mutableStateOf(defaultAnchor) }
-    var swipeWeekOffset by remember { mutableStateOf(0) }
-    var swipeMonthOffset by remember { mutableStateOf(0) }
-    var swipeYearOffset by remember { mutableStateOf(0) }
-    var headerDragOffsetY by remember { mutableFloatStateOf(0f) }
-
-    val currentOffsetInt = when (selectedPeriod) {
-        "week" -> swipeWeekOffset
-        "month" -> swipeMonthOffset
-        "year" -> swipeYearOffset
-        else -> 0
-    }
-
-    LaunchedEffect(selectedPeriod) {
-        if (stableAnchorDateStr.isBlank()) {
-            stableAnchorDateStr = defaultAnchor
-        }
+    LaunchedEffect(selectedPeriod, swipeMonthOffset, swipeWeekOffset, swipeYearOffset) {
         isDrilledDownToMixed = false
         selectedCategoryFilter = null
     }
 
-    val dynamicMonthLabel = remember(stableAnchorDateStr, customLabelStr, selectedPeriod, swipeMonthOffset, swipeWeekOffset, swipeYearOffset) {
+    val dynamicMonthLabel = remember(
+        stableAnchorDateStr,
+        customLabelStr,
+        selectedPeriod,
+        swipeMonthOffset,
+        swipeWeekOffset,
+        swipeYearOffset
+    ) {
         buildDynamicPeriodLabel(
             stableAnchorDateStr = stableAnchorDateStr,
             customLabelStr = customLabelStr,
@@ -182,10 +177,21 @@ fun AllTransactionsDialog(
             customEndStr = customEndStr,
             stableAnchorDateStr = stableAnchorDateStr,
             currentOffsetInt = currentOffsetInt,
-            offset = offset
+            offset = offset,
+            swipeMonthOffset = swipeMonthOffset
         )
 
-    val periodFilteredList = remember(transactions, selectedPeriod, customStartStr, customEndStr, stableAnchorDateStr, swipeWeekOffset, swipeMonthOffset, swipeYearOffset) {
+    // List of transactions for the currently displayed period (current/swiped month by default)
+    val periodFilteredList = remember(
+        transactions,
+        selectedPeriod,
+        customStartStr,
+        customEndStr,
+        stableAnchorDateStr,
+        swipeWeekOffset,
+        swipeMonthOffset,
+        swipeYearOffset
+    ) {
         getFilteredListForOffset(currentOffsetInt)
     }
 
@@ -278,7 +284,7 @@ fun AllTransactionsDialog(
                 onUpdateHeaderDragOffsetY = { headerDragOffsetY = it },
                 onDismiss = onDismiss,
                 shownCount = sortedList.size,
-                totalCount = transactions.size
+                totalCount = periodFilteredList.size
             )
 
             AllTransactionsCollapsibleHeader(
@@ -294,15 +300,11 @@ fun AllTransactionsDialog(
                 onSetDrilledDownToMixed = { isDrilledDownToMixed = it },
                 remainingCategoryNames = remainingCategoryNames,
                 selectedPeriod = selectedPeriod,
-                onSelectPeriod = { newPeriod ->
-                    selectedPeriod = newPeriod
-                    if (newPeriod != "custom") {
-                        customStartStr = null
-                        customEndStr = null
-                        customLabelStr = null
-                    }
+                onSelectPeriod = { clickedPeriod ->
+                    periodState = periodState.onTogglePeriodTab(clickedPeriod)
                 },
                 currentOffsetInt = currentOffsetInt,
+                swipeMonthOffset = swipeMonthOffset,
                 transactions = transactions,
                 visibleDateStr = visibleDateStr.value,
                 dynamicMonthLabel = dynamicMonthLabel,
@@ -315,11 +317,7 @@ fun AllTransactionsDialog(
                 getCategoryTotalsForOffset = ::getCategoryTotalsForOffset,
                 getCategoryColor = ::getCategoryColor,
                 onSwipePeriodOffset = { delta ->
-                    when (selectedPeriod) {
-                        "week" -> swipeWeekOffset += delta
-                        "month" -> swipeMonthOffset += delta
-                        "year" -> swipeYearOffset += delta
-                    }
+                    periodState = periodState.onSwipePeriod(delta)
                 },
                 onOpenMixedCategoriesDialog = { showMixedCategoriesDialog = true },
                 onExpandChart = { isChartCollapsed = false },
@@ -329,8 +327,6 @@ fun AllTransactionsDialog(
             Spacer(modifier = Modifier.height(8.dp))
 
             TransactionSortAndSearchBar(
-                isSearchExpandedInPlace = isSearchExpandedInPlace,
-                onSetSearchExpandedInPlace = { isSearchExpandedInPlace = it },
                 searchQuery = searchQuery,
                 onSearchQueryChange = { searchQuery = it },
                 focusRequester = focusRequester,
@@ -346,17 +342,11 @@ fun AllTransactionsDialog(
                 customStartStr = customStartStr,
                 dynamicMonthLabel = dynamicMonthLabel,
                 onOpenDatePickerModal = { showDatePickerModal = true },
-                onResetPeriodToAll = {
-                    selectedPeriod = "all"
-                    customStartStr = null
-                    customEndStr = null
-                    customLabelStr = null
+                onResetPeriodLock = {
+                    periodState = periodState.onClearPeriodLock()
                 },
                 sortOption = sortOption,
-                onSortOptionChange = { sortOption = it },
-                isScrolled = isScrolled,
-                filterType = filterType,
-                onFilterTypeChange = { filterType = it }
+                onSortOptionChange = { sortOption = it }
             )
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -395,14 +385,11 @@ fun AllTransactionsDialog(
 
         if (showDatePickerModal) {
             DateRangePickerDialog(
-                initialStart = customStartStr ?: visibleDateStr.value.ifBlank { "2026-07-01" },
-                initialEnd = customEndStr ?: "2026-08-31",
+                initialStart = customStartStr ?: periodState.displayedMonthDateStr,
+                initialEnd = customEndStr ?: periodState.displayedMonthDateStr,
                 onDismiss = { showDatePickerModal = false },
                 onConfirm = { s, e ->
-                    customStartStr = s
-                    customEndStr = e
-                    selectedPeriod = "custom"
-                    customLabelStr = try {
+                    val label = try {
                         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
                         val d1 = sdf.parse(s)
                         val d2 = sdf.parse(e)
@@ -411,6 +398,7 @@ fun AllTransactionsDialog(
                             "${outSdf.format(d1)} - ${outSdf.format(d2)}"
                         } else "$s - $e"
                     } catch (ex: Exception) { "$s - $e" }
+                    periodState = periodState.onApplyCustomDateRange(s, e, label)
                     showDatePickerModal = false
                 }
             )

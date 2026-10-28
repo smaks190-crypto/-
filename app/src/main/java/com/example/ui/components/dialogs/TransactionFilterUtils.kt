@@ -12,59 +12,192 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+val PERIOD_SWITCHER_TABS: List<Pair<String, String>> = listOf(
+    "week" to "Нед",
+    "month" to "Мес",
+    "year" to "Год"
+)
+
+fun resolveInitialAnchorDate(
+    initialDate: String?,
+    fallbackDate: Date = Date()
+): String {
+    return if (!initialDate.isNullOrBlank()) {
+        initialDate
+    } else {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(fallbackDate)
+    }
+}
+
+fun resolveEffectivePeriod(selectedPeriod: String?): String {
+    return when (selectedPeriod) {
+        "week" -> "week"
+        "month" -> "month"
+        "year" -> "year"
+        "custom" -> "custom"
+        else -> "month"
+    }
+}
+
+fun toggleLockedPeriod(currentSelectedPeriod: String?, clickedPeriod: String): String? {
+    return if (currentSelectedPeriod == clickedPeriod) {
+        null
+    } else {
+        clickedPeriod
+    }
+}
+
+fun resolveSelectedPeriodTabIndex(
+    selectedPeriod: String?,
+    tabs: List<Pair<String, String>> = PERIOD_SWITCHER_TABS
+): Int {
+    if (selectedPeriod.isNullOrBlank()) return -1
+    return tabs.indexOfFirst { it.first == selectedPeriod }
+}
+
+fun shiftDateByMonths(anchorDateStr: String, monthOffset: Int): String {
+    val cleanAnchor = anchorDateStr.ifBlank { "2026-08-01" }
+    if (monthOffset == 0) return cleanAnchor
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    val anchorDate = try { sdf.parse(cleanAnchor) } catch (e: Exception) { null } ?: Date()
+    val cal = Calendar.getInstance().apply {
+        time = anchorDate
+        add(Calendar.MONTH, monthOffset)
+    }
+    return sdf.format(cal.time)
+}
+
+data class AllTransactionsPeriodState(
+    val stableAnchorDateStr: String,
+    val selectedPeriod: String? = null, // null = без фиксации (просмотр по месяцам); "week", "month", "year", "custom"
+    val swipeMonthOffset: Int = 0,
+    val swipeWeekOffset: Int = 0,
+    val swipeYearOffset: Int = 0,
+    val customStartStr: String? = null,
+    val customEndStr: String? = null,
+    val customLabelStr: String? = null
+) {
+    val effectivePeriod: String
+        get() = resolveEffectivePeriod(selectedPeriod)
+
+    val displayedMonthDateStr: String
+        get() = shiftDateByMonths(stableAnchorDateStr, swipeMonthOffset)
+
+    val isPeriodLocked: Boolean
+        get() = !selectedPeriod.isNullOrBlank() || !customStartStr.isNullOrBlank()
+
+    val activeTabIndex: Int
+        get() = resolveSelectedPeriodTabIndex(selectedPeriod)
+
+    val currentOffsetInt: Int
+        get() = when (effectivePeriod) {
+            "week" -> swipeWeekOffset
+            "year" -> swipeYearOffset
+            else -> swipeMonthOffset
+        }
+
+    fun onSwipePeriod(delta: Int): AllTransactionsPeriodState {
+        return when (effectivePeriod) {
+            "week" -> copy(swipeWeekOffset = swipeWeekOffset + delta)
+            "year" -> copy(swipeYearOffset = swipeYearOffset + delta)
+            "custom" -> this
+            else -> copy(swipeMonthOffset = swipeMonthOffset + delta)
+        }
+    }
+
+    fun onTogglePeriodTab(clickedPeriod: String): AllTransactionsPeriodState {
+        val nextLocked = toggleLockedPeriod(selectedPeriod, clickedPeriod)
+        return copy(
+            selectedPeriod = nextLocked,
+            swipeWeekOffset = if (nextLocked == "week" && selectedPeriod != "week") 0 else swipeWeekOffset,
+            swipeYearOffset = if (nextLocked == "year" && selectedPeriod != "year") 0 else swipeYearOffset,
+            customStartStr = if (nextLocked != "custom") null else customStartStr,
+            customEndStr = if (nextLocked != "custom") null else customEndStr,
+            customLabelStr = if (nextLocked != "custom") null else customLabelStr
+        )
+    }
+
+    fun onApplyCustomDateRange(startStr: String, endStr: String, labelStr: String): AllTransactionsPeriodState {
+        return copy(
+            selectedPeriod = "custom",
+            customStartStr = startStr,
+            customEndStr = endStr,
+            customLabelStr = labelStr
+        )
+    }
+
+    fun onClearPeriodLock(): AllTransactionsPeriodState {
+        return copy(
+            selectedPeriod = null,
+            customStartStr = null,
+            customEndStr = null,
+            customLabelStr = null
+        )
+    }
+}
+
 fun buildDynamicPeriodLabel(
     stableAnchorDateStr: String,
     customLabelStr: String?,
-    selectedPeriod: String,
+    selectedPeriod: String?,
     swipeMonthOffset: Int,
     swipeWeekOffset: Int,
     swipeYearOffset: Int
 ): String {
-    return if (selectedPeriod == "custom" && !customLabelStr.isNullOrBlank()) {
+    val effectivePeriod = resolveEffectivePeriod(selectedPeriod)
+    return if (effectivePeriod == "custom" && !customLabelStr.isNullOrBlank()) {
         customLabelStr
-    } else if (selectedPeriod == "all") {
-        "За всё время"
     } else {
-        val anchorDateStr = stableAnchorDateStr.ifBlank { "2026-08-01" }
+        val baseDateStr = if (effectivePeriod == "week" || effectivePeriod == "year") {
+            shiftDateByMonths(stableAnchorDateStr, swipeMonthOffset)
+        } else {
+            stableAnchorDateStr.ifBlank { "2026-08-01" }
+        }
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val anchorDate = try { sdf.parse(anchorDateStr) } catch (e: Exception) { null } ?: Date()
+        val anchorDate = try { sdf.parse(baseDateStr) } catch (e: Exception) { null } ?: Date()
         val cal = Calendar.getInstance().apply { time = anchorDate }
 
-        if (selectedPeriod == "week") {
-            cal.add(Calendar.WEEK_OF_YEAR, swipeWeekOffset)
-            cal.firstDayOfWeek = Calendar.MONDAY
-            val startCal = (cal.clone() as Calendar).apply {
-                set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+        when (effectivePeriod) {
+            "week" -> {
+                cal.add(Calendar.WEEK_OF_YEAR, swipeWeekOffset)
+                cal.firstDayOfWeek = Calendar.MONDAY
+                val startCal = (cal.clone() as Calendar).apply {
+                    set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                }
+                val endCal = (startCal.clone() as Calendar).apply {
+                    add(Calendar.DAY_OF_YEAR, 6)
+                }
+                val df = SimpleDateFormat("dd.MM", Locale.getDefault())
+                "Неделя ${df.format(startCal.time)} - ${df.format(endCal.time)}"
             }
-            val endCal = (startCal.clone() as Calendar).apply {
-                add(Calendar.DAY_OF_YEAR, 6)
+            "year" -> {
+                cal.add(Calendar.YEAR, swipeYearOffset)
+                "${cal.get(Calendar.YEAR)} год"
             }
-            val df = SimpleDateFormat("dd.MM", Locale.getDefault())
-            "Неделя ${df.format(startCal.time)} - ${df.format(endCal.time)}"
-        } else if (selectedPeriod == "year") {
-            cal.add(Calendar.YEAR, swipeYearOffset)
-            "${cal.get(Calendar.YEAR)} год"
-        } else {
-            cal.add(Calendar.MONTH, swipeMonthOffset)
-            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-            val monthYear = cal.get(Calendar.YEAR)
-            val formatPattern = if (monthYear != currentYear) "LLLL yyyy" else "LLLL"
-            val rawStr = SimpleDateFormat(formatPattern, Locale("ru", "RU")).format(cal.time)
-            rawStr.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale("ru", "RU")) else it.toString() }
+            else -> {
+                cal.add(Calendar.MONTH, swipeMonthOffset)
+                val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+                val monthYear = cal.get(Calendar.YEAR)
+                val formatPattern = if (monthYear != currentYear) "LLLL yyyy" else "LLLL"
+                val rawStr = SimpleDateFormat(formatPattern, Locale("ru", "RU")).format(cal.time)
+                rawStr.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale("ru", "RU")) else it.toString() }
+            }
         }
     }
 }
 
 fun filterTransactionsForOffset(
     transactions: List<TransactionEntity>,
-    selectedPeriod: String,
+    selectedPeriod: String?,
     customStartStr: String?,
     customEndStr: String?,
     stableAnchorDateStr: String,
     currentOffsetInt: Int,
-    offset: Int
+    offset: Int,
+    swipeMonthOffset: Int = 0
 ): List<TransactionEntity> {
-    if (selectedPeriod == "custom" && !customStartStr.isNullOrBlank() && !customEndStr.isNullOrBlank() && offset == currentOffsetInt) {
+    val effectivePeriod = resolveEffectivePeriod(selectedPeriod)
+    if (effectivePeriod == "custom" && !customStartStr.isNullOrBlank() && !customEndStr.isNullOrBlank() && offset == currentOffsetInt) {
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val startDate = try { sdf.parse(customStartStr) } catch (e: Exception) { null }
         val endDate = try { sdf.parse(customEndStr) } catch (e: Exception) { null }
@@ -76,14 +209,14 @@ fun filterTransactionsForOffset(
             } else true
         }
     }
-    if (selectedPeriod == "all" && offset == currentOffsetInt) {
-        return transactions
-    }
 
-    val effectivePeriod = if (selectedPeriod == "all" || selectedPeriod == "custom") "month" else selectedPeriod
-    val anchorDateStr = stableAnchorDateStr.ifBlank { "2026-08-01" }
+    val baseAnchorDateStr = if (effectivePeriod == "week" || effectivePeriod == "year") {
+        shiftDateByMonths(stableAnchorDateStr, swipeMonthOffset)
+    } else {
+        stableAnchorDateStr.ifBlank { "2026-08-01" }
+    }
     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    val anchorDate = try { sdf.parse(anchorDateStr) } catch (e: Exception) { null } ?: Date()
+    val anchorDate = try { sdf.parse(baseAnchorDateStr) } catch (e: Exception) { null } ?: Date()
     val cal = Calendar.getInstance().apply { time = anchorDate }
 
     return when (effectivePeriod) {
@@ -110,15 +243,6 @@ fun filterTransactionsForOffset(
                 tx.date >= startStr && tx.date <= endStr
             }
         }
-        "month" -> {
-            cal.add(Calendar.MONTH, offset)
-            val currentYear = cal.get(Calendar.YEAR)
-            val currentMonth = cal.get(Calendar.MONTH) + 1
-            val monthPrefix = String.format(Locale.US, "%04d-%02d-", currentYear, currentMonth)
-            transactions.filter { tx ->
-                tx.date.startsWith(monthPrefix)
-            }
-        }
         "year" -> {
             cal.add(Calendar.YEAR, offset)
             val currentYear = cal.get(Calendar.YEAR)
@@ -127,7 +251,15 @@ fun filterTransactionsForOffset(
                 tx.date.startsWith(yearPrefix)
             }
         }
-        else -> transactions
+        else -> {
+            cal.add(Calendar.MONTH, offset)
+            val currentYear = cal.get(Calendar.YEAR)
+            val currentMonth = cal.get(Calendar.MONTH) + 1
+            val monthPrefix = String.format(Locale.US, "%04d-%02d-", currentYear, currentMonth)
+            transactions.filter { tx ->
+                tx.date.startsWith(monthPrefix)
+            }
+        }
     }
 }
 
@@ -264,4 +396,3 @@ fun filterAndSortTransactions(
         )
     }
 }
-

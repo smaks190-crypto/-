@@ -324,9 +324,10 @@ fun AllTransactionsCollapsibleHeader(
     isDrilledDownToMixed: Boolean,
     onSetDrilledDownToMixed: (Boolean) -> Unit,
     remainingCategoryNames: List<String>,
-    selectedPeriod: String,
+    selectedPeriod: String?,
     onSelectPeriod: (String) -> Unit,
     currentOffsetInt: Int,
+    swipeMonthOffset: Int = 0,
     transactions: List<TransactionEntity>,
     visibleDateStr: String,
     dynamicMonthLabel: String,
@@ -383,7 +384,9 @@ fun AllTransactionsCollapsibleHeader(
                         },
                         onSelectIncome = {
                             onFilterTypeChange("income")
-                        }
+                        },
+                        onSwipePeriodOffset = onSwipePeriodOffset,
+                        isSwipeEnabled = resolveEffectivePeriod(selectedPeriod) != "custom"
                     )
                 } else {
                     SingleHeroComparisonCard(
@@ -392,6 +395,7 @@ fun AllTransactionsCollapsibleHeader(
                         totalIncomeAmt = totalIncomeAmt,
                         selectedPeriod = selectedPeriod,
                         currentOffsetInt = currentOffsetInt,
+                        swipeMonthOffset = swipeMonthOffset,
                         transactions = transactions,
                         visibleDateStr = visibleDateStr,
                         dynamicMonthLabel = dynamicMonthLabel,

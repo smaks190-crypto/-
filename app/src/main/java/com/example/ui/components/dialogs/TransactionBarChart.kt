@@ -25,10 +25,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.TransactionEntity
+import com.example.ui.components.formatFullCurrency
 import com.example.ui.theme.Indigo500
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
-import com.example.ui.components.formatFullCurrency
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -36,7 +36,7 @@ import java.util.Locale
 
 @Composable
 fun TransactionBarChart(
-    selectedPeriod: String,
+    selectedPeriod: String?,
     stableAnchorDateStr: String,
     offsetValue: Int,
     filterType: String,
@@ -44,7 +44,7 @@ fun TransactionBarChart(
     getFilteredListForOffset: (Int) -> List<TransactionEntity>,
     modifier: Modifier = Modifier
 ) {
-    val effectivePeriod = if (selectedPeriod == "all") "month" else selectedPeriod
+    val effectivePeriod = resolveEffectivePeriod(selectedPeriod)
     val anchorDateStr = stableAnchorDateStr.ifBlank { "2026-08-01" }
     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     val anchorDate = try { sdf.parse(anchorDateStr) } catch (e: Exception) { null } ?: Date()
@@ -123,7 +123,7 @@ fun TransactionBarChart(
             }
             Triple(weekDayValues.toList(), weekDayLabels, highlightIdx)
         }
-        else -> { // "month" or "all"
+        else -> {
             cal.add(Calendar.MONTH, offsetValue)
             val currentYear = cal.get(Calendar.YEAR)
             val currentMonth = cal.get(Calendar.MONTH)
@@ -186,7 +186,6 @@ fun TransactionBarChart(
             .fillMaxWidth()
             .height(130.dp)
     ) {
-        // 1. Dotted Average Line
         if (averageVal > 0.0) {
             Canvas(
                 modifier = Modifier
@@ -204,7 +203,6 @@ fun TransactionBarChart(
                 )
             }
 
-            // Average text label placed right above the line
             Text(
                 text = "Ср: ${formatFullCurrency(averageVal)}",
                 color = Slate400,
@@ -216,7 +214,6 @@ fun TransactionBarChart(
             )
         }
 
-        // 2. Bar Rows
         Row(
             modifier = Modifier
                 .fillMaxSize()
@@ -228,7 +225,6 @@ fun TransactionBarChart(
                 val amountVal = barValues.getOrElse(i) { 0.0 }
                 val barRatio = if (maxVal > 0.0) (amountVal / maxVal).toFloat() else 0f
 
-                // Coerce to have a tiny minimal height if there are transactions but very small
                 val displayRatio = if (amountVal > 0.0) barRatio.coerceAtLeast(0.06f) else 0f
                 val isHighlighted = (i == currentHighlightIdx) || (currentHighlightIdx == -1 && barRatio == 1f && amountVal > 0.0)
 

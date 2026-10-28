@@ -66,6 +66,8 @@ fun DoubleSummaryComparisonCards(
     filterType: String,
     onSelectExpense: () -> Unit,
     onSelectIncome: () -> Unit,
+    onSwipePeriodOffset: ((Int) -> Unit)? = null,
+    isSwipeEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val totalFlow = (totalExpenseAmt + totalIncomeAmt).coerceAtLeast(1.0)
@@ -76,8 +78,30 @@ fun DoubleSummaryComparisonCards(
         (totalIncomeAmt / totalFlow).toFloat().coerceIn(0.15f, 1f)
     } else 0.12f
 
+    var totalDragX by remember { mutableFloatStateOf(0f) }
+
     Column(
-        modifier = modifier,
+        modifier = modifier.pointerInput(isSwipeEnabled, onSwipePeriodOffset) {
+            if (!isSwipeEnabled || onSwipePeriodOffset == null) return@pointerInput
+            detectHorizontalDragGestures(
+                onDragStart = { totalDragX = 0f },
+                onDragEnd = {
+                    val threshold = 110f
+                    val finalDrag = totalDragX
+                    totalDragX = 0f
+                    if (finalDrag < -threshold) {
+                        onSwipePeriodOffset(1)
+                    } else if (finalDrag > threshold) {
+                        onSwipePeriodOffset(-1)
+                    }
+                },
+                onDragCancel = { totalDragX = 0f },
+                onHorizontalDrag = { change, dragAmount ->
+                    change.consume()
+                    totalDragX += dragAmount
+                }
+            )
+        },
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(
@@ -244,8 +268,9 @@ fun SingleHeroComparisonCard(
     filterType: String,
     totalExpenseAmt: Double,
     totalIncomeAmt: Double,
-    selectedPeriod: String,
+    selectedPeriod: String?,
     currentOffsetInt: Int,
+    swipeMonthOffset: Int = 0,
     transactions: List<TransactionEntity>,
     visibleDateStr: String,
     dynamicMonthLabel: String,
@@ -262,8 +287,9 @@ fun SingleHeroComparisonCard(
     val isExpense = filterType == "expense"
     val accentColor = if (isExpense) Rose500 else Emerald400
     val activeAmount = if (filterType == "expense") totalExpenseAmt else totalIncomeAmt
-    val prevAmount = remember(selectedPeriod, currentOffsetInt, transactions, filterType, visibleDateStr) {
-        if (selectedPeriod == "all" || selectedPeriod == "custom") {
+    val effectivePeriod = resolveEffectivePeriod(selectedPeriod)
+    val prevAmount = remember(effectivePeriod, currentOffsetInt, transactions, filterType, visibleDateStr) {
+        if (effectivePeriod == "custom") {
             val dateParts = visibleDateStr.split("-")
             if (dateParts.size >= 2) {
                 val year = dateParts[0].toIntOrNull() ?: 2026
@@ -328,7 +354,7 @@ fun SingleHeroComparisonCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (selectedPeriod != "all") {
+                    if (effectivePeriod != "custom") {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(14.dp))
@@ -394,11 +420,11 @@ fun SingleHeroComparisonCard(
 
         // Chart area inside Swipe Gesture detector (full-width pages, zero adjacent bleed)
         var totalDragX by remember { mutableFloatStateOf(0f) }
-        val isSwipeEnabled = selectedPeriod != "all" && selectedPeriod != "custom"
+        val isSwipeEnabled = effectivePeriod != "custom"
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .pointerInput(selectedPeriod, isSwipeEnabled) {
+                .pointerInput(effectivePeriod, isSwipeEnabled) {
                     if (!isSwipeEnabled) return@pointerInput
                     detectHorizontalDragGestures(
                         onDragStart = { totalDragX = 0f },
@@ -447,10 +473,15 @@ fun SingleHeroComparisonCard(
                     listOf(currentOffsetInt)
                 }
 
+                val barChartAnchorDateStr = if (effectivePeriod == "week" || effectivePeriod == "year") {
+                    shiftDateByMonths(stableAnchorDateStr, swipeMonthOffset)
+                } else {
+                    stableAnchorDateStr
+                }
+
                 offsetsToRender.forEach { offsetValue ->
                     val pageDelta = offsetValue - animatedOffsetFloat
                     val relativeDiff = kotlin.math.abs(pageDelta)
-                    // Only visible when within viewport (< 0.98 page widths away); zero bleed at rest!
                     val alphaValue = (1f - relativeDiff * 1.05f).coerceIn(0f, 1f)
                     val scaleValue = (1f - relativeDiff * 0.10f).coerceIn(0.88f, 1f)
                     val translationX = widthDp * pageDelta
@@ -478,7 +509,7 @@ fun SingleHeroComparisonCard(
                             } else {
                                 TransactionBarChart(
                                     selectedPeriod = selectedPeriod,
-                                    stableAnchorDateStr = stableAnchorDateStr,
+                                    stableAnchorDateStr = barChartAnchorDateStr,
                                     offsetValue = offsetValue,
                                     filterType = filterType,
                                     accentColor = accentColor,

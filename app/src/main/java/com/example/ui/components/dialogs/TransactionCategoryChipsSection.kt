@@ -53,7 +53,7 @@ import com.example.ui.theme.SpaceGroteskFontFamily
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TransactionCategoryChipsSection(
-    selectedPeriod: String,
+    selectedPeriod: String?,
     onSelectPeriod: (String) -> Unit,
     chartViewMode: String,
     onSelectChartViewMode: (String) -> Unit,
@@ -72,10 +72,10 @@ fun TransactionCategoryChipsSection(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Period selector (Нед, Мес, Год, Все) synchronized with filter bar
+        // Period selector (Нед, Мес, Год) with toggle semantics and no artificial default highlight
         BoxWithConstraints(
             modifier = Modifier
-                .width(216.dp)
+                .width(180.dp)
                 .height(34.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .background(DarkBg)
@@ -86,17 +86,16 @@ fun TransactionCategoryChipsSection(
             val periodsList = listOf(
                 "week" to "Нед",
                 "month" to "Мес",
-                "year" to "Год",
-                "all" to "Все"
+                "year" to "Год"
             )
             val tabCount = periodsList.size
             val tabWidth = barWidth / tabCount
 
-            val selectedIndex = periodsList.indexOfFirst { it.first == selectedPeriod }
-                .let { if (it >= 0) it else 1 }
+            val selectedIndex = resolveSelectedPeriodTabIndex(selectedPeriod, periodsList)
+            val hasActivePeriodSelection = selectedIndex >= 0
 
             val animatedFraction by animateFloatAsState(
-                targetValue = selectedIndex.toFloat(),
+                targetValue = if (hasActivePeriodSelection) selectedIndex.toFloat() else 0f,
                 animationSpec = spring(
                     dampingRatio = Spring.DampingRatioLowBouncy,
                     stiffness = Spring.StiffnessMediumLow
@@ -104,35 +103,37 @@ fun TransactionCategoryChipsSection(
                 label = "period_tab_fraction"
             )
 
-            // Moving selection indicator pill
-            Box(
-                modifier = Modifier
-                    .width(tabWidth)
-                    .fillMaxHeight()
-                    .offset(x = tabWidth * animatedFraction)
-                    .shadow(
-                        elevation = 8.dp,
-                        shape = RoundedCornerShape(10.dp),
-                        ambientColor = Indigo500,
-                        spotColor = Indigo500
-                    )
-                    .background(
-                        Brush.horizontalGradient(
-                            colors = listOf(Indigo500, Indigo500.copy(alpha = 0.8f))
-                        ),
-                        shape = RoundedCornerShape(10.dp)
-                    )
-                    .border(
-                        width = 1.dp,
-                        color = Indigo500.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(10.dp)
-                    )
-            )
+            // Moving selection indicator pill — shown ONLY when a period is explicitly locked
+            if (hasActivePeriodSelection) {
+                Box(
+                    modifier = Modifier
+                        .width(tabWidth)
+                        .fillMaxHeight()
+                        .offset(x = tabWidth * animatedFraction)
+                        .shadow(
+                            elevation = 8.dp,
+                            shape = RoundedCornerShape(10.dp),
+                            ambientColor = Indigo500,
+                            spotColor = Indigo500
+                        )
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(Indigo500, Indigo500.copy(alpha = 0.8f))
+                            ),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = Indigo500.copy(alpha = 0.6f),
+                            shape = RoundedCornerShape(10.dp)
+                        )
+                )
+            }
 
-            // Clickable labels
+            // Clickable labels (toggle behavior handled by onSelectPeriod)
             Row(modifier = Modifier.fillMaxSize()) {
                 periodsList.forEach { (pKey, pText) ->
-                    val isSelected = selectedPeriod == pKey || (selectedPeriod == "custom" && pKey == "month")
+                    val isSelected = selectedPeriod == pKey
                     Box(
                         modifier = Modifier
                             .weight(1f)

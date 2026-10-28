@@ -43,7 +43,6 @@ import androidx.compose.ui.unit.sp
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.Indigo500
 import com.example.ui.theme.ManropeFontFamily
-import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate500
 import com.example.ui.theme.Slate800
@@ -51,8 +50,6 @@ import com.example.ui.theme.Slate900
 
 @Composable
 fun TransactionSortAndSearchBar(
-    isSearchExpandedInPlace: Boolean,
-    onSetSearchExpandedInPlace: (Boolean) -> Unit,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     focusRequester: FocusRequester,
@@ -61,16 +58,13 @@ fun TransactionSortAndSearchBar(
     remainingCategoryNames: List<String>,
     onClearCategoryFilter: () -> Unit,
     getCategoryColor: (String) -> Color,
-    selectedPeriod: String,
+    selectedPeriod: String?,
     customStartStr: String?,
     dynamicMonthLabel: String,
     onOpenDatePickerModal: () -> Unit,
-    onResetPeriodToAll: () -> Unit,
+    onResetPeriodLock: () -> Unit,
     sortOption: String,
-    onSortOptionChange: (String) -> Unit,
-    isScrolled: Boolean,
-    filterType: String = "all",
-    onFilterTypeChange: ((String) -> Unit)? = null
+    onSortOptionChange: (String) -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -132,212 +126,200 @@ fun TransactionSortAndSearchBar(
                         tint = Slate400,
                         modifier = Modifier
                             .size(16.dp)
-                            .clickable {
-                                onSearchQueryChange("")
-                                onSetSearchExpandedInPlace(false)
-                            }
+                            .clickable { onSearchQueryChange("") }
                     )
                 }
             }
         }
 
-        // Filter & Sort Chips Strip
+        // Sorting & Filter Chips Row (without duplicate type filter buttons)
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Quick Type Filter Chips (Все | Траты | Доходы)
-            if (onFilterTypeChange != null) {
-                val typeChips = listOf(
-                    Triple("all", "Все", Indigo500),
-                    Triple("expense", "Траты", Rose500),
-                    Triple("income", "Доходы", Emerald400)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "Сортировка:",
+                    color = Slate400,
+                    fontFamily = ManropeFontFamily,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
                 )
-                typeChips.forEach { (typeKey, label, accent) ->
-                    val isSelected = filterType == typeKey
+
+                val isCatActive = !selectedCategoryFilter.isNullOrBlank() || isDrilledDownToMixed
+                if (isCatActive) {
+                    val catLabel = selectedCategoryFilter
+                        ?: if (remainingCategoryNames.size <= 1) "Прочие" else "Смешанные"
+                    val catColor = if (!selectedCategoryFilter.isNullOrBlank()) {
+                        getCategoryColor(selectedCategoryFilter)
+                    } else {
+                        Indigo500
+                    }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(9.dp))
-                            .background(if (isSelected) accent.copy(alpha = 0.22f) else Slate900)
-                            .border(
-                                width = 1.dp,
-                                color = if (isSelected) accent.copy(alpha = 0.65f) else Slate800,
-                                shape = RoundedCornerShape(9.dp)
-                            )
-                            .clickable { onFilterTypeChange(typeKey) }
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                            .background(catColor.copy(alpha = 0.22f))
+                            .border(1.dp, catColor.copy(alpha = 0.55f), RoundedCornerShape(9.dp))
+                            .clickable { onClearCategoryFilter() }
+                            .padding(horizontal = 9.dp, vertical = 5.dp)
                     ) {
-                        Text(
-                            text = label,
-                            color = if (isSelected) Color.White else Slate400,
-                            fontFamily = ManropeFontFamily,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = catLabel,
+                                color = Color.White,
+                                fontFamily = ManropeFontFamily,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "✕",
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 9.sp
+                            )
+                        }
                     }
                 }
             }
 
-            // Active Category Filter Chip
-            val isCatActive = !selectedCategoryFilter.isNullOrBlank() || isDrilledDownToMixed
-            if (isCatActive) {
-                val catLabel = selectedCategoryFilter ?: if (remainingCategoryNames.size <= 1) "Прочие" else "Смешанные"
-                val catColor = if (!selectedCategoryFilter.isNullOrBlank()) getCategoryColor(selectedCategoryFilter) else Indigo500
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Period / Custom Date Range Selector Chip
+                val isPeriodActive = !selectedPeriod.isNullOrBlank() || !customStartStr.isNullOrBlank()
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(9.dp))
-                        .background(catColor.copy(alpha = 0.22f))
-                        .border(1.dp, catColor.copy(alpha = 0.55f), RoundedCornerShape(9.dp))
-                        .clickable { onClearCategoryFilter() }
-                        .padding(horizontal = 9.dp, vertical = 5.dp)
+                        .background(if (isPeriodActive) Indigo500.copy(alpha = 0.22f) else Slate900)
+                        .border(
+                            width = 1.dp,
+                            color = if (isPeriodActive) Indigo500.copy(alpha = 0.65f) else Slate800,
+                            shape = RoundedCornerShape(9.dp)
+                        )
+                        .clickable { onOpenDatePickerModal() }
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DateRange,
+                            contentDescription = null,
+                            tint = if (isPeriodActive) Color.White else Slate400,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = dynamicMonthLabel,
+                            color = if (isPeriodActive) Color.White else Slate400,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        if (isPeriodActive) {
+                            Text(
+                                text = "✕",
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 9.sp,
+                                modifier = Modifier
+                                    .padding(start = 2.dp)
+                                    .clickable { onResetPeriodLock() }
+                            )
+                        } else {
+                            Text("▼", color = Slate400, fontSize = 8.sp)
+                        }
+                    }
+                }
+
+                // Sort by Amount Chip
+                val isAmountActive = sortOption == "desc" || sortOption == "asc"
+                val arrowRotation by animateFloatAsState(
+                    targetValue = if (sortOption == "asc") 180f else 0f,
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                    label = "arrowRotation"
+                )
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (isAmountActive) Indigo500.copy(alpha = 0.22f) else Slate900)
+                        .border(
+                            width = 1.dp,
+                            color = if (isAmountActive) Indigo500.copy(alpha = 0.65f) else Slate800,
+                            shape = RoundedCornerShape(9.dp)
+                        )
+                        .clickable {
+                            onSortOptionChange(
+                                when (sortOption) {
+                                    "desc" -> "asc"
+                                    "asc" -> "date"
+                                    else -> "desc"
+                                }
+                            )
+                        }
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            text = catLabel,
-                            color = Color.White,
+                            text = "↓",
+                            color = if (isAmountActive) Color.White else Slate400,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.graphicsLayer { rotationZ = arrowRotation }
+                        )
+                        Text(
+                            text = "Сумма",
+                            color = if (isAmountActive) Color.White else Slate400,
                             fontFamily = ManropeFontFamily,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            text = "✕",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 9.sp
-                        )
                     }
                 }
-            }
 
-            // Period Selector Chip
-            val isPeriodActive = selectedPeriod != "all" || !customStartStr.isNullOrBlank()
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(if (isPeriodActive) Indigo500.copy(alpha = 0.22f) else Slate900)
-                    .border(
-                        width = 1.dp,
-                        color = if (isPeriodActive) Indigo500.copy(alpha = 0.65f) else Slate800,
-                        shape = RoundedCornerShape(9.dp)
-                    )
-                    .clickable { onOpenDatePickerModal() }
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DateRange,
-                        contentDescription = null,
-                        tint = if (isPeriodActive) Color.White else Slate400,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Text(
-                        text = dynamicMonthLabel,
-                        color = if (isPeriodActive) Color.White else Slate400,
-                        fontFamily = ManropeFontFamily,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    if (isPeriodActive) {
-                        Text(
-                            text = "✕",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 9.sp,
-                            modifier = Modifier
-                                .padding(start = 2.dp)
-                                .clickable { onResetPeriodToAll() }
+                // Sort A-Z / Z-A Chip
+                val isNameActive = sortOption == "name" || sortOption == "name_desc"
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(if (isNameActive) Indigo500.copy(alpha = 0.22f) else Slate900)
+                        .border(
+                            width = 1.dp,
+                            color = if (isNameActive) Indigo500.copy(alpha = 0.65f) else Slate800,
+                            shape = RoundedCornerShape(9.dp)
                         )
-                    } else {
-                        Text("▼", color = Slate400, fontSize = 8.sp)
-                    }
-                }
-            }
-
-            // Sort by Amount Chip
-            val isAmountActive = sortOption == "desc" || sortOption == "asc"
-            val arrowRotation by animateFloatAsState(
-                targetValue = if (sortOption == "asc") 180f else 0f,
-                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                label = "arrowRotation"
-            )
-
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(if (isAmountActive) Indigo500.copy(alpha = 0.22f) else Slate900)
-                    .border(
-                        width = 1.dp,
-                        color = if (isAmountActive) Indigo500.copy(alpha = 0.65f) else Slate800,
-                        shape = RoundedCornerShape(9.dp)
-                    )
-                    .clickable {
-                        onSortOptionChange(
-                            when (sortOption) {
-                                "desc" -> "asc"
-                                "asc" -> "date"
-                                else -> "desc"
-                            }
-                        )
-                    }
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        .clickable {
+                            onSortOptionChange(
+                                when (sortOption) {
+                                    "name" -> "name_desc"
+                                    "name_desc" -> "date"
+                                    else -> "name"
+                                }
+                            )
+                        }
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
                     Text(
-                        text = "↓",
-                        color = if (isAmountActive) Color.White else Slate400,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.graphicsLayer { rotationZ = arrowRotation }
-                    )
-                    Text(
-                        text = "Сумма",
-                        color = if (isAmountActive) Color.White else Slate400,
+                        text = if (sortOption == "name_desc") "Z-A" else "A-Z",
+                        color = if (isNameActive) Color.White else Slate400,
                         fontFamily = ManropeFontFamily,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
-            }
-
-            // Sort A-Z / Z-A Chip
-            val isNameActive = sortOption == "name" || sortOption == "name_desc"
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(if (isNameActive) Indigo500.copy(alpha = 0.22f) else Slate900)
-                    .border(
-                        width = 1.dp,
-                        color = if (isNameActive) Indigo500.copy(alpha = 0.65f) else Slate800,
-                        shape = RoundedCornerShape(9.dp)
-                    )
-                    .clickable {
-                        onSortOptionChange(
-                            when (sortOption) {
-                                "name" -> "name_desc"
-                                "name_desc" -> "date"
-                                else -> "name"
-                            }
-                        )
-                    }
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-            ) {
-                Text(
-                    text = if (sortOption == "name_desc") "Z-A" else "A-Z",
-                    color = if (isNameActive) Color.White else Slate400,
-                    fontFamily = ManropeFontFamily,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
             }
         }
     }
