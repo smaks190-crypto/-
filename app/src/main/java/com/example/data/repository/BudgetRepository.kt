@@ -3,6 +3,7 @@ package com.example.data.repository
 import com.example.utils.GlobalConsoleLogger
 import com.example.utils.NetworkCallStatus
 import com.example.data.api.GeminiApiService
+import com.example.data.api.GeminiModelConfig
 import com.example.data.api.GeminiContent
 import com.example.data.api.GeminiPart
 import com.example.data.api.GeminiRequest
@@ -237,73 +238,16 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        val modelsToTry = listOf(
-            "gemini-3.8-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
-        )
-        val opId = GlobalConsoleLogger.newOperationId("DAVID")
-
-        for ((idx, model) in modelsToTry.withIndex()) {
-            val attempt = idx + 1
-            val startMs = System.currentTimeMillis()
-            try {
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                        ?.trim()
-                        ?.removePrefix("\"")
-                        ?.removeSuffix("\"")
-                        ?.removePrefix("«")
-                        ?.removeSuffix("»")
-                        ?.trim()
-                    if (!responseText.isNullOrEmpty()) {
-                        GlobalConsoleLogger.recordNetworkCall(
-                            operationType = "Реакция Давида Жабова",
-                            modelName = model,
-                            durationMs = System.currentTimeMillis() - startMs,
-                            status = NetworkCallStatus.SUCCESS,
-                            httpCode = 200,
-                            attemptNumber = attempt,
-                            totalModelsInChain = modelsToTry.size,
-                            details = "cat=$category",
-                            operationId = opId
-                        )
-                        return responseText
-                    }
-                } else {
-                    GlobalConsoleLogger.recordNetworkCall(
-                        operationType = "Реакция Давида Жабова",
-                        modelName = model,
-                        durationMs = System.currentTimeMillis() - startMs,
-                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                        httpCode = response.error.code,
-                        errorType = response.error.status ?: "GeminiError",
-                        errorMessage = response.error.message,
-                        attemptNumber = attempt,
-                        totalModelsInChain = modelsToTry.size,
-                        details = "cat=$category",
-                        operationId = opId
-                    )
-                }
-            } catch (e: Exception) {
-                GlobalConsoleLogger.recordNetworkCall(
-                    operationType = "Реакция Давида Жабова",
-                    modelName = model,
-                    durationMs = System.currentTimeMillis() - startMs,
-                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                    errorType = e.javaClass.simpleName,
-                    errorMessage = e.localizedMessage ?: e.message,
-                    attemptNumber = attempt,
-                    totalModelsInChain = modelsToTry.size,
-                    details = "cat=$category",
-                    operationId = opId
-                )
-            }
-        }
-
-        return generateLocalDavidComment(type, category, amount)
+        val modelsToTry = GeminiModelConfig.DAVID_REACTION_MODELS
+        return GeminiModelConfig.executeDavidReactionWithFallback(
+            apiService = apiService,
+            apiKey = apiKey,
+            request = request,
+            operationType = "Реакция Давида Жабова",
+            operationPrefix = "DAVID",
+            details = "cat=$category",
+            models = modelsToTry
+        ) ?: generateLocalDavidComment(type, category, amount)
     }
 
     suspend fun generateDavidCommentMulti(
@@ -363,32 +307,16 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        val modelsToTry = listOf(
-            "gemini-3.8-flash",
-            "gemini-3.6-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
-        )
-
-        for (model in modelsToTry) {
-            try {
-                val response = apiService.generateContent(model, apiKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                    if (!responseText.isNullOrEmpty()) {
-                        return responseText.trim()
-                            .removePrefix("\"")
-                            .removeSuffix("\"")
-                            .removePrefix("«")
-                            .removeSuffix("»")
-                            .trim()
-                    }
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-        return "Добавлено ${operations.size} операций на общую сумму ${String.format("%.0f", operations.sumOf { it.amount })} ₽."
+        val modelsToTry = GeminiModelConfig.DAVID_REACTION_MODELS
+        return GeminiModelConfig.executeDavidReactionWithFallback(
+            apiService = apiService,
+            apiKey = apiKey,
+            request = request,
+            operationType = "Групповая реакция Давида Жабова",
+            operationPrefix = "DAVID-M",
+            details = "ops=${operations.size}",
+            models = modelsToTry
+        ) ?: "Добавлено ${operations.size} операций на общую сумму ${String.format("%.0f", operations.sumOf { it.amount })} ₽."
     }
 
     suspend fun generateUserPhraseMulti(

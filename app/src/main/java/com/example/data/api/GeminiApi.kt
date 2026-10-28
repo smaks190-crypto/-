@@ -2,6 +2,7 @@ package com.example.data.api
 
 import com.example.BuildConfig
 import com.example.utils.GlobalConsoleLogger
+import com.example.utils.NetworkCallStatus
 import com.squareup.moshi.Json
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -19,6 +20,115 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 import retrofit2.http.Streaming
 import java.util.concurrent.TimeUnit
+
+object GeminiModelConfig {
+    /**
+     * Основная модель по умолчанию для всех реакций Давида Жабова (одиночных и групповых).
+     * По диагностическим отчётам gemini-3.5-flash-lite стабильно генерирует реакции
+     * за ~0.8–1.4 секунды без частых HTTP 503 и SocketTimeoutException.
+     */
+    const val DEFAULT_DAVID_REACTION_MODEL = "gemini-3.5-flash-lite"
+
+    /**
+     * Цепочка моделей для реакций Давида Жабова (одиночных и групповых):
+     * 1. gemini-3.5-flash-lite (основная модель по умолчанию)
+     * 2. gemini-3.8-flash (резервная)
+     * 3. gemini-3.6-flash (резервная)
+     * 4. gemini-3.1-flash-lite (резервная)
+     */
+    val DAVID_REACTION_MODELS: List<String> = listOf(
+        DEFAULT_DAVID_REACTION_MODEL,
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-3.1-flash-lite"
+    )
+
+    /**
+     * Цепочка моделей для аналитического аудита бюджета (оставлена без изменений).
+     */
+    val BUDGET_AUDIT_MODELS: List<String> = listOf(
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-2.5-flash"
+    )
+
+    /**
+     * Выполняет генерацию реакции Давида Жабова (одиночной или групповой) с использованием
+     * основной модели по умолчанию [DEFAULT_DAVID_REACTION_MODEL] и автоматического fallback-переключения
+     * по цепочке [models], фиксируя телеметрию в [GlobalConsoleLogger].
+     */
+    suspend fun executeDavidReactionWithFallback(
+        apiService: GeminiApiService,
+        apiKey: String,
+        request: GeminiRequest,
+        operationType: String,
+        operationPrefix: String,
+        details: String,
+        models: List<String> = DAVID_REACTION_MODELS
+    ): String? {
+        val opId = GlobalConsoleLogger.newOperationId(operationPrefix)
+
+        for ((idx, model) in models.withIndex()) {
+            val attempt = idx + 1
+            val startMs = System.currentTimeMillis()
+            try {
+                val response = apiService.generateContent(model, apiKey, request)
+                if (response.error == null) {
+                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                        ?.trim()
+                        ?.removePrefix("\"")
+                        ?.removeSuffix("\"")
+                        ?.removePrefix("«")
+                        ?.removeSuffix("»")
+                        ?.trim()
+                    if (!responseText.isNullOrEmpty()) {
+                        GlobalConsoleLogger.recordNetworkCall(
+                            operationType = operationType,
+                            modelName = model,
+                            durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
+                            status = NetworkCallStatus.SUCCESS,
+                            httpCode = 200,
+                            attemptNumber = attempt,
+                            totalModelsInChain = models.size,
+                            details = details,
+                            operationId = opId
+                        )
+                        return responseText
+                    }
+                } else {
+                    GlobalConsoleLogger.recordNetworkCall(
+                        operationType = operationType,
+                        modelName = model,
+                        durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
+                        status = if (attempt < models.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                        httpCode = response.error.code,
+                        errorType = response.error.status ?: "GeminiError",
+                        errorMessage = response.error.message,
+                        attemptNumber = attempt,
+                        totalModelsInChain = models.size,
+                        details = details,
+                        operationId = opId
+                    )
+                }
+            } catch (e: Exception) {
+                GlobalConsoleLogger.recordNetworkCall(
+                    operationType = operationType,
+                    modelName = model,
+                    durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
+                    status = if (attempt < models.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                    errorType = e.javaClass.simpleName,
+                    errorMessage = e.localizedMessage ?: e.message,
+                    attemptNumber = attempt,
+                    totalModelsInChain = models.size,
+                    details = details,
+                    operationId = opId
+                )
+            }
+        }
+        return null
+    }
+}
 
 data class GeminiRequest(
     val contents: List<GeminiContent>,
