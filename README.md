@@ -15,15 +15,24 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v10.73 (сборка 164)
+### Версия v10.78 (сборка 169)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
+**Что изменилось:**
+
+## Что изменилось
 
 ### Добавлено
-- полноценная 5-вкладочная Developer Console с изоляцией Debug/Release и экспортом для ИИ ([PR #13](https://github.com/smaks190-crypto/-/pull/13))
+- установить gemini-3.5-flash-lite основной моделью для всех реакций Давида Жабова ([PR #17](https://github.com/smaks190-crypto/-/pull/17))
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v10.64-build.155...v10.73-build.164
+### Исправлено
+- отображение только последней операции в Gemini Live и раздельный подсчёт доходов/расходов на кнопке «Сохранить» ([PR #18](https://github.com/smaks190-crypto/-/pull/18))
+
+### Документация и сборка
+- обновить публичную презентацию README ([PR #16](https://github.com/smaks190-crypto/-/pull/16))
+
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v10.73-build.164...v10.78-build.169
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
