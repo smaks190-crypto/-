@@ -10,34 +10,17 @@ import java.io.File
 import java.util.Properties
 import java.util.Locale
 
-// РУЧНОЕ ЗНАЧЕНИЕ: версия автоматически увеличивается при каждой сборке и сохраняется в файле version.properties в корне проекта
-val versionPropsFile = file("${rootDir}/version.properties")
+// Version is stable for Debug builds. CI supplies a release-only version code.
 val versionProps = Properties()
-var manualVersionCode = 2
-
+val versionPropsFile = file("${rootDir}/version.properties")
 if (versionPropsFile.exists()) {
     versionPropsFile.inputStream().use { versionProps.load(it) }
-    manualVersionCode = versionProps.getProperty("VERSION_CODE", "2").toIntOrNull() ?: 2
-} else {
-    versionProps.setProperty("VERSION_CODE", "2")
-    versionPropsFile.outputStream().use { versionProps.store(it, "Auto-generated build version. You can edit this file to change the version.") }
 }
-
-// Автоматически увеличиваем версию только при релизной сборке (Release), чтобы не сбрасывать инкрементальный кэш BuildConfig/Resources/KSP при каждой Debug-сборке
-val isReleaseBuild = gradle.startParameter.taskNames.any { 
-    it.contains("Release", ignoreCase = true) && (
-        it.contains("assemble", ignoreCase = true) || 
-        it.contains("bundle", ignoreCase = true)
-    )
-}
-val ciVersionCode = System.getenv("CI_VERSION_CODE")?.toIntOrNull()?.takeIf { it > 0 }
-if (isReleaseBuild && ciVersionCode == null) {
-    manualVersionCode += 1
-    versionProps.setProperty("VERSION_CODE", manualVersionCode.toString())
-    versionPropsFile.outputStream().use { versionProps.store(it, "Auto-incremented build version.") }
-}
-
-val buildNum = ciVersionCode ?: manualVersionCode
+val baseVersionCode = versionProps.getProperty("VERSION_CODE", "809").toIntOrNull()
+    ?.takeIf { it > 0 } ?: error("Invalid VERSION_CODE in version.properties")
+val ciVersionCode = System.getenv("CI_VERSION_CODE")?.takeIf { it.isNotBlank() }?.toIntOrNull()
+    ?.takeIf { it > 0 }
+val buildNum = ciVersionCode ?: baseVersionCode
 
 // Функция расчета: x.xx (до 100, после 99 идет 0)
 fun getVersionLetterName(number: Int): String {
