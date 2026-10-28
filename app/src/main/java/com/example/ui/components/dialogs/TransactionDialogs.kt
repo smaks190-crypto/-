@@ -3,17 +3,12 @@ package com.example.ui.components.dialogs
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -21,7 +16,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -34,18 +28,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.data.db.TransactionEntity
 import com.example.ui.components.DateRangePickerDialog
-import com.example.ui.components.SwipeToDismissDialog
-import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -63,90 +58,108 @@ fun AllTransactionsDialog(
     val lazyListState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    val isScrolled by remember {
-        androidx.compose.runtime.derivedStateOf {
-            lazyListState.firstVisibleItemIndex > 0 || lazyListState.firstVisibleItemScrollOffset > 40
-        }
-    }
+
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
     var sortOption by remember { mutableStateOf("date") }
     var filterType by remember { mutableStateOf(initialFilterType) } // "all", "income", "expense"
-    var selectedPeriod by remember { mutableStateOf("month") } // "all", "week", "month", "year", "custom"
     var chartViewMode by remember { mutableStateOf("donut") } // "donut", "bar"
-    var selectedAccountFilter by remember { mutableStateOf<String?>(null) } // null = all, "Black" etc.
-    var excludeTransfers by remember { mutableStateOf(false) }
     var showDatePickerModal by remember { mutableStateOf(false) }
-    var isCategoriesExpanded by remember { mutableStateOf(false) }
     var isDrilledDownToMixed by remember { mutableStateOf(false) }
-    var isSearchExpandedInPlace by remember { mutableStateOf(false) }
     var showMixedCategoriesDialog by remember { mutableStateOf(false) }
+    var isChartCollapsed by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(isScrolled) {
-        if (!isScrolled) {
-            isSearchExpandedInPlace = false
+    // Non-oscillating NestedScrollConnection:
+    // Collapses the chart only on deliberate downward finger drag when the list can scroll forward,
+    // and expands only when pulling down at the very top of the list (or via manual tap).
+    val chartCollapseScrollConnection = remember(filterType) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag && filterType != "all") {
+                    if (available.y < -18f && !isChartCollapsed &&
+                        (lazyListState.canScrollForward || lazyListState.firstVisibleItemIndex > 0)
+                    ) {
+                        isChartCollapsed = true
+                    }
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (source == NestedScrollSource.Drag && filterType != "all") {
+                    if (available.y > 18f && isChartCollapsed &&
+                        lazyListState.firstVisibleItemIndex == 0 &&
+                        lazyListState.firstVisibleItemScrollOffset == 0
+                    ) {
+                        isChartCollapsed = false
+                    }
+                }
+                return Offset.Zero
+            }
         }
-    }
-
-    LaunchedEffect(isSearchExpandedInPlace) {
-        if (isSearchExpandedInPlace) {
-            focusRequester.requestFocus()
-        }
-    }
-
-    // Custom date range bounds
-    var customStartStr by remember { mutableStateOf<String?>(null) }
-    var customEndStr by remember { mutableStateOf<String?>(null) }
-    var customLabelStr by remember { mutableStateOf<String?>(null) }
-
-    // Synchronized current month name from first visible item on scroll
-    val visibleDateStr = remember(transactions) {
-        androidx.compose.runtime.derivedStateOf {
-            if (transactions.isNotEmpty()) {
-                val idx = (lazyListState.firstVisibleItemIndex - 4).coerceIn(0, transactions.size - 1)
-                transactions.getOrNull(idx)?.date ?: transactions.first().date
-            } else "2026-08-01"
-        }
-    }
-
-    val defaultAnchor = remember(initialDate, transactions) {
-        if (!initialDate.isNullOrBlank()) {
-            initialDate
-        } else if (transactions.isNotEmpty()) {
-            transactions.maxByOrNull { it.date }?.date ?: transactions.first().date
-        } else {
-            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        }
-    }
-
-    var stableAnchorDateStr by remember(defaultAnchor) { mutableStateOf(defaultAnchor) }
-    var swipeWeekOffset by remember { mutableStateOf(0) }
-    var swipeMonthOffset by remember { mutableStateOf(0) }
-    var swipeYearOffset by remember { mutableStateOf(0) }
-    var headerDragOffsetY by remember { mutableFloatStateOf(0f) }
-
-    val currentOffsetInt = when (selectedPeriod) {
-        "week" -> swipeWeekOffset
-        "month" -> swipeMonthOffset
-        "year" -> swipeYearOffset
-        else -> swipeMonthOffset
     }
 
     LaunchedEffect(filterType) {
         isDrilledDownToMixed = false
         selectedCategoryFilter = null
+        if (filterType == "all") {
+            isChartCollapsed = false
+        }
     }
 
-    LaunchedEffect(selectedPeriod) {
-        if (stableAnchorDateStr.isBlank()) {
-            stableAnchorDateStr = defaultAnchor
+    // Initial anchor date: uses initialDate if provided, otherwise current calendar date.
+    val defaultAnchor = remember(initialDate) {
+        resolveInitialAnchorDate(initialDate)
+    }
+
+    // Separated period state:
+    // - displayedMonthDateStr / swipeMonthOffset controls the currently displayed month
+    // - selectedPeriod (null by default) controls whether a period lock ("week", "month", "year", "custom") is active
+    var periodState by remember(defaultAnchor) {
+        mutableStateOf(AllTransactionsPeriodState(stableAnchorDateStr = defaultAnchor))
+    }
+
+    val stableAnchorDateStr = periodState.stableAnchorDateStr
+    val selectedPeriod = periodState.selectedPeriod
+    val swipeMonthOffset = periodState.swipeMonthOffset
+    val swipeWeekOffset = periodState.swipeWeekOffset
+    val swipeYearOffset = periodState.swipeYearOffset
+    val customStartStr = periodState.customStartStr
+    val customEndStr = periodState.customEndStr
+    val customLabelStr = periodState.customLabelStr
+    val currentOffsetInt = periodState.currentOffsetInt
+
+    var headerDragOffsetY by remember { mutableFloatStateOf(0f) }
+
+    val visibleDateStr = remember(transactions, periodState.displayedMonthDateStr) {
+        derivedStateOf {
+            if (transactions.isNotEmpty()) {
+                val idx = (lazyListState.firstVisibleItemIndex - 2).coerceIn(0, transactions.size - 1)
+                transactions.getOrNull(idx)?.date ?: periodState.displayedMonthDateStr
+            } else {
+                periodState.displayedMonthDateStr
+            }
         }
+    }
+
+    LaunchedEffect(selectedPeriod, swipeMonthOffset, swipeWeekOffset, swipeYearOffset) {
         isDrilledDownToMixed = false
         selectedCategoryFilter = null
     }
 
-    val dynamicMonthLabel = remember(stableAnchorDateStr, customLabelStr, selectedPeriod, swipeMonthOffset, swipeWeekOffset, swipeYearOffset) {
+    val dynamicMonthLabel = remember(
+        stableAnchorDateStr,
+        customLabelStr,
+        selectedPeriod,
+        swipeMonthOffset,
+        swipeWeekOffset,
+        swipeYearOffset
+    ) {
         buildDynamicPeriodLabel(
             stableAnchorDateStr = stableAnchorDateStr,
             customLabelStr = customLabelStr,
@@ -165,11 +178,21 @@ fun AllTransactionsDialog(
             customEndStr = customEndStr,
             stableAnchorDateStr = stableAnchorDateStr,
             currentOffsetInt = currentOffsetInt,
-            offset = offset
+            offset = offset,
+            swipeMonthOffset = swipeMonthOffset
         )
 
-    // Filter transactions by period ("week", "month", "year", "custom", "all") synchronized with chart & header
-    val periodFilteredList = remember(transactions, selectedPeriod, customStartStr, customEndStr, stableAnchorDateStr, swipeWeekOffset, swipeMonthOffset, swipeYearOffset) {
+    // List of transactions for the currently displayed period (current/swiped month by default)
+    val periodFilteredList = remember(
+        transactions,
+        selectedPeriod,
+        customStartStr,
+        customEndStr,
+        stableAnchorDateStr,
+        swipeWeekOffset,
+        swipeMonthOffset,
+        swipeYearOffset
+    ) {
         getFilteredListForOffset(currentOffsetInt)
     }
 
@@ -180,7 +203,6 @@ fun AllTransactionsDialog(
             isDrilledDownToMixed = isDrilledDownToMixed
         )
 
-    // Filtered by type ("expense", "income", "all")
     val typeFilteredList = remember(periodFilteredList, filterType) {
         when (filterType) {
             "income" -> periodFilteredList.filter { it.type.equals("income", ignoreCase = true) }
@@ -189,7 +211,6 @@ fun AllTransactionsDialog(
         }
     }
 
-    // Category sums map for current filter (strictly synchronized with typeFilteredList)
     val categoryTotalsMap = remember(typeFilteredList) {
         typeFilteredList
             .groupBy { it.category.ifBlank { "Прочее" } }
@@ -221,7 +242,6 @@ fun AllTransactionsDialog(
         computeActiveCategoryTotals(categoryTotalsMap, isDrilledDownToMixed, categoryThreshold)
     }
 
-    // Search, category filtered and sorted
     val sortedList = remember(typeFilteredList, searchQuery, selectedCategoryFilter, isDrilledDownToMixed, remainingCategoryNames, sortOption) {
         filterAndSortTransactions(
             typeFilteredList = typeFilteredList,
@@ -254,6 +274,7 @@ fun AllTransactionsDialog(
         modifier = Modifier
             .fillMaxSize()
             .offset { IntOffset(x = 0, y = animatedHeaderDragOffsetY.roundToInt()) }
+            .testTag("all_transactions_root")
     ) {
         Column(
             modifier = Modifier
@@ -265,12 +286,11 @@ fun AllTransactionsDialog(
                 onUpdateHeaderDragOffsetY = { headerDragOffsetY = it },
                 onDismiss = onDismiss,
                 shownCount = sortedList.size,
-                totalCount = transactions.size
+                totalCount = periodFilteredList.size
             )
 
-            // Pinned Collapsible / Morphing Header or Full-Size Components
             AllTransactionsCollapsibleHeader(
-                showCompactHeader = isScrolled && filterType != "all",
+                showCompactHeader = isChartCollapsed && filterType != "all",
                 filterType = filterType,
                 onFilterTypeChange = { filterType = it },
                 totalExpenseAmt = totalExpenseAmt,
@@ -282,8 +302,11 @@ fun AllTransactionsDialog(
                 onSetDrilledDownToMixed = { isDrilledDownToMixed = it },
                 remainingCategoryNames = remainingCategoryNames,
                 selectedPeriod = selectedPeriod,
-                onSelectPeriod = { selectedPeriod = it },
+                onSelectPeriod = { clickedPeriod ->
+                    periodState = periodState.onTogglePeriodTab(clickedPeriod)
+                },
                 currentOffsetInt = currentOffsetInt,
+                swipeMonthOffset = swipeMonthOffset,
                 transactions = transactions,
                 visibleDateStr = visibleDateStr.value,
                 dynamicMonthLabel = dynamicMonthLabel,
@@ -296,28 +319,16 @@ fun AllTransactionsDialog(
                 getCategoryTotalsForOffset = ::getCategoryTotalsForOffset,
                 getCategoryColor = ::getCategoryColor,
                 onSwipePeriodOffset = { delta ->
-                    when (selectedPeriod) {
-                        "week" -> swipeWeekOffset += delta
-                        "month" -> swipeMonthOffset += delta
-                        "year" -> swipeYearOffset += delta
-                        else -> {
-                            customStartStr = null
-                            customEndStr = null
-                            customLabelStr = null
-                            selectedPeriod = "month"
-                            swipeMonthOffset += delta
-                        }
-                    }
+                    periodState = periodState.onSwipePeriod(delta)
                 },
-                onOpenMixedCategoriesDialog = { showMixedCategoriesDialog = true }
+                onOpenMixedCategoriesDialog = { showMixedCategoriesDialog = true },
+                onExpandChart = { isChartCollapsed = false },
+                onCollapseChart = { isChartCollapsed = true }
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Pinned Sticky Sorting Options Row (outside LazyColumn)
             TransactionSortAndSearchBar(
-                isSearchExpandedInPlace = isSearchExpandedInPlace,
-                onSetSearchExpandedInPlace = { isSearchExpandedInPlace = it },
                 searchQuery = searchQuery,
                 onSearchQueryChange = { searchQuery = it },
                 focusRequester = focusRequester,
@@ -333,15 +344,11 @@ fun AllTransactionsDialog(
                 customStartStr = customStartStr,
                 dynamicMonthLabel = dynamicMonthLabel,
                 onOpenDatePickerModal = { showDatePickerModal = true },
-                onResetPeriodToAll = {
-                    selectedPeriod = "all"
-                    customStartStr = null
-                    customEndStr = null
-                    customLabelStr = null
+                onResetPeriodLock = {
+                    periodState = periodState.onClearPeriodLock()
                 },
                 sortOption = sortOption,
-                onSortOptionChange = { sortOption = it },
-                isScrolled = isScrolled
+                onSortOptionChange = { sortOption = it }
             )
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -358,7 +365,8 @@ fun AllTransactionsDialog(
                 onRestoreTransaction = onRestoreTransaction,
                 onEditTransaction = onEditTransaction,
                 coroutineScope = coroutineScope,
-                snackbarHostState = snackbarHostState
+                snackbarHostState = snackbarHostState,
+                modifier = Modifier.nestedScroll(chartCollapseScrollConnection)
             )
         }
 
@@ -377,17 +385,13 @@ fun AllTransactionsDialog(
             )
         }
 
-        // Date Range Selection Dialog Modal
         if (showDatePickerModal) {
             DateRangePickerDialog(
-                initialStart = customStartStr ?: visibleDateStr.value.ifBlank { "2026-07-01" },
-                initialEnd = customEndStr ?: "2026-08-31",
+                initialStart = customStartStr ?: periodState.displayedMonthDateStr,
+                initialEnd = customEndStr ?: periodState.displayedMonthDateStr,
                 onDismiss = { showDatePickerModal = false },
                 onConfirm = { s, e ->
-                    customStartStr = s
-                    customEndStr = e
-                    selectedPeriod = "custom"
-                    customLabelStr = try {
+                    val label = try {
                         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
                         val d1 = sdf.parse(s)
                         val d2 = sdf.parse(e)
@@ -396,12 +400,12 @@ fun AllTransactionsDialog(
                             "${outSdf.format(d1)} - ${outSdf.format(d2)}"
                         } else "$s - $e"
                     } catch (ex: Exception) { "$s - $e" }
+                    periodState = periodState.onApplyCustomDateRange(s, e, label)
                     showDatePickerModal = false
                 }
             )
         }
 
-        // Mixed Categories Pop-Up Window/Dialog
         if (showMixedCategoriesDialog) {
             MixedCategoriesDialog(
                 categoryTotalsMap = categoryTotalsMap,

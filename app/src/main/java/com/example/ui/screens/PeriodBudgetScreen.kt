@@ -1329,15 +1329,21 @@ fun TransactionRowItem(
     val (catColor, catIcon) = getCategoryColorAndIcon(item.category, item.subcategory)
     val hasSubcategory = item.subcategory.isNotBlank() && !item.subcategory.equals(item.category, ignoreCase = true)
     val topTitle = if (hasSubcategory) item.subcategory else item.category
-    val bottomTitle = if (hasSubcategory) item.category else ""
+    val bottomTitle = if (hasSubcategory) item.category else if (isExpense) "Расход" else "Доход"
 
-    val content = @Composable {
+    val cardContent: @Composable (Modifier) -> Unit = { rowModifier ->
         Row(
-            modifier = modifier
+            modifier = rowModifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
-                .background(Color.White.copy(alpha = 0.035f))
-                .border(androidx.compose.foundation.BorderStroke(1.dp, GlassBorder), RoundedCornerShape(18.dp))
+                .background(Color(0xFF0E1525))
+                .border(
+                    androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        Color.White.copy(alpha = 0.07f)
+                    ),
+                    RoundedCornerShape(18.dp)
+                )
                 .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1349,16 +1355,17 @@ fun TransactionRowItem(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(catColor.copy(alpha = 0.14f)),
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(catColor.copy(alpha = 0.15f))
+                        .border(1.dp, catColor.copy(alpha = 0.32f), RoundedCornerShape(13.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = catIcon,
                         contentDescription = item.category,
                         tint = catColor,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(19.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))
@@ -1368,30 +1375,29 @@ fun TransactionRowItem(
                         color = Color.White,
                         fontSize = 14.sp,
                         fontFamily = ManropeFontFamily,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
-                    if (bottomTitle.isNotEmpty()) {
-                        Text(
-                            text = bottomTitle,
-                            color = Slate400,
-                            fontSize = 11.sp,
-                            fontFamily = ManropeFontFamily,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = bottomTitle,
+                        color = Slate400,
+                        fontSize = 11.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
                 }
             }
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = "$prefix${numberFormat.format(item.amount)} ₽",
                 color = if (isExpense) Color.White else Emerald400,
                 fontSize = 15.sp,
                 fontFamily = SpaceGroteskFontFamily,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.ExtraBold
             )
         }
     }
@@ -1403,9 +1409,10 @@ fun TransactionRowItem(
             shape = RoundedCornerShape(18.dp),
             modifier = modifier
         ) {
-            content()
+            cardContent(Modifier)
         }
     } else {
-        content()
+        cardContent(modifier)
     }
 }
+

@@ -487,4 +487,447 @@ class GlobalConsoleLoggerTest {
         assertEquals("+50 000 ₽", incSummary.headerSubtitleText)
         assertEquals("Сохранить (1) • +50 000 ₽", incSummary.saveButtonPlainText)
     }
+
+    @Test
+    fun `mergeDuplicateVoiceOperations groups same-category operations and preserves subcategories`() {
+        val rawOps = listOf(
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Фастфуд и Доставка",
+                subcategory = "Бургер",
+                title = "Бургер",
+                amount = 500.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Фастфуд и Доставка",
+                subcategory = "Бургер",
+                title = "Бургер",
+                amount = 300.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Продукты и Выживание",
+                subcategory = "Молоко",
+                title = "Молоко",
+                amount = 120.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Продукты и Выживание",
+                subcategory = "Хлеб",
+                title = "Хлеб",
+                amount = 80.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "income",
+                category = "Зарплата",
+                subcategory = "Зарплата",
+                title = "Зарплата",
+                amount = 50000.0
+            )
+        )
+
+        val result = com.example.ui.components.mergeDuplicateVoiceOperations(rawOps)
+        assertEquals(2, result.mergedGroupsCount)
+        assertEquals(2, result.removedDuplicatesCount)
+        assertEquals(3, result.mergedOperations.size)
+
+        val mergedFastFood = result.mergedOperations[0]
+        assertEquals("Фастфуд и Доставка", mergedFastFood.category)
+        assertEquals("Бургер (×2)", mergedFastFood.subcategory)
+        assertEquals(800.0, mergedFastFood.amount, 0.001)
+
+        val mergedGroceries = result.mergedOperations[1]
+        assertEquals("Продукты и Выживание", mergedGroceries.category)
+        assertEquals("Молоко + Хлеб", mergedGroceries.subcategory)
+        assertEquals(200.0, mergedGroceries.amount, 0.001)
+
+        val unchangedIncome = result.mergedOperations[2]
+        assertEquals("Зарплата", unchangedIncome.category)
+        assertEquals(50000.0, unchangedIncome.amount, 0.001)
+    }
+
+    @Test
+    fun `computeDayHeaderTotals shows both income and expense badges in all mode`() {
+        val mixedAll = com.example.ui.components.dialogs.computeDayHeaderTotals(
+            filterType = "all",
+            dayTotalIncome = 55000.0,
+            dayTotalExpense = 26000.0
+        )
+        assertEquals("+55 000\u00A0₽", mixedAll.incomeBadgeText)
+        assertEquals("-26 000\u00A0₽", mixedAll.expenseBadgeText)
+
+        val expenseOnlyFilter = com.example.ui.components.dialogs.computeDayHeaderTotals(
+            filterType = "expense",
+            dayTotalIncome = 55000.0,
+            dayTotalExpense = 26000.0
+        )
+        assertNull(expenseOnlyFilter.incomeBadgeText)
+        assertEquals("-26 000\u00A0₽", expenseOnlyFilter.expenseBadgeText)
+
+        val incomeOnlyFilter = com.example.ui.components.dialogs.computeDayHeaderTotals(
+            filterType = "income",
+            dayTotalIncome = 55000.0,
+            dayTotalExpense = 26000.0
+        )
+        assertEquals("+55 000\u00A0₽", incomeOnlyFilter.incomeBadgeText)
+        assertNull(incomeOnlyFilter.expenseBadgeText)
+    }
+
+    @Test
+    fun `initial AllTransactionsPeriodState shows only current month operations without locking period or highlighting Mes`() {
+        val sampleTransactions = listOf(
+            com.example.data.db.TransactionEntity(
+                id = "tx-1",
+                type = "expense",
+                date = "2026-10-12",
+                category = "Кафе",
+                subcategory = "Октябрьский кофе",
+                amount = 350.0
+            ),
+            com.example.data.db.TransactionEntity(
+                id = "tx-2",
+                type = "income",
+                date = "2026-10-05",
+                category = "Зарплата",
+                subcategory = "Октябрьская зарплата",
+                amount = 120000.0
+            ),
+            com.example.data.db.TransactionEntity(
+                id = "tx-3",
+                type = "expense",
+                date = "2026-09-20",
+                category = "Продукты",
+                subcategory = "Сентябрьские продукты",
+                amount = 4200.0
+            ),
+            com.example.data.db.TransactionEntity(
+                id = "tx-4",
+                type = "expense",
+                date = "2026-08-14",
+                category = "Путешествия",
+                subcategory = "Августовский отпуск",
+                amount = 35000.0
+            )
+        )
+
+        // Переключатель периодов содержит ровно 3 кнопки: Нед | Мес | Год (без кнопки «Все»)
+        assertEquals(
+            listOf("week" to "Нед", "month" to "Мес", "year" to "Год"),
+            com.example.ui.components.dialogs.PERIOD_SWITCHER_TABS
+        )
+
+        val initialState = com.example.ui.components.dialogs.AllTransactionsPeriodState(
+            stableAnchorDateStr = "2026-10-15"
+        )
+
+        // При открытии период не зафиксирован и кнопка «Мес» не активна
+        assertNull(initialState.selectedPeriod)
+        assertFalse(initialState.isPeriodLocked)
+        assertEquals(-1, initialState.activeTabIndex)
+        assertEquals(0, initialState.swipeMonthOffset)
+        assertEquals("2026-10-15", initialState.displayedMonthDateStr)
+        assertEquals("month", initialState.effectivePeriod)
+
+        // Список содержит операции ТОЛЬКО за отображаемый текущий месяц (Октябрь 2026)
+        val initialMonthTransactions = com.example.ui.components.dialogs.filterTransactionsForOffset(
+            transactions = sampleTransactions,
+            selectedPeriod = initialState.selectedPeriod,
+            customStartStr = initialState.customStartStr,
+            customEndStr = initialState.customEndStr,
+            stableAnchorDateStr = initialState.stableAnchorDateStr,
+            currentOffsetInt = initialState.currentOffsetInt,
+            offset = initialState.currentOffsetInt,
+            swipeMonthOffset = initialState.swipeMonthOffset
+        )
+        assertEquals(2, initialMonthTransactions.size)
+        assertTrue(initialMonthTransactions.all { it.date.startsWith("2026-10") })
+
+        // Проверка граничного случая: пустой список операций
+        val emptyResult = com.example.ui.components.dialogs.filterTransactionsForOffset(
+            transactions = emptyList(),
+            selectedPeriod = initialState.selectedPeriod,
+            customStartStr = null,
+            customEndStr = null,
+            stableAnchorDateStr = initialState.stableAnchorDateStr,
+            currentOffsetInt = initialState.currentOffsetInt,
+            offset = initialState.currentOffsetInt,
+            swipeMonthOffset = initialState.swipeMonthOffset
+        )
+        assertTrue(emptyResult.isEmpty())
+    }
+
+    @Test
+    fun `swiping months updates chart totals, period labels, and transaction list synchronously without locking period`() {
+        val sampleTransactions = listOf(
+            com.example.data.db.TransactionEntity(
+                id = "tx-1",
+                type = "expense",
+                date = "2026-10-10",
+                category = "Фастфуд",
+                subcategory = "Октябрь бургер",
+                amount = 2000.0
+            ),
+            com.example.data.db.TransactionEntity(
+                id = "tx-2",
+                type = "expense",
+                date = "2026-09-18",
+                category = "Продукты",
+                subcategory = "Сентябрь супермаркет",
+                amount = 5000.0
+            ),
+            com.example.data.db.TransactionEntity(
+                id = "tx-3",
+                type = "expense",
+                date = "2026-08-05",
+                category = "Путешествия",
+                subcategory = "Август билеты",
+                amount = 15000.0
+            )
+        )
+
+        var state = com.example.ui.components.dialogs.AllTransactionsPeriodState(
+            stableAnchorDateStr = "2026-10-15"
+        )
+
+        // Шаг 1: Свайп на предыдущий месяц (Октябрь -> Сентябрь)
+        state = state.onSwipePeriod(-1)
+        assertEquals(-1, state.swipeMonthOffset)
+        assertEquals("2026-09-15", state.displayedMonthDateStr)
+        assertNull("Свайп не должен автоматически фиксировать период", state.selectedPeriod)
+        assertEquals(-1, state.activeTabIndex)
+
+        val sepLabel = com.example.ui.components.dialogs.buildDynamicPeriodLabel(
+            stableAnchorDateStr = state.stableAnchorDateStr,
+            customLabelStr = state.customLabelStr,
+            selectedPeriod = state.selectedPeriod,
+            swipeMonthOffset = state.swipeMonthOffset,
+            swipeWeekOffset = state.swipeWeekOffset,
+            swipeYearOffset = state.swipeYearOffset
+        )
+        assertTrue(sepLabel.startsWith("Сентябрь"))
+
+        val sepList = com.example.ui.components.dialogs.filterTransactionsForOffset(
+            transactions = sampleTransactions,
+            selectedPeriod = state.selectedPeriod,
+            customStartStr = state.customStartStr,
+            customEndStr = state.customEndStr,
+            stableAnchorDateStr = state.stableAnchorDateStr,
+            currentOffsetInt = state.currentOffsetInt,
+            offset = state.currentOffsetInt,
+            swipeMonthOffset = state.swipeMonthOffset
+        )
+        assertEquals(listOf("Сентябрь супермаркет"), sepList.map { it.subcategory })
+
+        val sepChartTotals = com.example.ui.components.dialogs.calculateCategoryTotalsForOffset(
+            rawList = sepList,
+            filterType = "expense",
+            isDrilledDownToMixed = false
+        ).toMap()
+        assertEquals(5000.0, sepChartTotals["Продукты"] ?: 0.0, 0.001)
+        assertFalse(sepChartTotals.containsKey("Фастфуд"))
+
+        // Шаг 2: Ещё один свайп назад (Сентябрь -> Август)
+        state = state.onSwipePeriod(-1)
+        assertEquals(-2, state.swipeMonthOffset)
+        assertEquals("2026-08-15", state.displayedMonthDateStr)
+        assertNull(state.selectedPeriod)
+        val augList = com.example.ui.components.dialogs.filterTransactionsForOffset(
+            transactions = sampleTransactions,
+            selectedPeriod = state.selectedPeriod,
+            customStartStr = state.customStartStr,
+            customEndStr = state.customEndStr,
+            stableAnchorDateStr = state.stableAnchorDateStr,
+            currentOffsetInt = state.currentOffsetInt,
+            offset = state.currentOffsetInt,
+            swipeMonthOffset = state.swipeMonthOffset
+        )
+        assertEquals(listOf("Август билеты"), augList.map { it.subcategory })
+
+        // Шаг 3: Свайп вперёд (Август -> Сентябрь)
+        state = state.onSwipePeriod(1)
+        assertEquals(-1, state.swipeMonthOffset)
+        assertEquals("2026-09-15", state.displayedMonthDateStr)
+        assertNull(state.selectedPeriod)
+    }
+
+    @Test
+    fun `tapping Mes after swiping locks displayed month and second tap unlocks without showing all-time history`() {
+        val sampleTransactions = listOf(
+            com.example.data.db.TransactionEntity(
+                id = "tx-1",
+                type = "expense",
+                date = "2026-10-10",
+                category = "Транспорт",
+                subcategory = "Октябрь такси",
+                amount = 800.0
+            ),
+            com.example.data.db.TransactionEntity(
+                id = "tx-2",
+                type = "expense",
+                date = "2026-09-10",
+                category = "Жильё",
+                subcategory = "Сентябрь аренда",
+                amount = 45000.0
+            )
+        )
+
+        // Пользователь открыл Октябрь и перелистнул на Сентябрь
+        var state = com.example.ui.components.dialogs.AllTransactionsPeriodState(
+            stableAnchorDateStr = "2026-10-15"
+        ).onSwipePeriod(-1)
+
+        assertEquals("2026-09-15", state.displayedMonthDateStr)
+        assertNull(state.selectedPeriod)
+
+        // Первое нажатие «Мес»: фиксирует текущий отображаемый месяц (Сентябрь), не сбрасывая его на Октябрь
+        state = state.onTogglePeriodTab("month")
+        assertEquals("month", state.selectedPeriod)
+        assertTrue(state.isPeriodLocked)
+        assertEquals(1, state.activeTabIndex)
+        assertEquals(-1, state.swipeMonthOffset)
+        assertEquals("2026-09-15", state.displayedMonthDateStr)
+
+        val lockedSepTransactions = com.example.ui.components.dialogs.filterTransactionsForOffset(
+            transactions = sampleTransactions,
+            selectedPeriod = state.selectedPeriod,
+            customStartStr = state.customStartStr,
+            customEndStr = state.customEndStr,
+            stableAnchorDateStr = state.stableAnchorDateStr,
+            currentOffsetInt = state.currentOffsetInt,
+            offset = state.currentOffsetInt,
+            swipeMonthOffset = state.swipeMonthOffset
+        )
+        assertEquals(listOf("Сентябрь аренда"), lockedSepTransactions.map { it.subcategory })
+
+        // Повторное нажатие «Мес»: снимает фиксацию, но оставляет отображаемый Сентябрь (НЕ включает все операции за всё время)
+        state = state.onTogglePeriodTab("month")
+        assertNull(state.selectedPeriod)
+        assertFalse(state.isPeriodLocked)
+        assertEquals(-1, state.activeTabIndex)
+        assertEquals(-1, state.swipeMonthOffset)
+        assertEquals("2026-09-15", state.displayedMonthDateStr)
+
+        val unlockedSepTransactions = com.example.ui.components.dialogs.filterTransactionsForOffset(
+            transactions = sampleTransactions,
+            selectedPeriod = state.selectedPeriod,
+            customStartStr = state.customStartStr,
+            customEndStr = state.customEndStr,
+            stableAnchorDateStr = state.stableAnchorDateStr,
+            currentOffsetInt = state.currentOffsetInt,
+            offset = state.currentOffsetInt,
+            swipeMonthOffset = state.swipeMonthOffset
+        )
+        assertEquals(1, unlockedSepTransactions.size)
+        assertEquals("Сентябрь аренда", unlockedSepTransactions.first().subcategory)
+    }
+
+    @Test
+    fun `toggle logic for week and year tabs and interaction with search, categories, and income-expense filters`() {
+        val sampleTransactions = listOf(
+            com.example.data.db.TransactionEntity(
+                id = "tx-1",
+                type = "expense",
+                date = "2026-09-14",
+                category = "Кафе",
+                subcategory = "Кофе Раф",
+                amount = 450.0
+            ),
+            com.example.data.db.TransactionEntity(
+                id = "tx-2",
+                type = "expense",
+                date = "2026-09-02",
+                category = "Кафе",
+                subcategory = "Кофе Американо",
+                amount = 250.0
+            ),
+            com.example.data.db.TransactionEntity(
+                id = "tx-3",
+                type = "income",
+                date = "2026-09-15",
+                category = "Зарплата",
+                subcategory = "Премия Сентябрь",
+                amount = 30000.0
+            ),
+            com.example.data.db.TransactionEntity(
+                id = "tx-4",
+                type = "expense",
+                date = "2026-01-10",
+                category = "Спорт",
+                subcategory = "Январский абонемент",
+                amount = 12000.0
+            )
+        )
+
+        var state = com.example.ui.components.dialogs.AllTransactionsPeriodState(
+            stableAnchorDateStr = "2026-10-15"
+        ).onSwipePeriod(-1) // Отображается 2026-09-15
+
+        // Нажатие «Нед»: включает недельный режим относительно отображаемого месяца (2026-09-15)
+        state = state.onTogglePeriodTab("week")
+        assertEquals("week", state.selectedPeriod)
+        assertEquals(0, state.activeTabIndex)
+        val weekList = com.example.ui.components.dialogs.filterTransactionsForOffset(
+            transactions = sampleTransactions,
+            selectedPeriod = state.selectedPeriod,
+            customStartStr = state.customStartStr,
+            customEndStr = state.customEndStr,
+            stableAnchorDateStr = state.stableAnchorDateStr,
+            currentOffsetInt = state.currentOffsetInt,
+            offset = state.currentOffsetInt,
+            swipeMonthOffset = state.swipeMonthOffset
+        )
+        // Неделя с 14 по 20 сентября 2026 содержит только операции за 14 и 15 сентября
+        assertEquals(setOf("Кофе Раф", "Премия Сентябрь"), weekList.map { it.subcategory }.toSet())
+
+        // Переключение с «Нед» сразу на «Год»: заменяет фильтр на годовой
+        state = state.onTogglePeriodTab("year")
+        assertEquals("year", state.selectedPeriod)
+        assertEquals(2, state.activeTabIndex)
+        val yearList = com.example.ui.components.dialogs.filterTransactionsForOffset(
+            transactions = sampleTransactions,
+            selectedPeriod = state.selectedPeriod,
+            customStartStr = state.customStartStr,
+            customEndStr = state.customEndStr,
+            stableAnchorDateStr = state.stableAnchorDateStr,
+            currentOffsetInt = state.currentOffsetInt,
+            offset = state.currentOffsetInt,
+            swipeMonthOffset = state.swipeMonthOffset
+        )
+        assertEquals(4, yearList.size)
+
+        // Повторное нажатие «Год»: снимает годовой фильтр и возвращает к просмотру месяца (Сентябрь 2026)
+        state = state.onTogglePeriodTab("year")
+        assertNull(state.selectedPeriod)
+        assertEquals(-1, state.activeTabIndex)
+        val backToMonthList = com.example.ui.components.dialogs.filterTransactionsForOffset(
+            transactions = sampleTransactions,
+            selectedPeriod = state.selectedPeriod,
+            customStartStr = state.customStartStr,
+            customEndStr = state.customEndStr,
+            stableAnchorDateStr = state.stableAnchorDateStr,
+            currentOffsetInt = state.currentOffsetInt,
+            offset = state.currentOffsetInt,
+            swipeMonthOffset = state.swipeMonthOffset
+        )
+        assertEquals(3, backToMonthList.size)
+        assertFalse(backToMonthList.any { it.subcategory == "Январский абонемент" })
+
+        // Проверка совместной работы с фильтром доходов/расходов, категорией и поиском
+        val expenseMonthList = backToMonthList.filter { it.type.equals("expense", ignoreCase = true) }
+        val filteredByCategoryAndSearch = com.example.ui.components.dialogs.filterAndSortTransactions(
+            typeFilteredList = expenseMonthList,
+            searchQuery = "Раф",
+            selectedCategoryFilter = "Кафе",
+            isDrilledDownToMixed = false,
+            remainingCategoryNames = emptyList(),
+            sortOption = "date"
+        )
+        assertEquals(1, filteredByCategoryAndSearch.size)
+        assertEquals("Кофе Раф", filteredByCategoryAndSearch.first().subcategory)
+    }
 }
+
+
+

@@ -158,9 +158,12 @@ dependencies {
   // testImplementation(libs.roborazzi.compose)
   // testImplementation(libs.roborazzi.junit.rule)
   androidTestImplementation(platform(libs.androidx.compose.bom))
+  androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+  androidTestImplementation(libs.androidx.core)
   androidTestImplementation(libs.androidx.espresso.core)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.runner)
+  androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
@@ -184,6 +187,28 @@ tasks.withType<Test>().configureEach {
   }
 }
 
+val startCiAndroidEmulator = tasks.register<Exec>("startCiAndroidEmulator") {
+  workingDir = rootProject.projectDir
+  commandLine("bash", "${rootProject.projectDir}/ci/start_emulator.sh")
+  mustRunAfter("packageDebugAndroidTest", "packageDebug")
+}
+
+val collectCiEmulatorArtifacts = tasks.register<Exec>("collectCiEmulatorArtifacts") {
+  workingDir = rootProject.projectDir
+  commandLine("bash", "${rootProject.projectDir}/ci/collect_artifacts.sh")
+}
+
+if (System.getenv("GITHUB_ACTIONS") == "true") {
+  tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
+    dependsOn(startCiAndroidEmulator)
+    finalizedBy(collectCiEmulatorArtifacts)
+  }
+}
+
 tasks.matching { it.name == "assembleDebug" }.configureEach {
   dependsOn("compileReleaseKotlin", "testDebugUnitTest")
+  if (System.getenv("GITHUB_ACTIONS") == "true") {
+    finalizedBy("connectedDebugAndroidTest")
+  }
 }
+
