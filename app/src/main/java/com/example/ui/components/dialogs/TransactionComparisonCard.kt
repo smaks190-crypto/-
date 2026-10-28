@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -37,21 +38,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.TransactionEntity
+import com.example.ui.components.formatFullCurrency
 import com.example.ui.theme.Emerald400
+import com.example.ui.theme.ManropeFontFamily
 import com.example.ui.theme.Rose500
 import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
-import com.example.ui.components.formatFullCurrency
+import com.example.ui.theme.SpaceGroteskFontFamily
 
 @Composable
 fun DoubleSummaryComparisonCards(
@@ -63,6 +68,14 @@ fun DoubleSummaryComparisonCards(
     onSelectIncome: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val totalFlow = (totalExpenseAmt + totalIncomeAmt).coerceAtLeast(1.0)
+    val expenseShare = if (totalExpenseAmt > 0.0) {
+        (totalExpenseAmt / totalFlow).toFloat().coerceIn(0.15f, 1f)
+    } else 0.12f
+    val incomeShare = if (totalIncomeAmt > 0.0) {
+        (totalIncomeAmt / totalFlow).toFloat().coerceIn(0.15f, 1f)
+    } else 0.12f
+
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -71,59 +84,155 @@ fun DoubleSummaryComparisonCards(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Expense Card
+            // Expense Bento Card
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(Slate900)
-                    .border(1.dp, Slate800, RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF131B2E),
+                                Color(0xFF0C1220)
+                            )
+                        )
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (filterType == "expense") Rose500.copy(alpha = 0.65f) else Rose500.copy(alpha = 0.22f),
+                        shape = RoundedCornerShape(20.dp)
+                    )
                     .clickable { onSelectExpense() }
-                    .padding(14.dp)
+                    .padding(horizontal = 14.dp, vertical = 13.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Траты • $dynamicMonthLabel",
+                            color = Slate400,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "График ›",
+                            color = Rose500.copy(alpha = 0.85f),
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Text(
                         text = formatFullCurrency(totalExpenseAmt),
                         color = Color.White,
+                        fontFamily = SpaceGroteskFontFamily,
                         fontSize = 18.sp,
-                        fontWeight = FontWeight.ExtraBold
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Text("Траты • $dynamicMonthLabel", color = Slate400, fontSize = 11.sp)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(4.dp)
+                            .height(5.dp)
                             .clip(CircleShape)
-                            .background(Rose500)
-                    )
+                            .background(Slate800)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(expenseShare)
+                                .fillMaxHeight()
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(Rose500, Color(0xFFFF758F))
+                                    )
+                                )
+                        )
+                    }
                 }
             }
 
-            // Income Card
+            // Income Bento Card
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(Slate900)
-                    .border(1.dp, Slate800, RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF101D29),
+                                Color(0xFF0B131E)
+                            )
+                        )
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (filterType == "income") Emerald400.copy(alpha = 0.65f) else Emerald400.copy(alpha = 0.22f),
+                        shape = RoundedCornerShape(20.dp)
+                    )
                     .clickable { onSelectIncome() }
-                    .padding(14.dp)
+                    .padding(horizontal = 14.dp, vertical = 13.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Доходы • $dynamicMonthLabel",
+                            color = Slate400,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "График ›",
+                            color = Emerald400.copy(alpha = 0.85f),
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Text(
                         text = formatFullCurrency(totalIncomeAmt),
                         color = Color.White,
+                        fontFamily = SpaceGroteskFontFamily,
                         fontSize = 18.sp,
-                        fontWeight = FontWeight.ExtraBold
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Text("Доходы • $dynamicMonthLabel", color = Slate400, fontSize = 11.sp)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(4.dp)
+                            .height(5.dp)
                             .clip(CircleShape)
-                            .background(Emerald400)
-                    )
+                            .background(Slate800)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(incomeShare)
+                                .fillMaxHeight()
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(Emerald400, Color(0xFF34D399))
+                                    )
+                                )
+                        )
+                    }
                 }
             }
         }
@@ -147,6 +256,7 @@ fun SingleHeroComparisonCard(
     getCategoryColor: (String) -> Color,
     onResetFilterToAll: () -> Unit,
     onSwipePeriodOffset: (Int) -> Unit,
+    onCollapseChart: (() -> Unit)? = null,
     bottomContent: @Composable ColumnScope.() -> Unit
 ) {
     val isExpense = filterType == "expense"
@@ -186,10 +296,17 @@ fun SingleHeroComparisonCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
-            .background(Slate900.copy(alpha = 0.9f))
-            .border(1.dp, Slate800, RoundedCornerShape(24.dp))
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF11192B),
+                        Slate900
+                    )
+                )
+            )
+            .border(1.dp, accentColor.copy(alpha = 0.25f), RoundedCornerShape(24.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         // Header inside card
         Row(
@@ -197,7 +314,7 @@ fun SingleHeroComparisonCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top
         ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -205,64 +322,97 @@ fun SingleHeroComparisonCard(
                     Text(
                         text = formatFullCurrency(activeAmount),
                         color = Color.White,
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Black
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = diffText,
-                            color = Slate300,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                    if (selectedPeriod != "all") {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                text = diffText,
+                                color = Slate300,
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = "$titleText • $dynamicMonthLabel",
                     color = Slate400,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Medium
+                    fontFamily = ManropeFontFamily,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
 
-            IconButton(
-                onClick = onResetFilterToAll,
-                modifier = Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
-                    .background(Slate800)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "К всем",
-                    tint = Slate400,
-                    modifier = Modifier.size(14.dp)
-                )
+                if (onCollapseChart != null) {
+                    IconButton(
+                        onClick = onCollapseChart,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(Slate800)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.KeyboardArrowUp,
+                            contentDescription = "Свернуть график",
+                            tint = Slate300,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onResetFilterToAll,
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Slate800)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "К всем",
+                        tint = Slate400,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
         }
 
-        // Chart area inside Swipe Gesture detector
+        // Chart area inside Swipe Gesture detector (full-width pages, zero adjacent bleed)
         var totalDragX by remember { mutableFloatStateOf(0f) }
+        val isSwipeEnabled = selectedPeriod != "all" && selectedPeriod != "custom"
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .pointerInput(selectedPeriod) {
+                .pointerInput(selectedPeriod, isSwipeEnabled) {
+                    if (!isSwipeEnabled) return@pointerInput
                     detectHorizontalDragGestures(
                         onDragStart = { totalDragX = 0f },
                         onDragEnd = {
-                            val threshold = 120f
-                            if (totalDragX < -threshold) {
+                            val threshold = 110f
+                            val finalDrag = totalDragX
+                            totalDragX = 0f
+                            if (finalDrag < -threshold) {
                                 onSwipePeriodOffset(1)
-                            } else if (totalDragX > threshold) {
+                            } else if (finalDrag > threshold) {
                                 onSwipePeriodOffset(-1)
                             }
                         },
+                        onDragCancel = { totalDragX = 0f },
                         onHorizontalDrag = { change, dragAmount ->
                             change.consume()
                             totalDragX += dragAmount
@@ -273,67 +423,68 @@ fun SingleHeroComparisonCard(
             BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(250.dp)
+                    .height(226.dp)
                     .clipToBounds()
             ) {
-                val widthPx = constraints.maxWidth
+                val widthPx = constraints.maxWidth.coerceAtLeast(1)
                 val widthDp = with(LocalDensity.current) { widthPx.toDp() }
-
-                val pageWidthDp = widthDp * 0.8f
-                val centerOffsetDp = widthDp * 0.1f
+                val dragOffsetFraction = if (isSwipeEnabled) {
+                    (totalDragX / widthPx.toFloat()).coerceIn(-0.95f, 0.95f)
+                } else 0f
 
                 val animatedOffsetFloat by animateFloatAsState(
-                    targetValue = currentOffsetInt.toFloat(),
+                    targetValue = currentOffsetInt.toFloat() - dragOffsetFraction,
                     animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioLowBouncy,
+                        dampingRatio = Spring.DampingRatioNoBouncy,
                         stiffness = Spring.StiffnessMediumLow
                     ),
                     label = "diagram_slide_offset"
                 )
 
-                listOf(currentOffsetInt - 1, currentOffsetInt, currentOffsetInt + 1).forEach { offsetValue ->
-                    val translationX = centerOffsetDp + pageWidthDp * (offsetValue - animatedOffsetFloat)
-                    val relativeDiff = kotlin.math.abs(offsetValue - animatedOffsetFloat)
-                    val alphaValue = if (offsetValue == currentOffsetInt) {
-                        1f - kotlin.math.min(1f, relativeDiff) * 0.4f
-                    } else {
-                        0.3f + (1f - kotlin.math.min(1f, relativeDiff)) * 0.3f
-                    }
+                val offsetsToRender = if (isSwipeEnabled) {
+                    listOf(currentOffsetInt - 1, currentOffsetInt, currentOffsetInt + 1)
+                } else {
+                    listOf(currentOffsetInt)
+                }
 
-                    val scaleValue = if (offsetValue == currentOffsetInt) {
-                        1f - kotlin.math.min(1f, relativeDiff) * 0.12f
-                    } else {
-                        0.88f + (1f - kotlin.math.min(1f, relativeDiff)) * 0.12f
-                    }
+                offsetsToRender.forEach { offsetValue ->
+                    val pageDelta = offsetValue - animatedOffsetFloat
+                    val relativeDiff = kotlin.math.abs(pageDelta)
+                    // Only visible when within viewport (< 0.98 page widths away); zero bleed at rest!
+                    val alphaValue = (1f - relativeDiff * 1.05f).coerceIn(0f, 1f)
+                    val scaleValue = (1f - relativeDiff * 0.10f).coerceIn(0.88f, 1f)
+                    val translationX = widthDp * pageDelta
 
-                    Box(
-                        modifier = Modifier
-                            .width(pageWidthDp)
-                            .fillMaxHeight()
-                            .offset(x = translationX)
-                            .graphicsLayer {
-                                alpha = alphaValue
-                                scaleX = scaleValue
-                                scaleY = scaleValue
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        val offsetTotalsMap = getCategoryTotalsForOffset(offsetValue)
+                    if (alphaValue > 0.01f) {
+                        Box(
+                            modifier = Modifier
+                                .width(widthDp)
+                                .fillMaxHeight()
+                                .offset(x = translationX)
+                                .graphicsLayer {
+                                    alpha = alphaValue
+                                    scaleX = scaleValue
+                                    scaleY = scaleValue
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            val offsetTotalsMap = getCategoryTotalsForOffset(offsetValue)
 
-                        if (chartViewMode == "donut") {
-                            TransactionDonutChart(
-                                offsetTotalsMap = offsetTotalsMap,
-                                getCategoryColor = getCategoryColor
-                            )
-                        } else {
-                            TransactionBarChart(
-                                selectedPeriod = selectedPeriod,
-                                stableAnchorDateStr = stableAnchorDateStr,
-                                offsetValue = offsetValue,
-                                filterType = filterType,
-                                accentColor = accentColor,
-                                getFilteredListForOffset = getFilteredListForOffset
-                            )
+                            if (chartViewMode == "donut") {
+                                TransactionDonutChart(
+                                    offsetTotalsMap = offsetTotalsMap,
+                                    getCategoryColor = getCategoryColor
+                                )
+                            } else {
+                                TransactionBarChart(
+                                    selectedPeriod = selectedPeriod,
+                                    stableAnchorDateStr = stableAnchorDateStr,
+                                    offsetValue = offsetValue,
+                                    filterType = filterType,
+                                    accentColor = accentColor,
+                                    getFilteredListForOffset = getFilteredListForOffset
+                                )
+                            }
                         }
                     }
                 }

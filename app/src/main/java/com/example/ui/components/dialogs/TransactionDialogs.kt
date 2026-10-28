@@ -3,17 +3,12 @@ package com.example.ui.components.dialogs
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -21,7 +16,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -34,15 +28,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.data.db.TransactionEntity
 import com.example.ui.components.DateRangePickerDialog
-import com.example.ui.components.SwipeToDismissDialog
-import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -64,7 +59,7 @@ fun AllTransactionsDialog(
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val isScrolled by remember {
-        androidx.compose.runtime.derivedStateOf {
+        derivedStateOf {
             lazyListState.firstVisibleItemIndex > 0 || lazyListState.firstVisibleItemScrollOffset > 40
         }
     }
@@ -74,24 +69,52 @@ fun AllTransactionsDialog(
     var filterType by remember { mutableStateOf(initialFilterType) } // "all", "income", "expense"
     var selectedPeriod by remember { mutableStateOf("month") } // "all", "week", "month", "year", "custom"
     var chartViewMode by remember { mutableStateOf("donut") } // "donut", "bar"
-    var selectedAccountFilter by remember { mutableStateOf<String?>(null) } // null = all, "Black" etc.
-    var excludeTransfers by remember { mutableStateOf(false) }
     var showDatePickerModal by remember { mutableStateOf(false) }
-    var isCategoriesExpanded by remember { mutableStateOf(false) }
     var isDrilledDownToMixed by remember { mutableStateOf(false) }
     var isSearchExpandedInPlace by remember { mutableStateOf(false) }
     var showMixedCategoriesDialog by remember { mutableStateOf(false) }
+    var isChartCollapsed by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(isScrolled) {
-        if (!isScrolled) {
-            isSearchExpandedInPlace = false
+    // Non-oscillating NestedScrollConnection:
+    // Collapses the chart only on deliberate downward finger drag when the list can scroll forward,
+    // and expands only when pulling down at the very top of the list (or via manual tap).
+    val chartCollapseScrollConnection = remember(filterType) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag && filterType != "all") {
+                    if (available.y < -18f && !isChartCollapsed &&
+                        (lazyListState.canScrollForward || lazyListState.firstVisibleItemIndex > 0)
+                    ) {
+                        isChartCollapsed = true
+                    }
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (source == NestedScrollSource.Drag && filterType != "all") {
+                    if (available.y > 18f && isChartCollapsed &&
+                        lazyListState.firstVisibleItemIndex == 0 &&
+                        lazyListState.firstVisibleItemScrollOffset == 0
+                    ) {
+                        isChartCollapsed = false
+                    }
+                }
+                return Offset.Zero
+            }
         }
     }
 
-    LaunchedEffect(isSearchExpandedInPlace) {
-        if (isSearchExpandedInPlace) {
-            focusRequester.requestFocus()
+    LaunchedEffect(filterType) {
+        isDrilledDownToMixed = false
+        selectedCategoryFilter = null
+        if (filterType == "all") {
+            isChartCollapsed = false
         }
     }
 
@@ -100,11 +123,10 @@ fun AllTransactionsDialog(
     var customEndStr by remember { mutableStateOf<String?>(null) }
     var customLabelStr by remember { mutableStateOf<String?>(null) }
 
-    // Synchronized current month name from first visible item on scroll
     val visibleDateStr = remember(transactions) {
-        androidx.compose.runtime.derivedStateOf {
+        derivedStateOf {
             if (transactions.isNotEmpty()) {
-                val idx = (lazyListState.firstVisibleItemIndex - 4).coerceIn(0, transactions.size - 1)
+                val idx = (lazyListState.firstVisibleItemIndex - 2).coerceIn(0, transactions.size - 1)
                 transactions.getOrNull(idx)?.date ?: transactions.first().date
             } else "2026-08-01"
         }
@@ -130,12 +152,7 @@ fun AllTransactionsDialog(
         "week" -> swipeWeekOffset
         "month" -> swipeMonthOffset
         "year" -> swipeYearOffset
-        else -> swipeMonthOffset
-    }
-
-    LaunchedEffect(filterType) {
-        isDrilledDownToMixed = false
-        selectedCategoryFilter = null
+        else -> 0
     }
 
     LaunchedEffect(selectedPeriod) {
@@ -168,7 +185,6 @@ fun AllTransactionsDialog(
             offset = offset
         )
 
-    // Filter transactions by period ("week", "month", "year", "custom", "all") synchronized with chart & header
     val periodFilteredList = remember(transactions, selectedPeriod, customStartStr, customEndStr, stableAnchorDateStr, swipeWeekOffset, swipeMonthOffset, swipeYearOffset) {
         getFilteredListForOffset(currentOffsetInt)
     }
@@ -180,7 +196,6 @@ fun AllTransactionsDialog(
             isDrilledDownToMixed = isDrilledDownToMixed
         )
 
-    // Filtered by type ("expense", "income", "all")
     val typeFilteredList = remember(periodFilteredList, filterType) {
         when (filterType) {
             "income" -> periodFilteredList.filter { it.type.equals("income", ignoreCase = true) }
@@ -189,7 +204,6 @@ fun AllTransactionsDialog(
         }
     }
 
-    // Category sums map for current filter (strictly synchronized with typeFilteredList)
     val categoryTotalsMap = remember(typeFilteredList) {
         typeFilteredList
             .groupBy { it.category.ifBlank { "Прочее" } }
@@ -221,7 +235,6 @@ fun AllTransactionsDialog(
         computeActiveCategoryTotals(categoryTotalsMap, isDrilledDownToMixed, categoryThreshold)
     }
 
-    // Search, category filtered and sorted
     val sortedList = remember(typeFilteredList, searchQuery, selectedCategoryFilter, isDrilledDownToMixed, remainingCategoryNames, sortOption) {
         filterAndSortTransactions(
             typeFilteredList = typeFilteredList,
@@ -268,9 +281,8 @@ fun AllTransactionsDialog(
                 totalCount = transactions.size
             )
 
-            // Pinned Collapsible / Morphing Header or Full-Size Components
             AllTransactionsCollapsibleHeader(
-                showCompactHeader = isScrolled && filterType != "all",
+                showCompactHeader = isChartCollapsed && filterType != "all",
                 filterType = filterType,
                 onFilterTypeChange = { filterType = it },
                 totalExpenseAmt = totalExpenseAmt,
@@ -282,7 +294,14 @@ fun AllTransactionsDialog(
                 onSetDrilledDownToMixed = { isDrilledDownToMixed = it },
                 remainingCategoryNames = remainingCategoryNames,
                 selectedPeriod = selectedPeriod,
-                onSelectPeriod = { selectedPeriod = it },
+                onSelectPeriod = { newPeriod ->
+                    selectedPeriod = newPeriod
+                    if (newPeriod != "custom") {
+                        customStartStr = null
+                        customEndStr = null
+                        customLabelStr = null
+                    }
+                },
                 currentOffsetInt = currentOffsetInt,
                 transactions = transactions,
                 visibleDateStr = visibleDateStr.value,
@@ -300,21 +319,15 @@ fun AllTransactionsDialog(
                         "week" -> swipeWeekOffset += delta
                         "month" -> swipeMonthOffset += delta
                         "year" -> swipeYearOffset += delta
-                        else -> {
-                            customStartStr = null
-                            customEndStr = null
-                            customLabelStr = null
-                            selectedPeriod = "month"
-                            swipeMonthOffset += delta
-                        }
                     }
                 },
-                onOpenMixedCategoriesDialog = { showMixedCategoriesDialog = true }
+                onOpenMixedCategoriesDialog = { showMixedCategoriesDialog = true },
+                onExpandChart = { isChartCollapsed = false },
+                onCollapseChart = { isChartCollapsed = true }
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            // Pinned Sticky Sorting Options Row (outside LazyColumn)
             TransactionSortAndSearchBar(
                 isSearchExpandedInPlace = isSearchExpandedInPlace,
                 onSetSearchExpandedInPlace = { isSearchExpandedInPlace = it },
@@ -341,7 +354,9 @@ fun AllTransactionsDialog(
                 },
                 sortOption = sortOption,
                 onSortOptionChange = { sortOption = it },
-                isScrolled = isScrolled
+                isScrolled = isScrolled,
+                filterType = filterType,
+                onFilterTypeChange = { filterType = it }
             )
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -358,7 +373,8 @@ fun AllTransactionsDialog(
                 onRestoreTransaction = onRestoreTransaction,
                 onEditTransaction = onEditTransaction,
                 coroutineScope = coroutineScope,
-                snackbarHostState = snackbarHostState
+                snackbarHostState = snackbarHostState,
+                modifier = Modifier.nestedScroll(chartCollapseScrollConnection)
             )
         }
 
@@ -377,7 +393,6 @@ fun AllTransactionsDialog(
             )
         }
 
-        // Date Range Selection Dialog Modal
         if (showDatePickerModal) {
             DateRangePickerDialog(
                 initialStart = customStartStr ?: visibleDateStr.value.ifBlank { "2026-07-01" },
@@ -401,7 +416,6 @@ fun AllTransactionsDialog(
             )
         }
 
-        // Mixed Categories Pop-Up Window/Dialog
         if (showMixedCategoriesDialog) {
             MixedCategoriesDialog(
                 categoryTotalsMap = categoryTotalsMap,

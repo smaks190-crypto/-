@@ -1,14 +1,14 @@
 package com.example.ui.components.dialogs
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -36,18 +37,22 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.db.TransactionEntity
+import com.example.ui.components.formatFullCurrency
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.Indigo500
+import com.example.ui.theme.ManropeFontFamily
 import com.example.ui.theme.Rose500
+import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate700
-import com.example.data.db.TransactionEntity
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
-import com.example.ui.components.formatFullCurrency
+import com.example.ui.theme.SpaceGroteskFontFamily
 
 @Composable
 fun AllTransactionsDragHandleAndHeaderBar(
@@ -57,7 +62,6 @@ fun AllTransactionsDragHandleAndHeaderBar(
     shownCount: Int,
     totalCount: Int
 ) {
-    // Vertical drag handle for swipe dismissal (identical to ExpenseSharesScreen.kt)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -85,18 +89,17 @@ fun AllTransactionsDragHandleAndHeaderBar(
     ) {
         Box(
             modifier = Modifier
-                .width(36.dp)
+                .width(38.dp)
                 .height(4.dp)
                 .clip(CircleShape)
                 .background(Slate700)
         )
     }
 
-    // Header Bar (Cleaned without accounts & transfers)
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 12.dp),
+            .padding(bottom = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -106,19 +109,19 @@ fun AllTransactionsDragHandleAndHeaderBar(
         ) {
             Box(
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(
                         Brush.linearGradient(
                             listOf(Emerald400, Indigo500, Rose500)
                         )
                     )
-                    .padding(2.dp)
+                    .padding(1.5.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .clip(CircleShape)
+                        .clip(RoundedCornerShape(10.5.dp))
                         .background(DarkBg),
                     contentAlignment = Alignment.Center
                 ) {
@@ -134,13 +137,16 @@ fun AllTransactionsDragHandleAndHeaderBar(
                 Text(
                     text = "Все операции",
                     color = Color.White,
+                    fontFamily = ManropeFontFamily,
                     fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.ExtraBold
                 )
                 Text(
                     text = "Показано $shownCount из $totalCount операций",
                     color = Slate400,
-                    fontSize = 11.sp
+                    fontFamily = ManropeFontFamily,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
                 )
             }
         }
@@ -168,50 +174,67 @@ fun CompactScrolledSummaryHeader(
     filterType: String,
     totalExpenseAmt: Double,
     totalIncomeAmt: Double,
+    dynamicMonthLabel: String = "",
     currentActiveCategoryTotals: List<Pair<String, Double>>,
     selectedCategoryFilter: String?,
     isDrilledDownToMixed: Boolean,
     remainingCategoryNames: List<String>,
     getCategoryColor: (String) -> Color,
+    onExpandChart: () -> Unit = {},
     onResetToAll: () -> Unit
 ) {
     val isExpense = filterType == "expense"
     val accentColor = if (isExpense) Rose500 else Emerald400
     val activeAmount = if (isExpense) totalExpenseAmt else totalIncomeAmt
     val titleText = if (isExpense) "Траты" else "Доходы"
+    val subtitleLabel = if (dynamicMonthLabel.isNotBlank()) "$titleText • $dynamicMonthLabel" else titleText
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(Slate900)
-            .border(1.dp, Slate800, RoundedCornerShape(20.dp))
+            .background(
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        Color(0xFF11192B),
+                        Slate900
+                    )
+                )
+            )
+            .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(20.dp))
+            .clickable { onExpandChart() }
             .padding(horizontal = 12.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.weight(1f)
         ) {
-            // Small doughnut/circular chart
             CompactMiniDonutChart(
                 categoryTotals = currentActiveCategoryTotals,
                 getCategoryColor = getCategoryColor
             )
 
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = titleText,
+                    text = subtitleLabel,
                     color = Slate400,
+                    fontFamily = ManropeFontFamily,
                     fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = formatFullCurrency(activeAmount),
                     color = Color.White,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.ExtraBold
+                    fontFamily = SpaceGroteskFontFamily,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
@@ -224,35 +247,66 @@ fun CompactScrolledSummaryHeader(
             else -> null
         }
 
-        if (!activeFilterText.isNullOrBlank()) {
-            Box(
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (!activeFilterText.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(accentColor.copy(alpha = 0.16f))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = activeFilterText,
+                        color = accentColor,
+                        fontFamily = ManropeFontFamily,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(accentColor.copy(alpha = 0.15f))
-                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Slate800.copy(alpha = 0.85f))
+                    .clickable { onExpandChart() }
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
-                    text = activeFilterText,
-                    color = accentColor,
+                    text = "График",
+                    color = Slate300,
+                    fontFamily = ManropeFontFamily,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold
                 )
+                Icon(
+                    imageVector = Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Развернуть график",
+                    tint = Slate300,
+                    modifier = Modifier.size(14.dp)
+                )
             }
-        }
 
-        IconButton(
-            onClick = onResetToAll,
-            modifier = Modifier
-                .size(24.dp)
-                .clip(CircleShape)
-                .background(Slate800)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "К всем",
-                tint = Slate400,
-                modifier = Modifier.size(12.dp)
-            )
+            IconButton(
+                onClick = onResetToAll,
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(Slate800)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "К всем",
+                    tint = Slate400,
+                    modifier = Modifier.size(13.dp)
+                )
+            }
         }
     }
 }
@@ -285,13 +339,16 @@ fun AllTransactionsCollapsibleHeader(
     getCategoryTotalsForOffset: (Int) -> List<Pair<String, Double>>,
     getCategoryColor: (String) -> Color,
     onSwipePeriodOffset: (Int) -> Unit,
-    onOpenMixedCategoriesDialog: () -> Unit
+    onOpenMixedCategoriesDialog: () -> Unit,
+    onExpandChart: () -> Unit = {},
+    onCollapseChart: () -> Unit = {}
 ) {
     AnimatedContent(
         targetState = showCompactHeader,
         transitionSpec = {
-            (fadeIn(animationSpec = tween(180, delayMillis = 60)) + scaleIn(initialScale = 0.96f, animationSpec = tween(180, delayMillis = 60)))
-                .togetherWith(fadeOut(animationSpec = tween(100)) + scaleOut(targetScale = 0.98f, animationSpec = tween(100)))
+            fadeIn(animationSpec = tween(180))
+                .togetherWith(fadeOut(animationSpec = tween(140)))
+                .using(SizeTransform(clip = true))
         },
         label = "header_morph_animation"
     ) { targetCompact ->
@@ -300,11 +357,13 @@ fun AllTransactionsCollapsibleHeader(
                 filterType = filterType,
                 totalExpenseAmt = totalExpenseAmt,
                 totalIncomeAmt = totalIncomeAmt,
+                dynamicMonthLabel = dynamicMonthLabel,
                 currentActiveCategoryTotals = currentActiveCategoryTotals,
                 selectedCategoryFilter = selectedCategoryFilter,
                 isDrilledDownToMixed = isDrilledDownToMixed,
                 remainingCategoryNames = remainingCategoryNames,
                 getCategoryColor = getCategoryColor,
+                onExpandChart = onExpandChart,
                 onResetToAll = {
                     onFilterTypeChange("all")
                     onSelectCategoryFilter(null)
@@ -312,9 +371,7 @@ fun AllTransactionsCollapsibleHeader(
                 }
             )
         } else {
-            // Full-Size UI Header
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Pinned Hero Card (Expenses / Income / Both)
                 if (filterType == "all") {
                     DoubleSummaryComparisonCards(
                         totalExpenseAmt = totalExpenseAmt,
@@ -322,18 +379,10 @@ fun AllTransactionsCollapsibleHeader(
                         dynamicMonthLabel = dynamicMonthLabel,
                         filterType = filterType,
                         onSelectExpense = {
-                            if (filterType == "expense") {
-                                onSelectPeriod("month")
-                            } else {
-                                onFilterTypeChange("expense")
-                            }
+                            onFilterTypeChange("expense")
                         },
                         onSelectIncome = {
-                            if (filterType == "income") {
-                                onSelectPeriod("month")
-                            } else {
-                                onFilterTypeChange("income")
-                            }
+                            onFilterTypeChange("income")
                         }
                     )
                 } else {
@@ -352,7 +401,8 @@ fun AllTransactionsCollapsibleHeader(
                         getCategoryTotalsForOffset = getCategoryTotalsForOffset,
                         getCategoryColor = getCategoryColor,
                         onResetFilterToAll = { onFilterTypeChange("all") },
-                        onSwipePeriodOffset = onSwipePeriodOffset
+                        onSwipePeriodOffset = onSwipePeriodOffset,
+                        onCollapseChart = onCollapseChart
                     ) {
                         TransactionCategoryChipsSection(
                             selectedPeriod = selectedPeriod,

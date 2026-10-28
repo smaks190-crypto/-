@@ -487,4 +487,92 @@ class GlobalConsoleLoggerTest {
         assertEquals("+50 000 ₽", incSummary.headerSubtitleText)
         assertEquals("Сохранить (1) • +50 000 ₽", incSummary.saveButtonPlainText)
     }
+
+    @Test
+    fun `mergeDuplicateVoiceOperations groups same-category operations and preserves subcategories`() {
+        val rawOps = listOf(
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Фастфуд и Доставка",
+                subcategory = "Бургер",
+                title = "Бургер",
+                amount = 500.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Фастфуд и Доставка",
+                subcategory = "Бургер",
+                title = "Бургер",
+                amount = 300.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Продукты и Выживание",
+                subcategory = "Молоко",
+                title = "Молоко",
+                amount = 120.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "expense",
+                category = "Продукты и Выживание",
+                subcategory = "Хлеб",
+                title = "Хлеб",
+                amount = 80.0
+            ),
+            com.example.data.repository.ParsedVoiceOperation(
+                type = "income",
+                category = "Зарплата",
+                subcategory = "Зарплата",
+                title = "Зарплата",
+                amount = 50000.0
+            )
+        )
+
+        val result = com.example.ui.components.mergeDuplicateVoiceOperations(rawOps)
+        assertEquals(2, result.mergedGroupsCount)
+        assertEquals(2, result.removedDuplicatesCount)
+        assertEquals(3, result.mergedOperations.size)
+
+        val mergedFastFood = result.mergedOperations[0]
+        assertEquals("Фастфуд и Доставка", mergedFastFood.category)
+        assertEquals("Бургер (×2)", mergedFastFood.subcategory)
+        assertEquals(800.0, mergedFastFood.amount, 0.001)
+
+        val mergedGroceries = result.mergedOperations[1]
+        assertEquals("Продукты и Выживание", mergedGroceries.category)
+        assertEquals("Молоко + Хлеб", mergedGroceries.subcategory)
+        assertEquals(200.0, mergedGroceries.amount, 0.001)
+
+        val unchangedIncome = result.mergedOperations[2]
+        assertEquals("Зарплата", unchangedIncome.category)
+        assertEquals(50000.0, unchangedIncome.amount, 0.001)
+    }
+
+    @Test
+    fun `computeDayHeaderTotals shows both income and expense badges in all mode`() {
+        val mixedAll = com.example.ui.components.dialogs.computeDayHeaderTotals(
+            filterType = "all",
+            dayTotalIncome = 55000.0,
+            dayTotalExpense = 26000.0
+        )
+        assertEquals("+55 000 ₽", mixedAll.incomeBadgeText)
+        assertEquals("-26 000 ₽", mixedAll.expenseBadgeText)
+
+        val expenseOnlyFilter = com.example.ui.components.dialogs.computeDayHeaderTotals(
+            filterType = "expense",
+            dayTotalIncome = 55000.0,
+            dayTotalExpense = 26000.0
+        )
+        assertNull(expenseOnlyFilter.incomeBadgeText)
+        assertEquals("-26 000 ₽", expenseOnlyFilter.expenseBadgeText)
+
+        val incomeOnlyFilter = com.example.ui.components.dialogs.computeDayHeaderTotals(
+            filterType = "income",
+            dayTotalIncome = 55000.0,
+            dayTotalExpense = 26000.0
+        )
+        assertEquals("+55 000 ₽", incomeOnlyFilter.incomeBadgeText)
+        assertNull(incomeOnlyFilter.expenseBadgeText)
+    }
 }
+

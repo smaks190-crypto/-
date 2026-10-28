@@ -25,6 +25,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.PieChart
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,12 +41,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.formatFullCurrency
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Indigo500
+import com.example.ui.theme.ManropeFontFamily
 import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate800
-import com.example.ui.components.formatFullCurrency
+import com.example.ui.theme.SpaceGroteskFontFamily
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -66,10 +72,10 @@ fun TransactionCategoryChipsSection(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Period selector (Нед, Мес, Год)
+        // Period selector (Нед, Мес, Год, Все) synchronized with filter bar
         BoxWithConstraints(
             modifier = Modifier
-                .width(180.dp)
+                .width(216.dp)
                 .height(34.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .background(DarkBg)
@@ -77,13 +83,17 @@ fun TransactionCategoryChipsSection(
                 .padding(2.dp)
         ) {
             val barWidth = maxWidth
-            val tabCount = 3
+            val periodsList = listOf(
+                "week" to "Нед",
+                "month" to "Мес",
+                "year" to "Год",
+                "all" to "Все"
+            )
+            val tabCount = periodsList.size
             val tabWidth = barWidth / tabCount
 
-            val periodsList = listOf("week", "month", "year")
-            val selectedIndex = periodsList.indexOf(
-                if (selectedPeriod == "all") "month" else selectedPeriod
-            ).coerceAtLeast(0)
+            val selectedIndex = periodsList.indexOfFirst { it.first == selectedPeriod }
+                .let { if (it >= 0) it else 1 }
 
             val animatedFraction by animateFloatAsState(
                 targetValue = selectedIndex.toFloat(),
@@ -121,8 +131,8 @@ fun TransactionCategoryChipsSection(
 
             // Clickable labels
             Row(modifier = Modifier.fillMaxSize()) {
-                listOf("week" to "Нед", "month" to "Мес", "year" to "Год").forEach { (pKey, pText) ->
-                    val isSelected = selectedPeriod == pKey || (selectedPeriod == "all" && pKey == "month")
+                periodsList.forEach { (pKey, pText) ->
+                    val isSelected = selectedPeriod == pKey || (selectedPeriod == "custom" && pKey == "month")
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -134,6 +144,7 @@ fun TransactionCategoryChipsSection(
                         Text(
                             text = pText,
                             color = if (isSelected) Color.White else Slate400,
+                            fontFamily = ManropeFontFamily,
                             fontSize = 10.sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                         )
@@ -142,44 +153,73 @@ fun TransactionCategoryChipsSection(
             }
         }
 
-        // Chart Mode buttons (Donut vs Bar)
+        // Chart Mode buttons (Donut vs Bar) with crisp Vector Icons
         Row(
             modifier = Modifier
+                .height(34.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .background(DarkBg)
+                .border(1.dp, Slate800, RoundedCornerShape(12.dp))
                 .padding(2.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            val isDonut = chartViewMode == "donut"
             Box(
                 modifier = Modifier
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(10.dp))
-                    .background(if (chartViewMode == "donut") Slate800 else Color.Transparent)
+                    .background(if (isDonut) Indigo500.copy(alpha = 0.25f) else Color.Transparent)
+                    .border(
+                        width = 1.dp,
+                        color = if (isDonut) Indigo500.copy(alpha = 0.6f) else Color.Transparent,
+                        shape = RoundedCornerShape(10.dp)
+                    )
                     .clickable { onSelectChartViewMode("donut") }
-                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Text("🔄", fontSize = 11.sp)
+                Icon(
+                    imageVector = Icons.Default.PieChart,
+                    contentDescription = "Круговая диаграмма",
+                    tint = if (isDonut) Color.White else Slate400,
+                    modifier = Modifier.size(15.dp)
+                )
             }
+            val isBar = chartViewMode == "bar"
             Box(
                 modifier = Modifier
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(10.dp))
-                    .background(if (chartViewMode == "bar") Slate800 else Color.Transparent)
+                    .background(if (isBar) Indigo500.copy(alpha = 0.25f) else Color.Transparent)
+                    .border(
+                        width = 1.dp,
+                        color = if (isBar) Indigo500.copy(alpha = 0.6f) else Color.Transparent,
+                        shape = RoundedCornerShape(10.dp)
+                    )
                     .clickable { onSelectChartViewMode("bar") }
-                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Text("📊", fontSize = 11.sp)
+                Icon(
+                    imageVector = Icons.Default.BarChart,
+                    contentDescription = "Гистограмма",
+                    tint = if (isBar) Color.White else Slate400,
+                    modifier = Modifier.size(15.dp)
+                )
             }
         }
     }
 
-    // Scrollable Category Flow Layout with grouping
+    // Category Chips with percentages and amounts
     if (categoryTotalsMap.isNotEmpty()) {
-        val totalCategorySum = categoryTotalsMap.sumOf { it.second }
+        val totalCategorySum = categoryTotalsMap.sumOf { it.second }.coerceAtLeast(1.0)
         val categoriesScrollState = rememberScrollState()
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 140.dp)
+                .heightIn(max = 112.dp)
                 .verticalScroll(categoriesScrollState)
         ) {
             FlowRow(
@@ -188,35 +228,37 @@ fun TransactionCategoryChipsSection(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (isDrilledDownToMixed) {
-                    // Back button pill to go up to top-level
+                    // Back button to top-level categories
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
                             .background(DarkBg)
-                            .border(1.dp, Indigo500.copy(alpha = 0.6f), RoundedCornerShape(20.dp))
+                            .border(1.dp, Indigo500, RoundedCornerShape(20.dp))
                             .clickable {
                                 onSetDrilledDownToMixed(false)
                                 onSelectCategoryFilter(null)
                             }
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Text(
-                            text = "← Назад",
+                            text = "« Назад",
                             color = Indigo500,
+                            fontFamily = ManropeFontFamily,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
 
-                    // Remaining child categories
                     val remainingCategories = categoryTotalsMap.drop(2)
+                    val remainingTotalSum = remainingCategories.sumOf { it.second }.coerceAtLeast(1.0)
+
                     remainingCategories.forEach { (catName, remainingSumAmt) ->
                         val isCatSelected = selectedCategoryFilter == catName
                         val pillColor = getCategoryColor(catName)
-                        val pct = if (totalCategorySum > 0) {
-                            ((remainingSumAmt / totalCategorySum) * 100).let { kotlin.math.round(it).toInt() }
+                        val pct = if (remainingTotalSum > 0) {
+                            ((remainingSumAmt / remainingTotalSum) * 100).let { kotlin.math.round(it).toInt() }
                         } else 0
 
                         Row(
@@ -249,17 +291,19 @@ fun TransactionCategoryChipsSection(
                                 modifier = Modifier
                                     .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(pillColor)
+                                    .background(if (isCatSelected) Color.White else pillColor)
                             )
                             Text(
                                 text = if (pct > 0) "$catName $pct%" else catName,
                                 color = if (isCatSelected) Color.White else Slate300,
+                                fontFamily = ManropeFontFamily,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
                                 text = formatFullCurrency(remainingSumAmt),
                                 color = if (isCatSelected) Color.White else Slate400,
+                                fontFamily = SpaceGroteskFontFamily,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -310,17 +354,19 @@ fun TransactionCategoryChipsSection(
                                 modifier = Modifier
                                     .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(pillColor)
+                                    .background(if (isCatSelected) Color.White else pillColor)
                             )
                             Text(
                                 text = if (pct > 0) "$catName $pct%" else catName,
                                 color = if (isCatSelected) Color.White else Slate300,
+                                fontFamily = ManropeFontFamily,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
                                 text = formatFullCurrency(sumAmt),
                                 color = if (isCatSelected) Color.White else Slate400,
+                                fontFamily = SpaceGroteskFontFamily,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -360,12 +406,14 @@ fun TransactionCategoryChipsSection(
                             Text(
                                 text = mixedLabel,
                                 color = Indigo500,
+                                fontFamily = ManropeFontFamily,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = formatFullCurrency(remainingSum),
                                 color = Slate400,
+                                fontFamily = SpaceGroteskFontFamily,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )

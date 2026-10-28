@@ -29,7 +29,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,9 +57,11 @@ import com.example.data.db.CategoryEntity
 import com.example.data.repository.ParsedVoiceOperation
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.GlassBorder
+import com.example.ui.theme.Indigo500
 import com.example.ui.theme.ManropeFontFamily
 import com.example.ui.theme.NeonCyan
 import com.example.ui.theme.Rose500
+import com.example.ui.theme.Slate300
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
@@ -85,6 +89,89 @@ internal data class VoiceBatchSummary(
     val headerSubtitleText: String,
     val saveButtonPlainText: String
 )
+
+internal data class VoiceDuplicateMergeResult(
+    val mergedOperations: List<ParsedVoiceOperation>,
+    val mergedGroupsCount: Int,
+    val removedDuplicatesCount: Int
+)
+
+internal fun mergeDuplicateVoiceOperations(
+    operations: List<ParsedVoiceOperation>
+): VoiceDuplicateMergeResult {
+    if (operations.size <= 1) {
+        return VoiceDuplicateMergeResult(
+            mergedOperations = operations,
+            mergedGroupsCount = 0,
+            removedDuplicatesCount = 0
+        )
+    }
+
+    val grouped = LinkedHashMap<Pair<String, String>, MutableList<ParsedVoiceOperation>>()
+    for (op in operations) {
+        val normType = if (op.type.equals("income", ignoreCase = true)) "income" else "expense"
+        val normCategory = op.category.trim().lowercase()
+        val key = normType to normCategory
+        grouped.getOrPut(key) { mutableListOf() }.add(op)
+    }
+
+    var mergedGroupsCount = 0
+    var removedDuplicatesCount = 0
+    val mergedList = ArrayList<ParsedVoiceOperation>(grouped.size)
+
+    for ((_, group) in grouped) {
+        if (group.size == 1) {
+            mergedList.add(group.first())
+        } else {
+            mergedGroupsCount += 1
+            removedDuplicatesCount += (group.size - 1)
+            val first = group.first()
+            val sumAmount = group.sumOf { it.amount }
+
+            // Собираем уникальные подкатегории/названия с подсчётом повторов
+            val labelCounts = LinkedHashMap<String, Pair<String, Int>>()
+            for (item in group) {
+                val rawLabel = item.subcategory.ifBlank { item.title.ifBlank { item.category } }.trim()
+                val cleanLabel = rawLabel.replace(Regex("""\s*\(×\d+\)\s*$"""), "").trim()
+                val normKey = cleanLabel.lowercase()
+                val existing = labelCounts[normKey]
+                if (existing == null) {
+                    labelCounts[normKey] = cleanLabel to 1
+                } else {
+                    labelCounts[normKey] = existing.first to (existing.second + 1)
+                }
+            }
+
+            val formattedParts = labelCounts.values.map { (displayLabel, count) ->
+                if (count > 1) "$displayLabel (×$count)" else displayLabel
+            }
+
+            val combinedLabel = when {
+                formattedParts.isEmpty() -> first.category
+                formattedParts.size == 1 -> {
+                    val single = formattedParts.first()
+                    if (single.contains("(×")) single else "$single (×${group.size})"
+                }
+                formattedParts.size == 2 -> "${formattedParts[0]} + ${formattedParts[1]}"
+                else -> "${formattedParts[0]} + ${formattedParts[1]} (+${formattedParts.size - 2})"
+            }
+
+            mergedList.add(
+                first.copy(
+                    title = combinedLabel,
+                    subcategory = combinedLabel,
+                    amount = sumAmount
+                )
+            )
+        }
+    }
+
+    return VoiceDuplicateMergeResult(
+        mergedOperations = mergedList,
+        mergedGroupsCount = mergedGroupsCount,
+        removedDuplicatesCount = removedDuplicatesCount
+    )
+}
 
 internal fun calculateVoiceBatchSummary(operations: List<ParsedVoiceOperation>): VoiceBatchSummary {
     val totalIncome = operations.asSequence().filter { it.type == "income" }.sumOf { it.amount }
@@ -173,12 +260,18 @@ fun VoiceOperationsPane(
     val partialText by voiceManager.partialText.collectAsState()
     val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
 
+    var preMergeSnapshot by remember { mutableStateOf<List<ParsedVoiceOperation>?>(null) }
+
     val currentEditingIndex = editingIndex?.takeIf { it in editableList.indices }
     if (editingIndex != currentEditingIndex) {
         onEditingIndexChanged(currentEditingIndex)
     }
 
-    val batchSummary = calculateVoiceBatchSummary(editableList)
+    val currentOperationsList = editableList.toList()
+    val batchSummary = calculateVoiceBatchSummary(currentOperationsList)
+    val duplicateMergePreview = remember(currentOperationsList) {
+        mergeDuplicateVoiceOperations(currentOperationsList)
+    }
 
     Column(
         modifier = modifier
@@ -220,7 +313,6 @@ fun VoiceOperationsPane(
                             )
                             if (isListening || isAnalyzingVoice) {
                                 Spacer(modifier = Modifier.width(8.dp))
-                                // Стабильный фирменный изумрудный бейдж без прыжков ширины каждые 2 секунды
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
@@ -274,6 +366,110 @@ fun VoiceOperationsPane(
                 }
             }
 
+            // Пункт 3: Авто-группировка однотипных/дублирующихся операций в 1 тап (с возможностью отмены)
+            if (duplicateMergePreview.removedDuplicatesCount > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    Indigo500.copy(alpha = 0.22f),
+                                    Emerald400.copy(alpha = 0.14f)
+                                )
+                            )
+                        )
+                        .border(1.dp, Indigo500.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            preMergeSnapshot = editableList.toList()
+                            editableList.clear()
+                            editableList.addAll(duplicateMergePreview.mergedOperations)
+                            com.example.utils.GlobalConsoleLogger.i(
+                                "UI",
+                                "Авто-группировка дублей: объединено до ${duplicateMergePreview.mergedOperations.size} операций"
+                            )
+                        }
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        .testTag("auto_group_duplicates_banner"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "✨ Авто-группировка дублей (${editableList.size} → ${duplicateMergePreview.mergedOperations.size})",
+                            color = Color.White,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Однотипные категории будут склеены с сохранением подкатегорий",
+                            color = Slate300,
+                            fontFamily = ManropeFontFamily,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Emerald400.copy(alpha = 0.20f))
+                            .border(1.dp, Emerald400.copy(alpha = 0.65f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = "Объединить",
+                            color = Emerald400,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            } else if (preMergeSnapshot != null) {
+                val snapshotToRestore = preMergeSnapshot!!
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(VoiceBentoBg)
+                        .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            editableList.clear()
+                            editableList.addAll(snapshotToRestore)
+                            preMergeSnapshot = null
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .testTag("undo_group_duplicates_banner"),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "✨ Дубли объединены в ${editableList.size} оп.",
+                        color = Slate300,
+                        fontFamily = ManropeFontFamily,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "↺ Разъединить (${snapshotToRestore.size})",
+                        color = Indigo500,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
             Spacer(modifier = Modifier.height(10.dp))
 
             Column(
@@ -287,6 +483,7 @@ fun VoiceOperationsPane(
                         onDelete = {
                             if (index in editableList.indices) {
                                 editableList.removeAt(index)
+                                preMergeSnapshot = null
                                 if (editableList.isEmpty() && !isListening && !isAnalyzingVoice) {
                                     onDismissVoiceOperations()
                                 }
@@ -296,7 +493,7 @@ fun VoiceOperationsPane(
                 }
             }
 
-            // Быстрые 1-тап пресеты для корректировки последней распознанной суммы без клавиатуры (Пункт 3)
+            // Быстрые 1-тап пресеты для корректировки последней распознанной суммы без клавиатуры
             if (editableList.isNotEmpty()) {
                 val lastIdx = editableList.lastIndex
                 val lastOp = editableList[lastIdx]
@@ -514,7 +711,6 @@ fun VoiceOperationsPane(
                 }
             }
 
-            // Фирменная кнопка «Сохранить» в едином стиле Obsidian Neo-Bank (с раздельным отображением доходов и расходов)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
