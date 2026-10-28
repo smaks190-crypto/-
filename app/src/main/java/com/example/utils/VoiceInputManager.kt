@@ -10,7 +10,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,8 +36,6 @@ class VoiceInputManager(context: Context) {
 
     private var audioRecord: AudioRecord? = null
     private var recordingJob: Job? = null
-    private var spectrumJob: Job? = null
-    private var spectrumFrames: Channel<ByteArray>? = null
 
     // Единый переиспользуемый FFT-анализатор спектра (без аллокаций на каждый аудиокадр)
     private val spectrumAnalyzer = VoiceSpectrumAnalyzer(sampleRate = SAMPLE_RATE)
@@ -110,17 +107,6 @@ class VoiceInputManager(context: Context) {
         _partialText.value = "Говорите..."
         _errorState.value = null
         spectrumAnalyzer.reset()
-        val visualFrames = Channel<ByteArray>(Channel.CONFLATED)
-        spectrumFrames = visualFrames
-        spectrumJob = scope.launch {
-            for (frame in visualFrames) {
-                val bands = spectrumAnalyzer.processPcm16LeFrame(frame, frame.size)
-                if (spectrumFrames === visualFrames && _isListening.value) {
-                    _spectrumBands.value = bands
-                    _rawSpectrumBands.value = spectrumAnalyzer.getRawFrequencyBands()
-                }
-            }
-        }
 
         try {
             val minBufferSize = AudioRecord.getMinBufferSize(
@@ -182,8 +168,8 @@ class VoiceInputManager(context: Context) {
                         _voiceLevel.value = ((visualDb - 1.0f) / 9.5f).coerceIn(0f, 1f)
 
                         // Реальный спектральный анализ (FFT + Hann window -> 32 частотные полосы) вне UI-потока
-                        // Best-effort visualization: never delay VAD or WAV dispatch.
-                        spectrumFrames?.trySend(frameCopy)
+                        _spectrumBands.value = spectrumAnalyzer.processPcm16LeFrame(frameCopy, readBytes)
+                        _rawSpectrumBands.value = spectrumAnalyzer.getRawFrequencyBands()
 
                         val isSpeechFrame = rms >= SPEECH_RMS_THRESHOLD
 
@@ -279,10 +265,6 @@ class VoiceInputManager(context: Context) {
         _isListening.value = false
         recordingJob?.cancel()
         recordingJob = null
-        spectrumFrames?.close()
-        spectrumFrames = null
-        spectrumJob?.cancel()
-        spectrumJob = null
 
         val record = audioRecord
         audioRecord = null
@@ -328,10 +310,6 @@ class VoiceInputManager(context: Context) {
         _isListening.value = false
         recordingJob?.cancel()
         recordingJob = null
-        spectrumFrames?.close()
-        spectrumFrames = null
-        spectrumJob?.cancel()
-        spectrumJob = null
 
         val record = audioRecord
         audioRecord = null
