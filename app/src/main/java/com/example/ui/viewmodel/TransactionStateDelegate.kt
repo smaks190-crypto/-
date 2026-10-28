@@ -107,14 +107,13 @@ class TransactionStateDelegate(
                     val updatedList = currentList + result
                     parsedVoiceOperations.value = updatedList
 
-                    val liveTranscript = updatedList.joinToString(", ") { op ->
-                        val label = op.subcategory.ifBlank { op.title.ifBlank { op.category } }
-                        "$label ${op.amount.toInt()} ₽"
-                    }
-                    voiceInputManager.setRecognizedTextManually(liveTranscript)
+                    val lastOp = updatedList.last()
+                    val lastOpLabel = lastOp.subcategory.ifBlank { lastOp.title.ifBlank { lastOp.category } }
+                    val lastOpTranscript = "$lastOpLabel ${lastOp.amount.toInt()} ₽"
+                    voiceInputManager.setRecognizedTextManually(lastOpTranscript)
                     com.example.utils.GlobalConsoleLogger.i(
                         "UI",
-                        "Gemini Live: +${result.size} операций (всего ${updatedList.size}): $liveTranscript"
+                        "Gemini Live: +${result.size} операций (всего ${updatedList.size}), последняя: $lastOpTranscript"
                     )
                 } else if (isFinalFlush && activeChunkJobs.get() <= 1 && parsedVoiceOperations.value.isNullOrEmpty()) {
                     val msg = "Не удалось распознать операции. Назовите покупку и сумму, например: «Кофе 300 и такси 500»"
@@ -183,7 +182,11 @@ class TransactionStateDelegate(
                     parsedVoiceOperations.value = null
                 } else {
                     val currentList = parsedVoiceOperations.value.orEmpty()
-                    parsedVoiceOperations.value = currentList + result
+                    val updatedList = currentList + result
+                    parsedVoiceOperations.value = updatedList
+                    val lastOp = updatedList.last()
+                    val lastOpLabel = lastOp.subcategory.ifBlank { lastOp.title.ifBlank { lastOp.category } }
+                    voiceInputManager.setRecognizedTextManually("$lastOpLabel ${lastOp.amount.toInt()} ₽")
                 }
             } catch (e: Exception) {
                 val msg = "Ошибка при анализе: ${e.message}"

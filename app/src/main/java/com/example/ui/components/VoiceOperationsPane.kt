@@ -43,9 +43,12 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.db.CategoryEntity
@@ -60,9 +63,9 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.SpaceGroteskFontFamily
 import com.example.ui.viewmodel.BudgetViewModel
-import java.util.Locale
 
 private val VoiceBentoBg = Color(0xFF0B111E)
+private val MixedExpenseAccent = Color(0xFFFF6B8B)
 private val LiveAmountRegex = Regex("""(\d[\d\s]{0,9})""")
 
 private data class LiveVoiceChipPreview(
@@ -70,6 +73,63 @@ private data class LiveVoiceChipPreview(
     val type: String,
     val amount: Double?
 )
+
+internal data class VoiceBatchSummary(
+    val count: Int,
+    val totalIncome: Double,
+    val totalExpense: Double,
+    val netBalance: Double,
+    val hasIncomes: Boolean,
+    val hasExpenses: Boolean,
+    val isMixed: Boolean,
+    val headerSubtitleText: String,
+    val saveButtonPlainText: String
+)
+
+internal fun calculateVoiceBatchSummary(operations: List<ParsedVoiceOperation>): VoiceBatchSummary {
+    val totalIncome = operations.asSequence().filter { it.type == "income" }.sumOf { it.amount }
+    val totalExpense = operations.asSequence().filter { it.type != "income" }.sumOf { it.amount }
+    val hasIncomes = totalIncome > 0.0
+    val hasExpenses = totalExpense > 0.0
+    val isMixed = hasIncomes && hasExpenses
+    val netBalance = totalIncome - totalExpense
+    val count = operations.size
+
+    val headerSubtitleText = when {
+        isMixed -> {
+            val sign = if (netBalance >= 0.0) "+" else "-"
+            "Итог: $sign${formatRublesCompact(kotlin.math.abs(netBalance))} ₽"
+        }
+        hasIncomes -> "+${formatRublesCompact(totalIncome)} ₽"
+        hasExpenses -> "-${formatRublesCompact(totalExpense)} ₽"
+        else -> "0 ₽"
+    }
+
+    val saveButtonPlainText = when {
+        isMixed -> "Сохранить ($count) • +${formatRublesCompact(totalIncome)} ₽ / -${formatRublesCompact(totalExpense)} ₽"
+        hasIncomes -> "Сохранить ($count) • +${formatRublesCompact(totalIncome)} ₽"
+        hasExpenses -> "Сохранить ($count) • -${formatRublesCompact(totalExpense)} ₽"
+        else -> "Сохранить ($count) • 0 ₽"
+    }
+
+    return VoiceBatchSummary(
+        count = count,
+        totalIncome = totalIncome,
+        totalExpense = totalExpense,
+        netBalance = netBalance,
+        hasIncomes = hasIncomes,
+        hasExpenses = hasExpenses,
+        isMixed = isMixed,
+        headerSubtitleText = headerSubtitleText,
+        saveButtonPlainText = saveButtonPlainText
+    )
+}
+
+internal fun formatLastAddedVoiceOperationText(operations: List<ParsedVoiceOperation>): String {
+    val lastOp = operations.lastOrNull() ?: return ""
+    val label = lastOp.subcategory.ifBlank { lastOp.title.ifBlank { lastOp.category } }.trim()
+    return "$label ${formatRublesCompact(lastOp.amount)} ₽"
+}
 
 private fun extractLiveVoiceChipPreview(
     liveText: String,
@@ -86,8 +146,8 @@ private fun extractLiveVoiceChipPreview(
     if (matchedCat == null && amountMatch == null) return null
 
     return LiveVoiceChipPreview(
-        categoryName = matchedCat?.first ?: "Расход",
-        type = matchedCat?.second ?: "expense",
+        categoryName = matchedCat?.second ?: "Расход",
+        type = matchedCat?.first ?: "expense",
         amount = amountMatch
     )
 }
@@ -117,6 +177,8 @@ fun VoiceOperationsPane(
     if (editingIndex != currentEditingIndex) {
         onEditingIndexChanged(currentEditingIndex)
     }
+
+    val batchSummary = calculateVoiceBatchSummary(editableList)
 
     Column(
         modifier = modifier
@@ -177,10 +239,15 @@ fun VoiceOperationsPane(
                                 }
                             }
                         }
-                        val totalAmount = editableList.sumOf { if (it.type == "expense") -it.amount else it.amount }
                         Text(
-                            text = if (totalAmount >= 0) "+${String.format(Locale.US, "%.0f", totalAmount)} ₽" else "${String.format(Locale.US, "%.0f", totalAmount)} ₽",
-                            color = if (totalAmount >= 0) Emerald400 else Rose500,
+                            text = batchSummary.headerSubtitleText,
+                            color = if (batchSummary.isMixed) {
+                                if (batchSummary.netBalance >= 0.0) Emerald400 else Rose500
+                            } else if (batchSummary.hasIncomes) {
+                                Emerald400
+                            } else {
+                                Rose500
+                            },
                             fontFamily = SpaceGroteskFontFamily,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -283,7 +350,10 @@ fun VoiceOperationsPane(
             }
 
             AnimatedVisibility(visible = isListening || isAnalyzingVoice) {
+                val lastAddedOp = editableList.lastOrNull()
+                val lastAddedOpText = formatLastAddedVoiceOperationText(editableList)
                 val liveSpeechText = when {
+                    lastAddedOpText.isNotBlank() -> lastAddedOpText
                     partialText.isNotBlank() && partialText != "Говорите..." -> partialText
                     recognizedText.isNotBlank() -> recognizedText
                     else -> ""
@@ -294,9 +364,17 @@ fun VoiceOperationsPane(
                     else -> "Слушаю вас... Говорите ещё"
                 }
 
-                // Мгновенный Live-чип распознанной категории и суммы прямо на лету (Пункт 2)
-                val liveChipPreview = remember(liveSpeechText, categories) {
-                    extractLiveVoiceChipPreview(liveSpeechText, categories)
+                // В капсуле Gemini Live всегда отображаем чип именно последней добавленной операции
+                val liveChipPreview = remember(lastAddedOp, liveSpeechText, categories) {
+                    if (lastAddedOp != null) {
+                        LiveVoiceChipPreview(
+                            categoryName = lastAddedOp.category,
+                            type = lastAddedOp.type,
+                            amount = lastAddedOp.amount
+                        )
+                    } else {
+                        extractLiveVoiceChipPreview(liveSpeechText, categories)
+                    }
                 }
 
                 VolumetricLiquidAuroraGlow(
@@ -376,11 +454,12 @@ fun VoiceOperationsPane(
                             )
                         }
 
-                        // Справа: мгновенный Live-чип категории и суммы на лету без мигающего спиннера
+                        // Справа: чип категории и суммы последней распознанной операции
                         if (liveChipPreview != null) {
                             val spec = remember(liveChipPreview.categoryName, liveChipPreview.type) {
                                 resolveCategoryVisualSpec(liveChipPreview.categoryName, liveChipPreview.type)
                             }
+                            val chipSign = if (liveChipPreview.type == "income") "+" else "-"
                             Spacer(modifier = Modifier.width(8.dp))
                             Row(
                                 modifier = Modifier
@@ -398,9 +477,9 @@ fun VoiceOperationsPane(
                                     modifier = Modifier.size(13.dp)
                                 )
                                 Text(
-                                    text = liveChipPreview.amount?.let { "${formatRublesCompact(it)} ₽" }
+                                    text = liveChipPreview.amount?.let { "$chipSign${formatRublesCompact(it)} ₽" }
                                         ?: liveChipPreview.categoryName,
-                                    color = Color.White,
+                                    color = if (liveChipPreview.type == "income") Emerald400 else Color.White,
                                     fontFamily = SpaceGroteskFontFamily,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.ExtraBold,
@@ -414,9 +493,28 @@ fun VoiceOperationsPane(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            val totalAbsSum = editableList.sumOf { it.amount }
+            val saveButtonAnnotatedText = buildAnnotatedString {
+                if (batchSummary.isMixed) {
+                    withStyle(SpanStyle(color = Color.White)) {
+                        append("Сохранить (${batchSummary.count}) • ")
+                    }
+                    withStyle(SpanStyle(color = Emerald400)) {
+                        append("+${formatRublesCompact(batchSummary.totalIncome)} ₽")
+                    }
+                    withStyle(SpanStyle(color = Color.White.copy(alpha = 0.55f))) {
+                        append(" / ")
+                    }
+                    withStyle(SpanStyle(color = MixedExpenseAccent)) {
+                        append("-${formatRublesCompact(batchSummary.totalExpense)} ₽")
+                    }
+                } else {
+                    withStyle(SpanStyle(color = Color.White)) {
+                        append(batchSummary.saveButtonPlainText)
+                    }
+                }
+            }
 
-            // Фирменная кнопка «Сохранить» в едином стиле Obsidian Neo-Bank (в цвет приложения)
+            // Фирменная кнопка «Сохранить» в едином стиле Obsidian Neo-Bank (с раздельным отображением доходов и расходов)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -453,16 +551,18 @@ fun VoiceOperationsPane(
                             Toast.makeText(context, "Нет операций для сохранения", Toast.LENGTH_SHORT).show()
                         }
                     }
+                    .padding(horizontal = 12.dp)
                     .testTag("confirm_voice_operations_button"),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Сохранить (${editableList.size}) • ${formatRublesCompact(totalAbsSum)} ₽",
+                    text = saveButtonAnnotatedText,
                     color = Color.White,
                     fontFamily = ManropeFontFamily,
                     fontWeight = FontWeight.ExtraBold,
-                    fontSize = 15.sp,
-                    maxLines = 1
+                    fontSize = if (batchSummary.isMixed) 14.sp else 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
         } else {
