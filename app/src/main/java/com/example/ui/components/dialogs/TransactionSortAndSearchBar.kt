@@ -36,6 +36,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -67,7 +68,9 @@ fun TransactionSortAndSearchBar(
     onSortOptionChange: (String) -> Unit
 ) {
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("search_and_sort_bar"),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // Unified Obsidian Search Field (stable position, never jumps on scroll)
@@ -98,7 +101,8 @@ fun TransactionSortAndSearchBar(
                     onValueChange = onSearchQueryChange,
                     modifier = Modifier
                         .weight(1f)
-                        .focusRequester(focusRequester),
+                        .focusRequester(focusRequester)
+                        .testTag("search_input_field"),
                     singleLine = true,
                     cursorBrush = SolidColor(Emerald400),
                     textStyle = TextStyle(
@@ -126,6 +130,7 @@ fun TransactionSortAndSearchBar(
                         tint = Slate400,
                         modifier = Modifier
                             .size(16.dp)
+                            .testTag("search_clear_button")
                             .clickable { onSearchQueryChange("") }
                     )
                 }
@@ -134,7 +139,9 @@ fun TransactionSortAndSearchBar(
 
         // Sorting & Filter Chips Row (without duplicate type filter buttons)
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("sort_and_filter_chips_row"),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -164,6 +171,7 @@ fun TransactionSortAndSearchBar(
                             .clip(RoundedCornerShape(9.dp))
                             .background(catColor.copy(alpha = 0.22f))
                             .border(1.dp, catColor.copy(alpha = 0.55f), RoundedCornerShape(9.dp))
+                            .testTag("active_category_filter_chip")
                             .clickable { onClearCategoryFilter() }
                             .padding(horizontal = 9.dp, vertical = 5.dp)
                     ) {
@@ -206,6 +214,7 @@ fun TransactionSortAndSearchBar(
                             color = if (isPeriodActive) Indigo500.copy(alpha = 0.65f) else Slate800,
                             shape = RoundedCornerShape(9.dp)
                         )
+                        .testTag("period_date_chip")
                         .clickable { onOpenDatePickerModal() }
                         .padding(horizontal = 10.dp, vertical = 5.dp)
                 ) {
@@ -233,6 +242,7 @@ fun TransactionSortAndSearchBar(
                                 fontSize = 9.sp,
                                 modifier = Modifier
                                     .padding(start = 2.dp)
+                                    .testTag("period_chip_reset")
                                     .clickable { onResetPeriodLock() }
                             )
                         } else {
@@ -258,6 +268,7 @@ fun TransactionSortAndSearchBar(
                             color = if (isAmountActive) Indigo500.copy(alpha = 0.65f) else Slate800,
                             shape = RoundedCornerShape(9.dp)
                         )
+                        .testTag("sort_amount_chip")
                         .clickable {
                             onSortOptionChange(
                                 when (sortOption) {
@@ -301,6 +312,7 @@ fun TransactionSortAndSearchBar(
                             color = if (isNameActive) Indigo500.copy(alpha = 0.65f) else Slate800,
                             shape = RoundedCornerShape(9.dp)
                         )
+                        .testTag("sort_name_chip")
                         .clickable {
                             onSortOptionChange(
                                 when (sortOption) {

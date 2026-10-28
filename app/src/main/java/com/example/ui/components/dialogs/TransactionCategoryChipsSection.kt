@@ -38,6 +38,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -81,13 +84,10 @@ fun TransactionCategoryChipsSection(
                 .background(DarkBg)
                 .border(1.dp, Slate800, RoundedCornerShape(12.dp))
                 .padding(2.dp)
+                .testTag("period_selector_bar")
         ) {
             val barWidth = maxWidth
-            val periodsList = listOf(
-                "week" to "Нед",
-                "month" to "Мес",
-                "year" to "Год"
-            )
+            val periodsList = PERIOD_SWITCHER_TABS
             val tabCount = periodsList.size
             val tabWidth = barWidth / tabCount
 
@@ -127,6 +127,7 @@ fun TransactionCategoryChipsSection(
                             color = Indigo500.copy(alpha = 0.6f),
                             shape = RoundedCornerShape(10.dp)
                         )
+                        .testTag("period_active_indicator")
                 )
             }
 
@@ -139,6 +140,8 @@ fun TransactionCategoryChipsSection(
                             .weight(1f)
                             .fillMaxHeight()
                             .clip(RoundedCornerShape(10.dp))
+                            .semantics { selected = isSelected }
+                            .testTag("period_tab_$pKey")
                             .clickable { onSelectPeriod(pKey) },
                         contentAlignment = Alignment.Center
                     ) {
@@ -176,6 +179,7 @@ fun TransactionCategoryChipsSection(
                         color = if (isDonut) Indigo500.copy(alpha = 0.6f) else Color.Transparent,
                         shape = RoundedCornerShape(10.dp)
                     )
+                    .testTag("chart_mode_donut")
                     .clickable { onSelectChartViewMode("donut") }
                     .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.Center
@@ -198,6 +202,7 @@ fun TransactionCategoryChipsSection(
                         color = if (isBar) Indigo500.copy(alpha = 0.6f) else Color.Transparent,
                         shape = RoundedCornerShape(10.dp)
                     )
+                    .testTag("chart_mode_bar")
                     .clickable { onSelectChartViewMode("bar") }
                     .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.Center

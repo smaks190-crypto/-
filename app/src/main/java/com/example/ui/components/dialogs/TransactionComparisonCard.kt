@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -81,27 +82,29 @@ fun DoubleSummaryComparisonCards(
     var totalDragX by remember { mutableFloatStateOf(0f) }
 
     Column(
-        modifier = modifier.pointerInput(isSwipeEnabled, onSwipePeriodOffset) {
-            if (!isSwipeEnabled || onSwipePeriodOffset == null) return@pointerInput
-            detectHorizontalDragGestures(
-                onDragStart = { totalDragX = 0f },
-                onDragEnd = {
-                    val threshold = 110f
-                    val finalDrag = totalDragX
-                    totalDragX = 0f
-                    if (finalDrag < -threshold) {
-                        onSwipePeriodOffset(1)
-                    } else if (finalDrag > threshold) {
-                        onSwipePeriodOffset(-1)
+        modifier = modifier
+            .testTag("double_summary_cards")
+            .pointerInput(isSwipeEnabled, onSwipePeriodOffset) {
+                if (!isSwipeEnabled || onSwipePeriodOffset == null) return@pointerInput
+                detectHorizontalDragGestures(
+                    onDragStart = { totalDragX = 0f },
+                    onDragEnd = {
+                        val threshold = 110f
+                        val finalDrag = totalDragX
+                        totalDragX = 0f
+                        if (finalDrag < -threshold) {
+                            onSwipePeriodOffset(1)
+                        } else if (finalDrag > threshold) {
+                            onSwipePeriodOffset(-1)
+                        }
+                    },
+                    onDragCancel = { totalDragX = 0f },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        totalDragX += dragAmount
                     }
-                },
-                onDragCancel = { totalDragX = 0f },
-                onHorizontalDrag = { change, dragAmount ->
-                    change.consume()
-                    totalDragX += dragAmount
-                }
-            )
-        },
+                )
+            },
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(
@@ -126,6 +129,7 @@ fun DoubleSummaryComparisonCards(
                         color = if (filterType == "expense") Rose500.copy(alpha = 0.65f) else Rose500.copy(alpha = 0.22f),
                         shape = RoundedCornerShape(20.dp)
                     )
+                    .testTag("summary_expense_card")
                     .clickable { onSelectExpense() }
                     .padding(horizontal = 14.dp, vertical = 13.dp)
             ) {
@@ -202,6 +206,7 @@ fun DoubleSummaryComparisonCards(
                         color = if (filterType == "income") Emerald400.copy(alpha = 0.65f) else Emerald400.copy(alpha = 0.22f),
                         shape = RoundedCornerShape(20.dp)
                     )
+                    .testTag("summary_income_card")
                     .clickable { onSelectIncome() }
                     .padding(horizontal = 14.dp, vertical = 13.dp)
             ) {
@@ -331,7 +336,8 @@ fun SingleHeroComparisonCard(
                 )
             )
             .border(1.dp, accentColor.copy(alpha = 0.25f), RoundedCornerShape(24.dp))
-            .padding(14.dp),
+            .padding(14.dp)
+            .testTag("single_hero_card"),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         // Header inside card
@@ -352,7 +358,8 @@ fun SingleHeroComparisonCard(
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Black,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("hero_active_amount")
                     )
                     if (effectivePeriod != "custom") {
                         Box(
@@ -377,7 +384,8 @@ fun SingleHeroComparisonCard(
                     color = Slate400,
                     fontFamily = ManropeFontFamily,
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.testTag("hero_period_subtitle")
                 )
             }
 
@@ -392,6 +400,7 @@ fun SingleHeroComparisonCard(
                             .size(28.dp)
                             .clip(CircleShape)
                             .background(Slate800)
+                            .testTag("hero_collapse_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.KeyboardArrowUp,
@@ -407,6 +416,7 @@ fun SingleHeroComparisonCard(
                         .size(28.dp)
                         .clip(CircleShape)
                         .background(Slate800)
+                        .testTag("hero_reset_to_all_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -424,6 +434,7 @@ fun SingleHeroComparisonCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .testTag("hero_chart_swipe_box")
                 .pointerInput(effectivePeriod, isSwipeEnabled) {
                     if (!isSwipeEnabled) return@pointerInput
                     detectHorizontalDragGestures(

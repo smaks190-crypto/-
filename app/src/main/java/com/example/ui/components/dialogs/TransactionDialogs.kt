@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.example.data.db.TransactionEntity
@@ -273,6 +274,7 @@ fun AllTransactionsDialog(
         modifier = Modifier
             .fillMaxSize()
             .offset { IntOffset(x = 0, y = animatedHeaderDragOffsetY.roundToInt()) }
+            .testTag("all_transactions_root")
     ) {
         Column(
             modifier = Modifier
