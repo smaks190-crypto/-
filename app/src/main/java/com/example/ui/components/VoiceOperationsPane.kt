@@ -259,6 +259,7 @@ fun VoiceOperationsPane(
     val recognizedText by voiceManager.recognizedText.collectAsState()
     val partialText by voiceManager.partialText.collectAsState()
     val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
+    val latestVoiceTickerEvent by viewModel.latestVoiceTickerEvent.collectAsState()
 
     var preMergeSnapshot by remember { mutableStateOf<List<ParsedVoiceOperation>?>(null) }
 
@@ -549,7 +550,9 @@ fun VoiceOperationsPane(
             AnimatedVisibility(visible = isListening || isAnalyzingVoice) {
                 val lastAddedOp = editableList.lastOrNull()
                 val lastAddedOpText = formatLastAddedVoiceOperationText(editableList)
+                val tickerText = latestVoiceTickerEvent?.formattedChipText.orEmpty()
                 val liveSpeechText = when {
+                    tickerText.isNotBlank() -> tickerText
                     lastAddedOpText.isNotBlank() -> lastAddedOpText
                     partialText.isNotBlank() && partialText != "Говорите..." -> partialText
                     recognizedText.isNotBlank() -> recognizedText
@@ -732,7 +735,8 @@ fun VoiceOperationsPane(
                     .clickable {
                         com.example.utils.GlobalConsoleLogger.i("UI", "Подтверждение сохранения ${editableList.size} распознанных операций")
                         if (isListening) {
-                            voiceManager.onAudioChunkReady = null
+                            voiceManager.onOperationsCaptured = null
+                            voiceManager.onLastOperationCorrected = null
                             voiceManager.stopListening()
                         }
                         if (editableList.isNotEmpty()) {

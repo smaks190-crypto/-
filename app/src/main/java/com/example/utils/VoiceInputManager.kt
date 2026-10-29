@@ -7,6 +7,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Base64
 import android.util.Log
+import com.example.data.repository.ParsedVoiceOperation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -26,26 +28,51 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import java.text.SimpleDateFormat
 import java.util.ArrayDeque
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.log10
 import kotlin.math.sqrt
 
 /**
+ * Описание точечного исправления последней распознанной голосовой операции на лету
+ * (инструмент `correct_last_voice_operation` в потоке `BidiGenerateContent`).
+ */
+data class VoiceOperationCorrection(
+    val amount: Double? = null,
+    val title: String? = null,
+    val category: String? = null,
+    val subcategory: String? = null,
+    val type: String? = null,
+    val date: String? = null
+) {
+    fun hasAnyField(): Boolean {
+        return (amount != null && amount > 0.0) ||
+            !title.isNullOrBlank() ||
+            !category.isNullOrBlank() ||
+            !subcategory.isNullOrBlank() ||
+            !type.isNullOrBlank() ||
+            !date.isNullOrBlank()
+    }
+}
+
+/**
  * Потоковый менеджер голосового ввода в стиле Gemini Live (`BidiGenerateContent`).
  *
- * Работает в режиме только текстовой транскрипции речи пользователя (`responseModalities: ["TEXT"]`,
- * `inputAudioTranscription: {}`):
+ * Работает как тихий потоковый рекордер-транскрибатор в едином WebSocket-соединении:
  * - Непрерывно считывает PCM-аудио (16 kHz, 16-bit, Mono) через AudioRecord без системных звуков
- *   и без сохранения во временные файлы.
- * - Стримит аудиочанки по WebSocket в Gemini Live и в реальном времени получает `inputTranscription`,
- *   обновляя `partialText` и `recognizedText` прямо во время речи.
- * - Полностью игнорирует любые ответы ассистента (`outputTranscription`, `modelTurn`, `toolCall`),
- *   чтобы сессия работала строго как живой рекордер-транскрибатор для добавления операций.
- * - По завершении фразы (`turnComplete` или паузе речи) передаёт распознанный текст в `onChunkRecognized`.
+ *   и без создания временных WAV-файлов.
+ * - Стримит PCM-фреймы напрямую по WebSocket в `BidiGenerateContent` и в реальном времени получает:
+ *   1) `inputTranscription` — живой текст речи пользователя (`partialText` / `recognizedText`);
+ *   2) `toolCall` (`record_voice_operations`) — структурированные операции (сумма, категория,
+ *      подкатегория, тип, дата), выделенные моделью прямо на лету во время речи без единого REST POST запроса;
+ *   3) `toolCall` (`correct_last_voice_operation`) — мгновенное исправление последней карточки,
+ *      если пользователь оговорился и поправил себя на лету («а нет, булочка 150»).
+ * - Не воспроизводит голос ассистента и не отправляет WAV/текстовые чанки через `generateContent`.
  */
 class VoiceInputManager(context: Context) {
     private val context: Context = context.applicationContext
@@ -73,14 +100,11 @@ class VoiceInputManager(context: Context) {
     val errorState: StateFlow<String?> = _errorState.asStateFlow()
 
     var onErrorCallback: (() -> Unit)? = null
-    var onAudioChunkReady: ((ByteArray) -> Unit)? = null
     var onChunkRecognized: ((String) -> Unit)? = null
+    var onOperationsCaptured: ((List<ParsedVoiceOperation>) -> Unit)? = null
+    var onLastOperationCorrected: ((VoiceOperationCorrection) -> Unit)? = null
 
-    private val chunkLock = Any()
-    private var activeSpeechBuffer = ByteArrayOutputStream()
-    private var activeSpeechFrames = 0
-
-    // --- Gemini Live WebSocket Text-Only STT State ---
+    // --- Gemini Live WebSocket BidiGenerateContent State ---
     private val liveHttpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -92,35 +116,27 @@ class VoiceInputManager(context: Context) {
     private val liveIntentionalClose = AtomicBoolean(false)
     private var liveModelAttemptIndex = 0
     private var currentLiveApiKey: String = ""
+    private var currentExpenseCategories: List<String> = emptyList()
+    private var currentIncomeCategories: List<String> = emptyList()
     private val pendingLiveTurnTranscript = StringBuilder()
+    private val fullSessionTranscript = StringBuilder()
     private val preSetupPcmQueue = ArrayDeque<String>(64)
-    private var liveTranscriptDebounceJob: Job? = null
-    private val hasReceivedLiveSttInCurrentUtterance = AtomicBoolean(false)
-    private val utteranceFlushedByLiveStt = AtomicBoolean(false)
+
     @Volatile
-    private var pendingFinalLiveText: String = ""
+    private var liveTurnOrToolLatch: CountDownLatch? = null
 
     companion object {
         private const val SAMPLE_RATE = 16000
         private const val FRAME_SAMPLES = 512 // 32 мс при 16000 Гц
         private const val FRAME_BYTES = FRAME_SAMPLES * 2 // 1024 байта (16-bit PCM)
-        private const val PRE_ROLL_FRAMES = 8 // ~256 мс предзаписи до начала фразы
-        private const val SILENCE_FRAMES_TO_SPLIT = 26 // ~830 мс паузы для отправки готовой фразы в Gemini Live
-        private const val SILENCE_FRAMES_WAV_FALLBACK = 42 // ~1.34 сек паузы до резервной отправки WAV, если Live STT ещё не прислал текст
-        private const val MIN_SPEECH_FRAMES = 11 // ~350 мс минимальной длительности речи во фразе
-        private const val MAX_CHUNK_FRAMES = 375 // ~12 секунд максимум на один непрерывный чанк
         private const val SPEECH_RMS_THRESHOLD = 360.0 // Порог чувствительности голоса (16-bit PCM)
-        private const val LIVE_TRANSCRIPT_DEBOUNCE_MS = 950L
-
-        private val SPOKEN_AMOUNT_REGEX = Regex(
-            """(\d+|ст[оа]|двест[иа]|трист[ао]|четырест[ао]|пятьсот|шестьсот|семьсот|восемьсот|девятьсот|тысяч|тыщ|миллион|косар|рубл|полтинник|сотк|десятк|двадцат|тридцат|сорок|пятьдесят|шестьдесят|семьдесят|восемьдесят|девяност)""",
-            RegexOption.IGNORE_CASE
-        )
 
         private const val GEMINI_LIVE_WS_ENDPOINT =
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
         const val LISTENING_PLACEHOLDER = "Говорите..."
+        const val TOOL_RECORD_VOICE_OPERATIONS = "record_voice_operations"
+        const val TOOL_CORRECT_LAST_VOICE_OPERATION = "correct_last_voice_operation"
 
         val LIVE_STT_MODELS = listOf(
             "models/gemini-2.5-flash-native-audio-preview-12-2025",
@@ -129,11 +145,188 @@ class VoiceInputManager(context: Context) {
         )
 
         /**
-         * Конфигурация сессии Gemini Live строго для распознавания речи пользователя без ответов ИИ.
+         * Декларация инструментов `record_voice_operations` и `correct_last_voice_operation` для `BidiGenerateContent`:
+         * позволяет модели в реальном времени фиксировать каждую названную трату/доход и исправлять
+         * последнюю операцию на лету при самоисправлении пользователя без HTTP POST запросов.
          */
-        internal fun buildLiveTranscriptionSetupJson(modelName: String): JSONObject {
+        internal fun buildVoiceOperationsFunctionDeclarations(): JSONArray {
+            val itemProperties = JSONObject().apply {
+                put(
+                    "title",
+                    JSONObject()
+                        .put("type", "STRING")
+                        .put("description", "Краткое название операции или покупки на русском языке (например: Кофе, Такси, Зарплата).")
+                )
+                put(
+                    "type",
+                    JSONObject()
+                        .put("type", "STRING")
+                        .put("description", "Тип операции: строго 'expense' (расход) или 'income' (доход).")
+                )
+                put(
+                    "amount",
+                    JSONObject()
+                        .put("type", "NUMBER")
+                        .put("description", "Числовая сумма операции в рублях (> 0).")
+                )
+                put(
+                    "category",
+                    JSONObject()
+                        .put("type", "STRING")
+                        .put("description", "Точное название наиболее подходящей категории из списка пользователя.")
+                )
+                put(
+                    "subcategory",
+                    JSONObject()
+                        .put("type", "STRING")
+                        .put("description", "Конкретное уточнение/подкатегория (например: Капучино, Яндекс Такси, Аванс).")
+                )
+                put(
+                    "date",
+                    JSONObject()
+                        .put("type", "STRING")
+                        .put("description", "Дата операции в формате YYYY-MM-DD.")
+                )
+            }
+
+            val recordParametersSchema = JSONObject().apply {
+                put("type", "OBJECT")
+                put(
+                    "properties",
+                    JSONObject().put(
+                        "operations",
+                        JSONObject().apply {
+                            put("type", "ARRAY")
+                            put("description", "Список распознанных финансовых операций из произнесённой фразы.")
+                            put(
+                                "items",
+                                JSONObject().apply {
+                                    put("type", "OBJECT")
+                                    put("properties", itemProperties)
+                                    put(
+                                        "required",
+                                        JSONArray()
+                                            .put("title")
+                                            .put("type")
+                                            .put("amount")
+                                            .put("category")
+                                            .put("subcategory")
+                                    )
+                                }
+                            )
+                        }
+                    )
+                )
+                put("required", JSONArray().put("operations"))
+            }
+
+            val correctParametersSchema = JSONObject().apply {
+                put("type", "OBJECT")
+                put(
+                    "properties",
+                    JSONObject().apply {
+                        put(
+                            "amount",
+                            JSONObject()
+                                .put("type", "NUMBER")
+                                .put("description", "Исправленная сумма последней операции в рублях (> 0).")
+                        )
+                        put(
+                            "title",
+                            JSONObject()
+                                .put("type", "STRING")
+                                .put("description", "Исправленное название последней операции.")
+                        )
+                        put(
+                            "category",
+                            JSONObject()
+                                .put("type", "STRING")
+                                .put("description", "Исправленная категория последней операции.")
+                        )
+                        put(
+                            "subcategory",
+                            JSONObject()
+                                .put("type", "STRING")
+                                .put("description", "Исправленная подкатегория последней операции.")
+                        )
+                        put(
+                            "type",
+                            JSONObject()
+                                .put("type", "STRING")
+                                .put("description", "Исправленный тип последней операции: 'expense' или 'income'.")
+                        )
+                        put(
+                            "date",
+                            JSONObject()
+                                .put("type", "STRING")
+                                .put("description", "Исправленная дата последней операции в формате YYYY-MM-DD.")
+                        )
+                    }
+                )
+            }
+
+            return JSONArray()
+                .put(
+                    JSONObject().apply {
+                        put("name", TOOL_RECORD_VOICE_OPERATIONS)
+                        put(
+                            "description",
+                            "Записывает распознанные из речи пользователя финансовые операции (расходы и доходы). " +
+                                "Вызывай этот инструмент сразу, как только пользователь назвал сумму и назначение траты или дохода."
+                        )
+                        put("parameters", recordParametersSchema)
+                    }
+                )
+                .put(
+                    JSONObject().apply {
+                        put("name", TOOL_CORRECT_LAST_VOICE_OPERATION)
+                        put(
+                            "description",
+                            "Исправляет последнюю ранее записанную финансовую операцию, если пользователь оговорился " +
+                                "или поправил себя на лету (например: 'а нет, булочка 150', 'ой, не 300, а 250', 'точнее категория Продукты')."
+                        )
+                        put("parameters", correctParametersSchema)
+                    }
+                )
+        }
+
+        /**
+         * Конфигурация сессии Gemini Live (`BidiGenerateContent`) для живого распознавания речи
+         * и потокового выделения финансовых операций через `toolCall` без голосовых ответов ИИ.
+         */
+        internal fun buildLiveTranscriptionSetupJson(
+            modelName: String,
+            expenseCategories: List<String> = emptyList(),
+            incomeCategories: List<String> = emptyList()
+        ): JSONObject {
             val isNativeAudio = modelName.contains("native-audio", ignoreCase = true)
             val modality = if (isNativeAudio) "AUDIO" else "TEXT"
+            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+            val expCatsStr = if (expenseCategories.isNotEmpty()) {
+                expenseCategories.joinToString(", ")
+            } else {
+                "Продукты, Кафе, Фастфуд, Транспорт, Такси, Жилье и ЖКУ, Аптека и здоровье, Развлечения, Одежда, Маркетплейсы, Прочее"
+            }
+            val incCatsStr = if (incomeCategories.isNotEmpty()) {
+                incomeCategories.joinToString(", ")
+            } else {
+                "Зарплата, Подработка, Фриланс, Подарки, Переводы, Доходы"
+            }
+
+            val systemPrompt = """
+                Ты — беззвучный потоковый регистратор финансовых операций в приложении David Finance.
+                Сегодняшняя дата: $todayStr.
+                Доступные категории РАСХОДОВ (type="expense"): [$expCatsStr].
+                Доступные категории ДОХОДОВ (type="income"): [$incCatsStr].
+                Твоя задача:
+                1. Слушай речь пользователя в реальном времени.
+                2. Как только пользователь произнёс финансовую операцию с суммой (например: «кофе 300», «такси 500 и шаурма 400», «пришла зарплата 80 тысяч»), НЕМЕДЛЕННО вызови инструмент `$TOOL_RECORD_VOICE_OPERATIONS` и передай распознанные операции.
+                3. Если пользователь поправил себя по поводу только что названной операции (например: «кофе 350, булочка 200... а нет, булочка 150», «ой, не 300, а 250 рублей», «точнее это категория Продукты»), НЕМЕДЛЕННО вызови инструмент `$TOOL_CORRECT_LAST_VOICE_OPERATION` с обновлёнными полями, НЕ создавая дублирующую операцию.
+                4. Для поля `category` выбирай наиболее подходящую категорию из списка выше, а в `subcategory` и `title` указывай конкретное название покупки или дохода.
+                5. Если пользователь назвал несколько покупок подряд, передай их все в массиве `operations`.
+                6. НЕ произноси вслух никаких ответов и НЕ веди диалог — только вызывай инструменты `$TOOL_RECORD_VOICE_OPERATIONS` или `$TOOL_CORRECT_LAST_VOICE_OPERATION`.
+            """.trimIndent()
+
             return JSONObject().apply {
                 put(
                     "setup",
@@ -145,25 +338,123 @@ class VoiceInputManager(context: Context) {
                                 put("responseModalities", JSONArray().put(modality))
                             }
                         )
-                        if (isNativeAudio) {
-                            put(
-                                "systemInstruction",
-                                JSONObject().apply {
-                                    put(
-                                        "parts",
-                                        JSONArray().put(
-                                            JSONObject().apply {
-                                                put("text", "Ты работаешь в тихом режиме распознавания речи. Отвечай одним коротким словом «Ок» только после паузы пользователя.")
-                                            }
-                                        )
+                        put(
+                            "systemInstruction",
+                            JSONObject().apply {
+                                put(
+                                    "parts",
+                                    JSONArray().put(
+                                        JSONObject().apply {
+                                            put("text", systemPrompt)
+                                        }
                                     )
+                                )
+                            }
+                        )
+                        put(
+                            "tools",
+                            JSONArray().put(
+                                JSONObject().apply {
+                                    put("functionDeclarations", buildVoiceOperationsFunctionDeclarations())
                                 }
                             )
-                        }
+                        )
                         put("inputAudioTranscription", JSONObject())
                     }
                 )
             }
+        }
+
+        /**
+         * Извлекает список [ParsedVoiceOperation] из серверного сообщения `toolCall` от `BidiGenerateContent`.
+         */
+        internal fun parseToolCallOperations(
+            toolCall: JSONObject,
+            defaultDateStr: String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        ): List<ParsedVoiceOperation> {
+            val result = mutableListOf<ParsedVoiceOperation>()
+            val functionCalls = toolCall.optJSONArray("functionCalls") ?: return result
+            for (i in 0 until functionCalls.length()) {
+                val fc = functionCalls.optJSONObject(i) ?: continue
+                val fnName = fc.optString("name")
+                if (fnName.isNotBlank() && fnName != TOOL_RECORD_VOICE_OPERATIONS) continue
+                val args = fc.optJSONObject("args") ?: continue
+                val opsArray = args.optJSONArray("operations") ?: continue
+                for (j in 0 until opsArray.length()) {
+                    val item = opsArray.optJSONObject(j) ?: continue
+                    val amount = item.optDouble("amount", 0.0)
+                    if (amount <= 0.0 || amount.isNaN() || amount.isInfinite()) continue
+                    val rawType = item.optString("type", "expense").trim().lowercase(Locale.ROOT)
+                    val type = if (rawType == "income") "income" else "expense"
+                    val title = item.optString("title", "").trim()
+                    val category = item.optString("category", "").trim()
+                    val subcategory = item.optString("subcategory", "").trim()
+                    val rawDate = item.optString("date", "").trim()
+                    val date = if (rawDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) rawDate else defaultDateStr
+
+                    val effectiveTitle = title.ifBlank { subcategory.ifBlank { category.ifBlank { "Операция" } } }
+                    val effectiveCategory = category.ifBlank { if (type == "income") "Доходы" else "Прочее" }
+                    val effectiveSubcategory = subcategory.ifBlank { effectiveTitle }
+
+                    result.add(
+                        ParsedVoiceOperation(
+                            title = effectiveTitle,
+                            type = type,
+                            amount = amount,
+                            category = effectiveCategory,
+                            subcategory = effectiveSubcategory,
+                            date = date
+                        )
+                    )
+                }
+            }
+            return result
+        }
+
+        /**
+         * Извлекает список корректировок [VoiceOperationCorrection] из серверного сообщения `toolCall`
+         * (`correct_last_voice_operation`) от `BidiGenerateContent`.
+         */
+        internal fun parseToolCallCorrections(toolCall: JSONObject): List<VoiceOperationCorrection> {
+            val corrections = mutableListOf<VoiceOperationCorrection>()
+            val functionCalls = toolCall.optJSONArray("functionCalls") ?: return corrections
+            for (i in 0 until functionCalls.length()) {
+                val fc = functionCalls.optJSONObject(i) ?: continue
+                val fnName = fc.optString("name")
+                if (fnName != TOOL_CORRECT_LAST_VOICE_OPERATION) continue
+                val args = fc.optJSONObject("args") ?: continue
+
+                val rawAmount = if (args.has("amount") && !args.isNull("amount")) {
+                    args.optDouble("amount", -1.0)
+                } else {
+                    -1.0
+                }
+                val validAmount = rawAmount.takeIf { it > 0.0 && !it.isNaN() && !it.isInfinite() }
+                val title = args.optString("title", "").trim().takeIf { it.isNotEmpty() && !it.equals("null", true) }
+                val category = args.optString("category", "").trim().takeIf { it.isNotEmpty() && !it.equals("null", true) }
+                val subcategory = args.optString("subcategory", "").trim().takeIf { it.isNotEmpty() && !it.equals("null", true) }
+                val rawType = args.optString("type", "").trim().lowercase(Locale.ROOT)
+                val type = when (rawType) {
+                    "income" -> "income"
+                    "expense" -> "expense"
+                    else -> null
+                }
+                val rawDate = args.optString("date", "").trim()
+                val date = rawDate.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
+
+                val correction = VoiceOperationCorrection(
+                    amount = validAmount,
+                    title = title,
+                    category = category,
+                    subcategory = subcategory,
+                    type = type,
+                    date = date
+                )
+                if (correction.hasAnyField()) {
+                    corrections.add(correction)
+                }
+            }
+            return corrections
         }
 
         internal fun sanitizeTranscriptText(raw: String): String {
@@ -171,10 +462,6 @@ class VoiceInputManager(context: Context) {
                 .replace(Regex("\\*\\*[^*]+\\*\\*"), "")
                 .replace(Regex("\\s+"), " ")
                 .trim()
-        }
-
-        internal fun containsSpokenAmount(text: String): Boolean {
-            return SPOKEN_AMOUNT_REGEX.containsMatchIn(text)
         }
     }
 
@@ -238,20 +525,25 @@ class VoiceInputManager(context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    fun startListening(callerContext: Context = context, apiKeyOverride: String = "") {
-        GlobalConsoleLogger.i("VOICE", "Запуск потокового режима Gemini Live STT (text-only)...")
+    fun startListening(
+        callerContext: Context = context,
+        apiKeyOverride: String = "",
+        expenseCategories: List<String> = emptyList(),
+        incomeCategories: List<String> = emptyList()
+    ) {
+        GlobalConsoleLogger.i("VOICE", "Запуск потокового режима Gemini Live BidiGenerateContent...")
         stopInternal()
 
         _recognizedText.value = ""
         _partialText.value = LISTENING_PLACEHOLDER
         _errorState.value = null
-        pendingFinalLiveText = ""
-        hasReceivedLiveSttInCurrentUtterance.set(false)
-        utteranceFlushedByLiveStt.set(false)
-        liveTranscriptDebounceJob?.cancel()
-        liveTranscriptDebounceJob = null
+        currentExpenseCategories = expenseCategories
+        currentIncomeCategories = incomeCategories
         synchronized(pendingLiveTurnTranscript) {
             pendingLiveTurnTranscript.clear()
+        }
+        synchronized(fullSessionTranscript) {
+            fullSessionTranscript.clear()
         }
         synchronized(preSetupPcmQueue) {
             preSetupPcmQueue.clear()
@@ -291,17 +583,8 @@ class VoiceInputManager(context: Context) {
             _rmsDb.value = 1.5f
             _voiceLevel.value = 0.08f
 
-            synchronized(chunkLock) {
-                activeSpeechBuffer.reset()
-                activeSpeechFrames = 0
-            }
-
             recordingJob = scope.launch {
                 val frameBuf = ByteArray(FRAME_BYTES)
-                val preRollQueue = ArrayDeque<ByteArray>(PRE_ROLL_FRAMES + 2)
-                var isInSpeech = false
-                var silenceFramesCount = 0
-                var totalFramesInChunk = 0
                 val wsBatchBuffer = ByteArrayOutputStream(FRAME_BYTES * 3)
                 var wsBatchCount = 0
 
@@ -323,6 +606,12 @@ class VoiceInputManager(context: Context) {
                         _rmsDb.value = visualDb
                         _voiceLevel.value = ((visualDb - 1.0f) / 9.5f).coerceIn(0f, 1f)
 
+                        if (rms >= SPEECH_RMS_THRESHOLD &&
+                            (_partialText.value.isBlank() || _partialText.value == LISTENING_PLACEHOLDER)
+                        ) {
+                            _partialText.value = "Слушаю..."
+                        }
+
                         // Потоковая отправка PCM-аудио в Gemini Live WebSocket (пакетами по ~96 мс)
                         wsBatchBuffer.write(frameCopy)
                         wsBatchCount++
@@ -331,97 +620,14 @@ class VoiceInputManager(context: Context) {
                             wsBatchBuffer.reset()
                             wsBatchCount = 0
                         }
-
-                        val isSpeechFrame = rms >= SPEECH_RMS_THRESHOLD
-
-                        synchronized(chunkLock) {
-                            if (utteranceFlushedByLiveStt.getAndSet(false)) {
-                                activeSpeechBuffer.reset()
-                                activeSpeechFrames = 0
-                                totalFramesInChunk = 0
-                                silenceFramesCount = 0
-                                isInSpeech = false
-                            }
-
-                            if (isSpeechFrame) {
-                                if (!isInSpeech) {
-                                    isInSpeech = true
-                                    silenceFramesCount = 0
-                                    for (preFrame in preRollQueue) {
-                                        activeSpeechBuffer.write(preFrame)
-                                    }
-                                    preRollQueue.clear()
-                                    if (_partialText.value.isBlank() || _partialText.value == "Говорите...") {
-                                        _partialText.value = "Слушаю..."
-                                    }
-                                }
-                                activeSpeechBuffer.write(frameCopy)
-                                activeSpeechFrames++
-                                totalFramesInChunk++
-                                silenceFramesCount = 0
-                            } else {
-                                if (isInSpeech) {
-                                    activeSpeechBuffer.write(frameCopy)
-                                    silenceFramesCount++
-                                    totalFramesInChunk++
-
-                                    // Если пользователь сделал паузу (~0.83 сек) или фраза длится > 12 сек:
-                                    if (silenceFramesCount >= SILENCE_FRAMES_TO_SPLIT || totalFramesInChunk >= MAX_CHUNK_FRAMES) {
-                                        val pauseFlush = if (liveSetupCompleted.get()) {
-                                            tryConsumeLiveTranscriptOnPause(
-                                                forceFlushByMaxLength = totalFramesInChunk >= MAX_CHUNK_FRAMES,
-                                                minSpeechFramesMet = activeSpeechFrames >= MIN_SPEECH_FRAMES
-                                            )
-                                        } else {
-                                            PauseTranscriptFlushResult(
-                                                hasNonBlankLiveText = false,
-                                                readyToFlush = false,
-                                                flushedText = null
-                                            )
-                                        }
-                                        if (liveSetupCompleted.get() && pauseFlush.hasNonBlankLiveText) {
-                                            if (pauseFlush.readyToFlush) {
-                                                if (pauseFlush.flushedText != null) {
-                                                    liveTranscriptDebounceJob?.cancel()
-                                                    hasReceivedLiveSttInCurrentUtterance.set(false)
-                                                    GlobalConsoleLogger.i("VOICE_LIVE", "Фраза распознана в Live STT по паузе: «${pauseFlush.flushedText}»")
-                                                    onChunkRecognized?.invoke(pauseFlush.flushedText)
-                                                }
-                                                activeSpeechBuffer.reset()
-                                                activeSpeechFrames = 0
-                                                totalFramesInChunk = 0
-                                                silenceFramesCount = 0
-                                                isInSpeech = false
-                                            }
-                                        } else if (
-                                            !liveSetupCompleted.get() ||
-                                            (!hasReceivedLiveSttInCurrentUtterance.get() && silenceFramesCount >= SILENCE_FRAMES_WAV_FALLBACK) ||
-                                            (!hasReceivedLiveSttInCurrentUtterance.get() && totalFramesInChunk >= MAX_CHUNK_FRAMES)
-                                        ) {
-                                            // Резервный fallback: только если WebSocket еще не подключился или за 1.34 сек паузы совсем не прислал текст
-                                            if (activeSpeechFrames >= MIN_SPEECH_FRAMES) {
-                                                val pcmData = activeSpeechBuffer.toByteArray()
-                                                val wavBytes = pcmToWavBytes(pcmData, SAMPLE_RATE)
-                                                onAudioChunkReady?.invoke(wavBytes)
-                                            }
-                                            activeSpeechBuffer.reset()
-                                            activeSpeechFrames = 0
-                                            totalFramesInChunk = 0
-                                            silenceFramesCount = 0
-                                            isInSpeech = false
-                                        }
-                                    }
-                                } else {
-                                    if (preRollQueue.size >= PRE_ROLL_FRAMES) {
-                                        preRollQueue.removeFirst()
-                                    }
-                                    preRollQueue.addLast(frameCopy)
-                                }
-                            }
-                        }
                     }
                 } catch (e: Throwable) {
                     Log.e("VoiceInputManager", "AudioRecord loop error", e)
+                } finally {
+                    if (wsBatchBuffer.size() > 0) {
+                        streamPcmFrameToLiveWebSocket(wsBatchBuffer.toByteArray())
+                        wsBatchBuffer.reset()
+                    }
                 }
             }
         } catch (e: Throwable) {
@@ -453,7 +659,11 @@ class VoiceInputManager(context: Context) {
                         webSocket.close(1000, "Stopped")
                         return
                     }
-                    val setupMsg = buildLiveTranscriptionSetupJson(modelName)
+                    val setupMsg = buildLiveTranscriptionSetupJson(
+                        modelName = modelName,
+                        expenseCategories = currentExpenseCategories,
+                        incomeCategories = currentIncomeCategories
+                    )
                     webSocket.send(setupMsg.toString())
                 }
 
@@ -471,17 +681,23 @@ class VoiceInputManager(context: Context) {
                         connectLiveSttWebSocket(liveModelAttemptIndex)
                         return
                     }
+                    liveTurnOrToolLatch?.countDown()
                     try {
                         webSocket.close(code, reason)
                     } catch (_: Throwable) {}
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    if (liveIntentionalClose.get()) return
+                    if (liveIntentionalClose.get()) {
+                        liveTurnOrToolLatch?.countDown()
+                        return
+                    }
                     if (!liveSetupCompleted.get() && liveModelAttemptIndex + 1 < LIVE_STT_MODELS.size) {
                         liveModelAttemptIndex++
                         connectLiveSttWebSocket(liveModelAttemptIndex)
+                        return
                     }
+                    liveTurnOrToolLatch?.countDown()
                 }
             }
         )
@@ -495,7 +711,7 @@ class VoiceInputManager(context: Context) {
             sendPcmBase64ToWebSocket(ws, b64)
         } else {
             synchronized(preSetupPcmQueue) {
-                if (preSetupPcmQueue.size >= 50) {
+                if (preSetupPcmQueue.size >= 60) {
                     preSetupPcmQueue.removeFirst()
                 }
                 preSetupPcmQueue.addLast(b64)
@@ -536,65 +752,61 @@ class VoiceInputManager(context: Context) {
         ws.send(msg.toString())
     }
 
+    private fun sendAudioStreamEndToWebSocket(ws: WebSocket) {
+        val streamEndMsg = JSONObject().apply {
+            put(
+                "realtimeInput",
+                JSONObject().apply {
+                    put("audioStreamEnd", true)
+                }
+            )
+        }
+        ws.send(streamEndMsg.toString())
+
+        val turnCompleteMsg = JSONObject().apply {
+            put(
+                "clientContent",
+                JSONObject().apply {
+                    put("turnComplete", true)
+                }
+            )
+        }
+        ws.send(turnCompleteMsg.toString())
+    }
+
+    private fun sendToolResponseToWebSocket(ws: WebSocket?, functionCalls: List<Pair<String, String>>) {
+        if (ws == null || functionCalls.isEmpty()) return
+        val responsesArray = JSONArray()
+        for ((callId, fnName) in functionCalls) {
+            responsesArray.put(
+                JSONObject().apply {
+                    if (callId.isNotBlank()) put("id", callId)
+                    put("name", fnName.ifBlank { TOOL_RECORD_VOICE_OPERATIONS })
+                    put(
+                        "response",
+                        JSONObject().apply {
+                            put("output", JSONObject().put("status", "recorded"))
+                        }
+                    )
+                }
+            )
+        }
+        val toolResponseMsg = JSONObject().apply {
+            put(
+                "toolResponse",
+                JSONObject().apply {
+                    put("functionResponses", responsesArray)
+                }
+            )
+        }
+        ws.send(toolResponseMsg.toString())
+    }
+
     /**
-     * Обрабатывает сообщения от Gemini Live в режиме текстовой транскрипции (доступен для unit-тестов).
+     * Обрабатывает сообщения от Gemini Live в потоковом режиме (доступен для unit-тестов).
      */
     internal fun processLiveServerMessageForTest(rawJson: String) {
         handleLiveServerJsonMessage(ws = null, rawJson = rawJson)
-    }
-
-    internal data class PauseTranscriptFlushResult(
-        val hasNonBlankLiveText: Boolean,
-        val readyToFlush: Boolean,
-        val flushedText: String?
-    )
-
-    /**
-     * Атомарно проверяет и очищает буфер накопленной фразы внутри одного synchronized-блока,
-     * исключая потерю символов, пришедших по WebSocket между чтением и очисткой.
-     */
-    internal fun tryConsumeLiveTranscriptOnPause(
-        forceFlushByMaxLength: Boolean,
-        minSpeechFramesMet: Boolean
-    ): PauseTranscriptFlushResult {
-        return synchronized(pendingLiveTurnTranscript) {
-            val text = sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
-            val hasText = text.isNotBlank()
-            if (hasText && (containsSpokenAmount(text) || forceFlushByMaxLength)) {
-                pendingLiveTurnTranscript.clear()
-                PauseTranscriptFlushResult(
-                    hasNonBlankLiveText = true,
-                    readyToFlush = true,
-                    flushedText = if (minSpeechFramesMet) text else null
-                )
-            } else {
-                PauseTranscriptFlushResult(
-                    hasNonBlankLiveText = hasText,
-                    readyToFlush = false,
-                    flushedText = null
-                )
-            }
-        }
-    }
-
-    private fun flushCompletedLiveTurnTranscript() {
-        val completedTurnText = synchronized(pendingLiveTurnTranscript) {
-            val text = sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
-            pendingLiveTurnTranscript.clear()
-            text
-        }
-        if (completedTurnText.isNotBlank()) {
-            _recognizedText.value = completedTurnText
-            _partialText.value = completedTurnText
-            hasReceivedLiveSttInCurrentUtterance.set(false)
-            utteranceFlushedByLiveStt.set(true)
-            synchronized(chunkLock) {
-                activeSpeechBuffer.reset()
-                activeSpeechFrames = 0
-            }
-            GlobalConsoleLogger.i("VOICE_LIVE", "Фраза завершена в Live STT: «$completedTurnText»")
-            onChunkRecognized?.invoke(completedTurnText)
-        }
     }
 
     private fun handleLiveServerJsonMessage(ws: WebSocket?, rawJson: String) {
@@ -610,8 +822,55 @@ class VoiceInputManager(context: Context) {
             return
         }
 
-        // Игнорируем любые вызовы инструментов и ответы модели — этот режим только записывает речь пользователя.
-        if (root.has("toolCall")) return
+        // Обработка потокового вызова инструментов (`record_voice_operations` и `correct_last_voice_operation`) прямо из BidiGenerateContent
+        val toolCall = root.optJSONObject("toolCall")
+        if (toolCall != null) {
+            val functionCallsArray = toolCall.optJSONArray("functionCalls")
+            val callDescriptors = mutableListOf<Pair<String, String>>()
+            if (functionCallsArray != null) {
+                for (i in 0 until functionCallsArray.length()) {
+                    val fc = functionCallsArray.optJSONObject(i) ?: continue
+                    val id = fc.optString("id")
+                    val name = fc.optString("name", TOOL_RECORD_VOICE_OPERATIONS)
+                    callDescriptors.add(id to name)
+                }
+            }
+            sendToolResponseToWebSocket(ws, callDescriptors)
+
+            val capturedOps = parseToolCallOperations(toolCall)
+            if (capturedOps.isNotEmpty()) {
+                val lastOp = capturedOps.last()
+                val label = lastOp.subcategory.ifBlank { lastOp.title.ifBlank { lastOp.category } }
+                val summary = "$label ${lastOp.amount.toInt()} ₽"
+                _recognizedText.value = summary
+                _partialText.value = summary
+                GlobalConsoleLogger.i(
+                    "VOICE_LIVE",
+                    "BidiGenerateContent toolCall: захвачено ${capturedOps.size} оп. (последняя: $summary)"
+                )
+                onOperationsCaptured?.invoke(capturedOps)
+            }
+
+            val corrections = parseToolCallCorrections(toolCall)
+            for (correction in corrections) {
+                val corrLabel = correction.subcategory
+                    ?: correction.title
+                    ?: correction.category
+                    ?: "Операция"
+                val corrAmountPart = correction.amount?.let { " ${it.toInt()} ₽" } ?: ""
+                val corrSummary = "✎ $corrLabel$corrAmountPart"
+                _recognizedText.value = corrSummary
+                _partialText.value = corrSummary
+                GlobalConsoleLogger.i(
+                    "VOICE_LIVE",
+                    "BidiGenerateContent toolCall: исправлена последняя операция ($corrSummary)"
+                )
+                onLastOperationCorrected?.invoke(correction)
+            }
+
+            liveTurnOrToolLatch?.countDown()
+            return
+        }
 
         val serverContent = root.optJSONObject("serverContent") ?: return
 
@@ -620,7 +879,6 @@ class VoiceInputManager(context: Context) {
             ?.takeIf { it.isNotBlank() }
 
         if (inputTranscription != null) {
-            hasReceivedLiveSttInCurrentUtterance.set(true)
             val cleaned = synchronized(pendingLiveTurnTranscript) {
                 pendingLiveTurnTranscript.append(inputTranscription)
                 sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
@@ -629,43 +887,96 @@ class VoiceInputManager(context: Context) {
                 _partialText.value = cleaned
                 _recognizedText.value = cleaned
             }
-            liveTranscriptDebounceJob?.cancel()
-            if (ws != null && containsSpokenAmount(cleaned)) {
-                liveTranscriptDebounceJob = scope.launch {
-                    kotlinx.coroutines.delay(LIVE_TRANSCRIPT_DEBOUNCE_MS)
-                    flushCompletedLiveTurnTranscript()
-                }
-            }
         }
 
-        val isUserTurnFinished = serverContent.optBoolean("turnComplete", false) ||
+        val isTurnComplete = serverContent.optBoolean("turnComplete", false) ||
             serverContent.has("modelTurn") ||
             serverContent.has("outputTranscription")
 
-        if (isUserTurnFinished) {
-            liveTranscriptDebounceJob?.cancel()
-            flushCompletedLiveTurnTranscript()
+        if (isTurnComplete) {
+            val completedTurnText = synchronized(pendingLiveTurnTranscript) {
+                val text = sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
+                pendingLiveTurnTranscript.clear()
+                text
+            }
+            if (completedTurnText.isNotBlank()) {
+                synchronized(fullSessionTranscript) {
+                    if (fullSessionTranscript.isNotEmpty()) fullSessionTranscript.append(' ')
+                    fullSessionTranscript.append(completedTurnText)
+                }
+                _recognizedText.value = completedTurnText
+                _partialText.value = completedTurnText
+                GlobalConsoleLogger.i("VOICE_LIVE", "Фраза распознана в Live STT: «$completedTurnText»")
+                onChunkRecognized?.invoke(completedTurnText)
+            }
+            liveTurnOrToolLatch?.countDown()
         }
     }
 
-    fun consumePendingFinalText(): String {
-        val text = pendingFinalLiveText
-        pendingFinalLiveText = ""
-        return text
+    /**
+     * Завершает захват микрофона, отправляет сигнал окончания аудиопотока в активный WebSocket
+     * `BidiGenerateContent` и кратко дожидается финального `toolCall` / `turnComplete`,
+     * после чего закрывает соединение. Не создаёт WAV-файлов и не выполняет HTTP POST.
+     */
+    suspend fun finishListeningAndAwaitLiveFlush(timeoutMs: Long = 1600L): String {
+        GlobalConsoleLogger.i("VOICE", "Завершение потоковой сессии Gemini Live BidiGenerateContent...")
+        _isListening.value = false
+        val jobToJoin = recordingJob
+        recordingJob = null
+        try {
+            jobToJoin?.cancel()
+        } catch (_: Throwable) {}
+
+        stopAudioRecordOnly()
+        _rmsDb.value = 0f
+        _voiceLevel.value = 0f
+
+        val ws = liveWebSocket
+        val isLiveReady = liveSetupCompleted.get() && ws != null
+        if (isLiveReady && ws != null) {
+            val latch = CountDownLatch(1)
+            liveTurnOrToolLatch = latch
+            try {
+                sendAudioStreamEndToWebSocket(ws)
+                withContext(Dispatchers.IO) {
+                    latch.await(timeoutMs, TimeUnit.MILLISECONDS)
+                }
+            } catch (_: Throwable) {
+            } finally {
+                liveTurnOrToolLatch = null
+            }
+        }
+
+        val remainingTurnText = synchronized(pendingLiveTurnTranscript) {
+            val t = sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
+            pendingLiveTurnTranscript.clear()
+            t
+        }
+        if (remainingTurnText.isNotBlank()) {
+            synchronized(fullSessionTranscript) {
+                if (fullSessionTranscript.isNotEmpty()) fullSessionTranscript.append(' ')
+                fullSessionTranscript.append(remainingTurnText)
+            }
+            _recognizedText.value = remainingTurnText
+            _partialText.value = remainingTurnText
+        } else if (_partialText.value == LISTENING_PLACEHOLDER || _partialText.value == "Слушаю...") {
+            _partialText.value = _recognizedText.value
+        }
+
+        closeLiveWebSocket()
+
+        val fullText = synchronized(fullSessionTranscript) {
+            sanitizeTranscriptText(fullSessionTranscript.toString())
+        }
+        return fullText.ifBlank { _recognizedText.value }
     }
 
-    /**
-     * Останавливает запись и возвращает последний оставшийся фрагмент речи (только если Live STT
-     * ещё не успел распознать его в текст), чтобы ни одно слово в конце не потерялось.
-     */
-    fun stopListeningAndFlushRemaining(): ByteArray? {
-        GlobalConsoleLogger.i("VOICE", "Завершение сессии Gemini Live STT...")
-        _isListening.value = false
-        liveTranscriptDebounceJob?.cancel()
-        liveTranscriptDebounceJob = null
-        recordingJob?.cancel()
-        recordingJob = null
+    fun stopListening() {
+        GlobalConsoleLogger.i("VOICE", "Полная остановка записи речи")
+        stopInternal()
+    }
 
+    private fun stopAudioRecordOnly() {
         val record = audioRecord
         audioRecord = null
         if (record != null) {
@@ -680,60 +991,13 @@ class VoiceInputManager(context: Context) {
                 } catch (_: Throwable) {}
             }
         }
-        _rmsDb.value = 0f
-        _voiceLevel.value = 0f
-
-        val pendingText = synchronized(pendingLiveTurnTranscript) {
-            val t = sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
-            pendingLiveTurnTranscript.clear()
-            t
-        }
-        pendingFinalLiveText = pendingText
-        if (pendingText.isNotBlank()) {
-            _recognizedText.value = pendingText
-            _partialText.value = pendingText
-        } else if (_partialText.value == LISTENING_PLACEHOLDER) {
-            _partialText.value = ""
-        }
-
-        val hadLiveSetup = liveSetupCompleted.get()
-        closeLiveWebSocket()
-
-        // Если для текущей финальной фразы Live WebSocket уже прислал непустой pendingText,
-        // возвращаем null, чтобы TransactionStateDelegate сразу разобрал готовый текст без отправки WAV-файла!
-        if (hadLiveSetup && pendingText.isNotBlank()) {
-            synchronized(chunkLock) {
-                activeSpeechBuffer.reset()
-                activeSpeechFrames = 0
-            }
-            return null
-        }
-
-        synchronized(chunkLock) {
-            val remainingPcm = activeSpeechBuffer.toByteArray()
-            val frames = activeSpeechFrames
-            activeSpeechBuffer.reset()
-            activeSpeechFrames = 0
-
-            return if (frames >= 8 && remainingPcm.size > FRAME_BYTES * 6) {
-                GlobalConsoleLogger.i("VOICE_LIVE", "Fallback-отправка финального фрагмента речи (${remainingPcm.size} байт)")
-                pcmToWavBytes(remainingPcm, SAMPLE_RATE)
-            } else {
-                null
-            }
-        }
-    }
-
-    fun stopListening() {
-        GlobalConsoleLogger.i("VOICE", "Полная остановка записи речи")
-        stopInternal()
     }
 
     private fun closeLiveWebSocket() {
         liveIntentionalClose.set(true)
         liveSetupCompleted.set(false)
-        liveTranscriptDebounceJob?.cancel()
-        liveTranscriptDebounceJob = null
+        liveTurnOrToolLatch?.countDown()
+        liveTurnOrToolLatch = null
         try {
             liveWebSocket?.close(1000, "Voice input finished")
         } catch (_: Throwable) {}
@@ -748,26 +1012,7 @@ class VoiceInputManager(context: Context) {
         recordingJob?.cancel()
         recordingJob = null
         closeLiveWebSocket()
-
-        val record = audioRecord
-        audioRecord = null
-        if (record != null) {
-            try {
-                if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
-                    record.stop()
-                }
-            } catch (_: Throwable) {
-            } finally {
-                try {
-                    record.release()
-                } catch (_: Throwable) {}
-            }
-        }
-
-        synchronized(chunkLock) {
-            activeSpeechBuffer.reset()
-            activeSpeechFrames = 0
-        }
+        stopAudioRecordOnly()
         _rmsDb.value = 0f
         _voiceLevel.value = 0f
     }
@@ -787,39 +1032,12 @@ class VoiceInputManager(context: Context) {
         return sqrt(sumSquares / sampleCount)
     }
 
-    private fun pcmToWavBytes(pcmData: ByteArray, sampleRate: Int): ByteArray {
-        val totalDataLen = pcmData.size + 36
-        val byteRate = sampleRate * 2 // 16-bit mono = 2 bytes per sample
-        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
-
-        // RIFF header
-        header.put("RIFF".toByteArray(Charsets.US_ASCII))
-        header.putInt(totalDataLen)
-        header.put("WAVE".toByteArray(Charsets.US_ASCII))
-
-        // fmt subchunk
-        header.put("fmt ".toByteArray(Charsets.US_ASCII))
-        header.putInt(16) // Subchunk1Size for PCM
-        header.putShort(1) // AudioFormat = 1 (PCM)
-        header.putShort(1) // NumChannels = 1 (Mono)
-        header.putInt(sampleRate)
-        header.putInt(byteRate)
-        header.putShort(2) // BlockAlign = 2
-        header.putShort(16) // BitsPerSample = 16
-
-        // data subchunk
-        header.put("data".toByteArray(Charsets.US_ASCII))
-        header.putInt(pcmData.size)
-
-        val wavOutput = ByteArray(44 + pcmData.size)
-        System.arraycopy(header.array(), 0, wavOutput, 0, 44)
-        System.arraycopy(pcmData, 0, wavOutput, 44, pcmData.size)
-        return wavOutput
-    }
-
     fun clear() {
         synchronized(pendingLiveTurnTranscript) {
             pendingLiveTurnTranscript.clear()
+        }
+        synchronized(fullSessionTranscript) {
+            fullSessionTranscript.clear()
         }
         _recognizedText.value = ""
         _partialText.value = ""

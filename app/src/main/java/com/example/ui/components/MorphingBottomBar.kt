@@ -188,6 +188,7 @@ fun MorphingBottomBar(
     val isVoiceActive by viewModel.isVoiceActive.collectAsState()
     val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
     val parsedOperations by viewModel.parsedVoiceOperations.collectAsState()
+    val latestVoiceTickerEvent by viewModel.latestVoiceTickerEvent.collectAsState()
     val categories by viewModel.categories.collectAsState(initial = emptyList())
     val isConsentGiven by viewModel.isGeminiConsentGiven.collectAsState()
     val apiKey by viewModel.apiKey.collectAsState()
@@ -206,14 +207,32 @@ fun MorphingBottomBar(
     }
     val effectiveModal = if (activeModal != BottomCapsuleModal.None) activeModal else renderedModal
 
+    // Мгновенный тактильный отклик в руку на каждый пойманный или скорректированный голосом расход/доход (toolCall)
+    LaunchedEffect(latestVoiceTickerEvent?.id) {
+        if (latestVoiceTickerEvent != null && activeModal is BottomCapsuleModal.VoiceInput) {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        }
+    }
+
     LaunchedEffect(parsedOperations) {
         val ops = parsedOperations
         if (ops != null) {
             if (editableList.isEmpty()) {
                 editableList.addAll(ops)
             } else if (ops.size > editableList.size) {
+                for (i in editableList.indices) {
+                    if (editableList[i] != ops[i] && editingIndex != i) {
+                        editableList[i] = ops[i]
+                    }
+                }
                 val newItems = ops.subList(editableList.size, ops.size)
                 editableList.addAll(newItems)
+            } else if (ops.size == editableList.size) {
+                for (i in ops.indices) {
+                    if (editableList[i] != ops[i] && editingIndex != i) {
+                        editableList[i] = ops[i]
+                    }
+                }
             }
             if (ops.isNotEmpty()) {
                 viewModel.openModal(BottomCapsuleModal.VoiceInput)
@@ -339,7 +358,8 @@ fun MorphingBottomBar(
     DisposableEffect(Unit) {
         onDispose {
             if (voiceManager.isListening.value) {
-                voiceManager.onAudioChunkReady = null
+                voiceManager.onOperationsCaptured = null
+                voiceManager.onLastOperationCorrected = null
                 voiceManager.onChunkRecognized = null
                 voiceManager.stopListening()
             }
@@ -977,14 +997,43 @@ fun MorphingBottomBar(
                                                                 )
                                                             )
                                                             Spacer(modifier = Modifier.width(6.dp))
-                                                            Text(
-                                                                text = if (isAnalyzingVoice) "ИИ разбор" else "Нажмите для стопа",
-                                                                color = Color(0xFF94A3B8).copy(alpha = 0.78f),
-                                                                fontSize = 10.sp,
-                                                                fontFamily = ManropeFontFamily,
-                                                                fontWeight = FontWeight.Medium,
-                                                                maxLines = 1
-                                                            )
+                                                            val tickerEvent = latestVoiceTickerEvent
+                                                            if (tickerEvent != null) {
+                                                                val tickerAccent = if (tickerEvent.isCorrection) {
+                                                                    Color(0xFF06B6D4)
+                                                                } else {
+                                                                    Emerald400
+                                                                }
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .clip(RoundedCornerShape(10.dp))
+                                                                        .background(tickerAccent.copy(alpha = 0.16f))
+                                                                        .border(
+                                                                            width = 1.dp,
+                                                                            color = tickerAccent.copy(alpha = 0.55f),
+                                                                            shape = RoundedCornerShape(10.dp)
+                                                                        )
+                                                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        text = tickerEvent.formattedChipText,
+                                                                        color = tickerAccent,
+                                                                        fontSize = 10.sp,
+                                                                        fontFamily = ManropeFontFamily,
+                                                                        fontWeight = FontWeight.ExtraBold,
+                                                                        maxLines = 1
+                                                                    )
+                                                                }
+                                                            } else {
+                                                                Text(
+                                                                    text = if (isAnalyzingVoice) "ИИ разбор" else "Нажмите для стопа",
+                                                                    color = Color(0xFF94A3B8).copy(alpha = 0.78f),
+                                                                    fontSize = 10.sp,
+                                                                    fontFamily = ManropeFontFamily,
+                                                                    fontWeight = FontWeight.Medium,
+                                                                    maxLines = 1
+                                                                )
+                                                            }
                                                         }
 
                                                         // 32-полосный горизонтальный спектральный визуализатор реального голоса (FFT + Hann)

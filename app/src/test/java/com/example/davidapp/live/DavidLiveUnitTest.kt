@@ -148,20 +148,40 @@ class DavidLiveUnitTest {
     }
 
     @Test
-    fun `voice input manager live STT mode keeps user speech transcription and ignores assistant output`() {
+    fun `voice input manager live BidiGenerateContent mode captures operations and self-corrections via toolCall`() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val voiceManager = VoiceInputManager(context)
-        val recognizedChunks = mutableListOf<String>()
-        voiceManager.onChunkRecognized = { recognizedChunks.add(it) }
+        val capturedBatches = mutableListOf<List<com.example.data.repository.ParsedVoiceOperation>>()
+        val capturedCorrections = mutableListOf<com.example.utils.VoiceOperationCorrection>()
+
+        voiceManager.onOperationsCaptured = { ops -> capturedBatches.add(ops) }
+        voiceManager.onLastOperationCorrected = { corr -> capturedCorrections.add(corr) }
 
         assertEquals(
             "models/gemini-2.5-flash-native-audio-preview-12-2025",
             VoiceInputManager.LIVE_STT_MODELS.first()
         )
 
-        val nativeSetup = VoiceInputManager.buildLiveTranscriptionSetupJson(VoiceInputManager.LIVE_STT_MODELS.first())
+        val funcDecls = VoiceInputManager.buildVoiceOperationsFunctionDeclarations()
+        assertEquals(2, funcDecls.length())
+        assertEquals(
+            VoiceInputManager.TOOL_RECORD_VOICE_OPERATIONS,
+            funcDecls.getJSONObject(0).getString("name")
+        )
+        assertEquals(
+            VoiceInputManager.TOOL_CORRECT_LAST_VOICE_OPERATION,
+            funcDecls.getJSONObject(1).getString("name")
+        )
+
+        val nativeSetup = VoiceInputManager.buildLiveTranscriptionSetupJson(
+            modelName = VoiceInputManager.LIVE_STT_MODELS.first(),
+            expenseCategories = listOf("Продукты", "Кафе", "Транспорт"),
+            incomeCategories = listOf("Зарплата")
+        )
         val nativeSetupObj = nativeSetup.getJSONObject("setup")
         assertTrue(nativeSetupObj.has("inputAudioTranscription"))
+        assertTrue(nativeSetupObj.has("systemInstruction"))
+        assertTrue(nativeSetupObj.has("tools"))
         assertEquals(
             "AUDIO",
             nativeSetupObj.getJSONObject("generationConfig").getJSONArray("responseModalities").getString(0)
@@ -171,72 +191,73 @@ class DavidLiveUnitTest {
         val setupObj = setup.getJSONObject("setup")
         assertTrue(setupObj.has("inputAudioTranscription"))
         assertFalse(setupObj.has("outputAudioTranscription"))
+        assertTrue(setupObj.has("tools"))
         assertEquals(
             "TEXT",
             setupObj.getJSONObject("generationConfig").getJSONArray("responseModalities").getString(0)
         )
 
+        // 1. Живая транскрипция речи пользователя обновляет UI-строку
         voiceManager.processLiveServerMessageForTest(
-            """{"serverContent":{"inputTranscription":{"text":"Кофе 350 и такси 500 "}}}"""
+            """{"serverContent":{"inputTranscription":{"text":"Кофе 350 и булочка 200 "}}}"""
         )
-        assertEquals("Кофе 350 и такси 500", voiceManager.recognizedText.value)
+        assertEquals("Кофе 350 и булочка 200", voiceManager.recognizedText.value)
 
-        // Ответы модели игнорируются, а при начале ответа модели / turnComplete фраза пользователя передается в onChunkRecognized ровно 1 раз
+        // 2. Приходит toolCall record_voice_operations — операции мгновенно захватываются без HTTP POST
         voiceManager.processLiveServerMessageForTest(
-            """{"serverContent":{"outputTranscription":{"text":"Я записал ваши расходы."},"turnComplete":true}}"""
+            """
+            {
+              "toolCall": {
+                "functionCalls": [
+                  {
+                    "id": "call-1",
+                    "name": "record_voice_operations",
+                    "args": {
+                      "operations": [
+                        {"title": "Кофе", "amount": 350, "type": "expense", "category": "Кафе", "subcategory": "Кофе"},
+                        {"title": "Булочка", "amount": 200, "type": "expense", "category": "Кафе", "subcategory": "Булочка"}
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+            """.trimIndent()
         )
-        assertEquals("Кофе 350 и такси 500", voiceManager.recognizedText.value)
-        assertEquals(listOf("Кофе 350 и такси 500"), recognizedChunks)
+        assertEquals(1, capturedBatches.size)
+        assertEquals(2, capturedBatches.first().size)
+        assertEquals("Кофе", capturedBatches.first()[0].title)
+        assertEquals(350.0, capturedBatches.first()[0].amount, 0.01)
+        assertEquals("Булочка", capturedBatches.first()[1].title)
+        assertEquals(200.0, capturedBatches.first()[1].amount, 0.01)
 
-        // Если пользователь нажимает «Стоп» сразу после произнесения второй фразы до прихода turnComplete,
-        // фраза сохраняется в consumePendingFinalText() и не теряется
+        // 3. Пользователь поправляет себя на лету («а нет, булочка 150») -> toolCall correct_last_voice_operation
         voiceManager.processLiveServerMessageForTest(
-            """{"serverContent":{"inputTranscription":{"text":"Вкусвилл 500 рублей"}}}"""
+            """
+            {
+              "toolCall": {
+                "functionCalls": [
+                  {
+                    "id": "call-2",
+                    "name": "correct_last_voice_operation",
+                    "args": {
+                      "title": "Булочка",
+                      "amount": 150,
+                      "category": "Кафе"
+                    }
+                  }
+                ]
+              }
+            }
+            """.trimIndent()
         )
-        voiceManager.stopListeningAndFlushRemaining()
-        assertEquals("Вкусвилл 500 рублей", voiceManager.consumePendingFinalText())
-        assertEquals("", voiceManager.consumePendingFinalText())
-
-        assertFalse(VoiceInputManager.containsSpokenAmount("Вкусно и точка"))
-        assertTrue(VoiceInputManager.containsSpokenAmount("Вкусно и точка 1000 рублей"))
-        assertTrue(VoiceInputManager.containsSpokenAmount("Такси пятьсот рублей"))
-
-        // Проверка атомарного чтения и очистки буфера на паузе (tryConsumeLiveTranscriptOnPause):
-        // 1) Пока сумма не названа («Вкусно и точка»), короткая пауза НЕ очищает буфер
-        voiceManager.processLiveServerMessageForTest(
-            """{"serverContent":{"inputTranscription":{"text":"Вкусно и точка "}}}"""
-        )
-        val pauseWithoutAmount = voiceManager.tryConsumeLiveTranscriptOnPause(
-            forceFlushByMaxLength = false,
-            minSpeechFramesMet = true
-        )
-        assertTrue(pauseWithoutAmount.hasNonBlankLiveText)
-        assertFalse(pauseWithoutAmount.readyToFlush)
-        assertNull(pauseWithoutAmount.flushedText)
-
-        // 2) Когда договорена сумма («1000 рублей»), пауза атомарно возвращает всю фразу и очищает буфер в одном synchronized-блоке
-        voiceManager.processLiveServerMessageForTest(
-            """{"serverContent":{"inputTranscription":{"text":"1000 рублей"}}}"""
-        )
-        val pauseWithAmount = voiceManager.tryConsumeLiveTranscriptOnPause(
-            forceFlushByMaxLength = false,
-            minSpeechFramesMet = true
-        )
-        assertTrue(pauseWithAmount.hasNonBlankLiveText)
-        assertTrue(pauseWithAmount.readyToFlush)
-        assertEquals("Вкусно и точка 1000 рублей", pauseWithAmount.flushedText)
-
-        // Повторный вызов сразу после очистки подтверждает, что буфер пуст
-        val afterFlush = voiceManager.tryConsumeLiveTranscriptOnPause(
-            forceFlushByMaxLength = false,
-            minSpeechFramesMet = true
-        )
-        assertFalse(afterFlush.hasNonBlankLiveText)
-        assertNull(afterFlush.flushedText)
+        assertEquals(1, capturedCorrections.size)
+        assertEquals("Булочка", capturedCorrections.first().title)
+        assertEquals(150.0, capturedCorrections.first().amount ?: 0.0, 0.01)
     }
 
     @Test
-    fun `TransactionStateDelegate processes Live voice chunks strictly in FIFO order via sequential Channel queue`() = runBlocking {
+    fun `TransactionStateDelegate captures live operations and applies on-the-fly self-correction with ticker events`() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val db = androidx.room.Room.inMemoryDatabaseBuilder(
             context,
@@ -289,56 +310,59 @@ class DavidLiveUnitTest {
                 getSavedApiKey = { "AIzaSyTestKey1234567890" }
             )
 
-            // Первая фраза («Кофе 300») обрабатывается дольше (120 мс), чем вторая («Такси 500», 10 мс).
-            // Последовательная очередь Channel обязана сохранить строгий порядок произнесения: сначала Кофе 300, затем Такси 500.
-            delegate.voiceTextParserOverride = { text ->
-                if (text.contains("Кофе")) {
-                    kotlinx.coroutines.delay(120L)
-                    listOf(
-                        com.example.data.repository.ParsedVoiceOperation(
-                            title = "Кофе",
-                            type = "expense",
-                            amount = 300.0,
-                            category = "Кафе",
-                            subcategory = "Кофе",
-                            date = "2026-10-29"
-                        )
+            delegate.appendLiveCapturedVoiceOperations(
+                listOf(
+                    com.example.data.repository.ParsedVoiceOperation(
+                        title = "Кофе",
+                        type = "expense",
+                        amount = 350.0,
+                        category = "Кафе",
+                        subcategory = "Кофе",
+                        date = "2026-10-29"
+                    ),
+                    com.example.data.repository.ParsedVoiceOperation(
+                        title = "Булочка",
+                        type = "expense",
+                        amount = 200.0,
+                        category = "Кафе",
+                        subcategory = "Булочка",
+                        date = "2026-10-29"
                     )
-                } else {
-                    kotlinx.coroutines.delay(10L)
-                    listOf(
-                        com.example.data.repository.ParsedVoiceOperation(
-                            title = "Такси",
-                            type = "expense",
-                            amount = 500.0,
-                            category = "Транспорт",
-                            subcategory = "Такси",
-                            date = "2026-10-29"
-                        )
-                    )
-                }
-            }
+                )
+            )
 
-            delegate.processLiveTextChunk("Кофе 300", isFinalFlush = false)
-            delegate.processLiveTextChunk("Такси 500", isFinalFlush = true)
+            val afterCapture = parsedOpsFlow.value
+            assertNotNull(afterCapture)
+            assertEquals(2, afterCapture!!.size)
+            val captureTicker = delegate.latestVoiceTickerEvent.value
+            assertNotNull(captureTicker)
+            assertFalse(captureTicker!!.isCorrection)
+            assertEquals("+ Булочка 200 ₽", captureTicker.formattedChipText)
 
-            // Ждём завершения очереди
-            var waitedMs = 0L
-            while (isAnalyzingFlow.value && waitedMs < 2000L) {
-                kotlinx.coroutines.delay(20L)
-                waitedMs += 20L
-            }
+            // Применяем live-самоисправление («а нет, булочка 150»)
+            delegate.correctLastCapturedVoiceOperation(
+                com.example.utils.VoiceOperationCorrection(
+                    amount = 150.0,
+                    title = "Булочка",
+                    category = "Кафе",
+                    subcategory = "Булочка",
+                    type = "expense"
+                )
+            )
 
-            val finalOps = parsedOpsFlow.value
-            assertNotNull(finalOps)
-            assertEquals(2, finalOps!!.size)
-            assertEquals("Кофе", finalOps[0].title)
-            assertEquals(300.0, finalOps[0].amount, 0.01)
-            assertEquals("Такси", finalOps[1].title)
-            assertEquals(500.0, finalOps[1].amount, 0.01)
-            assertFalse(isAnalyzingFlow.value)
+            val afterCorrection = parsedOpsFlow.value
+            assertNotNull(afterCorrection)
+            assertEquals(2, afterCorrection!!.size)
+            assertEquals(350.0, afterCorrection[0].amount, 0.01)
+            assertEquals(150.0, afterCorrection[1].amount, 0.01)
+
+            val correctionTicker = delegate.latestVoiceTickerEvent.value
+            assertNotNull(correctionTicker)
+            assertTrue(correctionTicker!!.isCorrection)
+            assertEquals("✎ Булочка 150 ₽", correctionTicker.formattedChipText)
 
             delegate.clearParsedVoiceOperations()
+            assertNull(delegate.latestVoiceTickerEvent.value)
         } finally {
             delegateJob.cancel()
             db.close()
