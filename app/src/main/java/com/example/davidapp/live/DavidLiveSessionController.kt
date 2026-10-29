@@ -39,6 +39,9 @@ class DavidLiveSessionController(
     private val setupCompleted = AtomicBoolean(false)
     private val intentionalClose = AtomicBoolean(false)
 
+    private val _displayMode = MutableStateFlow(DavidLiveDisplayMode.HIDDEN)
+    val displayMode: StateFlow<DavidLiveDisplayMode> = _displayMode.asStateFlow()
+
     private val _connectionState = MutableStateFlow(DavidLiveConnectionState.IDLE)
     val connectionState: StateFlow<DavidLiveConnectionState> = _connectionState.asStateFlow()
 
@@ -58,6 +61,27 @@ class DavidLiveSessionController(
     private val pendingUserTranscript = StringBuilder()
     private val pendingDavidTranscript = StringBuilder()
 
+    private var _startSessionCount = 0
+    val startSessionCount: Int
+        get() = _startSessionCount
+
+    /**
+     * Returns true when a David Live voice session is currently active (either full-screen or minimized).
+     */
+    fun isSessionActive(): Boolean {
+        return _displayMode.value != DavidLiveDisplayMode.HIDDEN &&
+            _connectionState.value != DavidLiveConnectionState.IDLE &&
+            _connectionState.value != DavidLiveConnectionState.ENDED
+    }
+
+    /**
+     * Enforces strict separation between the two voice modes:
+     * Regular transaction voice input (`VoiceInputManager`) must never start while David Live is active.
+     */
+    fun canStartRegularVoiceInput(): Boolean {
+        return _displayMode.value == DavidLiveDisplayMode.HIDDEN
+    }
+
     /**
      * Validates that the API key was manually entered by the user and is not empty or a build placeholder.
      */
@@ -72,8 +96,20 @@ class DavidLiveSessionController(
 
     /**
      * Starts a new David Live voice session using only the user's manual API key.
+     * If a session is already active (e.g. minimized), expands the existing session
+     * instead of creating a duplicate WebSocket connection.
      */
     fun startSession(userApiKey: String?) {
+        if (isSessionActive() &&
+            _connectionState.value != DavidLiveConnectionState.ERROR &&
+            _connectionState.value != DavidLiveConnectionState.NO_API_KEY
+        ) {
+            _displayMode.value = DavidLiveDisplayMode.EXPANDED
+            return
+        }
+
+        _displayMode.value = DavidLiveDisplayMode.EXPANDED
+
         if (!validateUserApiKey(userApiKey)) {
             _connectionState.value = DavidLiveConnectionState.NO_API_KEY
             _errorMessage.value = "Для запуска David Live укажите ваш Gemini API ключ в настройках чата (иконка ключа вверху)."
@@ -81,6 +117,7 @@ class DavidLiveSessionController(
             return
         }
 
+        _startSessionCount++
         currentApiKey = userApiKey!!.trim()
         modelAttemptIndex = 0
         synchronized(_transcriptTurns) {
@@ -96,6 +133,26 @@ class DavidLiveSessionController(
     }
 
     /**
+     * Collapses the full-screen David Live interface into the compact bottom voice capsule
+     * without disconnecting WebSocket, stopping AudioRecord/AudioTrack, or clearing transcripts.
+     */
+    fun minimizeSession() {
+        if (_displayMode.value == DavidLiveDisplayMode.EXPANDED) {
+            _displayMode.value = DavidLiveDisplayMode.MINIMIZED
+        }
+    }
+
+    /**
+     * Expands the compact bottom voice capsule back into the full-screen David Live interface
+     * without reconnecting WebSocket or restarting the audio stream.
+     */
+    fun expandSession() {
+        if (_displayMode.value == DavidLiveDisplayMode.MINIMIZED) {
+            _displayMode.value = DavidLiveDisplayMode.EXPANDED
+        }
+    }
+
+    /**
      * Retries connecting after a network or WebSocket failure while preserving session context.
      */
     fun retryConnection() {
@@ -108,6 +165,7 @@ class DavidLiveSessionController(
 
     /**
      * Toggles the microphone mute state without disconnecting the Gemini Live session.
+     * Works identically in both EXPANDED and MINIMIZED display modes.
      */
     fun toggleMicMute() {
         val nextMuted = !_isMicMuted.value
@@ -121,8 +179,8 @@ class DavidLiveSessionController(
     }
 
     /**
-     * Ends the David Live session cleanly, stops audio capture/playback, and returns
-     * the captured conversation turns and verified financial facts for post-session summary generation.
+     * Ends the David Live session cleanly, stops audio capture/playback, resets displayMode to HIDDEN,
+     * and returns the captured conversation turns and verified financial facts for post-session summary generation.
      */
     fun endSession(): Pair<List<DavidLiveTranscriptTurn>, List<DavidLiveToolFact>> {
         intentionalClose.set(true)
@@ -133,6 +191,7 @@ class DavidLiveSessionController(
         }
         webSocket = null
         audioEngine.stop()
+        _displayMode.value = DavidLiveDisplayMode.HIDDEN
         _connectionState.value = DavidLiveConnectionState.ENDED
         _errorMessage.value = null
         return transcriptTurns to financialToolsProvider.verifiedFacts

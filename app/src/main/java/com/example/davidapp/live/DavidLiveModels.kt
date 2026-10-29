@@ -4,6 +4,17 @@ import androidx.compose.runtime.Immutable
 import java.util.UUID
 
 /**
+ * Режим отображения голосового интерфейса David Live.
+ * Позволяет плавно сворачивать полноэкранный режим в компактную нижнюю капсулу
+ * без разрыва WebSocket-соединения, остановки аудиопотока или потери контекста.
+ */
+enum class DavidLiveDisplayMode {
+    HIDDEN,
+    EXPANDED,
+    MINIMIZED
+}
+
+/**
  * Состояния голосового режима David Live.
  */
 enum class DavidLiveConnectionState {

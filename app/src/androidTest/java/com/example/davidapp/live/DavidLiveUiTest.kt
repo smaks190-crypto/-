@@ -128,4 +128,76 @@ class DavidLiveUiTest {
         composeTestRule.onNodeWithText("• Анализ расходов на кафе и продукты").assertIsDisplayed()
         composeTestRule.onNodeWithText("• Продукты: 15 000 ₽ из лимита 25 000 ₽ (60%)").assertIsDisplayed()
     }
+
+    @Test
+    fun davidLiveMinimizesToCompactCapsuleHandlesMuteExpandAndEndsCleanly() {
+        var displayMode by mutableStateOf(DavidLiveDisplayMode.EXPANDED)
+        var micMuted by mutableStateOf(false)
+        var endCallCount = 0
+        var expandCount = 0
+
+        composeTestRule.setContent {
+            DavidLiveSheet(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                liveSubtitle = "Слушаю тебя...",
+                rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.42f },
+                overallEnergy = 0.48f,
+                activeSpeaker = DavidLiveSpeaker.USER,
+                isMicMuted = micMuted,
+                errorMessage = null,
+                onToggleMicMute = { micMuted = !micMuted },
+                onRetryConnection = {},
+                onOpenApiKeySettings = {},
+                onEndSession = {
+                    endCallCount++
+                    displayMode = DavidLiveDisplayMode.HIDDEN
+                },
+                displayMode = displayMode,
+                onMinimize = { displayMode = DavidLiveDisplayMode.MINIMIZED },
+                onExpand = {
+                    expandCount++
+                    displayMode = DavidLiveDisplayMode.EXPANDED
+                },
+                renderEmbeddedMinimizedCapsule = true
+            )
+        }
+
+        // 1. В полноэкранном режиме отображается круговой визуализатор и кнопка сворачивания
+        composeTestRule.onNodeWithTag("david_live_circular_visualizer").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("david_live_minimize_button").performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(DavidLiveDisplayMode.MINIMIZED, displayMode)
+        assertEquals(0, endCallCount)
+
+        // 2. В компактном режиме отображается нижняя капсула со звуковой волной, кнопкой микрофона и завершения
+        composeTestRule.onNodeWithTag("david_live_minimized_capsule").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("david_live_capsule_waveform").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Давид").assertIsDisplayed()
+        composeTestRule.onNodeWithText("LIVE").assertIsDisplayed()
+
+        // 3. Нажатие на кнопку микрофона в мини-капсуле переключает mute, но НЕ разворачивает экран
+        composeTestRule.onNodeWithTag("david_live_capsule_mute_button").performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(micMuted)
+        assertEquals(DavidLiveDisplayMode.MINIMIZED, displayMode)
+        assertEquals(0, expandCount)
+
+        // 4. Нажатие на свободную область компактной капсулы разворачивает обратно полноэкранный David Live
+        composeTestRule.onNodeWithTag("david_live_minimized_capsule").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(DavidLiveDisplayMode.EXPANDED, displayMode)
+        assertEquals(1, expandCount)
+        assertTrue("Mic mute state must persist across expand", micMuted)
+
+        // 5. Снова сворачиваем и завершаем звонок красной кнопкой из мини-капсулы
+        composeTestRule.onNodeWithTag("david_live_chat_minimize_button").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(DavidLiveDisplayMode.MINIMIZED, displayMode)
+
+        composeTestRule.onNodeWithTag("david_live_capsule_end_button").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(1, endCallCount)
+        assertEquals(DavidLiveDisplayMode.HIDDEN, displayMode)
+    }
 }

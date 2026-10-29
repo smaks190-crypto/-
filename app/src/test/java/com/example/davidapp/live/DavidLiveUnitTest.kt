@@ -345,6 +345,76 @@ class DavidLiveUnitTest {
         val (capturedTurns, _) = controller.endSession()
         assertEquals(2, capturedTurns.size)
         assertEquals(DavidLiveConnectionState.ENDED, controller.connectionState.value)
+        assertEquals(DavidLiveDisplayMode.HIDDEN, controller.displayMode.value)
+    }
+
+    @Test
+    fun `minimizing and expanding David Live keeps single session alive and blocks parallel regular voice input`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+
+        // До запуска сессии режим HIDDEN, обычный голосовой ввод разрешён
+        assertEquals(DavidLiveDisplayMode.HIDDEN, controller.displayMode.value)
+        assertFalse(controller.isSessionActive())
+        assertTrue(controller.canStartRegularVoiceInput())
+
+        // 1. Запуск сессии переводит displayMode в EXPANDED и блокирует параллельный обычный голосовой ввод
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        controller.processServerMessageForTest("""{"setupComplete": {}}""")
+        assertEquals(1, controller.startSessionCount)
+        assertEquals(DavidLiveDisplayMode.EXPANDED, controller.displayMode.value)
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertTrue(controller.isSessionActive())
+        assertFalse("Regular VoiceInputManager must be blocked while David Live is EXPANDED", controller.canStartRegularVoiceInput())
+
+        controller.recordTranscriptTurn(DavidLiveSpeaker.USER, "Привет, Давид! Проверь баланс.")
+
+        // 2. Сворачивание (EXPANDED -> MINIMIZED) НЕ завершает сессию и НЕ очищает реплики
+        controller.minimizeSession()
+        assertEquals(DavidLiveDisplayMode.MINIMIZED, controller.displayMode.value)
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertTrue("Session must remain active when minimized", controller.isSessionActive())
+        assertFalse("Regular VoiceInputManager must remain blocked while David Live is MINIMIZED", controller.canStartRegularVoiceInput())
+        assertEquals(1, controller.transcriptTurns.size)
+
+        // 3. Mute микрофона работает как в полноэкранном, так и в свёрнутом режиме
+        assertFalse(controller.isMicMuted.value)
+        controller.toggleMicMute()
+        assertTrue(controller.isMicMuted.value)
+        assertEquals("Микрофон выключен", resolveDavidLiveStatusLabel(controller.connectionState.value, DavidLiveSpeaker.NONE, controller.isMicMuted.value))
+
+        // 4. Разворачивание (MINIMIZED -> EXPANDED) НЕ создаёт второе подключение
+        controller.expandSession()
+        assertEquals(DavidLiveDisplayMode.EXPANDED, controller.displayMode.value)
+        assertEquals(1, controller.startSessionCount)
+        assertTrue(controller.isMicMuted.value)
+
+        // Повторный вызов startSession при активной свёрнутой сессии также просто разворачивает её без второго подключения
+        controller.minimizeSession()
+        assertEquals(DavidLiveDisplayMode.MINIMIZED, controller.displayMode.value)
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        assertEquals(DavidLiveDisplayMode.EXPANDED, controller.displayMode.value)
+        assertEquals(1, controller.startSessionCount)
+
+        // Включаем микрофон обратно в полноэкранном режиме
+        controller.toggleMicMute()
+        assertFalse(controller.isMicMuted.value)
+
+        // 5. Завершение из мини-капсулы полностью останавливает звонок и возвращает обычный режим (HIDDEN)
+        controller.minimizeSession()
+        assertEquals(DavidLiveDisplayMode.MINIMIZED, controller.displayMode.value)
+        val (turns, _) = controller.endSession()
+        assertEquals(1, turns.size)
+        assertEquals(DavidLiveDisplayMode.HIDDEN, controller.displayMode.value)
+        assertEquals(DavidLiveConnectionState.ENDED, controller.connectionState.value)
+        assertFalse(controller.isSessionActive())
+        assertTrue("Regular voice input must be allowed again after David Live ends", controller.canStartRegularVoiceInput())
     }
 
     private fun createReadOnlyTransactionDao(items: List<TransactionEntity>) = object : TransactionDao {

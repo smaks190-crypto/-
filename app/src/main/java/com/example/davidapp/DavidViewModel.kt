@@ -1,6 +1,7 @@
 package com.example.davidapp
 
 import android.app.Application
+import android.media.AudioFocusRequest
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.api.RetrofitClient
@@ -8,7 +9,9 @@ import com.example.data.db.AppDatabase
 import com.example.data.db.NotificationEntity
 import com.example.data.db.TransactionEntity
 import com.example.data.repository.BudgetRepository
+import com.example.davidapp.live.DavidLiveAudioEngine
 import com.example.davidapp.live.DavidLiveConnectionState
+import com.example.davidapp.live.DavidLiveDisplayMode
 import com.example.davidapp.live.DavidLiveFinancialToolsProvider
 import com.example.davidapp.live.DavidLiveSessionController
 import com.example.davidapp.live.DavidLiveSpeaker
@@ -84,6 +87,17 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isLiveOverlayVisible = MutableStateFlow(false)
     val isLiveOverlayVisible: StateFlow<Boolean> = _isLiveOverlayVisible.asStateFlow()
+
+    private val _isLiveSessionActive = MutableStateFlow(false)
+    val isLiveSessionActive: StateFlow<Boolean> = _isLiveSessionActive.asStateFlow()
+
+    val liveDisplayMode: StateFlow<DavidLiveDisplayMode> = liveSessionController.displayMode
+
+    private val _chatDraftText = MutableStateFlow("")
+    val chatDraftText: StateFlow<String> = _chatDraftText.asStateFlow()
+
+    private var activeAssistantAudioFocusRequest: AudioFocusRequest? = null
+    private var lastDisplayModeTransitionMs: Long = 0L
 
     val liveConnectionState: StateFlow<DavidLiveConnectionState> = liveSessionController.connectionState
     val liveSubtitle: StateFlow<String> = liveSessionController.liveSubtitle
@@ -938,13 +952,50 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
 
     // --- Управление голосовым режимом David Live и пост-резюме разговора ---
 
+    fun updateChatDraftText(text: String) {
+        _chatDraftText.value = text
+    }
+
     fun startDavidLive(soundManager: SoundManager? = null) {
         soundManager?.playClick()
         liveFinancialToolsProvider.setBudgetId(currentBudgetId)
-        _isLiveOverlayVisible.value = true
+        if (liveSessionController.displayMode.value == DavidLiveDisplayMode.MINIMIZED &&
+            liveSessionController.isSessionActive()
+        ) {
+            expandDavidLive()
+            return
+        }
+        if (activeAssistantAudioFocusRequest == null) {
+            activeAssistantAudioFocusRequest =
+                DavidLiveAudioEngine.requestAssistantAudioFocus(getApplication())
+        }
         val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
         val userKey = currentApiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
         liveSessionController.startSession(userKey)
+        _isLiveOverlayVisible.value = true
+        _isLiveSessionActive.value = true
+    }
+
+    fun minimizeDavidLive(soundManager: SoundManager? = null) {
+        val now = System.currentTimeMillis()
+        if (now - lastDisplayModeTransitionMs < 180L) return
+        if (liveSessionController.displayMode.value != DavidLiveDisplayMode.EXPANDED) return
+        lastDisplayModeTransitionMs = now
+        soundManager?.playClick()
+        liveSessionController.minimizeSession()
+        _isLiveOverlayVisible.value = false
+        _isLiveSessionActive.value = true
+    }
+
+    fun expandDavidLive(soundManager: SoundManager? = null) {
+        val now = System.currentTimeMillis()
+        if (now - lastDisplayModeTransitionMs < 180L) return
+        if (liveSessionController.displayMode.value != DavidLiveDisplayMode.MINIMIZED) return
+        lastDisplayModeTransitionMs = now
+        soundManager?.playClick()
+        liveSessionController.expandSession()
+        _isLiveOverlayVisible.value = true
+        _isLiveSessionActive.value = true
     }
 
     fun toggleLiveMicMute() {
@@ -958,7 +1009,13 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
     fun endDavidLiveSession(soundManager: SoundManager? = null) {
         soundManager?.playClick()
         val (turns, facts) = liveSessionController.endSession()
+        DavidLiveAudioEngine.abandonAssistantAudioFocus(
+            getApplication(),
+            activeAssistantAudioFocusRequest
+        )
+        activeAssistantAudioFocusRequest = null
         _isLiveOverlayVisible.value = false
+        _isLiveSessionActive.value = false
         processCompletedLiveSession(turns, facts, soundManager)
     }
 
@@ -1072,6 +1129,11 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
     override fun onCleared() {
         super.onCleared()
         try {
+            DavidLiveAudioEngine.abandonAssistantAudioFocus(
+                getApplication(),
+                activeAssistantAudioFocusRequest
+            )
+            activeAssistantAudioFocusRequest = null
             liveSessionController.endSession()
         } catch (_: Exception) {
         }

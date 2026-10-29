@@ -53,6 +53,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.davidapp.live.DavidLiveDisplayMode
+import com.example.davidapp.live.DavidLiveMinimizedCapsule
 import com.example.davidapp.live.DavidLiveSheet
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
@@ -70,6 +72,8 @@ import com.example.ui.theme.Slate800
  *   «🔥 Разбор трат» плавно раскрывает инлайн-выбор периода (День, Неделя, Месяц, Год) без лишних окон и дублей.
  * - Обтекаемая нижняя капсула ввода сообщения с запуском голосового режима **David Live**
  *   по долгому удержанию (~550 мс) кнопки отправки.
+ * - Поддержка компактного режима **David Live** (`DavidLiveDisplayMode.MINIMIZED`) прямо над полем ввода чата
+ *   с сохранением черновика сообщения и единой активной голосовой сессии.
  */
 @Composable
 fun DavidChatScreen(
@@ -80,6 +84,7 @@ fun DavidChatScreen(
     soundManager: SoundManager? = null,
     onBack: (() -> Unit)? = null,
     isEmbeddedInCapsule: Boolean = false,
+    showStandaloneLiveOverlay: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -94,8 +99,8 @@ fun DavidChatScreen(
     val isTyping by viewModel.isDavidTyping.collectAsState()
     val hasApiKey by viewModel.hasApiKey.collectAsState()
 
-    // David Live states
-    val isLiveOverlayVisible by viewModel.isLiveOverlayVisible.collectAsState()
+    // David Live states (shared single session)
+    val liveDisplayMode by viewModel.liveDisplayMode.collectAsState()
     val liveConnectionState by viewModel.liveConnectionState.collectAsState()
     val liveSubtitle by viewModel.liveSubtitle.collectAsState()
     val liveRayMagnitudes by viewModel.liveRayMagnitudes.collectAsState()
@@ -104,7 +109,8 @@ fun DavidChatScreen(
     val isLiveMicMuted by viewModel.isLiveMicMuted.collectAsState()
     val liveErrorMessage by viewModel.liveErrorMessage.collectAsState()
 
-    var inputText by remember { mutableStateOf("") }
+    // Persisted draft text in DavidViewModel so minimizing/closing chat never loses typed text
+    val inputText by viewModel.chatDraftText.collectAsState()
     var showAchievementsDialog by remember { mutableStateOf(false) }
     var showApiKeyDialog by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
@@ -130,9 +136,9 @@ fun DavidChatScreen(
         }
     }
 
-    if (isLiveOverlayVisible) {
+    if (liveDisplayMode == DavidLiveDisplayMode.EXPANDED) {
         BackHandler {
-            viewModel.endDavidLiveSession(effectiveSoundManager)
+            viewModel.minimizeDavidLive(effectiveSoundManager)
         }
     } else if (onBack != null) {
         BackHandler {
@@ -197,6 +203,24 @@ fun DavidChatScreen(
                         .padding(top = 8.dp, bottom = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    // Компактная голосовая капсула David Live прямо в чате при свёрнутом разговоре
+                    AnimatedVisibility(
+                        visible = liveDisplayMode == DavidLiveDisplayMode.MINIMIZED,
+                        enter = fadeIn(),
+                        exit = fadeOut()
+                    ) {
+                        DavidLiveMinimizedCapsule(
+                            connectionState = liveConnectionState,
+                            rayMagnitudes = liveRayMagnitudes,
+                            overallEnergy = liveOverallEnergy,
+                            activeSpeaker = liveActiveSpeaker,
+                            isMicMuted = isLiveMicMuted,
+                            onExpand = { viewModel.expandDavidLive(effectiveSoundManager) },
+                            onToggleMicMute = { viewModel.toggleLiveMicMute() },
+                            onEndSession = { viewModel.endDavidLiveSession(effectiveSoundManager) }
+                        )
+                    }
+
                     // Единая морфинг-полоса быстрых действий и выбора периода
                     DavidSmartActionStrip(
                         stage = stage,
@@ -230,11 +254,11 @@ fun DavidChatScreen(
                     // Капсула ввода текста в стиле Obsidian Neo-Bank (долгое нажатие ~550 мс -> David Live)
                     DavidChatInputBar(
                         text = inputText,
-                        onTextChange = { inputText = it },
+                        onTextChange = { viewModel.updateChatDraftText(it) },
                         onSend = {
                             if (inputText.isNotBlank()) {
                                 val textToSend = inputText
-                                inputText = ""
+                                viewModel.updateChatDraftText("")
                                 isSelectingPeriod = false
                                 viewModel.sendTextMessage(textToSend, effectiveSoundManager)
                             }
@@ -288,12 +312,8 @@ fun DavidChatScreen(
             }
         }
 
-        // Полноэкранный режим живого голосового диалога David Live
-        AnimatedVisibility(
-            visible = isLiveOverlayVisible,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
+        // Полноэкранный режим живого голосового диалога David Live (при автономном рендере чата)
+        if (showStandaloneLiveOverlay && liveDisplayMode != DavidLiveDisplayMode.HIDDEN) {
             DavidLiveSheet(
                 connectionState = liveConnectionState,
                 liveSubtitle = liveSubtitle,
@@ -305,7 +325,11 @@ fun DavidChatScreen(
                 onToggleMicMute = { viewModel.toggleLiveMicMute() },
                 onRetryConnection = { viewModel.retryLiveConnection() },
                 onOpenApiKeySettings = { showApiKeyDialog = true },
-                onEndSession = { viewModel.endDavidLiveSession(effectiveSoundManager) }
+                onEndSession = { viewModel.endDavidLiveSession(effectiveSoundManager) },
+                displayMode = liveDisplayMode,
+                onMinimize = { viewModel.minimizeDavidLive(effectiveSoundManager) },
+                onExpand = { viewModel.expandDavidLive(effectiveSoundManager) },
+                renderEmbeddedMinimizedCapsule = false
             )
         }
     }
