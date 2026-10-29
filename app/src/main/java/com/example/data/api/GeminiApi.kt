@@ -6,10 +6,15 @@ import com.example.utils.NetworkCallStatus
 import com.squareup.moshi.Json
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.ResponseBody
 import okhttp3.logging.HttpLoggingInterceptor
+import java.net.ConnectException
+import java.net.InetAddress
+import java.net.NoRouteToHostException
+import java.net.UnknownHostException
 import retrofit2.HttpException
 import retrofit2.Response
 import retrofit2.Retrofit
@@ -180,12 +185,22 @@ object GeminiModelConfig {
             return parseErrorBodyJson(errorBody, code)
         }
         val msg = (throwable.localizedMessage ?: throwable.message ?: throwable.javaClass.simpleName).trim()
+        val isHostUnreachable = throwable is UnknownHostException ||
+            throwable is ConnectException ||
+            throwable is NoRouteToHostException
+
+        val userMsg = if (isHostUnreachable) {
+            "Нет подключения к серверу Gemini API (${throwable.javaClass.simpleName}). Проверьте интернет или VPN."
+        } else {
+            msg
+        }
+
         return GeminiHttpErrorDetails(
             httpCode = null,
             errorType = throwable.javaClass.simpleName,
             rawMessage = msg,
-            userMessage = msg,
-            isFatalForAllModels = false
+            userMessage = userMsg,
+            isFatalForAllModels = isHostUnreachable
         )
     }
 
@@ -371,17 +386,40 @@ object RetrofitClient {
             }
             response
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             val durationMs = (System.nanoTime() - startNs) / 1_000_000L
-            GlobalConsoleLogger.e(
+            GlobalConsoleLogger.w(
                 tag = "NETWORK",
                 message = "Сбой HTTP ${request.method} $actionSegment ($modelSegment) через ${durationMs}ms: ${e.javaClass.simpleName}",
+                details = e.localizedMessage ?: e.message ?: e.javaClass.simpleName,
                 throwable = e
             )
             throw e
         }
     }
 
+    /**
+     * Устойчивый DNS-резолвер: при кратковременном сбое DNS (например, при переключении Wi-Fi/LTE/VPN)
+     * выполняет одну быструю повторную попытку через 150 мс перед выбросом UnknownHostException.
+     */
+    private val resilientDns = object : Dns {
+        override fun lookup(hostname: String): List<InetAddress> {
+            return try {
+                Dns.SYSTEM.lookup(hostname)
+            } catch (firstError: UnknownHostException) {
+                try {
+                    Thread.sleep(150L)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw firstError
+                }
+                Dns.SYSTEM.lookup(hostname)
+            }
+        }
+    }
+
     private val okHttpClient = OkHttpClient.Builder()
+        .dns(resilientDns)
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)

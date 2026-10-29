@@ -364,7 +364,7 @@ class BudgetRepository(
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                e.printStackTrace()
+                if (GeminiModelConfig.extractHttpErrorDetails(e).isFatalForAllModels) break
             }
         }
 
@@ -1161,13 +1161,19 @@ class BudgetRepository(
             "gemini-2.5-flash"
         )
 
+        val cleanKey = GeminiModelConfig.sanitizeApiKey(apiKey)
+        if (cleanKey.isBlank()) {
+            emit("ERROR_NO_API_KEY")
+            return@flow
+        }
+
         val opId = GlobalConsoleLogger.newOperationId("AUDIT")
         var success = false
         for ((idx, model) in modelsToTry.withIndex()) {
             val attempt = idx + 1
             val startMs = System.currentTimeMillis()
             try {
-                val response = apiService.streamGenerateContent(model, apiKey, "sse", request)
+                val response = apiService.streamGenerateContent(model, cleanKey, "sse", request)
                 if (response.isSuccessful) {
                     val body = response.body()
                     if (body != null) {
@@ -1206,36 +1212,44 @@ class BudgetRepository(
                         }
                     }
                 } else {
-                    lastExceptionMessage = "HTTP ${response.code()}: ${response.message()}"
+                    val errorBodyStr = try { response.errorBody()?.string() } catch (_: Exception) { null }
+                    val err = GeminiModelConfig.parseErrorBodyJson(errorBodyStr, response.code())
+                    lastExceptionMessage = err.userMessage
+                    val isLastOrFatal = err.isFatalForAllModels || attempt >= modelsToTry.size
                     GlobalConsoleLogger.recordNetworkCall(
                         operationType = "Аудит бюджета (SSE Stream)",
                         modelName = model,
                         durationMs = System.currentTimeMillis() - startMs,
-                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                        status = if (isLastOrFatal) NetworkCallStatus.ERROR else NetworkCallStatus.FALLBACK,
                         httpCode = response.code(),
-                        errorType = "HTTP_${response.code()}",
-                        errorMessage = response.message(),
+                        errorType = err.errorType,
+                        errorMessage = err.userMessage,
                         attemptNumber = attempt,
                         totalModelsInChain = modelsToTry.size,
                         details = "period=$periodName",
                         operationId = opId
                     )
+                    if (err.isFatalForAllModels) break
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                lastExceptionMessage = e.message ?: e.toString()
+                val err = GeminiModelConfig.extractHttpErrorDetails(e)
+                lastExceptionMessage = err.userMessage
+                val isLastOrFatal = err.isFatalForAllModels || attempt >= modelsToTry.size
                 GlobalConsoleLogger.recordNetworkCall(
                     operationType = "Аудит бюджета (SSE Stream)",
                     modelName = model,
                     durationMs = System.currentTimeMillis() - startMs,
-                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                    errorType = e.javaClass.simpleName,
-                    errorMessage = e.localizedMessage ?: e.message,
+                    status = if (isLastOrFatal) NetworkCallStatus.ERROR else NetworkCallStatus.FALLBACK,
+                    httpCode = err.httpCode,
+                    errorType = err.errorType,
+                    errorMessage = err.userMessage,
                     attemptNumber = attempt,
                     totalModelsInChain = modelsToTry.size,
                     details = "period=$periodName",
                     operationId = opId
                 )
+                if (err.isFatalForAllModels) break
             }
         }
 
@@ -1333,29 +1347,77 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
+        val cleanKey = GeminiModelConfig.sanitizeApiKey(apiKey)
+        if (cleanKey.isBlank()) {
+            return Result.failure(Exception("ERROR_NO_API_KEY"))
+        }
+
         var lastExceptionMessage = ""
 
         val modelsToTry = listOf(
             "gemini-3.8-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-2.5-flash"
+            "gemini-3.5-flash-lite"
         )
 
-        for (model in modelsToTry) {
+        val opId = GlobalConsoleLogger.newOperationId("AUDIT")
+        for ((idx, model) in modelsToTry.withIndex()) {
+            val attempt = idx + 1
+            val startMs = System.currentTimeMillis()
             try {
-                val response = apiService.generateContent(model, apiKey, request)
+                val response = apiService.generateContent(model, cleanKey, request)
                 if (response.error != null) {
                     lastExceptionMessage = "HTTP ${response.error.code ?: 400}: ${response.error.message ?: "Ошибка API"}"
+                    GlobalConsoleLogger.recordNetworkCall(
+                        operationType = "Аудит бюджета (ИИ)",
+                        modelName = model,
+                        durationMs = System.currentTimeMillis() - startMs,
+                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                        httpCode = response.error.code,
+                        errorType = response.error.status ?: "GeminiError",
+                        errorMessage = response.error.message,
+                        attemptNumber = attempt,
+                        totalModelsInChain = modelsToTry.size,
+                        details = "period=$periodName",
+                        operationId = opId
+                    )
                 } else {
                     val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                     if (!responseText.isNullOrEmpty()) {
+                        GlobalConsoleLogger.recordNetworkCall(
+                            operationType = "Аудит бюджета (ИИ)",
+                            modelName = model,
+                            durationMs = System.currentTimeMillis() - startMs,
+                            status = NetworkCallStatus.SUCCESS,
+                            httpCode = 200,
+                            attemptNumber = attempt,
+                            totalModelsInChain = modelsToTry.size,
+                            details = "period=$periodName",
+                            operationId = opId
+                        )
                         return Result.success(responseText)
                     }
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                lastExceptionMessage = e.message ?: e.toString()
+                val err = GeminiModelConfig.extractHttpErrorDetails(e)
+                lastExceptionMessage = err.userMessage
+                val isLastOrFatal = err.isFatalForAllModels || attempt >= modelsToTry.size
+                GlobalConsoleLogger.recordNetworkCall(
+                    operationType = "Аудит бюджета (ИИ)",
+                    modelName = model,
+                    durationMs = System.currentTimeMillis() - startMs,
+                    status = if (isLastOrFatal) NetworkCallStatus.ERROR else NetworkCallStatus.FALLBACK,
+                    httpCode = err.httpCode,
+                    errorType = err.errorType,
+                    errorMessage = err.userMessage,
+                    attemptNumber = attempt,
+                    totalModelsInChain = modelsToTry.size,
+                    details = "period=$periodName",
+                    operationId = opId
+                )
+                if (err.isFatalForAllModels) break
             }
         }
 
@@ -1495,7 +1557,7 @@ class BudgetRepository(
                 }
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                // Try next model or fallback
+                if (GeminiModelConfig.extractHttpErrorDetails(e).isFatalForAllModels) break
             }
         }
 
@@ -1628,9 +1690,6 @@ class BudgetRepository(
         var lastError: String? = null
 
         val modelsToTry = listOf(
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
             "gemini-3.5-flash",
             "gemini-3.8-flash",
             "gemini-3.5-flash-lite",
@@ -1780,10 +1839,9 @@ class BudgetRepository(
 
         var lastError: String? = null
         val modelsToTry = listOf(
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
             "gemini-3.5-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3.8-flash",
             "gemini-3.1-flash-lite"
         )
 
