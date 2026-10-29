@@ -1626,7 +1626,9 @@ class BudgetRepository(
             }
             return categories.firstOrNull { it.contains("Прочее", ignoreCase = true) } ?: categories.firstOrNull() ?: "Прочее"
         }
+    }
 
+    companion object {
         val VOICE_TEXT_MODELS: List<String> = listOf(
             "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
