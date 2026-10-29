@@ -95,6 +95,8 @@ class VoiceInputManager(context: Context) {
     private val pendingLiveTurnTranscript = StringBuilder()
     private val preSetupPcmQueue = ArrayDeque<String>(64)
     private var liveTranscriptDebounceJob: Job? = null
+    private val hasReceivedLiveSttInCurrentUtterance = AtomicBoolean(false)
+    private val utteranceFlushedByLiveStt = AtomicBoolean(false)
     @Volatile
     private var pendingFinalLiveText: String = ""
 
@@ -109,6 +111,11 @@ class VoiceInputManager(context: Context) {
         private const val MAX_CHUNK_FRAMES = 375 // ~12 секунд максимум на один непрерывный чанк
         private const val SPEECH_RMS_THRESHOLD = 360.0 // Порог чувствительности голоса (16-bit PCM)
         private const val LIVE_TRANSCRIPT_DEBOUNCE_MS = 950L
+
+        private val SPOKEN_AMOUNT_REGEX = Regex(
+            """(\d+|ст[оа]|двест[иа]|трист[ао]|четырест[ао]|пятьсот|шестьсот|семьсот|восемьсот|девятьсот|тысяч|тыщ|миллион|косар|рубл|полтинник|сотк|десятк|двадцат|тридцат|сорок|пятьдесят|шестьдесят|семьдесят|восемьдесят|девяност)""",
+            RegexOption.IGNORE_CASE
+        )
 
         private const val GEMINI_LIVE_WS_ENDPOINT =
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
@@ -164,6 +171,10 @@ class VoiceInputManager(context: Context) {
                 .replace(Regex("\\*\\*[^*]+\\*\\*"), "")
                 .replace(Regex("\\s+"), " ")
                 .trim()
+        }
+
+        internal fun containsSpokenAmount(text: String): Boolean {
+            return SPOKEN_AMOUNT_REGEX.containsMatchIn(text)
         }
     }
 
@@ -235,6 +246,8 @@ class VoiceInputManager(context: Context) {
         _partialText.value = LISTENING_PLACEHOLDER
         _errorState.value = null
         pendingFinalLiveText = ""
+        hasReceivedLiveSttInCurrentUtterance.set(false)
+        utteranceFlushedByLiveStt.set(false)
         liveTranscriptDebounceJob?.cancel()
         liveTranscriptDebounceJob = null
         synchronized(pendingLiveTurnTranscript) {
@@ -322,6 +335,14 @@ class VoiceInputManager(context: Context) {
                         val isSpeechFrame = rms >= SPEECH_RMS_THRESHOLD
 
                         synchronized(chunkLock) {
+                            if (utteranceFlushedByLiveStt.getAndSet(false)) {
+                                activeSpeechBuffer.reset()
+                                activeSpeechFrames = 0
+                                totalFramesInChunk = 0
+                                silenceFramesCount = 0
+                                isInSpeech = false
+                            }
+
                             if (isSpeechFrame) {
                                 if (!isInSpeech) {
                                     isInSpeech = true
@@ -350,21 +371,28 @@ class VoiceInputManager(context: Context) {
                                             sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
                                         }
                                         if (liveSetupCompleted.get() && liveTextSoFar.isNotBlank()) {
-                                            if (activeSpeechFrames >= MIN_SPEECH_FRAMES) {
-                                                liveTranscriptDebounceJob?.cancel()
-                                                synchronized(pendingLiveTurnTranscript) {
-                                                    pendingLiveTurnTranscript.clear()
+                                            if (containsSpokenAmount(liveTextSoFar) || totalFramesInChunk >= MAX_CHUNK_FRAMES) {
+                                                if (activeSpeechFrames >= MIN_SPEECH_FRAMES) {
+                                                    liveTranscriptDebounceJob?.cancel()
+                                                    synchronized(pendingLiveTurnTranscript) {
+                                                        pendingLiveTurnTranscript.clear()
+                                                    }
+                                                    hasReceivedLiveSttInCurrentUtterance.set(false)
+                                                    GlobalConsoleLogger.i("VOICE_LIVE", "Фраза распознана в Live STT по паузе: «$liveTextSoFar»")
+                                                    onChunkRecognized?.invoke(liveTextSoFar)
                                                 }
-                                                GlobalConsoleLogger.i("VOICE_LIVE", "Фраза распознана в Live STT по паузе: «$liveTextSoFar»")
-                                                onChunkRecognized?.invoke(liveTextSoFar)
+                                                activeSpeechBuffer.reset()
+                                                activeSpeechFrames = 0
+                                                totalFramesInChunk = 0
+                                                silenceFramesCount = 0
+                                                isInSpeech = false
                                             }
-                                            activeSpeechBuffer.reset()
-                                            activeSpeechFrames = 0
-                                            totalFramesInChunk = 0
-                                            silenceFramesCount = 0
-                                            isInSpeech = false
-                                        } else if (!liveSetupCompleted.get() || silenceFramesCount >= SILENCE_FRAMES_WAV_FALLBACK || totalFramesInChunk >= MAX_CHUNK_FRAMES) {
-                                            // Резервный fallback: если WebSocket еще не подключился или за 1.34 сек паузы не прислал текст
+                                        } else if (
+                                            !liveSetupCompleted.get() ||
+                                            (!hasReceivedLiveSttInCurrentUtterance.get() && silenceFramesCount >= SILENCE_FRAMES_WAV_FALLBACK) ||
+                                            (!hasReceivedLiveSttInCurrentUtterance.get() && totalFramesInChunk >= MAX_CHUNK_FRAMES)
+                                        ) {
+                                            // Резервный fallback: только если WebSocket еще не подключился или за 1.34 сек паузы совсем не прислал текст
                                             if (activeSpeechFrames >= MIN_SPEECH_FRAMES) {
                                                 val pcmData = activeSpeechBuffer.toByteArray()
                                                 val wavBytes = pcmToWavBytes(pcmData, SAMPLE_RATE)
@@ -518,6 +546,8 @@ class VoiceInputManager(context: Context) {
         if (completedTurnText.isNotBlank()) {
             _recognizedText.value = completedTurnText
             _partialText.value = completedTurnText
+            hasReceivedLiveSttInCurrentUtterance.set(false)
+            utteranceFlushedByLiveStt.set(true)
             synchronized(chunkLock) {
                 activeSpeechBuffer.reset()
                 activeSpeechFrames = 0
@@ -550,6 +580,7 @@ class VoiceInputManager(context: Context) {
             ?.takeIf { it.isNotBlank() }
 
         if (inputTranscription != null) {
+            hasReceivedLiveSttInCurrentUtterance.set(true)
             val cleaned = synchronized(pendingLiveTurnTranscript) {
                 pendingLiveTurnTranscript.append(inputTranscription)
                 sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
@@ -559,7 +590,7 @@ class VoiceInputManager(context: Context) {
                 _recognizedText.value = cleaned
             }
             liveTranscriptDebounceJob?.cancel()
-            if (ws != null) {
+            if (ws != null && containsSpokenAmount(cleaned)) {
                 liveTranscriptDebounceJob = scope.launch {
                     kotlinx.coroutines.delay(LIVE_TRANSCRIPT_DEBOUNCE_MS)
                     flushCompletedLiveTurnTranscript()

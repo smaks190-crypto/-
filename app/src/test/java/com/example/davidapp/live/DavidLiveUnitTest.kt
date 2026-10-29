@@ -196,6 +196,10 @@ class DavidLiveUnitTest {
         voiceManager.stopListeningAndFlushRemaining()
         assertEquals("Вкусвилл 500 рублей", voiceManager.consumePendingFinalText())
         assertEquals("", voiceManager.consumePendingFinalText())
+
+        assertFalse(VoiceInputManager.containsSpokenAmount("Вкусно и точка"))
+        assertTrue(VoiceInputManager.containsSpokenAmount("Вкусно и точка 1000 рублей"))
+        assertTrue(VoiceInputManager.containsSpokenAmount("Такси пятьсот рублей"))
     }
 
     @Test

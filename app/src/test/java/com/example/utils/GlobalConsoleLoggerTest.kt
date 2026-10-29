@@ -1040,4 +1040,69 @@ class GlobalConsoleLoggerTest {
             dnsAttemptedModels.size
         )
     }
+
+    @Test
+    fun `voice text parsing returns emptyList on HTTP 200 empty JSON array without throwing stale HTTP 503 from earlier model`() = runTest {
+        val sampleRequest = GeminiRequest(
+            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Вкусно и точка"))))
+        )
+
+        val error503Json = """
+            {
+              "error": {
+                "code": 503,
+                "message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+                "status": "UNAVAILABLE"
+              }
+            }
+        """.trimIndent()
+
+        // Сценарий из отчёта (VOICE-TXT-0002): первая модель возвращает HTTP 503 (UNAVAILABLE),
+        // а резервная модель gemini-3.5-flash-lite возвращает HTTP 200 с валидным пустым JSON-массивом "[]".
+        // Парсер обязан вернуть emptyList() со второй попытки, НЕ перебирая оставшиеся модели и НЕ выбрасывая IllegalStateException(HTTP 503).
+        val attemptedModels = mutableListOf<String>()
+        val fallbackEmptyArrayApi = object : GeminiApiService {
+            override suspend fun generateContent(
+                model: String,
+                apiKey: String,
+                request: GeminiRequest
+            ): GeminiResponse {
+                attemptedModels.add(model)
+                if (model == "gemini-3.5-flash") {
+                    val body = okhttp3.ResponseBody.create(null, error503Json)
+                    throw retrofit2.HttpException(retrofit2.Response.error<GeminiResponse>(503, body))
+                }
+                return GeminiResponse(
+                    candidates = listOf(
+                        GeminiCandidate(
+                            content = GeminiContent(
+                                parts = listOf(GeminiPart(text = "[]"))
+                            )
+                        )
+                    )
+                )
+            }
+
+            override suspend fun streamGenerateContent(
+                model: String,
+                apiKey: String,
+                alt: String,
+                request: GeminiRequest
+            ): Response<ResponseBody> = throw UnsupportedOperationException()
+        }
+
+        val parsed = com.example.data.repository.BudgetRepository.executeVoiceTextParsingWithFallback(
+            apiService = fallbackEmptyArrayApi,
+            cleanKey = "AIzaSyValidKey1234567890",
+            request = sampleRequest,
+            todayStr = "2026-10-29",
+            opId = "VOICE-TXT-TEST"
+        )
+
+        assertTrue(parsed.isEmpty())
+        assertEquals(
+            listOf("gemini-3.5-flash", "gemini-3.5-flash-lite"),
+            attemptedModels
+        )
+    }
 }

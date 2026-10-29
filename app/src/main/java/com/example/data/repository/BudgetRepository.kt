@@ -1626,6 +1626,140 @@ class BudgetRepository(
             }
             return categories.firstOrNull { it.contains("Прочее", ignoreCase = true) } ?: categories.firstOrNull() ?: "Прочее"
         }
+
+        val VOICE_TEXT_MODELS: List<String> = listOf(
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.8-flash",
+            "gemini-3.1-flash-lite"
+        )
+
+        internal fun extractJsonArray(rawText: String): String {
+            val clean = rawText.replace("```json", "").replace("```", "").trim()
+            val startIdx = clean.indexOf('[')
+            val endIdx = clean.lastIndexOf(']')
+            return if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
+                clean.substring(startIdx, endIdx + 1)
+            } else ""
+        }
+
+        internal fun sanitizeJsonStr(s: String?): String {
+            if (s == null) return ""
+            val trimmed = s.trim()
+            if (trimmed.equals("null", ignoreCase = true) || trimmed.equals("undefined", ignoreCase = true)) return ""
+            return trimmed
+        }
+
+        internal fun parseJsonOperations(jsonString: String, defaultDate: String): List<ParsedVoiceOperation> {
+            val results = mutableListOf<ParsedVoiceOperation>()
+            try {
+                val array = JSONArray(jsonString)
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val rawTitle = sanitizeJsonStr(obj.optString("title", ""))
+                    val rawType = if (obj.optString("type", "expense").lowercase().contains("inc")) "income" else "expense"
+                    val amount = obj.optDouble("amount", 0.0)
+                    val rawCategory = sanitizeJsonStr(obj.optString("category", ""))
+                    val rawSubcategory = sanitizeJsonStr(obj.optString("subcategory", ""))
+                    val rawDate = sanitizeJsonStr(obj.optString("date", ""))
+
+                    val finalTitle = if (rawTitle.isNotBlank()) rawTitle else if (rawCategory.isNotBlank()) rawCategory else if (rawType == "income") "Доход" else "Расход"
+                    val finalCategory = if (rawCategory.isNotBlank()) rawCategory else "Прочее"
+                    val finalDate = if (rawDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) rawDate else defaultDate
+
+                    if (amount > 0.0) {
+                        results.add(
+                            ParsedVoiceOperation(
+                                title = finalTitle,
+                                type = rawType,
+                                amount = amount,
+                                category = finalCategory,
+                                subcategory = rawSubcategory,
+                                date = finalDate
+                            )
+                        )
+                    }
+                }
+            } catch (_: Exception) {}
+            return results
+        }
+
+        internal suspend fun executeVoiceTextParsingWithFallback(
+            apiService: GeminiApiService,
+            cleanKey: String,
+            request: GeminiRequest,
+            todayStr: String,
+            opId: String,
+            modelsToTry: List<String> = VOICE_TEXT_MODELS
+        ): List<ParsedVoiceOperation> {
+            var lastError: String? = null
+
+            for ((idx, model) in modelsToTry.withIndex()) {
+                val attempt = idx + 1
+                val startMs = System.currentTimeMillis()
+                try {
+                    val response = apiService.generateContent(model, cleanKey, request)
+                    if (response.error == null) {
+                        val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                        if (!responseText.isNullOrEmpty()) {
+                            val jsonString = extractJsonArray(responseText)
+                            if (jsonString.isNotBlank()) {
+                                val parsed = parseJsonOperations(jsonString, todayStr)
+                                GlobalConsoleLogger.recordNetworkCall(
+                                    operationType = "Разбор голоса (Текст)",
+                                    modelName = model,
+                                    durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
+                                    status = NetworkCallStatus.SUCCESS,
+                                    httpCode = 200,
+                                    attemptNumber = attempt,
+                                    totalModelsInChain = modelsToTry.size,
+                                    details = "распознано=${parsed.size} шт.",
+                                    operationId = opId
+                                )
+                                return parsed
+                            }
+                        }
+                    } else {
+                        lastError = response.error.message
+                        GlobalConsoleLogger.recordNetworkCall(
+                            operationType = "Разбор голоса (Текст)",
+                            modelName = model,
+                            durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
+                            status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                            httpCode = response.error.code,
+                            errorType = response.error.status ?: "GeminiError",
+                            errorMessage = response.error.message,
+                            attemptNumber = attempt,
+                            totalModelsInChain = modelsToTry.size,
+                            operationId = opId
+                        )
+                    }
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    val err = GeminiModelConfig.extractHttpErrorDetails(e)
+                    lastError = err.userMessage
+                    val isLastOrFatal = err.isFatalForAllModels || attempt >= modelsToTry.size
+                    GlobalConsoleLogger.recordNetworkCall(
+                        operationType = "Разбор голоса (Текст)",
+                        modelName = model,
+                        durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
+                        status = if (isLastOrFatal) NetworkCallStatus.ERROR else NetworkCallStatus.FALLBACK,
+                        httpCode = err.httpCode,
+                        errorType = err.errorType,
+                        errorMessage = err.userMessage,
+                        attemptNumber = attempt,
+                        totalModelsInChain = modelsToTry.size,
+                        operationId = opId
+                    )
+                    if (err.isFatalForAllModels) {
+                        break
+                    }
+                }
+            }
+
+            GlobalConsoleLogger.e("GEMINI", "Все Gemini модели завершились ошибкой: $lastError")
+            throw IllegalStateException(lastError ?: "Не удалось разбрать операции из текста. Попробуйте сформулировать точнее.")
+        }
     }
 
     suspend fun parseVoiceOperations(
@@ -1647,6 +1781,7 @@ class BudgetRepository(
         val dayOfWeekStr = java.text.SimpleDateFormat("EEEE", java.util.Locale("ru")).format(java.util.Date())
 
         val systemPrompt = "Вы — экспертный финансовый ассистент. Анализируйте сказанный пользователем текст и извлекайте из него ВСЕ финансовые операции (доходы и расходы).\n" +
+                "Игнорируйте паузы, слова-паразиты ('эээ', 'ну', 'короче', 'так') и фоновый шум. Если во фразе нет финансовой операции или не названа сумма, верните пустой массив [].\n" +
                 "Разделите сказанное на отдельные операции и для каждой выделите название, тип (income или expense), сумму (число), категорию, подкатегорию (если есть) и дату (если упомянута).\n" +
                 "Текущая дата сегодня: $todayStr (день недели: $dayOfWeekStr).\n" +
                 "ПРАВИЛА ДЛЯ ДАТЫ ('date'):\n" +
@@ -1664,7 +1799,7 @@ class BudgetRepository(
             Категории расходов: ${expenseCategories.joinToString(", ")}
             Категории доходов: ${incomeCategories.joinToString(", ")}
 
-            Разбери фразу и верни JSON массив объектов формата:
+            Разбери фразу и верни JSON массив объектов формата (или [] если операций нет):
             [
               {
                 "title": "Такси",
@@ -1687,85 +1822,17 @@ class BudgetRepository(
             systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
         )
 
-        var lastError: String? = null
-
-        val modelsToTry = listOf(
-            "gemini-3.5-flash",
-            "gemini-3.8-flash",
-            "gemini-3.5-flash-lite",
-            "gemini-3.1-flash-lite"
-        )
-
         val opId = GlobalConsoleLogger.newOperationId("VOICE-TXT")
         GlobalConsoleLogger.i("GEMINI", "Запрос к Gemini API для разбора текста (${trimmedText.length} симв.)", operationId = opId)
 
-        for ((idx, model) in modelsToTry.withIndex()) {
-            val attempt = idx + 1
-            val startMs = System.currentTimeMillis()
-            try {
-                val response = apiService.generateContent(model, cleanKey, request)
-                if (response.error == null) {
-                    val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                    if (!responseText.isNullOrEmpty()) {
-                        val jsonString = extractJsonArray(responseText)
-                        if (jsonString.isNotBlank()) {
-                            val parsed = parseJsonOperations(jsonString, todayStr)
-                            if (parsed.isNotEmpty()) {
-                                GlobalConsoleLogger.recordNetworkCall(
-                                    operationType = "Разбор голоса (Текст)",
-                                    modelName = model,
-                                    durationMs = System.currentTimeMillis() - startMs,
-                                    status = NetworkCallStatus.SUCCESS,
-                                    httpCode = 200,
-                                    attemptNumber = attempt,
-                                    totalModelsInChain = modelsToTry.size,
-                                    details = "распознано=${parsed.size} шт.",
-                                    operationId = opId
-                                )
-                                return parsed
-                            }
-                        }
-                    }
-                } else {
-                    lastError = response.error.message
-                    GlobalConsoleLogger.recordNetworkCall(
-                        operationType = "Разбор голоса (Текст)",
-                        modelName = model,
-                        durationMs = System.currentTimeMillis() - startMs,
-                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                        httpCode = response.error.code,
-                        errorType = response.error.status ?: "GeminiError",
-                        errorMessage = response.error.message,
-                        attemptNumber = attempt,
-                        totalModelsInChain = modelsToTry.size,
-                        operationId = opId
-                    )
-                }
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                val err = GeminiModelConfig.extractHttpErrorDetails(e)
-                lastError = err.userMessage
-                val isLastOrFatal = err.isFatalForAllModels || attempt >= modelsToTry.size
-                GlobalConsoleLogger.recordNetworkCall(
-                    operationType = "Разбор голоса (Текст)",
-                    modelName = model,
-                    durationMs = System.currentTimeMillis() - startMs,
-                    status = if (isLastOrFatal) NetworkCallStatus.ERROR else NetworkCallStatus.FALLBACK,
-                    httpCode = err.httpCode,
-                    errorType = err.errorType,
-                    errorMessage = err.userMessage,
-                    attemptNumber = attempt,
-                    totalModelsInChain = modelsToTry.size,
-                    operationId = opId
-                )
-                if (err.isFatalForAllModels) {
-                    break
-                }
-            }
-        }
-
-        GlobalConsoleLogger.e("GEMINI", "Все Gemini модели завершились ошибкой: $lastError")
-        throw IllegalStateException(lastError ?: "Не удалось разбрать операции из текста. Попробуйте сформулировать точнее.")
+        return executeVoiceTextParsingWithFallback(
+            apiService = apiService,
+            cleanKey = cleanKey,
+            request = request,
+            todayStr = todayStr,
+            opId = opId,
+            modelsToTry = VOICE_TEXT_MODELS
+        )
     }
 
     suspend fun parseVoiceAudioOperations(
@@ -1917,56 +1984,6 @@ class BudgetRepository(
             GlobalConsoleLogger.e("GEMINI", "Ошибка Gemini Live аудио: $lastError")
         }
         return@withContext emptyList()
-    }
-
-    private fun extractJsonArray(rawText: String): String {
-        val clean = rawText.replace("```json", "").replace("```", "").trim()
-        val startIdx = clean.indexOf('[')
-        val endIdx = clean.lastIndexOf(']')
-        return if (startIdx != -1 && endIdx != -1 && endIdx > startIdx) {
-            clean.substring(startIdx, endIdx + 1)
-        } else ""
-    }
-
-    private fun sanitizeJsonStr(s: String?): String {
-        if (s == null) return ""
-        val trimmed = s.trim()
-        if (trimmed.equals("null", ignoreCase = true) || trimmed.equals("undefined", ignoreCase = true)) return ""
-        return trimmed
-    }
-
-    private fun parseJsonOperations(jsonString: String, defaultDate: String): List<ParsedVoiceOperation> {
-        val results = mutableListOf<ParsedVoiceOperation>()
-        try {
-            val array = JSONArray(jsonString)
-            for (i in 0 until array.length()) {
-                val obj = array.getJSONObject(i)
-                val rawTitle = sanitizeJsonStr(obj.optString("title", ""))
-                val rawType = if (obj.optString("type", "expense").lowercase().contains("inc")) "income" else "expense"
-                val amount = obj.optDouble("amount", 0.0)
-                val rawCategory = sanitizeJsonStr(obj.optString("category", ""))
-                val rawSubcategory = sanitizeJsonStr(obj.optString("subcategory", ""))
-                val rawDate = sanitizeJsonStr(obj.optString("date", ""))
-
-                val finalTitle = if (rawTitle.isNotBlank()) rawTitle else if (rawCategory.isNotBlank()) rawCategory else if (rawType == "income") "Доход" else "Расход"
-                val finalCategory = if (rawCategory.isNotBlank()) rawCategory else "Прочее"
-                val finalDate = if (rawDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) rawDate else defaultDate
-
-                if (amount > 0.0 || finalTitle.isNotBlank()) {
-                    results.add(
-                        ParsedVoiceOperation(
-                            title = finalTitle,
-                            type = rawType,
-                            amount = amount,
-                            category = finalCategory,
-                            subcategory = rawSubcategory,
-                            date = finalDate
-                        )
-                    )
-                }
-            }
-        } catch (_: Exception) {}
-        return results
     }
 }
 
