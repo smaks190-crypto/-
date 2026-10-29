@@ -103,6 +103,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -858,7 +859,43 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 }
             }
 
-            // --- UNIFIED MORPHING BOTTOM BAR (ALL MODALS + NAV TABS + EMBEDDED '+' + VOICE MORPH) ---
+            // --- SHARED DAVID LIVE SESSION & UNIFIED MORPHING BOTTOM BAR ---
+            val davidViewModel: com.example.davidapp.DavidViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+            val liveDisplayMode by davidViewModel.liveDisplayMode.collectAsState()
+            val liveConnectionState by davidViewModel.liveConnectionState.collectAsState()
+            val liveSubtitle by davidViewModel.liveSubtitle.collectAsState()
+            val liveRayMagnitudes by davidViewModel.liveRayMagnitudes.collectAsState()
+            val liveOverallEnergy by davidViewModel.liveOverallEnergy.collectAsState()
+            val liveActiveSpeaker by davidViewModel.liveActiveSpeaker.collectAsState()
+            val isLiveMicMuted by davidViewModel.isLiveMicMuted.collectAsState()
+            val liveErrorMessage by davidViewModel.liveErrorMessage.collectAsState()
+
+            val currentBudgetProfile = budgetProfiles.find { it.id == selectedBudgetId }
+            LaunchedEffect(selectedBudgetId, currentBudgetProfile?.name, apiKey) {
+                davidViewModel.bindProfile(
+                    budgetId = currentBudgetProfile?.id ?: "default",
+                    profileName = currentBudgetProfile?.name ?: "Максим",
+                    apiKey = apiKey
+                )
+            }
+
+            // Enforce strict separation between David Live and regular transaction voice input
+            LaunchedEffect(liveDisplayMode) {
+                viewModel.setDavidLiveSessionActive(
+                    liveDisplayMode != com.example.davidapp.live.DavidLiveDisplayMode.HIDDEN
+                )
+            }
+
+            // If the user dismisses the DavidChat modal card (e.g. via scrim tap) while David Live is expanded,
+            // smoothly transition David Live into the minimized bottom capsule inside MorphingBottomBar.
+            LaunchedEffect(activeModal) {
+                if (activeModal != com.example.ui.viewmodel.BottomCapsuleModal.DavidChat &&
+                    liveDisplayMode == com.example.davidapp.live.DavidLiveDisplayMode.EXPANDED
+                ) {
+                    davidViewModel.minimizeDavidLive()
+                }
+            }
+
             val parsedVoiceOperations by viewModel.parsedVoiceOperations.collectAsState()
             var isVoiceOverlayActive by remember { mutableStateOf(false) }
             val isVoicePipelineActive = isVoiceActive || isAnalyzingVoice || !parsedVoiceOperations.isNullOrEmpty() || isVoiceOverlayActive || activeModal != com.example.ui.viewmodel.BottomCapsuleModal.None
@@ -897,6 +934,31 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         showNavigationTabs = selectedBudgetId != null,
                         onOverlayActiveChanged = { active ->
                             isVoiceOverlayActive = active
+                        },
+                        isDavidLiveActive = liveDisplayMode != com.example.davidapp.live.DavidLiveDisplayMode.HIDDEN,
+                        davidLiveMinimizedCapsule = if (liveDisplayMode != com.example.davidapp.live.DavidLiveDisplayMode.HIDDEN) {
+                            {
+                                com.example.davidapp.live.DavidLiveMinimizedCapsule(
+                                    connectionState = liveConnectionState,
+                                    rayMagnitudes = liveRayMagnitudes,
+                                    overallEnergy = liveOverallEnergy,
+                                    activeSpeaker = liveActiveSpeaker,
+                                    isMicMuted = isLiveMicMuted,
+                                    onExpand = {
+                                        davidViewModel.expandDavidLive()
+                                        viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.DavidChat)
+                                    },
+                                    onToggleMicMute = { davidViewModel.toggleLiveMicMute() },
+                                    onEndSession = { davidViewModel.endDavidLiveSession() },
+                                    embeddedInBottomBar = true
+                                )
+                            }
+                        } else {
+                            null
+                        },
+                        onDavidLiveBlocksVoiceInput = {
+                            davidViewModel.expandDavidLive()
+                            viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.DavidChat)
                         },
                         modalContent = { modal ->
                             when (modal) {
@@ -1086,7 +1148,15 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                         budgetId = currentProfile?.id ?: "default",
                                         profileName = currentProfile?.name ?: "Максим",
                                         apiKey = apiKey,
+                                        viewModel = davidViewModel,
                                         isEmbeddedInCapsule = true,
+                                        showStandaloneLiveOverlay = true,
+                                        onMinimizeToBottomBar = {
+                                            davidViewModel.minimizeDavidLive()
+                                            viewModel.closeModal()
+                                            appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
+                                            viewModel.markNotificationsAsRead()
+                                        },
                                         onBack = {
                                             viewModel.closeModal()
                                             appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()

@@ -162,11 +162,12 @@ dependencies {
   // implementation("com.alphacephei:vosk-android:0.3.47")
 }
 
-// Автоматическая верификация Unit-тестов Developer Console и компиляции Release Source Set при сборке Debug APK
+// Автоматическая верификация Unit-тестов Developer Console, David Live и компиляции Release/AndroidTest Source Sets при сборке Debug APK
 tasks.withType<Test>().configureEach {
   filter {
     includeTestsMatching("com.example.utils.GlobalConsoleLoggerTest")
     includeTestsMatching("com.example.ExampleUnitTest")
+    includeTestsMatching("com.example.davidapp.live.DavidLiveUnitTest")
   }
 }
 
@@ -189,6 +190,7 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
 }
 
 tasks.matching { it.name == "assembleDebug" }.configureEach {
-  dependsOn("compileReleaseKotlin", "testDebugUnitTest")
+  dependsOn("compileReleaseKotlin", "compileDebugAndroidTestKotlin", "testDebugUnitTest")
 }
+
 

@@ -169,6 +169,9 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     private val _isVoiceActive = MutableStateFlow(false)
     val isVoiceActive: StateFlow<Boolean> = _isVoiceActive.asStateFlow()
 
+    private val _isDavidLiveSessionActive = MutableStateFlow(false)
+    val isDavidLiveSessionActive: StateFlow<Boolean> = _isDavidLiveSessionActive.asStateFlow()
+
     private val _manualText = MutableStateFlow("")
     val manualText: StateFlow<String> = _manualText.asStateFlow()
 
@@ -176,7 +179,20 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     val voiceStartTime: Long get() = if (::stateDelegate.isInitialized) stateDelegate.voiceStartTime else 0L
 
+    fun setDavidLiveSessionActive(active: Boolean) {
+        _isDavidLiveSessionActive.value = active
+        if (active && _isVoiceActive.value && ::stateDelegate.isInitialized) {
+            stateDelegate.cancelVoiceRecording()
+        }
+    }
+
     fun startVoiceRecording(context: Context) {
+        if (_isDavidLiveSessionActive.value) {
+            viewModelScope.launch {
+                _toastMessage.emit("Сейчас активен разговор David Live — сначала завершите его или разверните нижнюю панель")
+            }
+            return
+        }
         stateDelegate.startVoiceRecording(context)
     }
 

@@ -1,9 +1,17 @@
 package com.example.davidapp
 
+import android.Manifest
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -43,7 +51,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.davidapp.live.DavidLiveDisplayMode
+import com.example.davidapp.live.DavidLiveMinimizedCapsule
+import com.example.davidapp.live.DavidLiveSheet
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.GlassBorder
@@ -58,7 +70,10 @@ import com.example.ui.theme.Slate800
  * - Шапка чата с живым статусом и быстрым переходом к ачивкам.
  * - Единая трансформирующаяся полоса чипов (DavidSmartActionStrip), в которой нажатие на
  *   «🔥 Разбор трат» плавно раскрывает инлайн-выбор периода (День, Неделя, Месяц, Год) без лишних окон и дублей.
- * - Обтекаемая нижняя капсула ввода сообщения.
+ * - Обтекаемая нижняя капсула ввода сообщения с запуском голосового режима **David Live**
+ *   по долгому удержанию (~550 мс) кнопки отправки.
+ * - Поддержка компактного режима **David Live** (`DavidLiveDisplayMode.MINIMIZED`) прямо над полем ввода чата
+ *   с сохранением черновика сообщения и единой активной голосовой сессии.
  */
 @Composable
 fun DavidChatScreen(
@@ -68,7 +83,9 @@ fun DavidChatScreen(
     viewModel: DavidViewModel = viewModel(),
     soundManager: SoundManager? = null,
     onBack: (() -> Unit)? = null,
+    onMinimizeToBottomBar: (() -> Unit)? = null,
     isEmbeddedInCapsule: Boolean = false,
+    showStandaloneLiveOverlay: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -78,7 +95,54 @@ fun DavidChatScreen(
 
     var isSelectingPeriod by remember { mutableStateOf(false) }
 
-    if (onBack != null) {
+    val messages by viewModel.messages.collectAsState()
+    val stage by viewModel.stage.collectAsState()
+    val isTyping by viewModel.isDavidTyping.collectAsState()
+    val hasApiKey by viewModel.hasApiKey.collectAsState()
+
+    // David Live states (shared single session)
+    val liveDisplayMode by viewModel.liveDisplayMode.collectAsState()
+    val liveConnectionState by viewModel.liveConnectionState.collectAsState()
+    val liveSubtitle by viewModel.liveSubtitle.collectAsState()
+    val liveRayMagnitudes by viewModel.liveRayMagnitudes.collectAsState()
+    val liveOverallEnergy by viewModel.liveOverallEnergy.collectAsState()
+    val liveActiveSpeaker by viewModel.liveActiveSpeaker.collectAsState()
+    val isLiveMicMuted by viewModel.isLiveMicMuted.collectAsState()
+    val liveErrorMessage by viewModel.liveErrorMessage.collectAsState()
+
+    // Persisted draft text in DavidViewModel so minimizing/closing chat never loses typed text
+    val inputText by viewModel.chatDraftText.collectAsState()
+    var showAchievementsDialog by remember { mutableStateOf(false) }
+    var showApiKeyDialog by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+
+    // Permission launcher for RECORD_AUDIO on first David Live launch
+    val recordAudioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            viewModel.startDavidLive(effectiveSoundManager)
+        }
+    }
+
+    val triggerDavidLiveWithPermissionCheck = {
+        val hasAudioPerm = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasAudioPerm) {
+            viewModel.startDavidLive(effectiveSoundManager)
+        } else {
+            recordAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    if (liveDisplayMode == DavidLiveDisplayMode.EXPANDED) {
+        BackHandler {
+            viewModel.minimizeDavidLive(effectiveSoundManager)
+            onMinimizeToBottomBar?.invoke()
+        }
+    } else if (onBack != null) {
         BackHandler {
             if (isSelectingPeriod) {
                 isSelectingPeriod = false
@@ -100,16 +164,6 @@ fun DavidChatScreen(
         }
     }
 
-    val messages by viewModel.messages.collectAsState()
-    val stage by viewModel.stage.collectAsState()
-    val isTyping by viewModel.isDavidTyping.collectAsState()
-    val hasApiKey by viewModel.hasApiKey.collectAsState()
-
-    var inputText by remember { mutableStateOf("") }
-    var showAchievementsDialog by remember { mutableStateOf(false) }
-    var showApiKeyDialog by remember { mutableStateOf(false) }
-    val listState = rememberLazyListState()
-
     LaunchedEffect(messages.size, messages.lastOrNull()?.id, isTyping, stage) {
         if (messages.isNotEmpty()) {
             val totalItems = messages.size + if (isTyping) 1 else 0
@@ -117,119 +171,175 @@ fun DavidChatScreen(
         }
     }
 
-    Scaffold(
-        modifier = modifier
-            .fillMaxSize()
-            .background(DarkBg),
-        containerColor = DarkBg,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        topBar = {
-            DavidChatTopBar(
-                onBack = onBack,
-                onReset = {
-                    isSelectingPeriod = false
-                    viewModel.resetSession(effectiveSoundManager)
-                },
-                onOpenAchievements = { showAchievementsDialog = true },
-                hasApiKey = hasApiKey,
-                onOpenApiKeyDialog = { showApiKeyDialog = true },
-                isTyping = isTyping,
-                modifier = if (isEmbeddedInCapsule) Modifier else Modifier.statusBarsPadding()
-            )
-        },
-        bottomBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(DarkBg.copy(alpha = 0.96f))
-                    .then(
-                        if (isEmbeddedInCapsule) Modifier
-                        else Modifier.navigationBarsPadding().imePadding()
-                    )
-                    .padding(horizontal = 14.dp)
-                    .padding(top = 8.dp, bottom = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                // Единая морфинг-полоса быстрых действий и выбора периода
-                DavidSmartActionStrip(
-                    stage = stage,
-                    hasApiKey = hasApiKey,
-                    isSelectingPeriod = isSelectingPeriod,
-                    onTogglePeriodSelector = { open ->
-                        isSelectingPeriod = open
-                        if (!open && stage == DavidStage.FILE_SELECTION) {
-                            viewModel.cancelPeriodSelection()
-                        }
-                    },
-                    onPeriodSelect = { period ->
-                        isSelectingPeriod = false
-                        viewModel.processFile(period, effectiveSoundManager)
-                    },
-                    onSendPrompt = { prompt ->
-                        isSelectingPeriod = false
-                        viewModel.sendTextMessage(prompt, effectiveSoundManager)
-                    },
-                    onActionClick = { action ->
-                        isSelectingPeriod = false
-                        viewModel.handleAction(action, effectiveSoundManager)
-                    },
-                    onExportPdf = {
-                        isSelectingPeriod = false
-                        viewModel.exportPdf(effectiveSoundManager)
-                    },
-                    onOpenApiKeyDialog = { showApiKeyDialog = true }
-                )
-
-                // Капсула ввода текста в стиле Obsidian Neo-Bank
-                DavidChatInputBar(
-                    text = inputText,
-                    onTextChange = { inputText = it },
-                    onSend = {
-                        if (inputText.isNotBlank()) {
-                            val textToSend = inputText
-                            inputText = ""
-                            isSelectingPeriod = false
-                            viewModel.sendTextMessage(textToSend, effectiveSoundManager)
-                        }
-                    }
-                )
-            }
-        }
-    ) { innerPadding ->
-        LazyColumn(
-            state = listState,
+    Box(modifier = modifier.fillMaxSize()) {
+        Scaffold(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            item {
-                Spacer(modifier = Modifier.height(10.dp))
-            }
-
-            items(
-                items = messages,
-                key = { it.id }
-            ) { message ->
-                DavidMessageItem(
-                    message = message,
-                    onConfirmProposal = { msgId ->
-                        viewModel.confirmChatProposedOperation(msgId, effectiveSoundManager)
+                .background(DarkBg),
+            containerColor = DarkBg,
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            topBar = {
+                DavidChatTopBar(
+                    onBack = onBack,
+                    onReset = {
+                        isSelectingPeriod = false
+                        viewModel.resetSession(effectiveSoundManager)
                     },
-                    onDismissProposal = { msgId ->
-                        viewModel.dismissChatProposedOperation(msgId)
-                    }
+                    onOpenAchievements = { showAchievementsDialog = true },
+                    hasApiKey = hasApiKey,
+                    onOpenApiKeyDialog = { showApiKeyDialog = true },
+                    isTyping = isTyping,
+                    modifier = if (isEmbeddedInCapsule) Modifier else Modifier.statusBarsPadding()
                 )
-            }
+            },
+            bottomBar = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(DarkBg.copy(alpha = 0.96f))
+                        .then(
+                            if (isEmbeddedInCapsule) Modifier
+                            else Modifier.navigationBarsPadding().imePadding()
+                        )
+                        .padding(horizontal = 14.dp)
+                        .padding(top = 8.dp, bottom = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Компактная голосовая капсула David Live прямо в чате при свёрнутом разговоре
+                    AnimatedVisibility(
+                        visible = liveDisplayMode == DavidLiveDisplayMode.MINIMIZED,
+                        enter = fadeIn(),
+                        exit = fadeOut()
+                    ) {
+                        DavidLiveMinimizedCapsule(
+                            connectionState = liveConnectionState,
+                            rayMagnitudes = liveRayMagnitudes,
+                            overallEnergy = liveOverallEnergy,
+                            activeSpeaker = liveActiveSpeaker,
+                            isMicMuted = isLiveMicMuted,
+                            onExpand = { viewModel.expandDavidLive(effectiveSoundManager) },
+                            onToggleMicMute = { viewModel.toggleLiveMicMute() },
+                            onEndSession = { viewModel.endDavidLiveSession(effectiveSoundManager) }
+                        )
+                    }
 
-            if (isTyping) {
-                item {
-                    DavidCoinTossLoader()
+                    // Единая морфинг-полоса быстрых действий и выбора периода
+                    DavidSmartActionStrip(
+                        stage = stage,
+                        hasApiKey = hasApiKey,
+                        isSelectingPeriod = isSelectingPeriod,
+                        onTogglePeriodSelector = { open ->
+                            isSelectingPeriod = open
+                            if (!open && stage == DavidStage.FILE_SELECTION) {
+                                viewModel.cancelPeriodSelection()
+                            }
+                        },
+                        onPeriodSelect = { period ->
+                            isSelectingPeriod = false
+                            viewModel.processFile(period, effectiveSoundManager)
+                        },
+                        onSendPrompt = { prompt ->
+                            isSelectingPeriod = false
+                            viewModel.sendTextMessage(prompt, effectiveSoundManager)
+                        },
+                        onActionClick = { action ->
+                            isSelectingPeriod = false
+                            viewModel.handleAction(action, effectiveSoundManager)
+                        },
+                        onExportPdf = {
+                            isSelectingPeriod = false
+                            viewModel.exportPdf(effectiveSoundManager)
+                        },
+                        onOpenApiKeyDialog = { showApiKeyDialog = true }
+                    )
+
+                    // Капсула ввода текста в стиле Obsidian Neo-Bank (долгое нажатие ~550 мс -> David Live)
+                    DavidChatInputBar(
+                        text = inputText,
+                        onTextChange = { viewModel.updateChatDraftText(it) },
+                        onSend = {
+                            if (inputText.isNotBlank()) {
+                                val textToSend = inputText
+                                viewModel.updateChatDraftText("")
+                                isSelectingPeriod = false
+                                viewModel.sendTextMessage(textToSend, effectiveSoundManager)
+                            }
+                        },
+                        onStartDavidLive = {
+                            // Важно: не очищаем и не отправляем inputText при запуске David Live
+                            isSelectingPeriod = false
+                            triggerDavidLiveWithPermissionCheck()
+                        }
+                    )
                 }
             }
+        ) { innerPadding ->
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                item {
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
 
-            item {
-                Spacer(modifier = Modifier.height(14.dp))
+                items(
+                    items = messages,
+                    key = { it.id }
+                ) { message ->
+                    DavidMessageItem(
+                        message = message,
+                        onConfirmProposal = { msgId ->
+                            viewModel.confirmChatProposedOperation(msgId, effectiveSoundManager)
+                        },
+                        onDismissProposal = { msgId ->
+                            viewModel.dismissChatProposedOperation(msgId)
+                        },
+                        onRetryLiveSummary = { msgId ->
+                            viewModel.retryLiveSummary(msgId, effectiveSoundManager)
+                        }
+                    )
+                }
+
+                if (isTyping) {
+                    item {
+                        DavidCoinTossLoader()
+                    }
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
             }
+        }
+
+        // Полноценный режим живого голосового диалога David Live внутри окна чата Давида
+        if (showStandaloneLiveOverlay && liveDisplayMode != DavidLiveDisplayMode.HIDDEN) {
+            DavidLiveSheet(
+                connectionState = liveConnectionState,
+                liveSubtitle = liveSubtitle,
+                rayMagnitudes = liveRayMagnitudes,
+                overallEnergy = liveOverallEnergy,
+                activeSpeaker = liveActiveSpeaker,
+                isMicMuted = isLiveMicMuted,
+                errorMessage = liveErrorMessage,
+                onToggleMicMute = { viewModel.toggleLiveMicMute() },
+                onRetryConnection = { viewModel.retryLiveConnection() },
+                onOpenApiKeySettings = { showApiKeyDialog = true },
+                onEndSession = { viewModel.endDavidLiveSession(effectiveSoundManager) },
+                displayMode = liveDisplayMode,
+                onMinimize = {
+                    viewModel.minimizeDavidLive(effectiveSoundManager)
+                    onMinimizeToBottomBar?.invoke()
+                },
+                onMinimizeToChat = {
+                    viewModel.minimizeDavidLive(effectiveSoundManager)
+                },
+                onExpand = { viewModel.expandDavidLive(effectiveSoundManager) },
+                isEmbeddedInModalCard = isEmbeddedInCapsule,
+                renderEmbeddedMinimizedCapsule = false
+            )
         }
     }
 
@@ -257,7 +367,7 @@ fun DavidChatScreen(
             text = {
                 Column {
                     Text(
-                        text = "Вставьте бесплатный ключ из Google AI Studio для работы Давида Жабова (Gemini 3.8) и умного голосового ввода.",
+                        text = "Вставьте пользовательский ключ из Google AI Studio для работы Давида Жабова, David Live и умного голосового ввода.",
                         color = Slate400,
                         fontFamily = ManropeFontFamily,
                         fontSize = 12.5.sp,
@@ -306,6 +416,9 @@ fun DavidChatScreen(
                     onClick = {
                         viewModel.saveApiKeyFromChat(keyText, effectiveSoundManager)
                         showApiKeyDialog = false
+                        if (liveDisplayMode != DavidLiveDisplayMode.HIDDEN && keyText.trim().isNotBlank()) {
+                            viewModel.startDavidLive(effectiveSoundManager)
+                        }
                     },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Emerald400,

@@ -1,6 +1,9 @@
 package com.example.davidapp
 
 import androidx.compose.runtime.Immutable
+import com.example.davidapp.live.DavidLiveSummary
+import com.example.davidapp.live.DavidLiveToolFact
+import com.example.davidapp.live.DavidLiveTranscriptTurn
 import java.util.UUID
 
 /**
@@ -53,8 +56,18 @@ sealed class ChatMessageType {
         val operation: com.example.data.repository.ParsedVoiceOperation,
         val isAdded: Boolean = false
     ) : ChatMessageType()
-}
 
+    /**
+     * Структурированное резюме голосового разговора в режиме David Live
+     */
+    data class LiveSessionSummary(
+        val summary: DavidLiveSummary? = null,
+        val isGenerating: Boolean = false,
+        val errorMessage: String? = null,
+        val capturedTurns: List<DavidLiveTranscriptTurn> = emptyList(),
+        val capturedFacts: List<DavidLiveToolFact> = emptyList()
+    ) : ChatMessageType()
+}
 
 /**
  * Модель отдельного сообщения в диалоге

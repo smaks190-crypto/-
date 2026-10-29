@@ -21,6 +21,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,11 +52,13 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
@@ -63,6 +68,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -78,7 +84,12 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import com.example.davidapp.live.DavidSendButtonGestureHelper
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -359,6 +370,7 @@ fun DavidMessageItem(
     message: ChatMessage,
     onConfirmProposal: ((String) -> Unit)? = null,
     onDismissProposal: ((String) -> Unit)? = null,
+    onRetryLiveSummary: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val alignment = if (message.isUser) Alignment.End else Alignment.Start
@@ -405,6 +417,225 @@ fun DavidMessageItem(
                     onDismiss = { onDismissProposal?.invoke(message.id) }
                 )
             }
+            is ChatMessageType.LiveSessionSummary -> {
+                DavidLiveSummaryBubble(
+                    summaryState = type,
+                    timestamp = message.timestamp,
+                    onRetry = { onRetryLiveSummary?.invoke(message.id) }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Структурированная карточка итогов голосового диалога David Live в ленте чата.
+ */
+@Composable
+fun DavidLiveSummaryBubble(
+    summaryState: ChatMessageType.LiveSessionSummary,
+    timestamp: String,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(22.dp),
+        color = ObsidianSurface,
+        border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.45f)),
+        modifier = modifier
+            .widthIn(min = 250.dp, max = 355.dp)
+            .shadow(8.dp, RoundedCornerShape(22.dp))
+            .testTag("david_live_summary_card")
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Emerald400.copy(alpha = 0.16f))
+                            .border(1.dp, Emerald400.copy(alpha = 0.45f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = "David Live",
+                            tint = Emerald400,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Итоги разговора • David Live",
+                            color = Emerald400,
+                            fontSize = 12.5.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = "Только проверенные факты из диалога",
+                            color = Slate400,
+                            fontSize = 10.sp,
+                            fontFamily = ManropeFontFamily
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            when {
+                summaryState.isGenerating -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                            .testTag("david_live_summary_loading")
+                    ) {
+                        CircularProgressIndicator(
+                            color = Emerald400,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = "Давид формирует достоверное резюме разговора...",
+                            color = TextLight,
+                            fontSize = 12.5.sp,
+                            fontFamily = ManropeFontFamily
+                        )
+                    }
+                }
+
+                !summaryState.errorMessage.isNullOrBlank() -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DarkBg.copy(alpha = 0.65f))
+                            .border(1.dp, Rose500.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                            .padding(12.dp)
+                            .testTag("david_live_summary_error")
+                    ) {
+                        Text(
+                            text = summaryState.errorMessage,
+                            color = Color(0xFFFCA5A5),
+                            fontSize = 12.sp,
+                            fontFamily = ManropeFontFamily,
+                            lineHeight = 17.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = onRetry,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Emerald400,
+                                contentColor = DarkBg
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                            modifier = Modifier
+                                .align(Alignment.End)
+                                .testTag("david_live_summary_retry_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Повторить",
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                summaryState.summary != null -> {
+                    val summary = summaryState.summary
+                    if (summary.topics.isNotEmpty()) {
+                        LiveSummarySectionBlock(
+                            title = "📌 О чём говорили",
+                            items = summary.topics
+                        )
+                    }
+                    if (summary.keyFindings.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LiveSummarySectionBlock(
+                            title = "📊 Ключевые выводы по данным",
+                            items = summary.keyFindings
+                        )
+                    }
+                    if (summary.recommendations.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LiveSummarySectionBlock(
+                            title = "💡 Рекомендации Давида",
+                            items = summary.recommendations
+                        )
+                    }
+                    if (summary.nextActions.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LiveSummarySectionBlock(
+                            title = "✅ Следующие действия",
+                            items = summary.nextActions
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = timestamp,
+                color = Slate400.copy(alpha = 0.7f),
+                fontSize = 10.sp,
+                fontFamily = ManropeFontFamily,
+                modifier = Modifier.align(Alignment.End)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiveSummarySectionBlock(
+    title: String,
+    items: List<String>
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(DarkBg.copy(alpha = 0.6f))
+            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 9.dp)
+    ) {
+        Text(
+            text = title,
+            color = Emerald400,
+            fontSize = 11.5.sp,
+            fontFamily = ManropeFontFamily,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        items.forEach { item ->
+            Text(
+                text = "• $item",
+                color = TextLight,
+                fontSize = 12.5.sp,
+                fontFamily = ManropeFontFamily,
+                lineHeight = 18.sp,
+                modifier = Modifier.padding(vertical = 1.5.dp)
+            )
         }
     }
 }
@@ -1731,7 +1962,12 @@ private fun ObsidianQuickChip(
 }
 
 /**
- * Нижняя капсула ввода сообщения в едином стиле с MorphingBottomBar (Obsidian Neo-Bank)
+ * Нижняя капсула ввода сообщения в едином стиле с MorphingBottomBar (Obsidian Neo-Bank).
+ *
+ * Поддерживает распознавание короткого и долгого нажатия (~550 мс) на существующую кнопку отправки:
+ * - Короткое нажатие (< 550 мс) сохраняет обычную отправку сообщения.
+ * - Удержание (~550 мс) запускает голосовой режим **David Live** с лёгким haptic feedback,
+ *   исключает случайную отправку сообщения при отпускании пальца и сохраняет уже набранный текст нетронутым.
  */
 @Composable
 fun DavidChatInputBar(
@@ -1739,8 +1975,14 @@ fun DavidChatInputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onAttach: () -> Unit = {},
+    onStartDavidLive: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val haptic = LocalHapticFeedback.current
+    val currentTextState by rememberUpdatedState(text)
+    val currentOnSend by rememberUpdatedState(onSend)
+    val currentOnStartLive by rememberUpdatedState(onStartDavidLive)
+
     val trimmedInput = text.trim()
     val isSecretInput = trimmedInput.startsWith("AIza") ||
         trimmedInput.startsWith("AQ.") ||
@@ -1753,78 +1995,138 @@ fun DavidChatInputBar(
         label = "chat_input_border"
     )
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = modifier
-            .fillMaxWidth()
-            .height(54.dp)
-            .shadow(16.dp, RoundedCornerShape(27.dp))
-            .clip(RoundedCornerShape(27.dp))
-            .background(ObsidianSurface.copy(alpha = 0.98f))
-            .border(1.dp, borderColor, RoundedCornerShape(27.dp))
-            .padding(start = 16.dp, end = 6.dp)
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.End
     ) {
-        Box(
-            modifier = Modifier.weight(1f),
-            contentAlignment = Alignment.CenterStart
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp)
+                .shadow(16.dp, RoundedCornerShape(27.dp))
+                .clip(RoundedCornerShape(27.dp))
+                .background(ObsidianSurface.copy(alpha = 0.98f))
+                .border(1.dp, borderColor, RoundedCornerShape(27.dp))
+                .padding(start = 16.dp, end = 6.dp)
         ) {
-            if (text.isEmpty()) {
-                Text(
-                    text = "Спросите Давида или введите: Кофе 300...",
-                    color = Slate400,
-                    fontSize = 13.sp,
-                    fontFamily = ManropeFontFamily,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (text.isEmpty()) {
+                    Text(
+                        text = "Спросите Давида или введите: Кофе 300...",
+                        color = Slate400,
+                        fontSize = 13.sp,
+                        fontFamily = ManropeFontFamily,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                BasicTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    textStyle = TextStyle(
+                        color = TextLight,
+                        fontSize = 14.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    singleLine = true,
+                    visualTransformation = if (isSecretInput) {
+                        PasswordVisualTransformation('*')
+                    } else {
+                        VisualTransformation.None
+                    },
+                    cursorBrush = SolidColor(Emerald400),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { onSend() }),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("david_text_input")
                 )
             }
 
-            BasicTextField(
-                value = text,
-                onValueChange = onTextChange,
-                textStyle = TextStyle(
-                    color = TextLight,
-                    fontSize = 14.sp,
-                    fontFamily = ManropeFontFamily,
-                    fontWeight = FontWeight.Medium
-                ),
-                singleLine = true,
-                visualTransformation = if (isSecretInput) {
-                    PasswordVisualTransformation('*')
-                } else {
-                    VisualTransformation.None
-                },
-                cursorBrush = SolidColor(Emerald400),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { onSend() }),
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("david_text_input")
-            )
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isEnabled) {
+                            Brush.linearGradient(listOf(Emerald400, NeonEmerald))
+                        } else {
+                            Brush.linearGradient(listOf(Slate800, Slate800))
+                        }
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (isEnabled) Color.Transparent else Emerald400.copy(alpha = 0.35f),
+                        shape = CircleShape
+                    )
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            var longPressTriggered = false
+
+                            val upBeforeTimeout = withTimeoutOrNull(
+                                DavidSendButtonGestureHelper.LONG_PRESS_DURATION_MS
+                            ) {
+                                waitForUpOrCancellation()
+                            }
+
+                            if (upBeforeTimeout == null) {
+                                // Удержание >= 550 мс: запускаем David Live без отправки и без очистки текста
+                                longPressTriggered = true
+                                val evaluation = DavidSendButtonGestureHelper.evaluatePress(
+                                    pressDurationMs = DavidSendButtonGestureHelper.LONG_PRESS_DURATION_MS,
+                                    currentDraftText = currentTextState,
+                                    wasCancelled = false
+                                )
+                                if (evaluation.shouldTriggerHaptic) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                                currentOnStartLive?.invoke()
+                                // Дожидаемся отпускания пальца и блокируем случайную отправку сообщения
+                                waitForUpOrCancellation()
+                            } else if (!longPressTriggered) {
+                                // Короткое нажатие (< 550 мс): отправляем сообщение, только если жест не отменён и текст не пуст
+                                val evaluation = DavidSendButtonGestureHelper.evaluatePress(
+                                    pressDurationMs = 120L,
+                                    currentDraftText = currentTextState,
+                                    wasCancelled = false
+                                )
+                                if (evaluation.action == com.example.davidapp.live.SendButtonGestureAction.SHORT_TAP_SEND) {
+                                    currentOnSend()
+                                }
+                            }
+                        }
+                    }
+                    .testTag("david_send_button")
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "Отправить (удерживайте для David Live)",
+                    tint = if (isEnabled) DarkBg else Emerald400,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.width(8.dp))
-
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-                .size(42.dp)
-                .clip(CircleShape)
-                .background(
-                    if (isEnabled) {
-                        Brush.linearGradient(listOf(Emerald400, NeonEmerald))
-                    } else {
-                        Brush.linearGradient(listOf(Slate800, Slate800))
-                    }
-                )
-                .clickable(enabled = isEnabled, onClick = onSend)
-                .testTag("david_send_button")
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Send,
-                contentDescription = "Отправить",
-                tint = if (isEnabled) DarkBg else Slate400,
-                modifier = Modifier.size(18.dp)
+        // Небольшая ненавязчивая подсказка о возможности долгого нажатия для запуска David Live
+        if (onStartDavidLive != null) {
+            Text(
+                text = "Удерживайте отправку ~0.5 сек для голосового диалога David Live",
+                color = Slate400.copy(alpha = 0.72f),
+                fontSize = 10.sp,
+                fontFamily = ManropeFontFamily,
+                modifier = Modifier
+                    .padding(top = 3.dp, end = 10.dp)
+                    .testTag("david_live_long_press_hint")
             )
         }
     }
