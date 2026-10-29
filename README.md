@@ -15,7 +15,7 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v11.01 (сборка 192)
+### Версия v11.02 (сборка 209)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
@@ -24,9 +24,13 @@
 ## Что изменилось
 
 ### Добавлено
-- 32-полосный спектральный FFT-визуализатор голоса (Hann window + Spatial Envelope) ([PR #24](https://github.com/smaks190-crypto/-/pull/24))
+- Полноценный голосовой режим David Live (Gemini Live API + 48-лучевой FFT визуализатор + Read-Only финансовые инструменты + резюме диалога) ([PR #25](https://github.com/smaks190-crypto/-/pull/25))
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v10.88-build.179...v11.01-build.192
+### Исправлено
+- Исправления ошибок ([PR #26](https://github.com/smaks190-crypto/-/pull/26))
+- Исправления ошибок ([PR #30](https://github.com/smaks190-crypto/-/pull/30))
+
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.01-build.192...v11.02-build.209
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
