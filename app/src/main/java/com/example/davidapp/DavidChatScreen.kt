@@ -83,6 +83,7 @@ fun DavidChatScreen(
     viewModel: DavidViewModel = viewModel(),
     soundManager: SoundManager? = null,
     onBack: (() -> Unit)? = null,
+    onMinimizeToBottomBar: (() -> Unit)? = null,
     isEmbeddedInCapsule: Boolean = false,
     showStandaloneLiveOverlay: Boolean = true,
     modifier: Modifier = Modifier
@@ -139,6 +140,7 @@ fun DavidChatScreen(
     if (liveDisplayMode == DavidLiveDisplayMode.EXPANDED) {
         BackHandler {
             viewModel.minimizeDavidLive(effectiveSoundManager)
+            onMinimizeToBottomBar?.invoke()
         }
     } else if (onBack != null) {
         BackHandler {
@@ -312,7 +314,7 @@ fun DavidChatScreen(
             }
         }
 
-        // Полноэкранный режим живого голосового диалога David Live (при автономном рендере чата)
+        // Полноценный режим живого голосового диалога David Live внутри окна чата Давида
         if (showStandaloneLiveOverlay && liveDisplayMode != DavidLiveDisplayMode.HIDDEN) {
             DavidLiveSheet(
                 connectionState = liveConnectionState,
@@ -327,8 +329,15 @@ fun DavidChatScreen(
                 onOpenApiKeySettings = { showApiKeyDialog = true },
                 onEndSession = { viewModel.endDavidLiveSession(effectiveSoundManager) },
                 displayMode = liveDisplayMode,
-                onMinimize = { viewModel.minimizeDavidLive(effectiveSoundManager) },
+                onMinimize = {
+                    viewModel.minimizeDavidLive(effectiveSoundManager)
+                    onMinimizeToBottomBar?.invoke()
+                },
+                onMinimizeToChat = {
+                    viewModel.minimizeDavidLive(effectiveSoundManager)
+                },
                 onExpand = { viewModel.expandDavidLive(effectiveSoundManager) },
+                isEmbeddedInModalCard = isEmbeddedInCapsule,
                 renderEmbeddedMinimizedCapsule = false
             )
         }

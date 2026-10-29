@@ -200,4 +200,74 @@ class DavidLiveUiTest {
         assertEquals(1, endCallCount)
         assertEquals(DavidLiveDisplayMode.HIDDEN, displayMode)
     }
+
+    @Test
+    fun davidLiveEmbeddedInModalCardDistinguishesMinimizeToBottomBarAndMinimizeToChat() {
+        var displayMode by mutableStateOf(DavidLiveDisplayMode.EXPANDED)
+        var minimizedToBottomBarCount = 0
+        var minimizedToChatCount = 0
+
+        composeTestRule.setContent {
+            DavidLiveSheet(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                liveSubtitle = "Слушаю тебя...",
+                rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.42f },
+                overallEnergy = 0.48f,
+                activeSpeaker = DavidLiveSpeaker.USER,
+                isMicMuted = false,
+                errorMessage = null,
+                onToggleMicMute = {},
+                onRetryConnection = {},
+                onOpenApiKeySettings = {},
+                onEndSession = {},
+                displayMode = displayMode,
+                onMinimize = {
+                    minimizedToBottomBarCount++
+                    displayMode = DavidLiveDisplayMode.MINIMIZED
+                },
+                onMinimizeToChat = {
+                    minimizedToChatCount++
+                    displayMode = DavidLiveDisplayMode.MINIMIZED
+                },
+                onExpand = {
+                    displayMode = DavidLiveDisplayMode.EXPANDED
+                },
+                isEmbeddedInModalCard = true,
+                renderEmbeddedMinimizedCapsule = false
+            )
+
+            if (displayMode == DavidLiveDisplayMode.MINIMIZED) {
+                DavidLiveMinimizedCapsule(
+                    connectionState = DavidLiveConnectionState.LISTENING,
+                    rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.42f },
+                    overallEnergy = 0.48f,
+                    activeSpeaker = DavidLiveSpeaker.USER,
+                    isMicMuted = false,
+                    onExpand = { displayMode = DavidLiveDisplayMode.EXPANDED },
+                    onToggleMicMute = {},
+                    onEndSession = {},
+                    embeddedInBottomBar = true
+                )
+            }
+        }
+
+        // 1. Кнопка `<` (david_live_minimize_button) сворачивает окно сразу в нижнюю капсулу MorphingBottomBar
+        composeTestRule.onNodeWithTag("david_live_minimize_button").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(1, minimizedToBottomBarCount)
+        assertEquals(0, minimizedToChatCount)
+        composeTestRule.onNodeWithTag("david_live_minimized_capsule").assertIsDisplayed()
+
+        // 2. Разворачиваем обратно из нижней капсулы
+        composeTestRule.onNodeWithTag("david_live_minimized_capsule").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(DavidLiveDisplayMode.EXPANDED, displayMode)
+
+        // 3. Кнопка иконки чата (david_live_chat_minimize_button) сворачивает режим внутрь открытого чата
+        composeTestRule.onNodeWithTag("david_live_chat_minimize_button").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(1, minimizedToBottomBarCount)
+        assertEquals(1, minimizedToChatCount)
+    }
 }
+

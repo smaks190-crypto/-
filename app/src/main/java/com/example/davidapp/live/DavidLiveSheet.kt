@@ -262,7 +262,8 @@ fun DavidLiveMinimizedCapsule(
     onExpand: () -> Unit,
     onToggleMicMute: () -> Unit,
     onEndSession: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    embeddedInBottomBar: Boolean = false
 ) {
     val energyClamped = overallEnergy.coerceIn(0f, 1f)
     val isDavidSpeaking = connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
@@ -272,6 +273,8 @@ fun DavidLiveMinimizedCapsule(
         activeSpeaker = activeSpeaker,
         isMicMuted = isMicMuted
     )
+
+    val capsuleCornerRadius = if (embeddedInBottomBar) 22.dp else 26.dp
 
     val capsuleBorderColor = when {
         connectionState == DavidLiveConnectionState.ERROR ||
@@ -290,14 +293,20 @@ fun DavidLiveMinimizedCapsule(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(66.dp)
-            .shadow(
-                elevation = 16.dp,
-                shape = RoundedCornerShape(26.dp),
-                ambientColor = capsuleGlowColor.copy(alpha = 0.45f),
-                spotColor = capsuleGlowColor.copy(alpha = 0.55f)
+            .height(if (embeddedInBottomBar) 68.dp else 66.dp)
+            .then(
+                if (embeddedInBottomBar) {
+                    Modifier
+                } else {
+                    Modifier.shadow(
+                        elevation = 16.dp,
+                        shape = RoundedCornerShape(capsuleCornerRadius),
+                        ambientColor = capsuleGlowColor.copy(alpha = 0.45f),
+                        spotColor = capsuleGlowColor.copy(alpha = 0.55f)
+                    )
+                }
             )
-            .clip(RoundedCornerShape(26.dp))
+            .clip(RoundedCornerShape(capsuleCornerRadius))
             .background(
                 Brush.horizontalGradient(
                     colors = listOf(
@@ -308,9 +317,9 @@ fun DavidLiveMinimizedCapsule(
                 )
             )
             .border(
-                width = 1.2.dp,
+                width = if (embeddedInBottomBar) 1.dp else 1.2.dp,
                 color = capsuleBorderColor,
-                shape = RoundedCornerShape(26.dp)
+                shape = RoundedCornerShape(capsuleCornerRadius)
             )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -323,7 +332,7 @@ fun DavidLiveMinimizedCapsule(
                 contentDescription = "Компактная панель David Live. Нажмите, чтобы развернуть."
             },
         color = Color.Transparent,
-        shape = RoundedCornerShape(26.dp)
+        shape = RoundedCornerShape(capsuleCornerRadius)
     ) {
         Row(
             modifier = Modifier
@@ -565,7 +574,9 @@ fun DavidLiveSheet(
     modifier: Modifier = Modifier,
     displayMode: DavidLiveDisplayMode = DavidLiveDisplayMode.EXPANDED,
     onMinimize: () -> Unit = {},
+    onMinimizeToChat: (() -> Unit)? = null,
     onExpand: () -> Unit = {},
+    isEmbeddedInModalCard: Boolean = false,
     renderEmbeddedMinimizedCapsule: Boolean = true,
     minimizedBottomOffsetDp: Dp = 14.dp
 ) {
@@ -677,14 +688,24 @@ fun DavidLiveSheet(
                         indication = null,
                         onClick = {}
                     )
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
+                    .then(
+                        if (isEmbeddedInModalCard) {
+                            Modifier
+                        } else {
+                            Modifier
+                                .statusBarsPadding()
+                                .navigationBarsPadding()
+                        }
+                    )
                     .testTag("david_live_sheet")
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 22.dp, vertical = 16.dp),
+                        .padding(
+                            horizontal = if (isEmbeddedInModalCard) 18.dp else 22.dp,
+                            vertical = if (isEmbeddedInModalCard) 14.dp else 16.dp
+                        ),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     // 1. Top Navigation & Identity Header (Step 1: `<` minimize, David Live • LIVE, settings)
@@ -776,7 +797,7 @@ fun DavidLiveSheet(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(if (isEmbeddedInModalCard) 10.dp else 14.dp))
 
                         // David Avatar + "Давид Жабов" / "AI-помощник по финансам" header row
                         Row(
@@ -831,14 +852,14 @@ fun DavidLiveSheet(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Spacer(modifier = Modifier.height(if (isEmbeddedInModalCard) 10.dp else 14.dp))
 
                         // Live speech bubble with pointer tail ("Говорите, я слушаю...")
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(min = 54.dp)
+                                    .heightIn(min = if (isEmbeddedInModalCard) 48.dp else 54.dp)
                                     .clip(RoundedCornerShape(18.dp))
                                     .background(SubtitleBubbleSurface)
                                     .border(
@@ -852,7 +873,7 @@ fun DavidLiveSheet(
                                         },
                                         shape = RoundedCornerShape(18.dp)
                                     )
-                                    .padding(horizontal = 18.dp, vertical = 14.dp)
+                                    .padding(horizontal = 18.dp, vertical = if (isEmbeddedInModalCard) 11.dp else 14.dp)
                                     .testTag("david_live_subtitle_bubble")
                             ) {
                                 Column {
@@ -954,10 +975,10 @@ fun DavidLiveSheet(
                                     activeSpeaker = activeSpeaker,
                                     isMicMuted = isMicMuted,
                                     onToggleMicMute = onToggleMicMute,
-                                    visualizerSize = 278.dp
+                                    visualizerSize = if (isEmbeddedInModalCard) 244.dp else 278.dp
                                 )
 
-                                Spacer(modifier = Modifier.height(10.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
 
                                 Text(
                                     text = statusText,
@@ -1030,7 +1051,7 @@ fun DavidLiveSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .alpha(bottomControlsAlpha)
-                            .padding(bottom = 8.dp)
+                            .padding(bottom = if (isEmbeddedInModalCard) 4.dp else 8.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -1136,7 +1157,7 @@ fun DavidLiveSheet(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null,
                                         role = Role.Button,
-                                        onClick = onMinimize
+                                        onClick = { (onMinimizeToChat ?: onMinimize)() }
                                     )
                                     .testTag("david_live_chat_minimize_button")
                                     .semantics {

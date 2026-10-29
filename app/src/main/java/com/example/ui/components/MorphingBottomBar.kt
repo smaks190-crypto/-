@@ -377,9 +377,16 @@ fun MorphingBottomBar(
         label = "capsule_neon_phase"
     )
 
-    val borderBrush = when (activeModal) {
-        BottomCapsuleModal.None -> Brush.horizontalGradient(listOf(GlassHighlight, GlassHighlight))
-        is BottomCapsuleModal.VoiceInput -> Brush.horizontalGradient(
+    val borderBrush = when {
+        activeModal == BottomCapsuleModal.None && davidLiveMinimizedCapsule != null -> Brush.horizontalGradient(
+            colors = listOf(
+                Emerald400.copy(alpha = 0.58f),
+                NeonCyan.copy(alpha = 0.48f),
+                Emerald400.copy(alpha = 0.58f)
+            )
+        )
+        activeModal == BottomCapsuleModal.None -> Brush.horizontalGradient(listOf(GlassHighlight, GlassHighlight))
+        activeModal is BottomCapsuleModal.VoiceInput -> Brush.horizontalGradient(
             colors = listOf(
                 Emerald400.copy(alpha = 0.45f),
                 Color(0xFF10B981).copy(alpha = 0.38f),
@@ -430,21 +437,6 @@ fun MorphingBottomBar(
             )
         }
 
-        // Компактная голосовая капсула David Live над нижней панелью навигации (Frame 5 & 10)
-        AnimatedVisibility(
-            visible = davidLiveMinimizedCapsule != null && activeModal == BottomCapsuleModal.None,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 88.dp),
-            enter = fadeIn(animationSpec = tween(220)) + expandVertically(expandFrom = Alignment.Bottom),
-            exit = fadeOut(animationSpec = tween(160)) + shrinkVertically(shrinkTowards = Alignment.Bottom),
-            label = "david_live_minimized_capsule_host"
-        ) {
-            davidLiveMinimizedCapsule?.invoke()
-        }
-
         // Сама нижняя морфинг-капсула, жестко привязанная к низу экрана (Alignment.BottomCenter)
         Box(
             modifier = Modifier
@@ -458,11 +450,13 @@ fun MorphingBottomBar(
                     ambientColor = when {
                         activeModal is BottomCapsuleModal.VoiceInput -> Color(0xFF00E5FF)
                         activeModal != BottomCapsuleModal.None -> NeonEmerald
+                        davidLiveMinimizedCapsule != null -> NeonEmerald.copy(alpha = 0.65f)
                         else -> Color.Black
                     },
                     spotColor = when {
                         activeModal is BottomCapsuleModal.VoiceInput -> Color(0xFF38BDF8)
                         activeModal != BottomCapsuleModal.None -> NeonIndigo
+                        davidLiveMinimizedCapsule != null -> NeonCyan.copy(alpha = 0.65f)
                         else -> Color.Black
                     }
                 )
@@ -490,8 +484,9 @@ fun MorphingBottomBar(
                 ),
             contentAlignment = Alignment.BottomCenter
         ) {
-            // 1. Ряд иконок нижней навигации (height = 68.dp), строго зафиксированный внизу (Alignment.BottomCenter).
-            // При открытии окна растворяется на месте (fadeOut(120ms)), НИКОГДА не подпрыгивая вверх.
+            // 1. Нижняя капсула (height = 68.dp), строго зафиксированная внизу (Alignment.BottomCenter).
+            // При свернутом David Live отображает компактную голосовую капсулу Давида прямо внутри нижней панели
+            // вместо вкладок навигации; при завершении сессии плавно возвращает 4 вкладки + кнопку «+ Добавить».
             AnimatedVisibility(
                 visible = activeModal == BottomCapsuleModal.None,
                 modifier = Modifier
@@ -502,166 +497,183 @@ fun MorphingBottomBar(
                 exit = fadeOut(animationSpec = tween(durationMillis = 120)),
                 label = "bottom_nav_icons_fade"
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(68.dp)
-                        .padding(horizontal = 6.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // 4 вкладки навигации, которые плавно занимают всю доступную ширину
-                    BoxWithConstraints(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                    ) {
-                        val barWidth = maxWidth
-                        val tabCount = 4
-                        val tabWidth = barWidth / tabCount
-
-                        val animatedFraction by animateFloatAsState(
-                            targetValue = currentMainTab.toFloat(),
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioNoBouncy,
-                                stiffness = Spring.StiffnessMedium
-                            ),
-                            label = "bottom_nav_pill"
-                        )
-
+                AnimatedContent(
+                    targetState = davidLiveMinimizedCapsule != null,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(200)) togetherWith fadeOut(animationSpec = tween(150))
+                    },
+                    label = "bottom_capsule_live_vs_tabs"
+                ) { isLiveMinimizedInBar ->
+                    if (isLiveMinimizedInBar && davidLiveMinimizedCapsule != null) {
                         Box(
-                            modifier = Modifier
-                                .width(tabWidth)
-                                .fillMaxHeight()
-                                .offset(x = tabWidth * animatedFraction)
-                                .background(Emerald400.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
-                                .border(1.dp, Emerald400.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
-                        )
-
-                        Row(
                             modifier = Modifier.fillMaxSize(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            contentAlignment = Alignment.Center
+                        ) {
+                            davidLiveMinimizedCapsule.invoke()
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(68.dp)
+                                .padding(horizontal = 6.dp, vertical = 5.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            MorphNavTabButton(
-                                text = "Период",
-                                icon = Icons.Default.GridView,
-                                isSelected = currentMainTab == 0,
+                            // 4 вкладки навигации, которые плавно занимают всю доступную ширину
+                            BoxWithConstraints(
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
-                                    .testTag("tab_period"),
-                                onClick = { onSelectTab(0) }
-                            )
-
-                            MorphNavTabButton(
-                                text = "Долги",
-                                icon = Icons.Default.CreditCard,
-                                isSelected = currentMainTab == 1,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .testTag("tab_debts"),
-                                onClick = { onSelectTab(1) }
-                            )
-
-                            MorphNavTabButton(
-                                text = "Цели",
-                                icon = Icons.Default.EmojiEvents,
-                                isSelected = currentMainTab == 2,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .testTag("tab_goals"),
-                                onClick = { onSelectTab(2) }
-                            )
-
-                            MorphNavTabButton(
-                                text = "Отчет",
-                                icon = Icons.Default.PieChart,
-                                isSelected = currentMainTab == 3,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .fillMaxHeight()
-                                    .testTag("tab_annual"),
-                                onClick = { onSelectTab(3) }
-                            )
-                        }
-                    }
-
-                    // Встроенная симметричная кнопка `+ Добавить` внутри капсулы навигации (ТОЛЬКО на вкладке Период)
-                    AnimatedVisibility(
-                        visible = currentMainTab == 0,
-                        enter = expandHorizontally(
-                            expandFrom = Alignment.End,
-                            animationSpec = spring(
-                                dampingRatio = 0.82f,
-                                stiffness = Spring.StiffnessMediumLow
-                            )
-                        ) + fadeIn(animationSpec = tween(200)),
-                        exit = shrinkHorizontally(
-                            shrinkTowards = Alignment.End,
-                            animationSpec = spring(
-                                dampingRatio = 0.82f,
-                                stiffness = Spring.StiffnessMediumLow
-                            )
-                        ) + fadeOut(animationSpec = tween(150))
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxHeight()
-                                .padding(start = 6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .width(68.dp)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(
-                                        color = NeonEmerald.copy(alpha = 0.16f),
-                                        shape = RoundedCornerShape(16.dp)
-                                    )
-                                    .border(
-                                        width = 1.dp,
-                                        color = NeonEmerald.copy(alpha = 0.45f),
-                                        shape = RoundedCornerShape(16.dp)
-                                    )
-                                    .pointerInput(initialType) {
-                                        detectTapGestures(
-                                            onTap = {
-                                                onOpenManualInput()
-                                                viewModel.openModal(
-                                                    BottomCapsuleModal.ManualAddTransaction(initialType)
-                                                )
-                                            },
-                                            onLongPress = {
-                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                triggerVoiceMode()
-                                            }
-                                        )
-                                    }
-                                    .testTag("embedded_add_operation_button"),
-                                contentAlignment = Alignment.Center
                             ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.Center
+                                val barWidth = maxWidth
+                                val tabCount = 4
+                                val tabWidth = barWidth / tabCount
+
+                                val animatedFraction by animateFloatAsState(
+                                    targetValue = currentMainTab.toFloat(),
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMedium
+                                    ),
+                                    label = "bottom_nav_pill"
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .width(tabWidth)
+                                        .fillMaxHeight()
+                                        .offset(x = tabWidth * animatedFraction)
+                                        .background(Emerald400.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                                        .border(1.dp, Emerald400.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = "Добавить операцию (удерживайте для голосового ввода)",
-                                        tint = NeonEmerald,
-                                        modifier = Modifier.size(18.dp)
+                                    MorphNavTabButton(
+                                        text = "Период",
+                                        icon = Icons.Default.GridView,
+                                        isSelected = currentMainTab == 0,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .testTag("tab_period"),
+                                        onClick = { onSelectTab(0) }
                                     )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = "Добавить",
-                                        color = NeonEmerald,
-                                        fontSize = 10.sp,
-                                        fontFamily = ManropeFontFamily,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1
+
+                                    MorphNavTabButton(
+                                        text = "Долги",
+                                        icon = Icons.Default.CreditCard,
+                                        isSelected = currentMainTab == 1,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .testTag("tab_debts"),
+                                        onClick = { onSelectTab(1) }
                                     )
+
+                                    MorphNavTabButton(
+                                        text = "Цели",
+                                        icon = Icons.Default.EmojiEvents,
+                                        isSelected = currentMainTab == 2,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .testTag("tab_goals"),
+                                        onClick = { onSelectTab(2) }
+                                    )
+
+                                    MorphNavTabButton(
+                                        text = "Отчет",
+                                        icon = Icons.Default.PieChart,
+                                        isSelected = currentMainTab == 3,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .testTag("tab_annual"),
+                                        onClick = { onSelectTab(3) }
+                                    )
+                                }
+                            }
+
+                            // Встроенная симметричная кнопка `+ Добавить` внутри капсулы навигации (ТОЛЬКО на вкладке Период)
+                            AnimatedVisibility(
+                                visible = currentMainTab == 0,
+                                enter = expandHorizontally(
+                                    expandFrom = Alignment.End,
+                                    animationSpec = spring(
+                                        dampingRatio = 0.82f,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                ) + fadeIn(animationSpec = tween(200)),
+                                exit = shrinkHorizontally(
+                                    shrinkTowards = Alignment.End,
+                                    animationSpec = spring(
+                                        dampingRatio = 0.82f,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    )
+                                ) + fadeOut(animationSpec = tween(150))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxHeight()
+                                        .padding(start = 6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxHeight()
+                                            .width(68.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(
+                                                color = NeonEmerald.copy(alpha = 0.16f),
+                                                shape = RoundedCornerShape(16.dp)
+                                            )
+                                            .border(
+                                                width = 1.dp,
+                                                color = NeonEmerald.copy(alpha = 0.45f),
+                                                shape = RoundedCornerShape(16.dp)
+                                            )
+                                            .pointerInput(initialType) {
+                                                detectTapGestures(
+                                                    onTap = {
+                                                        onOpenManualInput()
+                                                        viewModel.openModal(
+                                                            BottomCapsuleModal.ManualAddTransaction(initialType)
+                                                        )
+                                                    },
+                                                    onLongPress = {
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        triggerVoiceMode()
+                                                    }
+                                                )
+                                            }
+                                            .testTag("embedded_add_operation_button"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Add,
+                                                contentDescription = "Добавить операцию (удерживайте для голосового ввода)",
+                                                tint = NeonEmerald,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = "Добавить",
+                                                color = NeonEmerald,
+                                                fontSize = 10.sp,
+                                                fontFamily = ManropeFontFamily,
+                                                fontWeight = FontWeight.Bold,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

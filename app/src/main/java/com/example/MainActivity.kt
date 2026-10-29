@@ -886,6 +886,16 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                 )
             }
 
+            // If the user dismisses the DavidChat modal card (e.g. via scrim tap) while David Live is expanded,
+            // smoothly transition David Live into the minimized bottom capsule inside MorphingBottomBar.
+            LaunchedEffect(activeModal) {
+                if (activeModal != com.example.ui.viewmodel.BottomCapsuleModal.DavidChat &&
+                    liveDisplayMode == com.example.davidapp.live.DavidLiveDisplayMode.EXPANDED
+                ) {
+                    davidViewModel.minimizeDavidLive()
+                }
+            }
+
             val parsedVoiceOperations by viewModel.parsedVoiceOperations.collectAsState()
             var isVoiceOverlayActive by remember { mutableStateOf(false) }
             val isVoicePipelineActive = isVoiceActive || isAnalyzingVoice || !parsedVoiceOperations.isNullOrEmpty() || isVoiceOverlayActive || activeModal != com.example.ui.viewmodel.BottomCapsuleModal.None
@@ -926,7 +936,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                             isVoiceOverlayActive = active
                         },
                         isDavidLiveActive = liveDisplayMode != com.example.davidapp.live.DavidLiveDisplayMode.HIDDEN,
-                        davidLiveMinimizedCapsule = if (liveDisplayMode == com.example.davidapp.live.DavidLiveDisplayMode.MINIMIZED) {
+                        davidLiveMinimizedCapsule = if (liveDisplayMode != com.example.davidapp.live.DavidLiveDisplayMode.HIDDEN) {
                             {
                                 com.example.davidapp.live.DavidLiveMinimizedCapsule(
                                     connectionState = liveConnectionState,
@@ -934,9 +944,13 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     overallEnergy = liveOverallEnergy,
                                     activeSpeaker = liveActiveSpeaker,
                                     isMicMuted = isLiveMicMuted,
-                                    onExpand = { davidViewModel.expandDavidLive() },
+                                    onExpand = {
+                                        davidViewModel.expandDavidLive()
+                                        viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.DavidChat)
+                                    },
                                     onToggleMicMute = { davidViewModel.toggleLiveMicMute() },
-                                    onEndSession = { davidViewModel.endDavidLiveSession() }
+                                    onEndSession = { davidViewModel.endDavidLiveSession() },
+                                    embeddedInBottomBar = true
                                 )
                             }
                         } else {
@@ -944,6 +958,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         },
                         onDavidLiveBlocksVoiceInput = {
                             davidViewModel.expandDavidLive()
+                            viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.DavidChat)
                         },
                         modalContent = { modal ->
                             when (modal) {
@@ -1135,7 +1150,13 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                         apiKey = apiKey,
                                         viewModel = davidViewModel,
                                         isEmbeddedInCapsule = true,
-                                        showStandaloneLiveOverlay = false,
+                                        showStandaloneLiveOverlay = true,
+                                        onMinimizeToBottomBar = {
+                                            davidViewModel.minimizeDavidLive()
+                                            viewModel.closeModal()
+                                            appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
+                                            viewModel.markNotificationsAsRead()
+                                        },
                                         onBack = {
                                             viewModel.closeModal()
                                             appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
@@ -1147,40 +1168,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                 else -> {}
                             }
                         }
-                    )
-                }
-            }
-
-            // Top-level David Live Morphing Host (shared across DavidChatScreen and all main app tabs)
-            if (liveDisplayMode != com.example.davidapp.live.DavidLiveDisplayMode.HIDDEN) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .zIndex(25f)
-                ) {
-                    com.example.davidapp.live.DavidLiveSheet(
-                        connectionState = liveConnectionState,
-                        liveSubtitle = liveSubtitle,
-                        rayMagnitudes = liveRayMagnitudes,
-                        overallEnergy = liveOverallEnergy,
-                        activeSpeaker = liveActiveSpeaker,
-                        isMicMuted = isLiveMicMuted,
-                        errorMessage = liveErrorMessage,
-                        onToggleMicMute = { davidViewModel.toggleLiveMicMute() },
-                        onRetryConnection = { davidViewModel.retryLiveConnection() },
-                        onOpenApiKeySettings = {
-                            davidViewModel.minimizeDavidLive()
-                            viewModel.openModal(
-                                com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(
-                                    com.example.ui.components.SettingsScreen.API_KEY
-                                )
-                            )
-                        },
-                        onEndSession = { davidViewModel.endDavidLiveSession() },
-                        displayMode = liveDisplayMode,
-                        onMinimize = { davidViewModel.minimizeDavidLive() },
-                        onExpand = { davidViewModel.expandDavidLive() },
-                        renderEmbeddedMinimizedCapsule = false
                     )
                 }
             }
