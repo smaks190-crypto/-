@@ -1008,7 +1008,7 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
 
     fun endDavidLiveSession(soundManager: SoundManager? = null) {
         soundManager?.playClick()
-        val (turns, facts) = liveSessionController.endSession()
+        liveSessionController.endSession()
         DavidLiveAudioEngine.abandonAssistantAudioFocus(
             getApplication(),
             activeAssistantAudioFocusRequest
@@ -1016,7 +1016,6 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         activeAssistantAudioFocusRequest = null
         _isLiveOverlayVisible.value = false
         _isLiveSessionActive.value = false
-        processCompletedLiveSession(turns, facts, soundManager)
     }
 
     internal fun processCompletedLiveSession(
