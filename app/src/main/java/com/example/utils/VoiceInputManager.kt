@@ -367,19 +367,25 @@ class VoiceInputManager(context: Context) {
 
                                     // Если пользователь сделал паузу (~0.83 сек) или фраза длится > 12 сек:
                                     if (silenceFramesCount >= SILENCE_FRAMES_TO_SPLIT || totalFramesInChunk >= MAX_CHUNK_FRAMES) {
-                                        val liveTextSoFar = synchronized(pendingLiveTurnTranscript) {
-                                            sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
+                                        val pauseFlush = if (liveSetupCompleted.get()) {
+                                            tryConsumeLiveTranscriptOnPause(
+                                                forceFlushByMaxLength = totalFramesInChunk >= MAX_CHUNK_FRAMES,
+                                                minSpeechFramesMet = activeSpeechFrames >= MIN_SPEECH_FRAMES
+                                            )
+                                        } else {
+                                            PauseTranscriptFlushResult(
+                                                hasNonBlankLiveText = false,
+                                                readyToFlush = false,
+                                                flushedText = null
+                                            )
                                         }
-                                        if (liveSetupCompleted.get() && liveTextSoFar.isNotBlank()) {
-                                            if (containsSpokenAmount(liveTextSoFar) || totalFramesInChunk >= MAX_CHUNK_FRAMES) {
-                                                if (activeSpeechFrames >= MIN_SPEECH_FRAMES) {
+                                        if (liveSetupCompleted.get() && pauseFlush.hasNonBlankLiveText) {
+                                            if (pauseFlush.readyToFlush) {
+                                                if (pauseFlush.flushedText != null) {
                                                     liveTranscriptDebounceJob?.cancel()
-                                                    synchronized(pendingLiveTurnTranscript) {
-                                                        pendingLiveTurnTranscript.clear()
-                                                    }
                                                     hasReceivedLiveSttInCurrentUtterance.set(false)
-                                                    GlobalConsoleLogger.i("VOICE_LIVE", "Фраза распознана в Live STT по паузе: «$liveTextSoFar»")
-                                                    onChunkRecognized?.invoke(liveTextSoFar)
+                                                    GlobalConsoleLogger.i("VOICE_LIVE", "Фраза распознана в Live STT по паузе: «${pauseFlush.flushedText}»")
+                                                    onChunkRecognized?.invoke(pauseFlush.flushedText)
                                                 }
                                                 activeSpeechBuffer.reset()
                                                 activeSpeechFrames = 0
@@ -535,6 +541,40 @@ class VoiceInputManager(context: Context) {
      */
     internal fun processLiveServerMessageForTest(rawJson: String) {
         handleLiveServerJsonMessage(ws = null, rawJson = rawJson)
+    }
+
+    internal data class PauseTranscriptFlushResult(
+        val hasNonBlankLiveText: Boolean,
+        val readyToFlush: Boolean,
+        val flushedText: String?
+    )
+
+    /**
+     * Атомарно проверяет и очищает буфер накопленной фразы внутри одного synchronized-блока,
+     * исключая потерю символов, пришедших по WebSocket между чтением и очисткой.
+     */
+    internal fun tryConsumeLiveTranscriptOnPause(
+        forceFlushByMaxLength: Boolean,
+        minSpeechFramesMet: Boolean
+    ): PauseTranscriptFlushResult {
+        return synchronized(pendingLiveTurnTranscript) {
+            val text = sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
+            val hasText = text.isNotBlank()
+            if (hasText && (containsSpokenAmount(text) || forceFlushByMaxLength)) {
+                pendingLiveTurnTranscript.clear()
+                PauseTranscriptFlushResult(
+                    hasNonBlankLiveText = true,
+                    readyToFlush = true,
+                    flushedText = if (minSpeechFramesMet) text else null
+                )
+            } else {
+                PauseTranscriptFlushResult(
+                    hasNonBlankLiveText = hasText,
+                    readyToFlush = false,
+                    flushedText = null
+                )
+            }
+        }
     }
 
     private fun flushCompletedLiveTurnTranscript() {

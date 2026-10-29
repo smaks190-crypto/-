@@ -200,6 +200,149 @@ class DavidLiveUnitTest {
         assertFalse(VoiceInputManager.containsSpokenAmount("Вкусно и точка"))
         assertTrue(VoiceInputManager.containsSpokenAmount("Вкусно и точка 1000 рублей"))
         assertTrue(VoiceInputManager.containsSpokenAmount("Такси пятьсот рублей"))
+
+        // Проверка атомарного чтения и очистки буфера на паузе (tryConsumeLiveTranscriptOnPause):
+        // 1) Пока сумма не названа («Вкусно и точка»), короткая пауза НЕ очищает буфер
+        voiceManager.processLiveServerMessageForTest(
+            """{"serverContent":{"inputTranscription":{"text":"Вкусно и точка "}}}"""
+        )
+        val pauseWithoutAmount = voiceManager.tryConsumeLiveTranscriptOnPause(
+            forceFlushByMaxLength = false,
+            minSpeechFramesMet = true
+        )
+        assertTrue(pauseWithoutAmount.hasNonBlankLiveText)
+        assertFalse(pauseWithoutAmount.readyToFlush)
+        assertNull(pauseWithoutAmount.flushedText)
+
+        // 2) Когда договорена сумма («1000 рублей»), пауза атомарно возвращает всю фразу и очищает буфер в одном synchronized-блоке
+        voiceManager.processLiveServerMessageForTest(
+            """{"serverContent":{"inputTranscription":{"text":"1000 рублей"}}}"""
+        )
+        val pauseWithAmount = voiceManager.tryConsumeLiveTranscriptOnPause(
+            forceFlushByMaxLength = false,
+            minSpeechFramesMet = true
+        )
+        assertTrue(pauseWithAmount.hasNonBlankLiveText)
+        assertTrue(pauseWithAmount.readyToFlush)
+        assertEquals("Вкусно и точка 1000 рублей", pauseWithAmount.flushedText)
+
+        // Повторный вызов сразу после очистки подтверждает, что буфер пуст
+        val afterFlush = voiceManager.tryConsumeLiveTranscriptOnPause(
+            forceFlushByMaxLength = false,
+            minSpeechFramesMet = true
+        )
+        assertFalse(afterFlush.hasNonBlankLiveText)
+        assertNull(afterFlush.flushedText)
+    }
+
+    @Test
+    fun `TransactionStateDelegate processes Live voice chunks strictly in FIFO order via sequential Channel queue`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val db = androidx.room.Room.inMemoryDatabaseBuilder(
+            context,
+            com.example.data.db.AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+
+        val delegateJob = kotlinx.coroutines.SupervisorJob()
+        val delegateScope = kotlinx.coroutines.CoroutineScope(
+            delegateJob + kotlinx.coroutines.Dispatchers.Default
+        )
+        try {
+            val repo = com.example.data.repository.BudgetRepository(
+                context = context,
+                budgetProfileDao = db.budgetProfileDao(),
+                transactionDao = db.transactionDao(),
+                goalDao = db.goalDao(),
+                categoryDao = db.categoryDao(),
+                aiAuditDao = db.aiAuditDao(),
+                accountDao = db.accountDao(),
+                notificationDao = db.notificationDao(),
+                db = db
+            )
+            val voiceManager = VoiceInputManager(context)
+            val parsedOpsFlow = kotlinx.coroutines.flow.MutableStateFlow<List<com.example.data.repository.ParsedVoiceOperation>?>(null)
+            val isAnalyzingFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
+            val isVoiceActiveFlow = kotlinx.coroutines.flow.MutableStateFlow(true)
+
+            val delegate = com.example.ui.viewmodel.TransactionStateDelegate(
+                context = context,
+                repository = repo,
+                scope = delegateScope,
+                selectedBudgetId = kotlinx.coroutines.flow.MutableStateFlow("default"),
+                apiKey = kotlinx.coroutines.flow.MutableStateFlow("AIzaSyTestKey1234567890"),
+                selectedDateDay = kotlinx.coroutines.flow.MutableStateFlow("2026-10-29"),
+                toastMessage = kotlinx.coroutines.flow.MutableSharedFlow(extraBufferCapacity = 8),
+                isGeneratingReaction = kotlinx.coroutines.flow.MutableStateFlow(false),
+                isAnalyzingVoice = isAnalyzingFlow,
+                voiceErrorMessage = kotlinx.coroutines.flow.MutableStateFlow(null),
+                parsedVoiceOperations = parsedOpsFlow,
+                completedGoalEvent = kotlinx.coroutines.flow.MutableStateFlow(null),
+                transactions = kotlinx.coroutines.flow.MutableStateFlow(emptyList()),
+                accounts = kotlinx.coroutines.flow.MutableStateFlow(emptyList()),
+                goals = kotlinx.coroutines.flow.MutableStateFlow(emptyList()),
+                categories = kotlinx.coroutines.flow.MutableStateFlow(emptyList()),
+                voiceInputManager = voiceManager,
+                isVoiceActive = isVoiceActiveFlow,
+                manualText = kotlinx.coroutines.flow.MutableStateFlow(""),
+                aiAuditResult = kotlinx.coroutines.flow.MutableStateFlow(null),
+                aiAuditLoading = kotlinx.coroutines.flow.MutableStateFlow(false),
+                getSavedApiKey = { "AIzaSyTestKey1234567890" }
+            )
+
+            // Первая фраза («Кофе 300») обрабатывается дольше (120 мс), чем вторая («Такси 500», 10 мс).
+            // Последовательная очередь Channel обязана сохранить строгий порядок произнесения: сначала Кофе 300, затем Такси 500.
+            delegate.voiceTextParserOverride = { text ->
+                if (text.contains("Кофе")) {
+                    kotlinx.coroutines.delay(120L)
+                    listOf(
+                        com.example.data.repository.ParsedVoiceOperation(
+                            title = "Кофе",
+                            type = "expense",
+                            amount = 300.0,
+                            category = "Кафе",
+                            subcategory = "Кофе",
+                            date = "2026-10-29"
+                        )
+                    )
+                } else {
+                    kotlinx.coroutines.delay(10L)
+                    listOf(
+                        com.example.data.repository.ParsedVoiceOperation(
+                            title = "Такси",
+                            type = "expense",
+                            amount = 500.0,
+                            category = "Транспорт",
+                            subcategory = "Такси",
+                            date = "2026-10-29"
+                        )
+                    )
+                }
+            }
+
+            delegate.processLiveTextChunk("Кофе 300", isFinalFlush = false)
+            delegate.processLiveTextChunk("Такси 500", isFinalFlush = true)
+
+            // Ждём завершения очереди
+            var waitedMs = 0L
+            while (isAnalyzingFlow.value && waitedMs < 2000L) {
+                kotlinx.coroutines.delay(20L)
+                waitedMs += 20L
+            }
+
+            val finalOps = parsedOpsFlow.value
+            assertNotNull(finalOps)
+            assertEquals(2, finalOps!!.size)
+            assertEquals("Кофе", finalOps[0].title)
+            assertEquals(300.0, finalOps[0].amount, 0.01)
+            assertEquals("Такси", finalOps[1].title)
+            assertEquals(500.0, finalOps[1].amount, 0.01)
+            assertFalse(isAnalyzingFlow.value)
+
+            delegate.clearParsedVoiceOperations()
+        } finally {
+            delegateJob.cancel()
+            db.close()
+        }
     }
 
     @Test

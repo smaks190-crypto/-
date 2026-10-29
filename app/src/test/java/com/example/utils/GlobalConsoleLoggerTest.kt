@@ -1104,5 +1104,62 @@ class GlobalConsoleLoggerTest {
             listOf("gemini-3.5-flash", "gemini-3.5-flash-lite"),
             attemptedModels
         )
+
+        // Дополнительный сценарий: первая модель возвращает HTTP 503, а все последующие возвращают HTTP 200 без JSON-массива.
+        // lastError обязан обновиться на «Ответ модели без JSON-массива» (не оставляя устаревший HTTP 503),
+        // а в логе должны быть зафиксированы записи EmptyResponse.
+        GlobalConsoleLogger.clear()
+        val nonJsonAttemptedModels = mutableListOf<String>()
+        val nonJsonApi = object : GeminiApiService {
+            override suspend fun generateContent(
+                model: String,
+                apiKey: String,
+                request: GeminiRequest
+            ): GeminiResponse {
+                nonJsonAttemptedModels.add(model)
+                if (model == "gemini-3.5-flash") {
+                    val body = okhttp3.ResponseBody.create(null, error503Json)
+                    throw retrofit2.HttpException(retrofit2.Response.error<GeminiResponse>(503, body))
+                }
+                return GeminiResponse(
+                    candidates = listOf(
+                        GeminiCandidate(
+                            content = GeminiContent(
+                                parts = listOf(GeminiPart(text = "Извините, не понял операцию"))
+                            )
+                        )
+                    )
+                )
+            }
+
+            override suspend fun streamGenerateContent(
+                model: String,
+                apiKey: String,
+                alt: String,
+                request: GeminiRequest
+            ): Response<ResponseBody> = throw UnsupportedOperationException()
+        }
+
+        var thrownError: IllegalStateException? = null
+        try {
+            com.example.data.repository.BudgetRepository.executeVoiceTextParsingWithFallback(
+                apiService = nonJsonApi,
+                cleanKey = "AIzaSyValidKey1234567890",
+                request = sampleRequest,
+                todayStr = "2026-10-29",
+                opId = "VOICE-TXT-NONJSON"
+            )
+        } catch (e: IllegalStateException) {
+            thrownError = e
+        }
+
+        assertNotNull(thrownError)
+        assertEquals("Ответ модели без JSON-массива", thrownError?.message)
+        assertEquals(4, nonJsonAttemptedModels.size)
+        val logsSnapshot = GlobalConsoleLogger.logs.value
+        assertTrue(
+            "EmptyResponse must be recorded in GlobalConsoleLogger when HTTP 200 contains no JSON array",
+            logsSnapshot.any { it.message.contains("EmptyResponse") || it.message.contains("Ответ модели без JSON-массива") }
+        )
     }
 }

@@ -1703,23 +1703,39 @@ class BudgetRepository(
                     val response = apiService.generateContent(model, cleanKey, request)
                     if (response.error == null) {
                         val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                        if (!responseText.isNullOrEmpty()) {
-                            val jsonString = extractJsonArray(responseText)
-                            if (jsonString.isNotBlank()) {
-                                val parsed = parseJsonOperations(jsonString, todayStr)
-                                GlobalConsoleLogger.recordNetworkCall(
-                                    operationType = "Разбор голоса (Текст)",
-                                    modelName = model,
-                                    durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
-                                    status = NetworkCallStatus.SUCCESS,
-                                    httpCode = 200,
-                                    attemptNumber = attempt,
-                                    totalModelsInChain = modelsToTry.size,
-                                    details = "распознано=${parsed.size} шт.",
-                                    operationId = opId
-                                )
-                                return parsed
+                        val jsonString = if (!responseText.isNullOrEmpty()) extractJsonArray(responseText) else ""
+                        if (jsonString.isNotBlank()) {
+                            val parsed = parseJsonOperations(jsonString, todayStr)
+                            GlobalConsoleLogger.recordNetworkCall(
+                                operationType = "Разбор голоса (Текст)",
+                                modelName = model,
+                                durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
+                                status = NetworkCallStatus.SUCCESS,
+                                httpCode = 200,
+                                attemptNumber = attempt,
+                                totalModelsInChain = modelsToTry.size,
+                                details = "распознано=${parsed.size} шт.",
+                                operationId = opId
+                            )
+                            return parsed
+                        } else {
+                            lastError = if (responseText.isNullOrEmpty()) {
+                                "Пустой ответ модели"
+                            } else {
+                                "Ответ модели без JSON-массива"
                             }
+                            GlobalConsoleLogger.recordNetworkCall(
+                                operationType = "Разбор голоса (Текст)",
+                                modelName = model,
+                                durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
+                                status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                                httpCode = 200,
+                                errorType = "EmptyResponse",
+                                errorMessage = lastError,
+                                attemptNumber = attempt,
+                                totalModelsInChain = modelsToTry.size,
+                                operationId = opId
+                            )
                         }
                     } else {
                         lastError = response.error.message
@@ -1924,23 +1940,40 @@ class BudgetRepository(
                 val response = apiService.generateContent(model, cleanKey, request)
                 if (response.error == null) {
                     val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                    if (!responseText.isNullOrEmpty()) {
-                        val jsonString = extractJsonArray(responseText)
-                        if (jsonString.isNotBlank()) {
-                            val parsed = parseJsonOperations(jsonString, todayStr)
-                            GlobalConsoleLogger.recordNetworkCall(
-                                operationType = "Gemini Live Аудио (WAV)",
-                                modelName = model,
-                                durationMs = System.currentTimeMillis() - startMs,
-                                status = NetworkCallStatus.SUCCESS,
-                                httpCode = 200,
-                                attemptNumber = attempt,
-                                totalModelsInChain = modelsToTry.size,
-                                details = "bytes=${audioBytes.size} | распознано=${parsed.size}",
-                                operationId = opId
-                            )
-                            return@withContext parsed
+                    val jsonString = if (!responseText.isNullOrEmpty()) extractJsonArray(responseText) else ""
+                    if (jsonString.isNotBlank()) {
+                        val parsed = parseJsonOperations(jsonString, todayStr)
+                        GlobalConsoleLogger.recordNetworkCall(
+                            operationType = "Gemini Live Аудио (WAV)",
+                            modelName = model,
+                            durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
+                            status = NetworkCallStatus.SUCCESS,
+                            httpCode = 200,
+                            attemptNumber = attempt,
+                            totalModelsInChain = modelsToTry.size,
+                            details = "bytes=${audioBytes.size} | распознано=${parsed.size}",
+                            operationId = opId
+                        )
+                        return@withContext parsed
+                    } else {
+                        lastError = if (responseText.isNullOrEmpty()) {
+                            "Пустой ответ модели"
+                        } else {
+                            "Ответ модели без JSON-массива"
                         }
+                        GlobalConsoleLogger.recordNetworkCall(
+                            operationType = "Gemini Live Аудио (WAV)",
+                            modelName = model,
+                            durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
+                            status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                            httpCode = 200,
+                            errorType = "EmptyResponse",
+                            errorMessage = lastError,
+                            attemptNumber = attempt,
+                            totalModelsInChain = modelsToTry.size,
+                            details = "bytes=${audioBytes.size}",
+                            operationId = opId
+                        )
                     }
                 } else {
                     lastError = response.error.message
