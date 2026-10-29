@@ -322,128 +322,50 @@ class DavidLiveSessionController(
             return
         }
 
-        // 1. Setup Complete
         if (root.has("setupComplete")) {
             setupCompleted.set(true)
             _connectionState.value = DavidLiveConnectionState.LISTENING
             _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Говорите, я слушаю..."
-            if (ws != null) {
-                startAudioStreaming(ws)
-            }
+            if (ws != null) startAudioStreaming(ws)
             return
         }
 
-        // Text-only mode: ignore model tool calls; this session is for transcription only.
+        // This session is a speech-to-text recorder, not a conversational assistant.
+        // Ignore tool calls and all model-generated content.
         if (root.has("toolCall")) return
 
-        // 3. Server Content (Audio, Transcriptions, Interruption, Turn Complete)
         val serverContent = root.optJSONObject("serverContent") ?: return
 
         if (serverContent.optBoolean("interrupted", false)) {
             audioEngine.clearModelPlaybackQueue()
-            flushPendingTranscripts()
+            if (pendingUserTranscript.isNotEmpty()) {
+                recordTranscriptTurn(DavidLiveSpeaker.USER, pendingUserTranscript.toString())
+                pendingUserTranscript.clear()
+            }
             _connectionState.value = DavidLiveConnectionState.LISTENING
-            _liveSubtitle.value = "Слушаю вас..."
+            _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Говорите, я слушаю..."
             return
         }
 
-        // User's live speech transcription
         val inputTranscription = serverContent.optJSONObject("inputTranscription")
             ?.optString("text")
             ?.takeIf { it.isNotBlank() }
+
         if (inputTranscription != null) {
-            if (pendingDavidTranscript.isNotEmpty()) {
-                recordTranscriptTurn(DavidLiveSpeaker.DAVID, pendingDavidTranscript.toString())
-                pendingDavidTranscript.clear()
-            }
             pendingUserTranscript.append(inputTranscription)
-            val cleanedUserText = sanitizeSpokenSubtitle(pendingUserTranscript.toString())
-            if (cleanedUserText.isNotBlank()) {
-                _liveSubtitle.value = cleanedUserText
+            val cleanedText = sanitizeSpokenSubtitle(pendingUserTranscript.toString())
+            if (cleanedText.isNotBlank()) {
+                _liveSubtitle.value = cleanedText
             }
         }
 
-        // Text-only mode: never display or play model output. Preserve only the recognized user text.
         if (serverContent.optBoolean("turnComplete", false)) {
             if (pendingUserTranscript.isNotEmpty()) {
                 recordTranscriptTurn(DavidLiveSpeaker.USER, pendingUserTranscript.toString())
                 pendingUserTranscript.clear()
             }
             _connectionState.value = DavidLiveConnectionState.LISTENING
-            if (!_isMicMuted.value) _liveSubtitle.value = "Говорите, я слушаю..."
-        }
-        return
-
-        // David's actual spoken voice transcription (outputTranscription)
-        val outputTranscription = serverContent.optJSONObject("outputTranscription")
-            ?.optString("text")
-            ?.takeIf { it.isNotBlank() }
-        if (outputTranscription != null) {
-            if (pendingUserTranscript.isNotEmpty()) {
-                recordTranscriptTurn(DavidLiveSpeaker.USER, pendingUserTranscript.toString())
-                pendingUserTranscript.clear()
-            }
-            pendingDavidTranscript.append(outputTranscription)
-            _connectionState.value = DavidLiveConnectionState.DAVID_SPEAKING
-            val cleanedDavidText = sanitizeSpokenSubtitle(pendingDavidTranscript.toString())
-            if (cleanedDavidText.isNotBlank()) {
-                _liveSubtitle.value = cleanedDavidText
-            }
-        }
-
-        val modelTurn = serverContent.optJSONObject("modelTurn")
-        val parts = modelTurn?.optJSONArray("parts")
-        if (parts != null) {
-            for (i in 0 until parts.length()) {
-                val part = parts.optJSONObject(i) ?: continue
-
-                // IMPORTANT: Native audio thinking models (like gemini-2.5-flash-native-audio-preview)
-                // send internal Chain-of-Thought reasoning in `modelTurn.parts[i].text` (often with `"thought": true`
-                // or English markdown headers like `**Crafting The Greeting**\nI'm working on...`),
-                // while the real Russian spoken response arrives via `serverContent.outputTranscription`.
-                // We must NEVER display internal thought parts in the user's subtitle bubble!
-                val isThoughtPart = isInternalThoughtPart(part)
-                val textPart = part.optString("text").takeIf { it.isNotBlank() }
-                if (!isThoughtPart && textPart != null && outputTranscription == null && ! part.has("inlineData")) {
-                    val cleanedPart = sanitizeSpokenSubtitle(textPart)
-                    if (cleanedPart.isNotBlank()) {
-                        pendingDavidTranscript.append(cleanedPart)
-                        _liveSubtitle.value = sanitizeSpokenSubtitle(pendingDavidTranscript.toString())
-                    }
-                }
-
-                val inlineData = part.optJSONObject("inlineData")
-                if (inlineData != null) {
-                    val mimeType = inlineData.optString("mimeType")
-                    val b64Data = inlineData.optString("data")
-                    if (mimeType.startsWith("audio/pcm") && b64Data.isNotBlank()) {
-                        val pcmBytes = try {
-                            Base64.decode(b64Data, Base64.DEFAULT)
-                        } catch (_: Exception) {
-                            null
-                        }
-                        if (pcmBytes != null && pcmBytes.isNotEmpty()) {
-                            if (pendingUserTranscript.isNotEmpty()) {
-                                recordTranscriptTurn(DavidLiveSpeaker.USER, pendingUserTranscript.toString())
-                                pendingUserTranscript.clear()
-                            }
-                            _connectionState.value = DavidLiveConnectionState.DAVID_SPEAKING
-                            if (pendingDavidTranscript.isEmpty()) {
-                                _liveSubtitle.value = "Давид отвечает..."
-                            }
-                            audioEngine.enqueueModelAudioPcm24k(pcmBytes)
-                        }
-                    }
-                }
-            }
-        }
-
-        if (serverContent.optBoolean("turnComplete", false)) {
-            flushPendingTranscripts()
-            _connectionState.value = DavidLiveConnectionState.LISTENING
-            if (!_isMicMuted.value && _liveSubtitle.value.isBlank()) {
-                _liveSubtitle.value = "Говорите, я слушаю..."
-            }
+            _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Говорите, я слушаю..."
         }
     }
 
