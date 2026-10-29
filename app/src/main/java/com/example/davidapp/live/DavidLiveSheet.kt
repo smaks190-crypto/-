@@ -636,7 +636,7 @@ fun DavidLiveSheet(
     val backdropAlpha = ((expandProgress - 0.08f) / 0.92f).coerceIn(0f, 1f)
     val topHeaderAlpha = ((expandProgress - 0.55f) / 0.45f).coerceIn(0f, 1f)
     val circularAlpha = ((expandProgress - 0.42f) / 0.42f).coerceIn(0f, 1f)
-    val circularScale = lerp(0.54f, 1f, ((expandProgress - 0.35f) / 0.65f).coerceIn(0f, 1f))
+    val circularScale = 0.54f + (1f - 0.54f) * ((expandProgress - 0.35f) / 0.65f).coerceIn(0f, 1f)
 
     // Intermediate horizontal wave stage (Steps 3, 4, 9) visible while morphing between circle and capsule
     val intermediateWaveAlpha = when {

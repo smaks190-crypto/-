@@ -407,7 +407,7 @@ fun DavidChatScreen(
                     onClick = {
                         viewModel.saveApiKeyFromChat(keyText, effectiveSoundManager)
                         showApiKeyDialog = false
-                        if (isLiveOverlayVisible && keyText.trim().isNotBlank()) {
+                        if (liveDisplayMode != DavidLiveDisplayMode.HIDDEN && keyText.trim().isNotBlank()) {
                             viewModel.startDavidLive(effectiveSoundManager)
                         }
                     },
