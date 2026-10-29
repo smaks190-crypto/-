@@ -1,9 +1,14 @@
 package com.example.davidapp
 
 import android.app.Application
+import android.content.Context
+import android.content.SharedPreferences
 import android.media.AudioFocusRequest
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
+import com.example.data.api.GeminiModelConfig
 import com.example.data.api.RetrofitClient
 import com.example.data.db.AppDatabase
 import com.example.data.db.NotificationEntity
@@ -107,6 +112,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     val isLiveMicMuted: StateFlow<Boolean> = liveSessionController.isMicMuted
     val liveErrorMessage: StateFlow<String?> = liveSessionController.errorMessage
 
+    private val prefs: SharedPreferences =
+        application.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
+    private val securePrefs: SharedPreferences = createSecurePrefs(application)
+
     private var currentBudgetId: String = "default"
     private var currentProfileName: String = "Максим"
     private var currentApiKey: String = ""
@@ -118,14 +127,26 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val isoFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
+    init {
+        val migratedKey = resolveAndMigrateApiKey(
+            legacyPrefs = prefs,
+            securePrefs = securePrefs
+        )
+        if (migratedKey.isNotBlank()) {
+            currentApiKey = migratedKey
+            _hasApiKey.value = true
+        }
+    }
+
     fun bindProfile(budgetId: String, profileName: String, apiKey: String) {
         val isDifferentBudget = budgetId != currentBudgetId || profileName != currentProfileName
         currentBudgetId = budgetId
         currentProfileName = if (profileName.isNotBlank()) profileName else "Пользователь"
         liveFinancialToolsProvider.setBudgetId(currentBudgetId)
-        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-        val effectiveKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            apiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        val effectiveKey = resolveAndMigrateApiKey(
+            legacyPrefs = prefs,
+            securePrefs = securePrefs,
+            explicitKey = apiKey
         )
         currentApiKey = effectiveKey
         _hasApiKey.value = effectiveKey.isNotBlank()
@@ -138,9 +159,11 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveApiKeyFromChat(newKey: String, soundManager: SoundManager? = null) {
-        val clean = com.example.data.api.GeminiModelConfig.sanitizeApiKey(newKey)
-        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-        prefs.edit().putString("gemini_api_key", clean).putBoolean("gemini_consent_given", true).apply()
+        val clean = saveSanitizedApiKey(
+            legacyPrefs = prefs,
+            securePrefs = securePrefs,
+            newKey = newKey
+        )
         currentApiKey = clean
         _hasApiKey.value = clean.isNotBlank()
         soundManager?.playReceive()
@@ -971,8 +994,16 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             activeAssistantAudioFocusRequest =
                 DavidLiveAudioEngine.requestAssistantAudioFocus(getApplication())
         }
-        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-        val userKey = currentApiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        val userKey = GeminiModelConfig.sanitizeApiKey(
+            currentApiKey.ifBlank {
+                resolveAndMigrateApiKey(
+                    legacyPrefs = prefs,
+                    securePrefs = securePrefs
+                )
+            }
+        )
+        currentApiKey = userKey
+        _hasApiKey.value = userKey.isNotBlank()
         liveSessionController.startSession(userKey)
         _isLiveOverlayVisible.value = true
         _isLiveSessionActive.value = true
@@ -1081,8 +1112,16 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         soundManager: SoundManager?
     ) {
         viewModelScope.launch {
-            val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-            val userKey = currentApiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+            val userKey = GeminiModelConfig.sanitizeApiKey(
+                currentApiKey.ifBlank {
+                    resolveAndMigrateApiKey(
+                        legacyPrefs = prefs,
+                        securePrefs = securePrefs
+                    )
+                }
+            )
+            currentApiKey = userKey
+            _hasApiKey.value = userKey.isNotBlank()
 
             val outcome = liveSummaryGenerator.generateSummary(
                 userApiKey = userKey,
@@ -1138,6 +1177,76 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             activeAssistantAudioFocusRequest = null
             liveSessionController.endSession()
         } catch (_: Exception) {
+        }
+    }
+
+    companion object {
+        internal const val LEGACY_PREFS_NAME = "budget_prefs"
+        internal const val SECURE_PREFS_NAME = "secure_prefs"
+        internal const val KEY_GEMINI_API = "gemini_api_key"
+        internal const val KEY_GEMINI_CONSENT = "gemini_consent_given"
+
+        internal fun createSecurePrefs(context: Context): SharedPreferences {
+            return try {
+                val masterKey = MasterKey.Builder(context)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+                EncryptedSharedPreferences.create(
+                    context,
+                    SECURE_PREFS_NAME,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            } catch (_: Throwable) {
+                context.getSharedPreferences(SECURE_PREFS_NAME, Context.MODE_PRIVATE)
+            }
+        }
+
+        /**
+         * Мигрирует `gemini_api_key` из открытого `budget_prefs` в зашифрованный `secure_prefs`,
+         * удаляет ключ из `budget_prefs` и возвращает санитизированный через `GeminiModelConfig.sanitizeApiKey` ключ.
+         */
+        internal fun resolveAndMigrateApiKey(
+            legacyPrefs: SharedPreferences,
+            securePrefs: SharedPreferences,
+            explicitKey: String = ""
+        ): String {
+            if (legacyPrefs.contains(KEY_GEMINI_API)) {
+                val rawLegacy = legacyPrefs.getString(KEY_GEMINI_API, null)
+                val sanitizedLegacy = GeminiModelConfig.sanitizeApiKey(rawLegacy)
+                if (sanitizedLegacy.isNotBlank()) {
+                    securePrefs.edit().putString(KEY_GEMINI_API, sanitizedLegacy).apply()
+                }
+                legacyPrefs.edit().remove(KEY_GEMINI_API).apply()
+            }
+
+            val cleanExplicit = GeminiModelConfig.sanitizeApiKey(explicitKey)
+            if (cleanExplicit.isNotBlank()) {
+                return cleanExplicit
+            }
+
+            return GeminiModelConfig.sanitizeApiKey(
+                securePrefs.getString(KEY_GEMINI_API, "")
+            )
+        }
+
+        /**
+         * Сохраняет санитизированный `gemini_api_key` исключительно в `secure_prefs`,
+         * удаляя любые следы ключа из открытого `budget_prefs`.
+         */
+        internal fun saveSanitizedApiKey(
+            legacyPrefs: SharedPreferences,
+            securePrefs: SharedPreferences,
+            newKey: String
+        ): String {
+            val clean = GeminiModelConfig.sanitizeApiKey(newKey)
+            securePrefs.edit().putString(KEY_GEMINI_API, clean).apply()
+            legacyPrefs.edit()
+                .remove(KEY_GEMINI_API)
+                .putBoolean(KEY_GEMINI_CONSENT, true)
+                .apply()
+            return clean
         }
     }
 }

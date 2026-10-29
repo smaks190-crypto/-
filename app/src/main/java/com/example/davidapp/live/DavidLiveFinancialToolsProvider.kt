@@ -1,5 +1,6 @@
 package com.example.davidapp.live
 
+import android.os.Build
 import com.example.data.db.AccountDao
 import com.example.data.db.CategoryDao
 import com.example.data.db.GoalDao
@@ -8,10 +9,10 @@ import com.example.data.db.TransactionEntity
 import kotlinx.coroutines.flow.firstOrNull
 import org.json.JSONArray
 import org.json.JSONObject
-import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -210,13 +211,9 @@ class DavidLiveFinancialToolsProvider(
         return result
     }
 
-    private fun parseTransactionMillis(tx: TransactionEntity): Long {
+    internal fun parseTransactionMillis(tx: TransactionEntity): Long {
         if (tx.createdAt > 0L) return tx.createdAt
-        return try {
-            SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(tx.date)?.time ?: 0L
-        } catch (_: Exception) {
-            0L
-        }
+        return parseIsoDateToMillis(tx.date)
     }
 
     private suspend fun queryFinancialOverview(): JSONObject {
@@ -464,5 +461,49 @@ class DavidLiveFinancialToolsProvider(
         const val TOOL_GOALS_AND_DEBTS = "get_goals_and_debts"
         const val TOOL_COMPARE_PERIODS = "compare_spending_periods"
         const val TOOL_RECENT_TRANSACTIONS = "get_recent_transactions"
+
+        /**
+         * Потокобезопасный статический парсер дат формата `YYYY-MM-DD` без аллокаций `SimpleDateFormat` в циклах.
+         */
+        @JvmStatic
+        internal fun parseIsoDateToMillis(dateStr: String): Long {
+            val trimmed = dateStr.trim()
+            if (trimmed.length < 10) return 0L
+            val isoPart = if (trimmed.length == 10) trimmed else trimmed.substring(0, 10)
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    LocalDate.parse(isoPart, DateTimeFormatter.ISO_LOCAL_DATE)
+                        .atStartOfDay(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli()
+                } else {
+                    parseYyyyMmDdStrictFallback(isoPart)
+                }
+            } catch (_: Exception) {
+                parseYyyyMmDdStrictFallback(isoPart)
+            }
+        }
+
+        private fun parseYyyyMmDdStrictFallback(isoPart: String): Long {
+            if (isoPart.length != 10 || isoPart[4] != '-' || isoPart[7] != '-') return 0L
+            return try {
+                val year = isoPart.substring(0, 4).toInt()
+                val month = isoPart.substring(5, 7).toInt()
+                val day = isoPart.substring(8, 10).toInt()
+                if (year !in 1970..2100 || month !in 1..12 || day !in 1..31) return 0L
+                Calendar.getInstance().apply {
+                    isLenient = false
+                    set(Calendar.YEAR, year)
+                    set(Calendar.MONTH, month - 1)
+                    set(Calendar.DAY_OF_MONTH, day)
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            } catch (_: Exception) {
+                0L
+            }
+        }
     }
 }

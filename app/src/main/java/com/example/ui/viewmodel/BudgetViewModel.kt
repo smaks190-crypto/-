@@ -259,9 +259,13 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         // One-time migration of legacy API key to EncryptedSharedPreferences
-        val oldKey = prefs.getString("gemini_api_key", null)
-        if (!oldKey.isNullOrEmpty()) {
-            securePrefs.edit().putString("gemini_api_key", oldKey).apply()
+        if (prefs.contains("gemini_api_key")) {
+            val oldKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
+                prefs.getString("gemini_api_key", null)
+            )
+            if (oldKey.isNotEmpty()) {
+                securePrefs.edit().putString("gemini_api_key", oldKey).apply()
+            }
             prefs.edit().remove("gemini_api_key").apply()
         }
 

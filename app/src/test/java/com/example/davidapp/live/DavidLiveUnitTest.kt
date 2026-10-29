@@ -641,6 +641,148 @@ class DavidLiveUnitTest {
         assertTrue("Regular voice input must be allowed again after David Live ends", controller.canStartRegularVoiceInput())
     }
 
+    @Test
+    fun `DavidViewModel migrates gemini_api_key from budget_prefs to secure_prefs and removes plaintext key`() {
+        val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val legacyPrefs = context.getSharedPreferences(
+            com.example.davidapp.DavidViewModel.LEGACY_PREFS_NAME,
+            android.content.Context.MODE_PRIVATE
+        )
+        val securePrefs = com.example.davidapp.DavidViewModel.createSecurePrefs(context)
+
+        legacyPrefs.edit().clear().commit()
+        securePrefs.edit().clear().commit()
+
+        // 1. Записываем несанитизированный ключ в старый незашифрованный budget_prefs
+        legacyPrefs.edit()
+            .putString("gemini_api_key", "  \"AIzaSyLegacyMigratedKey123456789\" \n ")
+            .commit()
+        assertTrue(legacyPrefs.contains("gemini_api_key"))
+
+        // 2. Вызываем миграцию — ключ должен быть очищен через sanitizeApiKey, перенесён в secure_prefs и удалён из budget_prefs
+        val migrated = com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = securePrefs
+        )
+        assertEquals("AIzaSyLegacyMigratedKey123456789", migrated)
+        assertFalse(
+            "Plaintext budget_prefs must not retain gemini_api_key after migration",
+            legacyPrefs.contains("gemini_api_key")
+        )
+        assertNull(legacyPrefs.getString("gemini_api_key", null))
+        assertEquals(
+            "AIzaSyLegacyMigratedKey123456789",
+            securePrefs.getString("gemini_api_key", null)
+        )
+
+        // 3. Сохранение нового ключа из чата пишет строго в secure_prefs и не оставляет следов в budget_prefs
+        val savedFromChat = com.example.davidapp.DavidViewModel.saveSanitizedApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = securePrefs,
+            newKey = " 'AIzaSyNewChatSecretKey987654321' "
+        )
+        assertEquals("AIzaSyNewChatSecretKey987654321", savedFromChat)
+        assertFalse(
+            "saveSanitizedApiKey must never store gemini_api_key in budget_prefs",
+            legacyPrefs.contains("gemini_api_key")
+        )
+        assertTrue(legacyPrefs.getBoolean("gemini_consent_given", false))
+        assertEquals(
+            "AIzaSyNewChatSecretKey987654321",
+            securePrefs.getString("gemini_api_key", null)
+        )
+    }
+
+    @Test
+    fun `DavidLiveFinancialToolsProvider parses transaction ISO dates accurately without SimpleDateFormat allocations`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+
+        // 1. Если задан createdAt > 0, возвращается точный timestamp создания
+        val txWithCreatedAt = TransactionEntity(
+            id = "tx_created",
+            budgetId = "default",
+            type = "expense",
+            date = "2026-10-29",
+            category = "Кафе",
+            subcategory = "Кофе",
+            amount = 350.0,
+            createdAt = 1761740000123L
+        )
+        assertEquals(1761740000123L, provider.parseTransactionMillis(txWithCreatedAt))
+
+        // 2. Если createdAt == 0, парсится ISO дата YYYY-MM-DD в полночь системной таймзоны
+        val txIsoOnly = TransactionEntity(
+            id = "tx_iso",
+            budgetId = "default",
+            type = "expense",
+            date = "2026-10-29",
+            category = "Продукты",
+            subcategory = "Супермаркет",
+            amount = 1500.0,
+            createdAt = 0L
+        )
+        val expectedMillis = java.time.LocalDate.of(2026, 10, 29)
+            .atStartOfDay(java.time.ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        assertEquals(expectedMillis, provider.parseTransactionMillis(txIsoOnly))
+
+        // 3. Проверка хронологического порядка и некорректных дат
+        val earlierMillis = DavidLiveFinancialToolsProvider.parseIsoDateToMillis("2026-10-01")
+        val laterMillis = DavidLiveFinancialToolsProvider.parseIsoDateToMillis("2026-10-29")
+        assertTrue(laterMillis > earlierMillis)
+        assertEquals(0L, DavidLiveFinancialToolsProvider.parseIsoDateToMillis(""))
+        assertEquals(0L, DavidLiveFinancialToolsProvider.parseIsoDateToMillis("invalid-date"))
+        assertEquals(0L, DavidLiveFinancialToolsProvider.parseIsoDateToMillis("2026-02-30"))
+    }
+
+    @Test
+    fun `audio engine clearModelPlaybackQueue increments generation and suppresses tail echo while AvatarCropDialog scales non-square bitmaps`() {
+        val engine = DavidLiveAudioEngine()
+        val initialGen = engine.getPlaybackGenerationForTest()
+        val beforeMs = System.currentTimeMillis()
+        engine.clearModelPlaybackQueue()
+        assertEquals(initialGen + 1, engine.getPlaybackGenerationForTest())
+        assertTrue(engine.getBargeInEchoSuppressUntilMsForTest() >= beforeMs + DavidLiveAudioEngine.BARGE_IN_TAIL_ECHO_SUPPRESS_MS)
+        // Тихий остаточный хвост из динамика подавляется, а громкая речь пользователя — пропускается
+        assertTrue(engine.shouldSuppressTailEchoFrame(rms = 0.02f, nowMs = beforeMs + 50L))
+        assertFalse(engine.shouldSuppressTailEchoFrame(rms = 0.12f, nowMs = beforeMs + 50L))
+
+        // Проверка minScale для квадратных, узких вертикальных и панорамных изображений в AvatarCropDialog
+        val squareMinScale = com.example.ui.components.calculateAvatarMinScale(
+            bitmapWidth = 1000,
+            bitmapHeight = 1000,
+            containerSizePx = 300f,
+            viewportSizePx = 240f
+        )
+        assertEquals(1f, squareMinScale, 0.001f)
+
+        // Панорамное изображение 2000x500 (соотношение 4:1): при вписывании в 300px высота равна 75px,
+        // поэтому для покрытия круга 240px требуется minScale = 240 / 75 = 3.2f
+        val panoramaMinScale = com.example.ui.components.calculateAvatarMinScale(
+            bitmapWidth = 2000,
+            bitmapHeight = 500,
+            containerSizePx = 300f,
+            viewportSizePx = 240f
+        )
+        assertEquals(3.2f, panoramaMinScale, 0.001f)
+
+        // Узкое вертикальное изображение 500x1500 (соотношение 1:3): ширина при вписывании 100px -> minScale = 240 / 100 = 2.4f
+        val narrowMinScale = com.example.ui.components.calculateAvatarMinScale(
+            bitmapWidth = 500,
+            bitmapHeight = 1500,
+            containerSizePx = 300f,
+            viewportSizePx = 240f
+        )
+        assertEquals(2.4f, narrowMinScale, 0.001f)
+    }
+
     private fun createReadOnlyTransactionDao(items: List<TransactionEntity>) = object : TransactionDao {
         override fun getAllTransactions(): Flow<List<TransactionEntity>> = flowOf(items)
         override fun getTransactionsByBudgetId(budgetId: String): Flow<List<TransactionEntity>> =
