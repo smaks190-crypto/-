@@ -293,17 +293,11 @@ class DavidLiveSessionController(
         )
     }
 
+    /**
+     * Text-only transcription mode: stream microphone audio to Gemini Live for input
+     * transcription, but do not request or play spoken assistant responses.
+     */
     private fun buildSetupMessageJson(modelName: String): JSONObject {
-        val systemPrompt = """
-            Ты — Давид Жабов 🐸, харизматичный, ироничный и острый на ум ИИ-аудитор личных финансов в приложении David Finance AI.
-            Сейчас ты работаешь в голосовом режиме реального времени David Live.
-            Правила общения в David Live:
-            1. Всегда говори и отвечай ТОЛЬКО на русском языке. Отвечай живо, естественно и лаконично (2–4 предложения за реплику).
-            2. Для любых вопросов про баланс, расходы, доходы, категории, бюджеты, цели, сравнение периодов или прогноз остатка бюджета ОБЯЗАТЕЛЬНО вызывай предоставленные инструменты (tools).
-            3. НИКОГДА не выдумывай суммы, категории, проценты или операции, которых нет в ответах инструментов. Если данных недостаточно — честно скажи об этом.
-            4. Ты работаешь строго в режиме чтения: никогда не утверждай, что ты сам создал, изменил или удалил финансовую операцию без подтверждения пользователя.
-        """.trimIndent()
-
         return JSONObject().apply {
             put(
                 "setup",
@@ -312,48 +306,10 @@ class DavidLiveSessionController(
                     put(
                         "generationConfig",
                         JSONObject().apply {
-                            put("responseModalities", JSONArray().put("AUDIO"))
-                            put(
-                                "speechConfig",
-                                JSONObject().apply {
-                                    put(
-                                        "voiceConfig",
-                                        JSONObject().apply {
-                                            put(
-                                                "prebuiltVoiceConfig",
-                                                JSONObject().apply {
-                                                    put("voiceName", "Aoede")
-                                                }
-                                            )
-                                        }
-                                    )
-                                }
-                            )
+                            put("responseModalities", JSONArray().put("TEXT"))
                         }
-                    )
-                    put(
-                        "systemInstruction",
-                        JSONObject().apply {
-                            put(
-                                "parts",
-                                JSONArray().put(
-                                    JSONObject().apply {
-                                        put("text", systemPrompt)
-                                    }
-                                )
-                            )
-                        }
-                    )
-                    put(
-                        "tools",
-                        JSONArray().put(
-                            JSONObject().apply {
-                                put("functionDeclarations", financialToolsProvider.buildFunctionDeclarationsJson())
-                            }
-                        )
                     )
                     put("inputAudioTranscription", JSONObject())
-                    put("outputAudioTranscription", JSONObject())
                 }
             )
         }
@@ -377,46 +333,8 @@ class DavidLiveSessionController(
             return
         }
 
-        // 2. Tool Call (controlled on-demand financial queries)
-        val toolCall = root.optJSONObject("toolCall")
-        if (toolCall != null) {
-            val functionCalls = toolCall.optJSONArray("functionCalls")
-            if (functionCalls != null && functionCalls.length() > 0) {
-                _liveSubtitle.value = "Проверяю ваши финансовые данные..."
-                controllerScope.launch {
-                    val responsesArray = JSONArray()
-                    for (i in 0 until functionCalls.length()) {
-                        val fc = functionCalls.optJSONObject(i) ?: continue
-                        val callId = fc.optString("id")
-                        val fnName = fc.optString("name")
-                        val args = fc.optJSONObject("args")
-                        val toolResult = financialToolsProvider.executeToolCall(fnName, args)
-                        responsesArray.put(
-                            JSONObject().apply {
-                                if (callId.isNotBlank()) put("id", callId)
-                                put("name", fnName)
-                                put(
-                                    "response",
-                                    JSONObject().apply {
-                                        put("output", toolResult)
-                                    }
-                                )
-                            }
-                        )
-                    }
-                    val toolResponseMsg = JSONObject().apply {
-                        put(
-                            "toolResponse",
-                            JSONObject().apply {
-                                put("functionResponses", responsesArray)
-                            }
-                        )
-                    }
-                    ws?.send(toolResponseMsg.toString())
-                }
-            }
-            return
-        }
+        // Text-only mode: ignore model tool calls; this session is for transcription only.
+        if (root.has("toolCall")) return
 
         // 3. Server Content (Audio, Transcriptions, Interruption, Turn Complete)
         val serverContent = root.optJSONObject("serverContent") ?: return
@@ -444,6 +362,17 @@ class DavidLiveSessionController(
                 _liveSubtitle.value = cleanedUserText
             }
         }
+
+        // Text-only mode: never display or play model output. Preserve only the recognized user text.
+        if (serverContent.optBoolean("turnComplete", false)) {
+            if (pendingUserTranscript.isNotEmpty()) {
+                recordTranscriptTurn(DavidLiveSpeaker.USER, pendingUserTranscript.toString())
+                pendingUserTranscript.clear()
+            }
+            _connectionState.value = DavidLiveConnectionState.LISTENING
+            if (!_isMicMuted.value) _liveSubtitle.value = "Говорите, я слушаю..."
+        }
+        return
 
         // David's actual spoken voice transcription (outputTranscription)
         val outputTranscription = serverContent.optJSONObject("outputTranscription")
