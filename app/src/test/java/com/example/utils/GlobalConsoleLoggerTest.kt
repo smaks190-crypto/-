@@ -997,5 +997,47 @@ class GlobalConsoleLoggerTest {
             1,
             attemptedModels.size
         )
+
+        // Проверка UnknownHostException: сбой разрешения DNS generativelanguage.googleapis.com
+        // обязан останавливать цепочку моделей с первой попытки (isFatalForAllModels = true)
+        val dnsAttemptedModels = mutableListOf<String>()
+        val dnsFailApi = object : GeminiApiService {
+            override suspend fun generateContent(
+                model: String,
+                apiKey: String,
+                request: GeminiRequest
+            ): GeminiResponse {
+                dnsAttemptedModels.add(model)
+                throw java.net.UnknownHostException("Unable to resolve host \"generativelanguage.googleapis.com\"")
+            }
+
+            override suspend fun streamGenerateContent(
+                model: String,
+                apiKey: String,
+                alt: String,
+                request: GeminiRequest
+            ): Response<ResponseBody> = throw UnsupportedOperationException()
+        }
+
+        val dnsDetails = GeminiModelConfig.extractHttpErrorDetails(
+            java.net.UnknownHostException("Unable to resolve host \"generativelanguage.googleapis.com\"")
+        )
+        assertTrue(dnsDetails.isFatalForAllModels)
+        assertEquals("UnknownHostException", dnsDetails.errorType)
+
+        val dnsResult = GeminiModelConfig.executeDavidReactionWithFallback(
+            apiService = dnsFailApi,
+            apiKey = "AIzaSyValidKey1234567890",
+            request = sampleRequest,
+            operationType = "Аудит бюджета (ИИ)",
+            operationPrefix = "AUDIT",
+            details = "period=Месяц"
+        )
+        assertNull(dnsResult)
+        assertEquals(
+            "UnknownHostException on shared host must abort immediately on attempt 1 without firing 4 duplicate DNS failures",
+            1,
+            dnsAttemptedModels.size
+        )
     }
 }
