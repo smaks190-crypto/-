@@ -1,121 +1,122 @@
 package com.example.utils
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.media.audiofx.AcousticEchoCanceler
-import android.media.audiofx.AutomaticGainControl
-import android.media.audiofx.NoiseSuppressor
-import android.os.Process
 import android.util.Base64
-import androidx.core.content.ContextCompat
-import com.example.data.ParsedOperation
-import com.example.data.SettingsManager
-import kotlinx.coroutines.*
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import okhttp3.*
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.math.abs
+import kotlin.math.log10
 import kotlin.math.sqrt
 
-enum class VoiceRecordingState {
-    IDLE,
-    REQUESTING_CONSENT,
-    RECORDING,
-    PROCESSING,
-    REVIEW,
-    MANUAL_INPUT,
-    SUCCESS,
-    ERROR,
-    MISSING_API_KEY
-}
-
 /**
- * Manages hold-to-record voice input on the "+" button using Gemini Multimodal Live WebSocket
- * in text-only input transcription mode (`inputAudioTranscription`).
+ * Потоковый менеджер голосового ввода в стиле Gemini Live (`BidiGenerateContent`).
  *
- * Instead of recording to a temporary `.m4a` file and uploading it afterwards, this manager
- * streams 16kHz PCM audio directly over WebSocket while the user holds/records, receiving
- * real-time speech transcription without any spoken assistant response, and then parses the
- * recognized text into structured financial operations.
+ * Работает в режиме только текстовой транскрипции речи пользователя (`responseModalities: ["TEXT"]`,
+ * `inputAudioTranscription: {}`):
+ * - Непрерывно считывает PCM-аудио (16 kHz, 16-bit, Mono) через AudioRecord без системных звуков
+ *   и без сохранения во временные файлы.
+ * - Стримит аудиочанки по WebSocket в Gemini Live и в реальном времени получает `inputTranscription`,
+ *   обновляя `partialText` и `recognizedText` прямо во время речи.
+ * - Полностью игнорирует любые ответы ассистента (`outputTranscription`, `modelTurn`, `toolCall`),
+ *   чтобы сессия работала строго как живой рекордер-транскрибатор для добавления операций.
+ * - По завершении фразы (`turnComplete` или паузе речи) передаёт распознанный текст в `onChunkRecognized`.
  */
-class VoiceInputManager(
-    private val context: Context,
-    private val settingsManager: SettingsManager,
-    private val onOperationsConfirmed: (List<ParsedOperation>) -> Unit
-) {
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+class VoiceInputManager(context: Context) {
+    private val context: Context = context.applicationContext
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val _state = MutableStateFlow(VoiceRecordingState.IDLE)
-    val state: StateFlow<VoiceRecordingState> = _state.asStateFlow()
+    private var audioRecord: AudioRecord? = null
+    private var recordingJob: Job? = null
 
-    private val _amplitude = MutableStateFlow(0f)
-    val amplitude: StateFlow<Float> = _amplitude.asStateFlow()
-
-    private val _spectrumBands = MutableStateFlow(List(24) { 0f })
-    val spectrumBands: StateFlow<List<Float>> = _spectrumBands.asStateFlow()
+    private val _isListening = MutableStateFlow(false)
+    val isListening: StateFlow<Boolean> = _isListening.asStateFlow()
 
     private val _recognizedText = MutableStateFlow("")
     val recognizedText: StateFlow<String> = _recognizedText.asStateFlow()
 
-    private val _parsedOperations = MutableStateFlow<List<ParsedOperation>>(emptyList())
-    val parsedOperations: StateFlow<List<ParsedOperation>> = _parsedOperations.asStateFlow()
+    private val _partialText = MutableStateFlow("")
+    val partialText: StateFlow<String> = _partialText.asStateFlow()
 
-    private val _errorMessage = MutableStateFlow<String?>(null)
-    val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
+    private val _rmsDb = MutableStateFlow(0f)
+    val rmsDb: StateFlow<Float> = _rmsDb.asStateFlow()
 
-    private var startTime: Long = 0
-    private var currentExpenseCategories: List<String> = emptyList()
-    private var currentIncomeCategories: List<String> = emptyList()
+    private val _voiceLevel = MutableStateFlow(0f)
+    val voiceLevel: StateFlow<Float> = _voiceLevel.asStateFlow()
 
-    private val httpClient = OkHttpClient.Builder()
+    private val _errorState = MutableStateFlow<String?>(null)
+    val errorState: StateFlow<String?> = _errorState.asStateFlow()
+
+    var onErrorCallback: (() -> Unit)? = null
+    var onAudioChunkReady: ((ByteArray) -> Unit)? = null
+    var onChunkRecognized: ((String) -> Unit)? = null
+
+    private val chunkLock = Any()
+    private var activeSpeechBuffer = ByteArrayOutputStream()
+    private var activeSpeechFrames = 0
+
+    // --- Gemini Live WebSocket Text-Only STT State ---
+    private val liveHttpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .pingInterval(20, TimeUnit.SECONDS)
         .build()
 
-    private var webSocket: WebSocket? = null
-    private var captureJob: Job? = null
-    private var audioRecord: AudioRecord? = null
-    private var echoCanceler: AcousticEchoCanceler? = null
-    private var noiseSuppressor: NoiseSuppressor? = null
-    private var gainControl: AutomaticGainControl? = null
-
-    private val isLiveCapturing = AtomicBoolean(false)
-    private val setupCompleted = AtomicBoolean(false)
-    private var modelFallbackIndex = 0
-    private var activeApiKey: String = ""
-
-    private val finalizedTranscriptBuilder = StringBuilder()
-    private val currentTurnTranscriptBuilder = StringBuilder()
-    private val preSetupAudioQueue = ArrayDeque<String>()
+    private var liveWebSocket: WebSocket? = null
+    private val liveSetupCompleted = AtomicBoolean(false)
+    private val liveIntentionalClose = AtomicBoolean(false)
+    private var liveModelAttemptIndex = 0
+    private var currentLiveApiKey: String = ""
+    private val pendingLiveTurnTranscript = StringBuilder()
+    private val preSetupPcmQueue = ArrayDeque<String>(64)
 
     companion object {
-        private const val INPUT_SAMPLE_RATE = 16000
-        private const val INPUT_FRAME_SAMPLES = 1600 // 100ms at 16kHz
-        private const val SPECTRUM_BANDS_COUNT = 24
-        private const val MAX_PRE_SETUP_CHUNKS = 150 // Up to 15s buffered while WS handshakes
+        private const val SAMPLE_RATE = 16000
+        private const val FRAME_SAMPLES = 512 // 32 мс при 16000 Гц
+        private const val FRAME_BYTES = FRAME_SAMPLES * 2 // 1024 байта (16-bit PCM)
+        private const val PRE_ROLL_FRAMES = 8 // ~256 мс предзаписи до начала фразы
+        private const val SILENCE_FRAMES_TO_SPLIT = 26 // ~830 мс паузы для отправки готовой фразы в Gemini Live
+        private const val MIN_SPEECH_FRAMES = 11 // ~350 мс минимальной длительности речи во фразе
+        private const val MAX_CHUNK_FRAMES = 375 // ~12 секунд максимум на один непрерывный чанк
+        private const val SPEECH_RMS_THRESHOLD = 360.0 // Порог чувствительности голоса (16-bit PCM)
 
-        val LIVE_STT_MODEL_CANDIDATES = listOf(
+        private const val GEMINI_LIVE_WS_ENDPOINT =
+            "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+
+        val LIVE_STT_MODELS = listOf(
             "models/gemini-2.5-flash-native-audio-preview-12-2025",
-            "models/gemini-2.5-flash-native-audio-preview-09-2025",
             "models/gemini-2.0-flash-live-001",
             "models/gemini-2.0-flash-exp"
         )
 
-        private const val WS_BASE_URL =
-            "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-
+        /**
+         * Конфигурация сессии Gemini Live строго для распознавания речи пользователя без ответов ИИ.
+         */
         internal fun buildLiveTranscriptionSetupJson(modelName: String): JSONObject {
             return JSONObject().apply {
                 put(
@@ -142,141 +143,305 @@ class VoiceInputManager(
         }
     }
 
-    fun updateCategories(expenseCategories: List<String>, incomeCategories: List<String>) {
-        currentExpenseCategories = expenseCategories
-        currentIncomeCategories = incomeCategories
-    }
-
-    fun startRecording() {
-        if (_state.value == VoiceRecordingState.RECORDING ||
-            _state.value == VoiceRecordingState.PROCESSING ||
-            _state.value == VoiceRecordingState.REQUESTING_CONSENT
-        ) return
-
+    init {
+        // Очистка старой тяжелой офлайн-модели VOSK (~50 МБ), если она осталась от прошлых версий
         scope.launch {
-            val hasConsent = settingsManager.geminiConsentFlow.first()
-            if (!hasConsent) {
-                _state.value = VoiceRecordingState.REQUESTING_CONSENT
-                return@launch
-            }
-
-            val apiKey = settingsManager.geminiApiKeyFlow.first().trim()
-            if (apiKey.isEmpty()) {
-                _state.value = VoiceRecordingState.MISSING_API_KEY
-                return@launch
-            }
-
-            startRecordingInternal(apiKey)
+            try {
+                val legacyVoskDir = File(this@VoiceInputManager.context.filesDir, "vosk-model-small-ru-0.22")
+                if (legacyVoskDir.exists()) {
+                    legacyVoskDir.deleteRecursively()
+                }
+                val legacyZip = File(this@VoiceInputManager.context.cacheDir, "vosk_model.zip")
+                if (legacyZip.exists()) {
+                    legacyZip.delete()
+                }
+            } catch (_: Throwable) {}
         }
     }
 
-    fun acceptConsentAndStartRecording() {
-        scope.launch {
-            settingsManager.saveGeminiConsent(true)
-            val apiKey = settingsManager.geminiApiKeyFlow.first().trim()
-            if (apiKey.isEmpty()) {
-                _state.value = VoiceRecordingState.MISSING_API_KEY
-            } else {
-                startRecordingInternal(apiKey)
-            }
+    private fun resolveUserApiKey(callerContext: Context): String {
+        return try {
+            val prefs = callerContext.getSharedPreferences("budget_prefs", Context.MODE_PRIVATE)
+            (prefs.getString("gemini_api_key", "") ?: "").trim()
+        } catch (_: Throwable) {
+            ""
         }
     }
 
-    fun declineConsent() {
-        _state.value = VoiceRecordingState.IDLE
-    }
-
-    private fun startRecordingInternal(apiKey: String) {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            _errorMessage.value = "Нет разрешения на запись звука"
-            _state.value = VoiceRecordingState.ERROR
-            return
-        }
-
-        stopLiveCaptureInternal()
-
-        activeApiKey = apiKey
-        modelFallbackIndex = 0
-        synchronized(finalizedTranscriptBuilder) {
-            finalizedTranscriptBuilder.clear()
-            currentTurnTranscriptBuilder.clear()
-        }
-        synchronized(preSetupAudioQueue) {
-            preSetupAudioQueue.clear()
-        }
+    @SuppressLint("MissingPermission")
+    fun startListening(callerContext: Context = context) {
+        GlobalConsoleLogger.i("VOICE", "Запуск потокового режима Gemini Live STT (text-only)...")
+        stopInternal()
 
         _recognizedText.value = ""
-        _errorMessage.value = null
-        startTime = System.currentTimeMillis()
-        isLiveCapturing.set(true)
-        setupCompleted.set(false)
-        _state.value = VoiceRecordingState.RECORDING
+        _partialText.value = "Говорите..."
+        _errorState.value = null
+        synchronized(pendingLiveTurnTranscript) {
+            pendingLiveTurnTranscript.clear()
+        }
+        synchronized(preSetupPcmQueue) {
+            preSetupPcmQueue.clear()
+        }
 
-        startMicrophoneCaptureLoop()
-        connectLiveWebSocket(LIVE_STT_MODEL_CANDIDATES[modelFallbackIndex])
+        currentLiveApiKey = resolveUserApiKey(callerContext)
+        if (currentLiveApiKey.isNotBlank()) {
+            liveIntentionalClose.set(false)
+            liveModelAttemptIndex = 0
+            connectLiveSttWebSocket(modelIndex = 0)
+        }
+
+        try {
+            val minBufferSize = AudioRecord.getMinBufferSize(
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+            val bufferSize = maxOf(minBufferSize * 2, FRAME_BYTES * 8)
+
+            val record = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize
+            )
+
+            if (record.state != AudioRecord.STATE_INITIALIZED) {
+                record.release()
+                throw IllegalStateException("Микрофон не удалось инициализировать")
+            }
+
+            record.startRecording()
+            audioRecord = record
+            _isListening.value = true
+            _rmsDb.value = 1.5f
+            _voiceLevel.value = 0.08f
+
+            synchronized(chunkLock) {
+                activeSpeechBuffer.reset()
+                activeSpeechFrames = 0
+            }
+
+            recordingJob = scope.launch {
+                val frameBuf = ByteArray(FRAME_BYTES)
+                val preRollQueue = ArrayDeque<ByteArray>(PRE_ROLL_FRAMES + 2)
+                var isInSpeech = false
+                var silenceFramesCount = 0
+                var totalFramesInChunk = 0
+                val wsBatchBuffer = ByteArrayOutputStream(FRAME_BYTES * 3)
+                var wsBatchCount = 0
+
+                try {
+                    while (isActive && _isListening.value) {
+                        val readBytes = record.read(frameBuf, 0, FRAME_BYTES)
+                        if (readBytes <= 0) continue
+
+                        val frameCopy = frameBuf.copyOf(readBytes)
+                        val rms = calculatePcmRms(frameCopy, readBytes)
+
+                        // Плавная нормализация амплитуды (1..12) и уровня голоса (0f..1f) для Volumetric Liquid Aurora
+                        val visualDb = if (rms > 80.0) {
+                            val db = 20f * log10((rms / 80.0).toFloat())
+                            (db * 0.35f).coerceIn(1.5f, 12f)
+                        } else {
+                            1.0f
+                        }
+                        _rmsDb.value = visualDb
+                        _voiceLevel.value = ((visualDb - 1.0f) / 9.5f).coerceIn(0f, 1f)
+
+                        // Потоковая отправка PCM-аудио в Gemini Live WebSocket (пакетами по ~96 мс)
+                        wsBatchBuffer.write(frameCopy)
+                        wsBatchCount++
+                        if (wsBatchCount >= 3) {
+                            streamPcmFrameToLiveWebSocket(wsBatchBuffer.toByteArray())
+                            wsBatchBuffer.reset()
+                            wsBatchCount = 0
+                        }
+
+                        val isSpeechFrame = rms >= SPEECH_RMS_THRESHOLD
+
+                        synchronized(chunkLock) {
+                            if (isSpeechFrame) {
+                                if (!isInSpeech) {
+                                    isInSpeech = true
+                                    silenceFramesCount = 0
+                                    for (preFrame in preRollQueue) {
+                                        activeSpeechBuffer.write(preFrame)
+                                    }
+                                    preRollQueue.clear()
+                                    if (_partialText.value.isBlank() || _partialText.value == "Говорите...") {
+                                        _partialText.value = "Слушаю..."
+                                    }
+                                }
+                                activeSpeechBuffer.write(frameCopy)
+                                activeSpeechFrames++
+                                totalFramesInChunk++
+                                silenceFramesCount = 0
+                            } else {
+                                if (isInSpeech) {
+                                    activeSpeechBuffer.write(frameCopy)
+                                    silenceFramesCount++
+                                    totalFramesInChunk++
+
+                                    // Если пользователь сделал паузу (~0.83 сек) или фраза длится > 12 сек:
+                                    if (silenceFramesCount >= SILENCE_FRAMES_TO_SPLIT || totalFramesInChunk >= MAX_CHUNK_FRAMES) {
+                                        if (activeSpeechFrames >= MIN_SPEECH_FRAMES) {
+                                            val liveTextSoFar = synchronized(pendingLiveTurnTranscript) {
+                                                sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
+                                            }
+                                            if (liveSetupCompleted.get() && liveTextSoFar.isNotBlank()) {
+                                                // В режиме Live STT отправляем распознанный текст без создания WAV-файла!
+                                                synchronized(pendingLiveTurnTranscript) {
+                                                    pendingLiveTurnTranscript.clear()
+                                                }
+                                                GlobalConsoleLogger.i("VOICE_LIVE", "Фраза распознана в Live STT по паузе: «$liveTextSoFar»")
+                                                onChunkRecognized?.invoke(liveTextSoFar)
+                                            } else if (!liveSetupCompleted.get()) {
+                                                // Резервный fallback на случай, если WebSocket еще не установил соединение
+                                                val pcmData = activeSpeechBuffer.toByteArray()
+                                                val wavBytes = pcmToWavBytes(pcmData, SAMPLE_RATE)
+                                                onAudioChunkReady?.invoke(wavBytes)
+                                            }
+                                        }
+                                        activeSpeechBuffer.reset()
+                                        activeSpeechFrames = 0
+                                        totalFramesInChunk = 0
+                                        silenceFramesCount = 0
+                                        isInSpeech = false
+                                    }
+                                } else {
+                                    if (preRollQueue.size >= PRE_ROLL_FRAMES) {
+                                        preRollQueue.removeFirst()
+                                    }
+                                    preRollQueue.addLast(frameCopy)
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Throwable) {
+                    Log.e("VoiceInputManager", "AudioRecord loop error", e)
+                }
+            }
+        } catch (e: Throwable) {
+            Log.e("VoiceInputManager", "Failed to start AudioRecord", e)
+            GlobalConsoleLogger.e("VOICE", "Ошибка запуска Gemini Live микрофона: ${e.localizedMessage}", e)
+            _errorState.value = "Ошибка микрофона: ${e.localizedMessage}"
+            _isListening.value = false
+            stopInternal()
+            onErrorCallback?.invoke()
+        }
     }
 
-    private fun connectLiveWebSocket(modelName: String) {
-        if (!isLiveCapturing.get()) return
+    private fun connectLiveSttWebSocket(modelIndex: Int) {
+        if (currentLiveApiKey.isBlank()) return
+        liveSetupCompleted.set(false)
+        try {
+            liveWebSocket?.cancel()
+        } catch (_: Throwable) {}
 
-        setupCompleted.set(false)
-        val wsUrl = "$WS_BASE_URL?key=$activeApiKey"
+        val modelName = LIVE_STT_MODELS.getOrElse(modelIndex) { LIVE_STT_MODELS.last() }
+        val wsUrl = "$GEMINI_LIVE_WS_ENDPOINT?key=$currentLiveApiKey"
         val request = Request.Builder().url(wsUrl).build()
 
-        webSocket = httpClient.newWebSocket(
+        liveWebSocket = liveHttpClient.newWebSocket(
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    if (!isLiveCapturing.get()) {
-                        webSocket.close(1000, "Recording stopped")
+                    if (liveIntentionalClose.get()) {
+                        webSocket.close(1000, "Stopped")
                         return
                     }
-                    val setupJson = buildLiveTranscriptionSetupJson(modelName)
-                    webSocket.send(setupJson.toString())
+                    val setupMsg = buildLiveTranscriptionSetupJson(modelName)
+                    webSocket.send(setupMsg.toString())
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
-                    handleLiveServerMessage(webSocket, text)
+                    handleLiveServerJsonMessage(webSocket, text)
                 }
 
-                override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
-                    handleLiveServerMessage(webSocket, bytes.utf8())
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    handleLiveServerJsonMessage(webSocket, bytes.utf8())
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    webSocket.close(code, reason)
-                }
-
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    if (!isLiveCapturing.get()) return
-                    if (!setupCompleted.get() && modelFallbackIndex + 1 < LIVE_STT_MODEL_CANDIDATES.size) {
-                        modelFallbackIndex++
-                        connectLiveWebSocket(LIVE_STT_MODEL_CANDIDATES[modelFallbackIndex])
-                    } else if (code != 1000) {
-                        scope.launch {
-                            _errorMessage.value = "Ошибка Live-транскрипции ($code): $reason"
-                            _state.value = VoiceRecordingState.ERROR
-                        }
+                    if (!liveIntentionalClose.get() && !liveSetupCompleted.get() && liveModelAttemptIndex + 1 < LIVE_STT_MODELS.size) {
+                        liveModelAttemptIndex++
+                        connectLiveSttWebSocket(liveModelAttemptIndex)
+                        return
                     }
+                    try {
+                        webSocket.close(code, reason)
+                    } catch (_: Throwable) {}
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    if (!isLiveCapturing.get()) return
-                    if (!setupCompleted.get() && modelFallbackIndex + 1 < LIVE_STT_MODEL_CANDIDATES.size) {
-                        modelFallbackIndex++
-                        connectLiveWebSocket(LIVE_STT_MODEL_CANDIDATES[modelFallbackIndex])
-                    } else {
-                        scope.launch {
-                            _errorMessage.value = "Ошибка соединения Live: ${t.localizedMessage ?: "проверьте интернет"}"
-                            _state.value = VoiceRecordingState.ERROR
-                        }
+                    if (liveIntentionalClose.get()) return
+                    if (!liveSetupCompleted.get() && liveModelAttemptIndex + 1 < LIVE_STT_MODELS.size) {
+                        liveModelAttemptIndex++
+                        connectLiveSttWebSocket(liveModelAttemptIndex)
                     }
                 }
             }
         )
     }
 
-    internal fun handleLiveServerMessage(ws: WebSocket?, rawJson: String) {
+    private fun streamPcmFrameToLiveWebSocket(pcm16kBytes: ByteArray) {
+        if (currentLiveApiKey.isBlank() || pcm16kBytes.isEmpty()) return
+        val b64 = Base64.encodeToString(pcm16kBytes, Base64.NO_WRAP)
+        val ws = liveWebSocket
+        if (liveSetupCompleted.get() && ws != null) {
+            sendPcmBase64ToWebSocket(ws, b64)
+        } else {
+            synchronized(preSetupPcmQueue) {
+                if (preSetupPcmQueue.size >= 50) {
+                    preSetupPcmQueue.removeFirst()
+                }
+                preSetupPcmQueue.addLast(b64)
+            }
+        }
+    }
+
+    private fun flushPreSetupPcmQueue(ws: WebSocket?) {
+        if (ws == null) return
+        val buffered = mutableListOf<String>()
+        synchronized(preSetupPcmQueue) {
+            while (preSetupPcmQueue.isNotEmpty()) {
+                buffered.add(preSetupPcmQueue.removeFirst())
+            }
+        }
+        for (b64 in buffered) {
+            sendPcmBase64ToWebSocket(ws, b64)
+        }
+    }
+
+    private fun sendPcmBase64ToWebSocket(ws: WebSocket, base64Pcm: String) {
+        val msg = JSONObject().apply {
+            put(
+                "realtimeInput",
+                JSONObject().apply {
+                    put(
+                        "mediaChunks",
+                        JSONArray().put(
+                            JSONObject().apply {
+                                put("mimeType", "audio/pcm;rate=16000")
+                                put("data", base64Pcm)
+                            }
+                        )
+                    )
+                }
+            )
+        }
+        ws.send(msg.toString())
+    }
+
+    /**
+     * Обрабатывает сообщения от Gemini Live в режиме текстовой транскрипции (доступен для unit-тестов).
+     */
+    internal fun processLiveServerMessageForTest(rawJson: String) {
+        handleLiveServerJsonMessage(ws = null, rawJson = rawJson)
+    }
+
+    private fun handleLiveServerJsonMessage(ws: WebSocket?, rawJson: String) {
         val root = try {
             JSONObject(rawJson)
         } catch (_: Exception) {
@@ -284,12 +449,12 @@ class VoiceInputManager(
         }
 
         if (root.has("setupComplete")) {
-            setupCompleted.set(true)
-            flushPreSetupAudioQueue(ws)
+            liveSetupCompleted.set(true)
+            flushPreSetupPcmQueue(ws)
             return
         }
 
-        // Ignore tool calls and any assistant responses — this session is purely speech-to-text.
+        // Игнорируем любые вызовы инструментов и ответы модели — этот режим только записывает речь пользователя.
         if (root.has("toolCall")) return
 
         val serverContent = root.optJSONObject("serverContent") ?: return
@@ -299,513 +464,205 @@ class VoiceInputManager(
             ?.takeIf { it.isNotBlank() }
 
         if (inputTranscription != null) {
-            val combined = synchronized(finalizedTranscriptBuilder) {
-                currentTurnTranscriptBuilder.append(inputTranscription)
-                buildCombinedTranscriptLocked()
+            val cleaned = synchronized(pendingLiveTurnTranscript) {
+                pendingLiveTurnTranscript.append(inputTranscription)
+                sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
             }
-            if (combined.isNotBlank()) {
-                _recognizedText.value = combined
+            if (cleaned.isNotBlank()) {
+                _partialText.value = cleaned
+                _recognizedText.value = cleaned
             }
         }
 
-        if (serverContent.optBoolean("turnComplete", false) || serverContent.optBoolean("interrupted", false)) {
-            val combined = synchronized(finalizedTranscriptBuilder) {
-                val turnText = sanitizeTranscriptText(currentTurnTranscriptBuilder.toString())
-                if (turnText.isNotBlank()) {
-                    if (finalizedTranscriptBuilder.isNotEmpty()) {
-                        finalizedTranscriptBuilder.append(' ')
-                    }
-                    finalizedTranscriptBuilder.append(turnText)
+        if (serverContent.optBoolean("turnComplete", false)) {
+            val completedTurnText = synchronized(pendingLiveTurnTranscript) {
+                val text = sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
+                pendingLiveTurnTranscript.clear()
+                text
+            }
+            if (completedTurnText.isNotBlank()) {
+                _recognizedText.value = completedTurnText
+                _partialText.value = completedTurnText
+                synchronized(chunkLock) {
+                    activeSpeechBuffer.reset()
+                    activeSpeechFrames = 0
                 }
-                currentTurnTranscriptBuilder.clear()
-                buildCombinedTranscriptLocked()
-            }
-            if (combined.isNotBlank()) {
-                _recognizedText.value = combined
+                onChunkRecognized?.invoke(completedTurnText)
             }
         }
     }
 
-    private fun buildCombinedTranscriptLocked(): String {
-        val finalized = finalizedTranscriptBuilder.toString().trim()
-        val current = sanitizeTranscriptText(currentTurnTranscriptBuilder.toString())
-        return when {
-            finalized.isEmpty() -> current
-            current.isEmpty() -> finalized
-            else -> "$finalized $current".replace(Regex("\\s+"), " ").trim()
-        }
-    }
+    /**
+     * Останавливает запись и возвращает последний оставшийся фрагмент речи (только если Live STT
+     * ещё не успел распознать его в текст), чтобы ни одно слово в конце не потерялось.
+     */
+    fun stopListeningAndFlushRemaining(): ByteArray? {
+        GlobalConsoleLogger.i("VOICE", "Завершение сессии Gemini Live STT...")
+        _isListening.value = false
+        recordingJob?.cancel()
+        recordingJob = null
 
-    private fun flushPreSetupAudioQueue(ws: WebSocket?) {
-        if (ws == null) return
-        val pendingChunks = mutableListOf<String>()
-        synchronized(preSetupAudioQueue) {
-            while (preSetupAudioQueue.isNotEmpty()) {
-                pendingChunks.add(preSetupAudioQueue.removeFirst())
-            }
-        }
-        for (b64 in pendingChunks) {
-            sendPcmChunkOverWebSocket(ws, b64)
-        }
-    }
-
-    private fun sendPcmChunkOverWebSocket(ws: WebSocket, base64Audio: String) {
-        val realtimeInputJson = JSONObject().apply {
-            put(
-                "realtimeInput",
-                JSONObject().apply {
-                    put(
-                        "mediaChunks",
-                        JSONArray().put(
-                            JSONObject().apply {
-                                put("mimeType", "audio/pcm;rate=16000")
-                                put("data", base64Audio)
-                            }
-                        )
-                    )
-                }
-            )
-        }
-        ws.send(realtimeInputJson.toString())
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun startMicrophoneCaptureLoop() {
-        captureJob?.cancel()
-        captureJob = scope.launch(Dispatchers.IO) {
-            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
-
-            val minBufSize = AudioRecord.getMinBufferSize(
-                INPUT_SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            ).coerceAtLeast(INPUT_FRAME_SAMPLES * 2)
-
-            val record = try {
-                AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                    INPUT_SAMPLE_RATE,
-                    AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    minBufSize * 2
-                )
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _errorMessage.value = "Не удалось инициализировать микрофон: ${e.localizedMessage}"
-                    _state.value = VoiceRecordingState.ERROR
-                }
-                return@launch
-            }
-
-            if (record.state != AudioRecord.STATE_INITIALIZED) {
-                record.release()
-                withContext(Dispatchers.Main) {
-                    _errorMessage.value = "Микрофон недоступен или занят другим приложением"
-                    _state.value = VoiceRecordingState.ERROR
-                }
-                return@launch
-            }
-
-            audioRecord = record
-            attachAudioEffects(record.audioSessionId)
-
-            val shortBuffer = ShortArray(INPUT_FRAME_SAMPLES)
-            val byteBuffer = ByteArray(INPUT_FRAME_SAMPLES * 2)
-            val smoothedBands = FloatArray(SPECTRUM_BANDS_COUNT)
-
-            try {
-                record.startRecording()
-                while (isActive && isLiveCapturing.get()) {
-                    val readCount = record.read(shortBuffer, 0, shortBuffer.size)
-                    if (readCount > 0) {
-                        updateAmplitudeAndSpectrum(shortBuffer, readCount, smoothedBands)
-
-                        for (i in 0 until readCount) {
-                            val s = shortBuffer[i].toInt()
-                            byteBuffer[i * 2] = (s and 0xFF).toByte()
-                            byteBuffer[i * 2 + 1] = ((s shr 8) and 0xFF).toByte()
-                        }
-                        val payloadBytes = if (readCount == shortBuffer.size) {
-                            byteBuffer
-                        } else {
-                            byteBuffer.copyOf(readCount * 2)
-                        }
-                        val b64 = Base64.encodeToString(payloadBytes, Base64.NO_WRAP)
-
-                        val ws = webSocket
-                        if (setupCompleted.get() && ws != null) {
-                            sendPcmChunkOverWebSocket(ws, b64)
-                        } else {
-                            synchronized(preSetupAudioQueue) {
-                                if (preSetupAudioQueue.size >= MAX_PRE_SETUP_CHUNKS) {
-                                    preSetupAudioQueue.removeFirst()
-                                }
-                                preSetupAudioQueue.addLast(b64)
-                            }
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-            } finally {
-                releaseAudioRecordInternal()
-            }
-        }
-    }
-
-    private fun updateAmplitudeAndSpectrum(
-        samples: ShortArray,
-        length: Int,
-        smoothedBands: FloatArray
-    ) {
-        if (length <= 0) return
-        var sumSq = 0.0
-        for (i in 0 until length) {
-            val norm = samples[i] / 32768.0
-            sumSq += norm * norm
-        }
-        val rms = sqrt(sumSq / length).toFloat()
-        val normalizedAmp = (rms * 4.5f).coerceIn(0f, 1f)
-        _amplitude.value = _amplitude.value * 0.35f + normalizedAmp * 0.65f
-
-        val samplesPerBand = (length / SPECTRUM_BANDS_COUNT).coerceAtLeast(1)
-        val bandList = MutableList(SPECTRUM_BANDS_COUNT) { 0f }
-        for (b in 0 until SPECTRUM_BANDS_COUNT) {
-            val startIdx = b * samplesPerBand
-            val endIdx = (startIdx + samplesPerBand).coerceAtMost(length)
-            var bandEnergy = 0f
-            var zeroCrossings = 0
-            var prev = 0
-            for (i in startIdx until endIdx) {
-                val v = samples[i].toInt()
-                bandEnergy += abs(v) / 32768f
-                if ((v >= 0 && prev < 0) || (v < 0 && prev >= 0)) {
-                    zeroCrossings++
-                }
-                prev = v
-            }
-            val count = (endIdx - startIdx).coerceAtLeast(1)
-            val avgEnergy = (bandEnergy / count) * (3.2f + (zeroCrossings.toFloat() / count) * 1.8f)
-            val target = ( normalizedAmp * 0.4f + avgEnergy * 0.6f ).coerceIn(0.05f, 1f)
-            val factor = if (target > smoothedBands[b]) 0.6f else 0.3f
-            smoothedBands[b] = (smoothedBands[b] * (1f - factor) + target * factor).coerceIn(0.05f, 1f)
-            bandList[b] = smoothedBands[b]
-        }
-        _spectrumBands.value = bandList
-    }
-
-    private fun attachAudioEffects(audioSessionId: Int) {
-        try {
-            if (AcousticEchoCanceler.isAvailable()) {
-                echoCanceler = AcousticEchoCanceler.create(audioSessionId)?.apply { enabled = true }
-            }
-        } catch (_: Exception) {}
-        try {
-            if (NoiseSuppressor.isAvailable()) {
-                noiseSuppressor = NoiseSuppressor.create(audioSessionId)?.apply { enabled = true }
-            }
-        } catch (_: Exception) {}
-        try {
-            if (AutomaticGainControl.isAvailable()) {
-                gainControl = AutomaticGainControl.create(audioSessionId)?.apply { enabled = true }
-            }
-        } catch (_: Exception) {}
-    }
-
-    private fun releaseAudioRecordInternal() {
-        try { echoCanceler?.release() } catch (_: Exception) {}
-        echoCanceler = null
-        try { noiseSuppressor?.release() } catch (_: Exception) {}
-        noiseSuppressor = null
-        try { gainControl?.release() } catch (_: Exception) {}
-        gainControl = null
-
-        try {
-            audioRecord?.stop()
-        } catch (_: Exception) {}
-        try {
-            audioRecord?.release()
-        } catch (_: Exception) {}
+        val record = audioRecord
         audioRecord = null
-    }
-
-    fun stopRecordingAndProcess() {
-        if (_state.value != VoiceRecordingState.RECORDING) return
-
-        val duration = System.currentTimeMillis() - startTime
-        if (duration < 500) {
-            stopLiveCaptureInternal()
-            _errorMessage.value = "Запись слишком короткая. Удерживайте кнопку и проговорите операцию."
-            _state.value = VoiceRecordingState.ERROR
-            return
-        }
-
-        _state.value = VoiceRecordingState.PROCESSING
-        _amplitude.value = 0f
-        _spectrumBands.value = List(SPECTRUM_BANDS_COUNT) { 0f }
-
-        scope.launch {
-            // Stop capturing new mic frames, send end-of-turn signal to flush final live transcription chunks
-            isLiveCapturing.set(false)
-            captureJob?.cancelAndJoin()
-            releaseAudioRecordInternal()
-
-            val ws = webSocket
-            if (setupCompleted.get() && ws != null) {
-                flushPreSetupAudioQueue(ws)
+        if (record != null) {
+            try {
+                if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                    record.stop()
+                }
+            } catch (_: Throwable) {
+            } finally {
                 try {
-                    val turnCompleteMsg = JSONObject().apply {
-                        put("clientContent", JSONObject().apply { put("turnComplete", true) })
-                    }
-                    ws.send(turnCompleteMsg.toString())
-                } catch (_: Exception) {}
-
-                // Wait briefly (up to 900ms) for Gemini Live to deliver trailing inputTranscription chunks
-                var waitedMs = 0
-                while (waitedMs < 900) {
-                    delay(150)
-                    waitedMs += 150
-                    if (_recognizedText.value.isNotBlank() && waitedMs >= 450) break
-                }
+                    record.release()
+                } catch (_: Throwable) {}
             }
+        }
+        _rmsDb.value = 0f
+        _voiceLevel.value = 0f
 
-            closeWebSocketInternal()
+        val pendingText = synchronized(pendingLiveTurnTranscript) {
+            val t = sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
+            pendingLiveTurnTranscript.clear()
+            t
+        }
+        if (pendingText.isNotBlank()) {
+            _recognizedText.value = pendingText
+            _partialText.value = pendingText
+        }
 
-            val finalTranscript = synchronized(finalizedTranscriptBuilder) {
-                buildCombinedTranscriptLocked()
-            }.ifBlank { _recognizedText.value.trim() }
+        val hadLiveSetup = liveSetupCompleted.get()
+        closeLiveWebSocket()
 
-            if (finalTranscript.isBlank()) {
-                _errorMessage.value = "Не удалось расслышать речь. Попробуйте сказать чуть громче или введите текстом."
-                _state.value = VoiceRecordingState.ERROR
+        // Если Live WebSocket уже распознал текст в реальном времени, возвращаем null,
+        // чтобы TransactionStateDelegate сразу разобрал готовый текст без отправки WAV-файла!
+        if (hadLiveSetup && (_recognizedText.value.isNotBlank() || pendingText.isNotBlank())) {
+            synchronized(chunkLock) {
+                activeSpeechBuffer.reset()
+                activeSpeechFrames = 0
+            }
+            return null
+        }
+
+        synchronized(chunkLock) {
+            val remainingPcm = activeSpeechBuffer.toByteArray()
+            val frames = activeSpeechFrames
+            activeSpeechBuffer.reset()
+            activeSpeechFrames = 0
+
+            return if (frames >= 8 && remainingPcm.size > FRAME_BYTES * 6) {
+                GlobalConsoleLogger.i("VOICE_LIVE", "Fallback-отправка финального фрагмента речи (${remainingPcm.size} байт)")
+                pcmToWavBytes(remainingPcm, SAMPLE_RATE)
             } else {
-                _recognizedText.value = finalTranscript
-                parseRecognizedTextWithGemini(finalTranscript)
+                null
             }
         }
     }
 
-    fun cancelRecording() {
-        stopLiveCaptureInternal()
-        _state.value = VoiceRecordingState.IDLE
-        _amplitude.value = 0f
-        _spectrumBands.value = List(SPECTRUM_BANDS_COUNT) { 0f }
-        _recognizedText.value = ""
-        _parsedOperations.value = emptyList()
-        _errorMessage.value = null
+    fun stopListening() {
+        GlobalConsoleLogger.i("VOICE", "Полная остановка записи речи")
+        stopInternal()
     }
 
-    private fun stopLiveCaptureInternal() {
-        isLiveCapturing.set(false)
-        setupCompleted.set(false)
-        captureJob?.cancel()
-        captureJob = null
-        releaseAudioRecordInternal()
-        closeWebSocketInternal()
-        synchronized(preSetupAudioQueue) {
-            preSetupAudioQueue.clear()
-        }
-    }
-
-    private fun closeWebSocketInternal() {
+    private fun closeLiveWebSocket() {
+        liveIntentionalClose.set(true)
+        liveSetupCompleted.set(false)
         try {
-            webSocket?.close(1000, "Voice input completed")
-        } catch (_: Exception) {}
-        webSocket = null
-    }
-
-    fun switchToManualInput() {
-        stopLiveCaptureInternal()
-        _amplitude.value = 0f
-        _spectrumBands.value = List(SPECTRUM_BANDS_COUNT) { 0f }
-        _errorMessage.value = null
-        _state.value = VoiceRecordingState.MANUAL_INPUT
-    }
-
-    fun processManualText(text: String) {
-        if (text.isBlank()) {
-            _errorMessage.value = "Введите текст операции"
-            _state.value = VoiceRecordingState.ERROR
-            return
-        }
-        _recognizedText.value = text.trim()
-        _state.value = VoiceRecordingState.PROCESSING
-        scope.launch {
-            val hasConsent = settingsManager.geminiConsentFlow.first()
-            if (!hasConsent) {
-                _state.value = VoiceRecordingState.REQUESTING_CONSENT
-                return@launch
-            }
-            parseRecognizedTextWithGemini(text.trim())
+            liveWebSocket?.close(1000, "Voice input finished")
+        } catch (_: Throwable) {}
+        liveWebSocket = null
+        synchronized(preSetupPcmQueue) {
+            preSetupPcmQueue.clear()
         }
     }
 
-    fun saveApiKeyAndRetry(apiKey: String) {
-        scope.launch {
-            settingsManager.saveGeminiApiKey(apiKey.trim())
-            _state.value = VoiceRecordingState.IDLE
-        }
-    }
+    private fun stopInternal() {
+        _isListening.value = false
+        recordingJob?.cancel()
+        recordingJob = null
+        closeLiveWebSocket()
 
-    private suspend fun parseRecognizedTextWithGemini(transcriptText: String) {
-        withContext(Dispatchers.IO) {
+        val record = audioRecord
+        audioRecord = null
+        if (record != null) {
             try {
-                val apiKey = settingsManager.geminiApiKeyFlow.first().trim()
-                if (apiKey.isEmpty()) {
-                    withContext(Dispatchers.Main) {
-                        _state.value = VoiceRecordingState.MISSING_API_KEY
-                    }
-                    return@withContext
+                if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                    record.stop()
                 }
-
-                val expenseCatsStr = if (currentExpenseCategories.isNotEmpty()) {
-                    currentExpenseCategories.joinToString(", ")
-                } else {
-                    "Еда, Транспорт, Жилье, Развлечения, Здоровье, Одежда, Связь, Подарки, Другое"
-                }
-
-                val incomeCatsStr = if (currentIncomeCategories.isNotEmpty()) {
-                    currentIncomeCategories.joinToString(", ")
-                } else {
-                    "Зарплата, Фриланс, Подарки, Инвестиции, Возврат, Другое"
-                }
-
-                val prompt = VoiceParserHelper.buildTextParsingPrompt(transcriptText, expenseCatsStr, incomeCatsStr)
-
-                val requestJson = JSONObject().apply {
-                    put("contents", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("parts", JSONArray().apply {
-                                put(JSONObject().apply {
-                                    put("text", prompt)
-                                })
-                            })
-                        })
-                    })
-                    put("generationConfig", JSONObject().apply {
-                        put("temperature", 0.1)
-                        put("responseMimeType", "application/json")
-                    })
-                }
-
-                val responseText = executeGeminiGenerateContentWithFallback(apiKey, requestJson.toString())
-
-                val jsonResponse = JSONObject(responseText)
-                val candidates = jsonResponse.optJSONArray("candidates")
-                if (candidates == null || candidates.length() == 0) {
-                    throw Exception("Пустой ответ от ИИ")
-                }
-
-                val content = candidates.getJSONObject(0).optJSONObject("content")
-                val parts = content?.optJSONArray("parts")
-                val rawJsonText = parts?.getJSONObject(0)?.optString("text") ?: ""
-
-                val parseResult = VoiceParserHelper.parseGeminiJsonResponse(
-                    rawJsonText = rawJsonText,
-                    expenseCategories = currentExpenseCategories,
-                    incomeCategories = currentIncomeCategories,
-                    fallbackTranscript = transcriptText
-                )
-
-                withContext(Dispatchers.Main) {
-                    _recognizedText.value = parseResult.transcript.ifBlank { transcriptText }
-                    if (parseResult.operations.isEmpty()) {
-                        _errorMessage.value = "Не удалось распознать финансовые операции в фразе: «$transcriptText»"
-                        _state.value = VoiceRecordingState.ERROR
-                    } else {
-                        _parsedOperations.value = parseResult.operations
-                        _state.value = VoiceRecordingState.REVIEW
-                    }
-                }
-
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    _errorMessage.value = "Ошибка обработки: ${e.localizedMessage ?: "Неизвестная ошибка"}"
-                    _state.value = VoiceRecordingState.ERROR
-                }
+            } catch (_: Throwable) {
+            } finally {
+                try {
+                    record.release()
+                } catch (_: Throwable) {}
             }
         }
-    }
 
-    private fun executeGeminiGenerateContentWithFallback(apiKey: String, jsonBody: String): String {
-        val models = listOf("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
-        var lastException: Exception? = null
-
-        for (model in models) {
-            try {
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-                val requestBody = RequestBody.create("application/json".toMediaTypeOrNull(), jsonBody)
-                val request = Request.Builder()
-                    .url(url)
-                    .post(requestBody)
-                    .build()
-
-                val response = httpClient.newCall(request).execute()
-                val bodyString = response.body?.string() ?: ""
-
-                if (response.isSuccessful) {
-                    return bodyString
-                } else {
-                    lastException = Exception("HTTP ${response.code}: $bodyString")
-                }
-            } catch (e: Exception) {
-                lastException = e
-            }
+        synchronized(chunkLock) {
+            activeSpeechBuffer.reset()
+            activeSpeechFrames = 0
         }
-        throw lastException ?: Exception("Не удалось подключиться к Gemini API")
+        _rmsDb.value = 0f
+        _voiceLevel.value = 0f
     }
 
-    fun updateOperation(index: Int, updated: ParsedOperation) {
-        val current = _parsedOperations.value.toMutableList()
-        if (index in current.indices) {
-            current[index] = updated
-            _parsedOperations.value = current
+    private fun calculatePcmRms(buffer: ByteArray, length: Int): Double {
+        var sumSquares = 0.0
+        val sampleCount = length / 2
+        if (sampleCount <= 0) return 0.0
+        var i = 0
+        while (i < length - 1) {
+            val low = buffer[i].toInt() and 0xFF
+            val high = buffer[i + 1].toInt()
+            val sample = (high shl 8) or low
+            sumSquares += sample.toDouble() * sample.toDouble()
+            i += 2
         }
+        return sqrt(sumSquares / sampleCount)
     }
 
-    fun removeOperation(index: Int) {
-        val current = _parsedOperations.value.toMutableList()
-        if (index in current.indices) {
-            current.removeAt(index)
-            if (current.isEmpty()) {
-                cancelRecording()
-            } else {
-                _parsedOperations.value = current
-            }
+    private fun pcmToWavBytes(pcmData: ByteArray, sampleRate: Int): ByteArray {
+        val totalDataLen = pcmData.size + 36
+        val byteRate = sampleRate * 2 // 16-bit mono = 2 bytes per sample
+        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+
+        // RIFF header
+        header.put("RIFF".toByteArray(Charsets.US_ASCII))
+        header.putInt(totalDataLen)
+        header.put("WAVE".toByteArray(Charsets.US_ASCII))
+
+        // fmt subchunk
+        header.put("fmt ".toByteArray(Charsets.US_ASCII))
+        header.putInt(16) // Subchunk1Size for PCM
+        header.putShort(1) // AudioFormat = 1 (PCM)
+        header.putShort(1) // NumChannels = 1 (Mono)
+        header.putInt(sampleRate)
+        header.putInt(byteRate)
+        header.putShort(2) // BlockAlign = 2
+        header.putShort(16) // BitsPerSample = 16
+
+        // data subchunk
+        header.put("data".toByteArray(Charsets.US_ASCII))
+        header.putInt(pcmData.size)
+
+        val wavOutput = ByteArray(44 + pcmData.size)
+        System.arraycopy(header.array(), 0, wavOutput, 0, 44)
+        System.arraycopy(pcmData, 0, wavOutput, 44, pcmData.size)
+        return wavOutput
+    }
+
+    fun clear() {
+        synchronized(pendingLiveTurnTranscript) {
+            pendingLiveTurnTranscript.clear()
         }
+        _recognizedText.value = ""
+        _partialText.value = ""
+        _errorState.value = null
     }
 
-    fun addBlankOperation() {
-        val current = _parsedOperations.value.toMutableList()
-        val defaultCategory = currentExpenseCategories.firstOrNull() ?: "Другое"
-        current.add(
-            ParsedOperation(
-                amount = 0.0,
-                category = defaultCategory,
-                note = "Новая запись",
-                isIncome = false,
-                confidence = 1.0f
-            )
-        )
-        _parsedOperations.value = current
+    fun setRecognizedTextManually(text: String) {
+        _recognizedText.value = text
+        _partialText.value = text
     }
 
-    fun confirmOperations() {
-        val ops = _parsedOperations.value.filter { it.amount > 0 }
-        if (ops.isEmpty()) {
-            _errorMessage.value = "Укажите сумму больше 0 хотя бы для одной операции"
-            return
-        }
-        onOperationsConfirmed(ops)
-        _state.value = VoiceRecordingState.SUCCESS
-        scope.launch {
-            delay(1200)
-            cancelRecording()
-        }
-    }
-
-    private fun String.toMediaTypeOrNull(): MediaType? = try {
-        MediaType.get(this)
-    } catch (_: Exception) {
-        null
+    fun destroy() {
+        stopInternal()
     }
 }

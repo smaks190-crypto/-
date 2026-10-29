@@ -1,94 +1,89 @@
 package com.example.davidapp
 
 import android.app.Application
-import android.content.Context
 import android.media.AudioFocusRequest
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.data.*
+import com.example.data.api.RetrofitClient
+import com.example.data.db.AppDatabase
+import com.example.data.db.NotificationEntity
+import com.example.data.db.TransactionEntity
+import com.example.data.repository.BudgetRepository
 import com.example.davidapp.live.DavidLiveAudioEngine
 import com.example.davidapp.live.DavidLiveConnectionState
-import com.example.davidapp.live.DavidLiveFactCard
+import com.example.davidapp.live.DavidLiveDisplayMode
 import com.example.davidapp.live.DavidLiveFinancialToolsProvider
 import com.example.davidapp.live.DavidLiveSessionController
 import com.example.davidapp.live.DavidLiveSpeaker
 import com.example.davidapp.live.DavidLiveSummaryGenerator
+import com.example.davidapp.live.DavidLiveToolFact
 import com.example.davidapp.live.DavidLiveTranscriptTurn
-import kotlinx.coroutines.Dispatchers
+import com.example.ui.components.extractOpsAndComment
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
 import java.text.SimpleDateFormat
-import java.util.*
-import java.util.concurrent.TimeUnit
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
-class DavidViewModel(
-    application: Application,
-    private val transactionDao: TransactionDao,
-    private val categoryLimitDao: CategoryLimitDao,
-    private val savingGoalDao: SavingGoalDao,
-    private val categoryDao: CategoryDao,
-    private val davidMessageDao: DavidMessageDao,
-    private val settingsManager: SettingsManager,
-    private val achievementManager: AchievementManager
-) : AndroidViewModel(application) {
+/**
+ * ViewModel для управления состоянием чата и аудита с Давидом Жабовым.
+ *
+ * Полная интеграция:
+ * 1. Привязка к активному профилю бюджета (budgetId, profileName).
+ * 2. Синхронизация и отображение реакций Давида на добавленные транзакции (из NotificationEntity).
+ * 3. Строгий сквозной хронологический порядок всех элементов диалога (транзакции, отчеты, диаграммы, сообщения).
+ * 4. Расчёт реальных финансовых показателей и генерация персонального аудита (День, Неделя, Месяц, Год).
+ * 5. Интерактивная диаграмма динамики баланса на основе фактических транзакций.
+ */
+class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val currentBudgetIdFlow = MutableStateFlow("default")
-
-    fun setBudgetId(budgetId: String) {
-        if (currentBudgetIdFlow.value != budgetId) {
-            currentBudgetIdFlow.value = budgetId
-            rebuildLiveSessionController(budgetId)
-        }
-    }
+    private val database = AppDatabase.getDatabase(application)
+    private val repository = BudgetRepository(
+        application,
+        database.budgetProfileDao(),
+        database.transactionDao(),
+        database.goalDao(),
+        database.categoryDao(),
+        database.aiAuditDao(),
+        database.accountDao(),
+        database.notificationDao(),
+        database
+    )
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
 
-    private val _isTyping = MutableStateFlow(false)
-    val isTyping: StateFlow<Boolean> = _isTyping.asStateFlow()
+    private val _stage = MutableStateFlow(DavidStage.INITIAL)
+    val stage: StateFlow<DavidStage> = _stage.asStateFlow()
 
-    private val _mood = MutableStateFlow(DavidMood.NEUTRAL)
-    val mood: StateFlow<DavidMood> = _mood.asStateFlow()
+    private val _isDavidTyping = MutableStateFlow(false)
+    val isDavidTyping: StateFlow<Boolean> = _isDavidTyping.asStateFlow()
 
-    private val _inputText = MutableStateFlow("")
-    val inputText: StateFlow<String> = _inputText.asStateFlow()
+    private val _hasApiKey = MutableStateFlow(false)
+    val hasApiKey: StateFlow<Boolean> = _hasApiKey.asStateFlow()
 
-    private val _apiKey = MutableStateFlow("")
-    val apiKey: StateFlow<String> = _apiKey.asStateFlow()
+    // --- David Live (Голосовой диалог в реальном времени) ---
+    val liveFinancialToolsProvider = DavidLiveFinancialToolsProvider(
+        budgetId = "default",
+        transactionDao = database.transactionDao(),
+        categoryDao = database.categoryDao(),
+        goalDao = database.goalDao(),
+        accountDao = database.accountDao()
+    )
 
-    private val _hasGeminiConsent = MutableStateFlow(false)
-    val hasGeminiConsent: StateFlow<Boolean> = _hasGeminiConsent.asStateFlow()
+    val liveSessionController = DavidLiveSessionController(
+        financialToolsProvider = liveFinancialToolsProvider
+    )
 
-    private val _showConsentDialog = MutableStateFlow(false)
-    val showConsentDialog: StateFlow<Boolean> = _showConsentDialog.asStateFlow()
-
-    private var pendingMessageAfterConsent: String? = null
-    private var pendingSoundManagerAfterConsent: SoundManager? = null
-    private var pendingLiveStartAfterConsent: Boolean = false
-
-    private val _unlockedAchievements = MutableStateFlow<Set<String>>(emptySet())
-    val unlockedAchievements: StateFlow<Set<String>> = _unlockedAchievements.asStateFlow()
-
-    private val _newlyUnlockedAchievement = MutableStateFlow<Achievement?>(null)
-    val newlyUnlockedAchievement: StateFlow<Achievement?> = _newlyUnlockedAchievement.asStateFlow()
-
-    private val _proactiveNotification = MutableStateFlow<String?>(null)
-    val proactiveNotification: StateFlow<String?> = _proactiveNotification.asStateFlow()
-
-    // =========================================================================
-    // DAVID LIVE (REALTIME MULTIMODAL VOICE SESSION) STATE
-    // =========================================================================
+    private val liveSummaryGenerator = DavidLiveSummaryGenerator(
+        geminiApiService = RetrofitClient.service
+    )
 
     private val _isLiveOverlayVisible = MutableStateFlow(false)
     val isLiveOverlayVisible: StateFlow<Boolean> = _isLiveOverlayVisible.asStateFlow()
@@ -96,840 +91,919 @@ class DavidViewModel(
     private val _isLiveSessionActive = MutableStateFlow(false)
     val isLiveSessionActive: StateFlow<Boolean> = _isLiveSessionActive.asStateFlow()
 
-    private val _isGeneratingLiveSummary = MutableStateFlow(false)
-    val isGeneratingLiveSummary: StateFlow<Boolean> = _isGeneratingLiveSummary.asStateFlow()
+    val liveDisplayMode: StateFlow<DavidLiveDisplayMode> = liveSessionController.displayMode
+
+    private val _chatDraftText = MutableStateFlow("")
+    val chatDraftText: StateFlow<String> = _chatDraftText.asStateFlow()
 
     private var activeAssistantAudioFocusRequest: AudioFocusRequest? = null
+    private var lastDisplayModeTransitionMs: Long = 0L
 
-    private var liveSessionController: DavidLiveSessionController = createLiveController("default")
+    val liveConnectionState: StateFlow<DavidLiveConnectionState> = liveSessionController.connectionState
+    val liveSubtitle: StateFlow<String> = liveSessionController.liveSubtitle
+    val liveRayMagnitudes: StateFlow<List<Float>> = liveSessionController.audioEngine.rayMagnitudes
+    val liveOverallEnergy: StateFlow<Float> = liveSessionController.audioEngine.overallEnergy
+    val liveActiveSpeaker: StateFlow<DavidLiveSpeaker> = liveSessionController.audioEngine.activeSpeaker
+    val isLiveMicMuted: StateFlow<Boolean> = liveSessionController.isMicMuted
+    val liveErrorMessage: StateFlow<String?> = liveSessionController.errorMessage
 
-    private val _liveConnectionState = MutableStateFlow(DavidLiveConnectionState.IDLE)
-    val liveConnectionState: StateFlow<DavidLiveConnectionState> = _liveConnectionState.asStateFlow()
+    private var currentBudgetId: String = "default"
+    private var currentProfileName: String = "Максим"
+    private var currentApiKey: String = ""
 
-    private val _liveSubtitle = MutableStateFlow("")
-    val liveSubtitle: StateFlow<String> = _liveSubtitle.asStateFlow()
+    private var notificationsJob: Job? = null
+    private var currentNotifications: List<NotificationEntity> = emptyList()
+    private val sessionMessages = mutableListOf<ChatMessage>()
 
-    private val _liveErrorMessage = MutableStateFlow<String?>(null)
-    val liveErrorMessage: StateFlow<String?> = _liveErrorMessage.asStateFlow()
+    private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    private val isoFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
-    private val _liveIsMicMuted = MutableStateFlow(false)
-    val liveIsMicMuted: StateFlow<Boolean> = _liveIsMicMuted.asStateFlow()
+    fun bindProfile(budgetId: String, profileName: String, apiKey: String) {
+        val isDifferentBudget = budgetId != currentBudgetId || profileName != currentProfileName
+        currentBudgetId = budgetId
+        currentProfileName = if (profileName.isNotBlank()) profileName else "Пользователь"
+        liveFinancialToolsProvider.setBudgetId(currentBudgetId)
+        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
+        val effectiveKey = apiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        currentApiKey = effectiveKey
+        _hasApiKey.value = effectiveKey.isNotBlank()
 
-    private val _liveFactCards = MutableStateFlow<List<DavidLiveFactCard>>(emptyList())
-    val liveFactCards: StateFlow<List<DavidLiveFactCard>> = _liveFactCards.asStateFlow()
-
-    private val _liveUserAudioLevel = MutableStateFlow(0f)
-    val liveUserAudioLevel: StateFlow<Float> = _liveUserAudioLevel.asStateFlow()
-
-    private val _liveModelAudioLevel = MutableStateFlow(0f)
-    val liveModelAudioLevel: StateFlow<Float> = _liveModelAudioLevel.asStateFlow()
-
-    private val _liveUserSpectrum = MutableStateFlow(FloatArray(24))
-    val liveUserSpectrum: StateFlow<FloatArray> = _liveUserSpectrum.asStateFlow()
-
-    private val _liveModelSpectrum = MutableStateFlow(FloatArray(24))
-    val liveModelSpectrum: StateFlow<FloatArray> = _liveModelSpectrum.asStateFlow()
-
-    private var liveCollectorJob: Job? = null
-
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .build()
-
-    private val jsonFormat = Json { ignoreUnknownKeys = true; encodeDefaults = true }
-
-    init {
-        viewModelScope.launch {
-            settingsManager.geminiApiKeyFlow.collect { key ->
-                _apiKey.value = key
-            }
-        }
-        viewModelScope.launch {
-            settingsManager.geminiConsentFlow.collect { consent ->
-                _hasGeminiConsent.value = consent
-            }
-        }
-        viewModelScope.launch {
-            achievementManager.unlockedAchievementsFlow.collect { unlocked ->
-                _unlockedAchievements.value = unlocked
-            }
-        }
-        viewModelScope.launch {
-            achievementManager.newAchievementEvent.collect { achievement ->
-                _newlyUnlockedAchievement.value = achievement
-            }
-        }
-
-        bindLiveControllerFlows(liveSessionController)
-
-        viewModelScope.launch {
-            currentBudgetIdFlow.flatMapLatest { budgetId ->
-                davidMessageDao.getMessagesForBudget(budgetId)
-            }.collect { entities ->
-                if (entities.isEmpty()) {
-                    val welcomeMsg = createWelcomeMessage()
-                    _messages.value = listOf(welcomeMsg)
-                    saveMessageToDb(welcomeMsg)
-                } else {
-                    _messages.value = entities.map { it.toChatMessage() }
-                }
-            }
+        if (isDifferentBudget || notificationsJob == null) {
+            sessionMessages.clear()
+            _stage.value = DavidStage.INITIAL
+            observeNotifications()
         }
     }
 
-    private fun createLiveController(budgetId: String): DavidLiveSessionController {
-        val provider = DavidLiveFinancialToolsProvider(
-            budgetId = budgetId,
-            transactionDao = transactionDao,
-            categoryLimitDao = categoryLimitDao,
-            savingGoalDao = savingGoalDao,
-            categoryDao = categoryDao
-        )
-        return DavidLiveSessionController(
-            financialToolsProvider = provider,
-            httpClient = httpClient
-        )
-    }
-
-    private fun rebuildLiveSessionController(budgetId: String) {
-        if (_isLiveSessionActive.value) {
-            liveSessionController.endSession()
-            _isLiveSessionActive.value = false
-            _isLiveOverlayVisible.value = false
-        }
-        liveSessionController.release()
-        liveSessionController = createLiveController(budgetId)
-        bindLiveControllerFlows(liveSessionController)
-    }
-
-    private fun bindLiveControllerFlows(controller: DavidLiveSessionController) {
-        liveCollectorJob?.cancel()
-        liveCollectorJob = viewModelScope.launch {
-            launch { controller.connectionState.collect { _liveConnectionState.value = it } }
-            launch { controller.liveSubtitle.collect { _liveSubtitle.value = it } }
-            launch { controller.errorMessage.collect { _liveErrorMessage.value = it } }
-            launch { controller.isMicMuted.collect { _liveIsMicMuted.value = it } }
-            launch { controller.factCards.collect { _liveFactCards.value = it } }
-            launch { controller.audioEngine.userAudioLevel.collect { _liveUserAudioLevel.value = it } }
-            launch { controller.audioEngine.modelAudioLevel.collect { _liveModelAudioLevel.value = it } }
-            launch { controller.audioEngine.userSpectrum.collect { _liveUserSpectrum.value = it } }
-            launch { controller.audioEngine.modelSpectrum.collect { _liveModelSpectrum.value = it } }
-        }
-    }
-
-    private fun createWelcomeMessage(): ChatMessage {
-        return ChatMessage(
-            id = UUID.randomUUID().toString(),
-            text = "Привет! Я Давид Жабов 🐸 — твой персональный ИИ-аудитор и финансовый консультант.\n\n" +
-                    "Я не просто считаю циферки, а помогаю находить дыры в бюджете, строить реальные планы накоплений и не сливать зарплату в первую неделю.\n\n" +
-                    "Нажми на одну из быстрых кнопок ниже, напиши вопрос в чат или запусти голосовой режим **David Live** (иконка волны сверху), чтобы поговорить со мной вживую!",
-            isUser = false,
-            timestamp = getCurrentTimeFormatted(),
-            mood = DavidMood.HAPPY,
-            suggestions = listOf(
-                "📊 Полный разбор бюджета",
-                "🔥 Где я теряю деньги?",
-                "🎯 Как быстрее накопить на цель?",
-                "💡 Совет дня от Жабова"
+    fun saveApiKeyFromChat(newKey: String, soundManager: SoundManager? = null) {
+        val clean = newKey.trim()
+        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("gemini_api_key", clean).putBoolean("gemini_consent_given", true).apply()
+        currentApiKey = clean
+        _hasApiKey.value = clean.isNotBlank()
+        soundManager?.playReceive()
+        addSessionMessage(
+            ChatMessage(
+                sender = "Давид Жабов 🐸",
+                type = ChatMessageType.Text(
+                    if (clean.isNotBlank()) {
+                        "🐸 Ква! API-ключ успешно сохранён и активирован! Теперь я работаю на базе **Gemini 3.8** — спрашивай про бюджет или пиши траты прямо сюда (например: *«Такси 500»*)!"
+                    } else {
+                        "API-ключ очищен. Я переключился в локальный офлайн-режим."
+                    }
+                ),
+                timestamp = currentTime(),
+                isUser = false,
+                timestampMillis = System.currentTimeMillis()
             )
         )
     }
 
-    fun updateInputText(text: String) {
-        _inputText.value = text
-    }
 
-    fun saveApiKey(key: String) {
-        viewModelScope.launch {
-            settingsManager.saveGeminiApiKey(key.trim())
+    fun setProfileName(name: String) {
+        if (name.isNotBlank() && name != currentProfileName) {
+            currentProfileName = name
+            rebuildChronologicalMessages()
         }
     }
 
-    fun requestGeminiConsentIfNeeded(
-        messageText: String,
-        soundManager: SoundManager? = null
-    ): Boolean {
-        if (_hasGeminiConsent.value) return true
-        pendingMessageAfterConsent = messageText
-        pendingSoundManagerAfterConsent = soundManager
-        pendingLiveStartAfterConsent = false
-        _showConsentDialog.value = true
-        return false
-    }
-
-    fun onGeminiConsentAccepted() {
-        viewModelScope.launch {
-            settingsManager.saveGeminiConsent(true)
-            _showConsentDialog.value = false
-            if (pendingLiveStartAfterConsent) {
-                pendingLiveStartAfterConsent = false
-                val sm = pendingSoundManagerAfterConsent
-                pendingSoundManagerAfterConsent = null
-                startDavidLiveSession(sm)
-                return@launch
-            }
-            val msg = pendingMessageAfterConsent
-            val sm = pendingSoundManagerAfterConsent
-            pendingMessageAfterConsent = null
-            pendingSoundManagerAfterConsent = null
-            if (!msg.isNullOrBlank()) {
-                sendMessage(msg, sm)
+    private fun observeNotifications() {
+        notificationsJob?.cancel()
+        notificationsJob = viewModelScope.launch {
+            repository.getNotificationsForBudget(currentBudgetId).collect { notifs ->
+                currentNotifications = notifs
+                rebuildChronologicalMessages()
             }
         }
     }
 
-    fun onGeminiConsentDeclined() {
-        pendingMessageAfterConsent = null
-        pendingSoundManagerAfterConsent = null
-        pendingLiveStartAfterConsent = false
-        _showConsentDialog.value = false
+    private fun addSessionMessage(message: ChatMessage) {
+        sessionMessages.add(message)
+        rebuildChronologicalMessages()
     }
 
-    fun dismissAchievementToast() {
-        _newlyUnlockedAchievement.value = null
-    }
-
-    fun clearProactiveNotification() {
-        _proactiveNotification.value = null
-    }
-
-    fun clearHistory(soundManager: SoundManager? = null) {
-        viewModelScope.launch {
-            val budgetId = currentBudgetIdFlow.value
-            davidMessageDao.clearMessagesForBudget(budgetId)
-            val welcome = createWelcomeMessage()
-            _messages.value = listOf(welcome)
-            saveMessageToDb(welcome)
-            _mood.value = DavidMood.NEUTRAL
-            soundManager?.playClick()
-        }
-    }
-
-    fun sendMessage(
-        userText: String = _inputText.value,
-        soundManager: SoundManager? = null
-    ) {
-        val trimmed = userText.trim()
-        if (trimmed.isEmpty() || _isTyping.value) return
-
-        if (!_hasGeminiConsent.value) {
-            requestGeminiConsentIfNeeded(trimmed, soundManager)
-            return
-        }
-
-        _inputText.value = ""
-        soundManager?.playSend()
-
-        val userMsg = ChatMessage(
-            id = UUID.randomUUID().toString(),
-            text = trimmed,
-            isUser = true,
-            timestamp = getCurrentTimeFormatted()
+    private fun rebuildChronologicalMessages() {
+        // 1. Начальное приветствие от Давида (всегда первое, timestampMillis = 0L)
+        val greetingMsg = ChatMessage(
+            id = "greeting_${currentBudgetId}",
+            sender = "Давид Жабов 🐸",
+            type = ChatMessageType.Text(
+                "Салют, $currentProfileName! Я **Давид Жабов** — твой персональный финансовый ревизор.\n\n" +
+                "Нажми **«🔥 Разбор трат»** внизу, чтобы выбрать период аудита, спроси меня о бюджете или просто напиши расход прямо в чат (например: *«Кофе 300»*)."
+            ),
+            timestamp = "09:00",
+            isUser = false,
+            timestampMillis = 0L
         )
 
-        val updatedList = _messages.value + userMsg
-        _messages.value = updatedList
+        // 2. Добавление реакций на транзакции и действия из базы данных
+        val notifMessages = mutableListOf<ChatMessage>()
+        for (notif in currentNotifications) {
+            val (ops, userPhrase, comment) = extractOpsAndComment(notif)
+            val notifTime = timeFormat.format(Date(notif.timestamp))
 
-        viewModelScope.launch {
-            saveMessageToDb(userMsg)
-            achievementManager.unlockAchievement("first_chat")
-
-            val userMsgCount = updatedList.count { it.isUser }
-            if (userMsgCount >= 10) {
-                achievementManager.unlockAchievement("chat_master")
-            }
-            if (trimmed.contains("инвест", ignoreCase = true) ||
-                trimmed.contains("акци", ignoreCase = true) ||
-                trimmed.contains("вклад", ignoreCase = true) ||
-                trimmed.contains("капитал", ignoreCase = true)
-            ) {
-                achievementManager.unlockAchievement("investor_mindset")
+            // Пропускаем простые системные уведомления-приветствия, чтобы не дублировать стартовое приветствие Давида
+            if (ops.isEmpty() && userPhrase.isBlank() && (comment.startsWith("Добр") || comment.startsWith("Салют"))) {
+                continue
             }
 
-            val calendar = Calendar.getInstance()
-            val hour = calendar.get(Calendar.HOUR_OF_DAY)
-            if (hour in 0..4) {
-                achievementManager.unlockAchievement("night_owl")
-            }
+            // Сообщение пользователя (добавленная операция или фраза)
+            if (userPhrase.isNotBlank() || ops.isNotEmpty()) {
+                val firstOp = ops.firstOrNull()
+                val opType = firstOp?.type ?: "expense"
+                val opCategory = firstOp?.category ?: "Операция"
+                val opSub = firstOp?.subcategory ?: ""
+                val opAmount = if (ops.size > 1) ops.sumOf { it.amount } else (firstOp?.amount ?: 0.0)
 
-            _isTyping.value = true
-            _mood.value = DavidMood.THINKING
-
-            try {
-                val financialContext = buildFinancialContext()
-                val currentKey = _apiKey.value.trim()
-
-                val responseResult = if (currentKey.isNotEmpty()) {
-                    callGeminiApi(trimmed, financialContext, currentKey, updatedList)
+                val phraseText = if (userPhrase.isNotBlank()) {
+                    userPhrase
+                } else if (ops.size > 1) {
+                    "Добавлено ${ops.size} операций на сумму ${opAmount.toInt()} ₽"
                 } else {
-                    generateLocalSmartResponse(trimmed, financialContext)
+                    "$opCategory ($opSub) — ${opAmount.toInt()} ₽"
                 }
 
-                _isTyping.value = false
-                _mood.value = responseResult.mood
-                soundManager?.playReceive()
-
-                val botMsg = ChatMessage(
-                    id = UUID.randomUUID().toString(),
-                    text = responseResult.text,
-                    isUser = false,
-                    timestamp = getCurrentTimeFormatted(),
-                    mood = responseResult.mood,
-                    chartData = responseResult.chartData,
-                    actionButton = responseResult.actionButton,
-                    suggestions = responseResult.suggestions,
-                    financialInsights = responseResult.insights
+                notifMessages.add(
+                    ChatMessage(
+                        id = "user_notif_${notif.id}",
+                        sender = currentProfileName,
+                        type = ChatMessageType.Operation(
+                            type = opType,
+                            category = opCategory,
+                            subcategory = opSub,
+                            amount = opAmount,
+                            userPhrase = phraseText,
+                            isRead = notif.isRead
+                        ),
+                        timestamp = notifTime,
+                        isUser = true,
+                        timestampMillis = notif.timestamp
+                    )
                 )
+            }
 
-                _messages.value = _messages.value + botMsg
-                saveMessageToDb(botMsg)
-
-            } catch (e: Exception) {
-                _isTyping.value = false
-                _mood.value = DavidMood.SHOCKED
-                val fallback = generateLocalSmartResponse(trimmed, buildFinancialContext())
-                val errorNote = if (_apiKey.value.isNotBlank()) {
-                    "\n\n*(Примечание: не удалось связаться с облачным сервером Gemini — ${e.localizedMessage ?: "ошибка сети"}. Переключился на локальный аналитический модуль Жабова)*"
-                } else ""
-
-                val botMsg = ChatMessage(
-                    id = UUID.randomUUID().toString(),
-                    text = fallback.text + errorNote,
-                    isUser = false,
-                    timestamp = getCurrentTimeFormatted(),
-                    mood = fallback.mood,
-                    chartData = fallback.chartData,
-                    suggestions = fallback.suggestions,
-                    financialInsights = fallback.insights
+            // Ответ Давида (реакция / прожарка)
+            if (comment.isNotBlank()) {
+                notifMessages.add(
+                    ChatMessage(
+                        id = "david_notif_${notif.id}",
+                        sender = "Давид Жабов 🐸",
+                        type = ChatMessageType.Text(comment),
+                        timestamp = notifTime,
+                        isUser = false,
+                        timestampMillis = notif.timestamp + 1L
+                    )
                 )
-                _messages.value = _messages.value + botMsg
-                saveMessageToDb(botMsg)
+            }
+        }
+
+        // 3. Строгая хронологическая сортировка всех динамических элементов ленты
+        val dynamicMessages = (notifMessages + sessionMessages).sortedWith(
+            compareBy<ChatMessage> { it.timestampMillis }.thenBy { it.id }
+        )
+
+        // 4. Приветствие всегда в начале истории
+        _messages.value = listOf(greetingMsg) + dynamicMessages
+    }
+
+    private fun currentTime(): String = timeFormat.format(Date())
+
+    /**
+     * Обработка быстрых действий
+     */
+    fun handleAction(action: String, soundManager: SoundManager? = null) {
+        viewModelScope.launch {
+            soundManager?.playClick()
+            when (action) {
+                "START" -> {
+                    AchievementManager.unlock(getApplication(), "first_audit")
+                    val now = System.currentTimeMillis()
+                    val userMsg = ChatMessage(
+                        sender = currentProfileName,
+                        type = ChatMessageType.Text("🐸 Давид, сделай отчет"),
+                        timestamp = currentTime(),
+                        isUser = true,
+                        timestampMillis = now
+                    )
+                    addSessionMessage(userMsg)
+
+                    _stage.value = DavidStage.PROCESSING
+                    _isDavidTyping.value = true
+                    delay(500)
+                    _isDavidTyping.value = false
+                    soundManager?.playReceive()
+                    _stage.value = DavidStage.FILE_SELECTION
+
+                    val botMsg = ChatMessage(
+                        sender = "Давид Жабов 🐸",
+                        type = ChatMessageType.Text(
+                            "Отлично, $currentProfileName! Выбери временной интервал для выписки. Я соберу все твои фактические траты и выдам сочный финансовый вердикт."
+                        ),
+                        timestamp = currentTime(),
+                        isUser = false,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+                    addSessionMessage(botMsg)
+                }
+                "AUDIT" -> {
+                    AchievementManager.unlock(getApplication(), "first_audit")
+                    val userMsg = ChatMessage(
+                        sender = currentProfileName,
+                        type = ChatMessageType.Text("⚡ Провести экспресс-аудит за текущий месяц"),
+                        timestamp = currentTime(),
+                        isUser = true,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+                    addSessionMessage(userMsg)
+                    processFile("Месяц", soundManager)
+                }
+                "GOALS" -> {
+                    val userMsg = ChatMessage(
+                        sender = currentProfileName,
+                        type = ChatMessageType.Text("🎯 Покажи статус моих финансовых целей"),
+                        timestamp = currentTime(),
+                        isUser = true,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+                    addSessionMessage(userMsg)
+
+                    _isDavidTyping.value = true
+                    delay(600)
+                    _isDavidTyping.value = false
+                    soundManager?.playReceive()
+
+                    val goalsList = try {
+                        repository.getGoalsForBudget(currentBudgetId).first()
+                    } catch (_: Exception) { emptyList() }
+
+                    val goalsText = if (goalsList.isNotEmpty()) {
+                        "🎯 **Прогресс по финансовым целям ($currentProfileName):**\n\n" +
+                        goalsList.joinToString("\n") { g ->
+                            val percent = if (g.targetAmount > 0) ((g.currentAmount / g.targetAmount) * 100).toInt() else 0
+                            "- 📌 **${g.name}:** $percent% (собрано ${g.currentAmount.toInt()} ₽ из ${g.targetAmount.toInt()} ₽)"
+                        } + "\n\n💡 *Совет Жабова:* Регулярные автопополнения приближают цель в 2.5 раза быстрее спонтанных взносов!"
+                    } else {
+                        "🎯 У тебя пока нет активных целей в профиле **$currentProfileName**. Создай цель на главный экран, чтобы мне было за что тебя хвалить!"
+                    }
+
+                    val botMsg = ChatMessage(
+                        sender = "Давид Жабов 🐸",
+                        type = ChatMessageType.Text(goalsText),
+                        timestamp = currentTime(),
+                        isUser = false,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+                    addSessionMessage(botMsg)
+                }
+                else -> {
+                    processFile("Месяц", soundManager)
+                }
             }
         }
     }
 
-    private suspend fun buildFinancialContext(): FinancialContextData = withContext(Dispatchers.IO) {
-        val budgetId = currentBudgetIdFlow.value
-        val transactions = transactionDao.getTransactionsByBudgetSync(budgetId)
-        val limits = categoryLimitDao.getLimitsForBudgetSync(budgetId)
-        val goals = savingGoalDao.getGoalsByBudgetSync(budgetId)
-        val customCategories = categoryDao.getCategoriesByBudgetSync(budgetId)
+    /**
+     * Обработка выбора периода: рассчитывает реальные данные профиля, формирует отчет и интерактивный график
+     */
+    fun processFile(period: String, soundManager: SoundManager? = null) {
+        AchievementManager.unlock(getApplication(), "first_audit")
+        viewModelScope.launch {
+            soundManager?.playSend()
 
-        val totalIncome = transactions.filter { it.isIncome }.sumOf { it.amount }
-        val totalExpense = transactions.filter { !it.isIncome }.sumOf { it.amount }
-        val balance = totalIncome - totalExpense
+            val periodFormatted = when (period.lowercase()) {
+                "день", "day" -> "День"
+                "неделя", "week" -> "Неделя"
+                "месяц", "month" -> "Месяц"
+                "год", "year" -> "Год"
+                else -> period.replaceFirstChar { it.uppercase() }
+            }
 
-        val expensesByCategory = transactions
-            .filter { !it.isIncome }
-            .groupBy { it.category }
-            .mapValues { entry -> entry.value.sumOf { it.amount } }
-            .toList()
-            .sortedByDescending { it.second }
+            val fileName = "Выписка_${currentProfileName}_${periodFormatted}.pdf"
+            val fileSize = when (periodFormatted) {
+                "День" -> "1.2 MB"
+                "Неделя" -> "2.4 MB"
+                "Месяц" -> "4.8 MB"
+                "Год" -> "12.3 MB"
+                else -> "3.1 MB"
+            }
 
-        val incomeByCategory = transactions
-            .filter { it.isIncome }
-            .groupBy { it.category }
-            .mapValues { entry -> entry.value.sumOf { it.amount } }
-            .toList()
-            .sortedByDescending { it.second }
+            // Добавляем сообщение-запрос с файлом от пользователя
+            val fileTime = System.currentTimeMillis()
+            val fileMsg = ChatMessage(
+                sender = currentProfileName,
+                type = ChatMessageType.File(
+                    name = fileName,
+                    size = fileSize,
+                    extension = "PDF"
+                ),
+                timestamp = currentTime(),
+                isUser = true,
+                timestampMillis = fileTime
+            )
+            addSessionMessage(fileMsg)
 
-        val recentTransactions = transactions
-            .sortedByDescending { it.timestamp }
-            .take(15)
+            _stage.value = DavidStage.PROCESSING
 
-        FinancialContextData(
-            totalIncome = totalIncome,
-            totalExpense = totalExpense,
-            balance = balance,
-            expensesByCategory = expensesByCategory,
-            incomeByCategory = incomeByCategory,
-            limits = limits,
-            goals = goals,
-            recentTransactions = recentTransactions,
-            totalTransactionsCount = transactions.size,
-            customCategoriesCount = customCategories.size
+            // Получаем реальные транзакции для этого профиля
+            val allTxs = try {
+                repository.getTransactionsForBudget(currentBudgetId).first()
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            val auditData = calculateRealAuditData(periodFormatted, allTxs)
+            val sections = splitReportIntoSections(auditData.sarcasticReport)
+            val reportBaseTime = System.currentTimeMillis()
+
+            // 1. Отправляем каждую секцию отчета отдельным баблом с эффектом печати
+            sections.forEachIndexed { index, section ->
+                _isDavidTyping.value = true
+                delay(600)
+                _isDavidTyping.value = false
+                soundManager?.playReceive()
+
+                val textMsg = ChatMessage(
+                    sender = "Давид Жабов 🐸",
+                    type = ChatMessageType.Text(section),
+                    timestamp = currentTime(),
+                    isUser = false,
+                    timestampMillis = reportBaseTime + index + 1
+                )
+                addSessionMessage(textMsg)
+                delay(150)
+            }
+
+            // 2. В конце отправляем карточку интерактивного графика
+            _isDavidTyping.value = true
+            delay(700)
+            _isDavidTyping.value = false
+            soundManager?.playReceive()
+
+            val chartMsg = ChatMessage(
+                sender = "Давид Жабов 🐸",
+                type = ChatMessageType.Chart(
+                    title = "Динамика баланса: $periodFormatted",
+                    summary = auditData.chartSummary,
+                    income = auditData.income,
+                    expense = auditData.expense,
+                    deltaPercent = auditData.deltaPercent,
+                    dataPoints = auditData.dataPoints
+                ),
+                timestamp = currentTime(),
+                isUser = false,
+                timestampMillis = reportBaseTime + sections.size + 1
+            )
+            addSessionMessage(chartMsg)
+
+            _stage.value = DavidStage.FOLLOW_UP
+        }
+    }
+
+    /**
+     * Расчет реальных показателей транзакций для выбранного периода
+     */
+    private suspend fun calculateRealAuditData(
+        period: String,
+        allTxs: List<TransactionEntity>
+    ): AuditPeriodData {
+        val cal = Calendar.getInstance()
+        val todayStr = isoFormat.format(cal.time)
+
+        val (currentTxs, prevTxs, periodTitle) = when (period) {
+            "День" -> {
+                cal.add(Calendar.DAY_OF_YEAR, -1)
+                val yesterdayStr = isoFormat.format(cal.time)
+                Triple(
+                    allTxs.filter { it.date == todayStr },
+                    allTxs.filter { it.date == yesterdayStr },
+                    "за сегодня ($todayStr)"
+                )
+            }
+            "Неделя" -> {
+                val weekDates = (0..6).map { offset ->
+                    val c = Calendar.getInstance()
+                    c.add(Calendar.DAY_OF_YEAR, -offset)
+                    isoFormat.format(c.time)
+                }.toSet()
+                val prevWeekDates = (7..13).map { offset ->
+                    val c = Calendar.getInstance()
+                    c.add(Calendar.DAY_OF_YEAR, -offset)
+                    isoFormat.format(c.time)
+                }.toSet()
+                Triple(
+                    allTxs.filter { it.date in weekDates },
+                    allTxs.filter { it.date in prevWeekDates },
+                    "за последние 7 дней"
+                )
+            }
+            "Месяц" -> {
+                val curMonthPrefix = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date())
+                cal.add(Calendar.MONTH, -1)
+                val prevMonthPrefix = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(cal.time)
+                Triple(
+                    allTxs.filter { it.date.startsWith(curMonthPrefix) },
+                    allTxs.filter { it.date.startsWith(prevMonthPrefix) },
+                    "за текущий месяц"
+                )
+            }
+            "Год" -> {
+                val curYearPrefix = SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())
+                val prevYearPrefix = (Calendar.getInstance().get(Calendar.YEAR) - 1).toString()
+                Triple(
+                    allTxs.filter { it.date.startsWith(curYearPrefix) },
+                    allTxs.filter { it.date.startsWith(prevYearPrefix) },
+                    "за текущий год"
+                )
+            }
+            else -> Triple(allTxs, emptyList(), "за все время")
+        }
+
+        val totalIncome = currentTxs.filter { it.type == "income" }.sumOf { it.amount }
+        val totalExpense = currentTxs.filter { it.type == "expense" }.sumOf { it.amount }
+        val net = totalIncome - totalExpense
+
+        val prevIncome = prevTxs.filter { it.type == "income" }.sumOf { it.amount }
+        val prevExpense = prevTxs.filter { it.type == "expense" }.sumOf { it.amount }
+        val prevNet = prevIncome - prevExpense
+
+        val deltaPercent = if (prevIncome + prevExpense > 0) {
+            val rawDelta = ((net - prevNet) / (prevIncome + prevExpense).coerceAtLeast(1.0)) * 100.0
+            String.format(Locale.US, "%.1f", rawDelta).toDoubleOrNull() ?: 0.0
+        } else {
+            if (net >= 0) 15.0 else -15.0
+        }
+
+        // Построение точек диаграммы на основе фактических транзакций
+        val dataPoints = generateRealDataPoints(period, currentTxs, totalIncome, totalExpense)
+
+        // Генерация отчета через репозиторий с учетом реальных данных и имени профиля
+        val debts = try { repository.getAccountsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
+        val goals = try { repository.getGoalsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
+
+        val reportResult = repository.requestAiAudit(
+            apiKey = currentApiKey,
+            periodName = periodTitle,
+            year = cal.get(Calendar.YEAR),
+            filteredTransactions = currentTxs,
+            previousTransactions = prevTxs,
+            activeDebts = debts,
+            activeGoals = goals,
+            allTransactions = allTxs
+        )
+
+        val reportText = reportResult.getOrNull() ?: buildDefaultSarcasticReport(
+            period = period,
+            income = totalIncome,
+            expense = totalExpense,
+            net = net,
+            transactions = currentTxs
+        )
+
+        val chartSummary = when {
+            net >= 0 -> "Профицит периода ($period): +${net.toInt()} ₽. Доходы превышают расходы на ${if (totalIncome > 0) ((net / totalIncome) * 100).toInt() else 100}%."
+            else -> "Дефицит периода ($period): ${net.toInt()} ₽. Превышение расходов над доходами!"
+        }
+
+        return AuditPeriodData(
+            income = totalIncome,
+            expense = totalExpense,
+            deltaPercent = deltaPercent,
+            dataPoints = dataPoints,
+            chartSummary = chartSummary,
+            sarcasticReport = reportText
         )
     }
 
-    private suspend fun callGeminiApi(
-        userQuery: String,
-        context: FinancialContextData,
-        apiKey: String,
-        chatHistory: List<ChatMessage>
-    ): BotResponseResult = withContext(Dispatchers.IO) {
-
-        val systemInstructionText = buildSystemPrompt(context)
-
-        val contentsArray = JSONArray()
-        val recentHistory = chatHistory.takeLast(8)
-        for (msg in recentHistory) {
-            val role = if (msg.isUser) "user" else "model"
-            val partObj = JSONObject().put("text", msg.text)
-            val partsArr = JSONArray().put(partObj)
-            val contentObj = JSONObject()
-                .put("role", role)
-                .put("parts", partsArr)
-            contentsArray.put(contentObj)
+    /**
+     * Построение точек для диаграммы Безье на основе фактических транзакций
+     */
+    private fun generateRealDataPoints(
+        period: String,
+        txs: List<TransactionEntity>,
+        income: Double,
+        expense: Double
+    ): List<Float> {
+        if (txs.isEmpty()) {
+            return listOf(20f, 25f, 30f, 40f, 50f, 65f, 75f)
         }
 
-        val payload = JSONObject().apply {
-            put("systemInstruction", JSONObject().apply {
-                put("parts", JSONArray().put(JSONObject().put("text", systemInstructionText)))
-            })
-            put("contents", contentsArray)
-            put("generationConfig", JSONObject().apply {
-                put("temperature", 0.75)
-                put("maxOutputTokens", 1200)
-            })
+        val sorted = txs.sortedBy { it.date }
+        val expenses = sorted.filter { it.type == "expense" }
+
+        val points = mutableListOf<Float>()
+        var runningExpense = 0.0
+        val maxTarget = (income + expense).coerceAtLeast(1000.0)
+
+        points.add(20f)
+        for (tx in expenses.take(8)) {
+            runningExpense += tx.amount
+            val norm = (20f + (runningExpense / maxTarget * 75f).toFloat()).coerceIn(10f, 95f)
+            points.add(norm)
         }
 
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
-        val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-        val request = Request.Builder().url(url).post(body).build()
-
-        val response = httpClient.newCall(request).execute()
-        val responseBody = response.body?.string() ?: ""
-
-        if (!response.isSuccessful) {
-            throw IllegalStateException("HTTP ${response.code}: ${responseBody.take(200)}")
+        while (points.size < 6) {
+            points.add(points.last() + 5f)
         }
 
-        val rootJson = JSONObject(responseBody)
-        val candidates = rootJson.optJSONArray("candidates")
-        val firstCandidate = candidates?.optJSONObject(0)
-        val contentObj = firstCandidate?.optJSONObject("content")
-        val parts = contentObj?.optJSONArray("parts")
-        val rawText = parts?.optJSONObject(0)?.optString("text")?.trim()
-            ?: throw IllegalStateException("Пустой ответ от модели Gemini")
-
-        parseStructuredBotResponse(rawText, userQuery, context)
+        return points.take(10)
     }
 
-    private fun buildSystemPrompt(ctx: FinancialContextData): String {
-        val topExpensesStr = if (ctx.expensesByCategory.isEmpty()) {
-            "Расходов пока нет"
-        } else {
-            ctx.expensesByCategory.take(6).joinToString("; ") { "${it.first}: ${it.second.toInt()} ₽" }
-        }
+    /**
+     * Генератор саркастического отчета по умолчанию на основе фактических цифр профиля
+     */
+    private fun buildDefaultSarcasticReport(
+        period: String,
+        income: Double,
+        expense: Double,
+        net: Double,
+        transactions: List<TransactionEntity>
+    ): String {
+        val expenses = transactions.filter { it.type == "expense" }
+        val topCategory = expenses.groupBy { it.category }
+            .mapValues { entry -> entry.value.sumOf { it.amount } }
+            .maxByOrNull { it.value }
 
-        val limitsStr = if (ctx.limits.isEmpty()) {
-            "Лимиты не установлены"
-        } else {
-            ctx.limits.joinToString("; ") { lim ->
-                val spent = ctx.expensesByCategory.find { it.first == lim.category }?.second ?: 0.0
-                "${lim.category}: потрачено ${spent.toInt()} из ${lim.limitAmount.toInt()} ₽"
-            }
-        }
+        val topCatName = topCategory?.key ?: "Спонтанные покупки"
+        val topCatAmount = topCategory?.value?.toInt() ?: 0
 
-        val goalsStr = if (ctx.goals.isEmpty()) {
-            "Целей накоплений пока нет"
-        } else {
-            ctx.goals.joinToString("; ") { g ->
-                "${g.name}: накоплено ${g.currentAmount.toInt()} из ${g.targetAmount.toInt()} ₽"
-            }
-        }
-
-        val recentStr = if (ctx.recentTransactions.isEmpty()) {
-            "Нет недавних операций"
-        } else {
-            ctx.recentTransactions.take(8).joinToString(" | ") { tx ->
-                val sign = if (tx.isIncome) "+" else "-"
-                "$sign${tx.amount.toInt()}₽ (${tx.category}${if (tx.note.isNotBlank()) ": ${tx.note}" else ""})"
-            }
-        }
+        val verdictTitle = if (net >= 0) "📈 УМЕРЕННЫЙ ПРОФИЦИТ" else "🚨 КАССОВЫЙ РАЗРЫВ"
 
         return """
-Ты — Давид Жабов 🐸, харизматичный, ироничный, но очень профессиональный и заботливый финансовый аудитор внутри мобильного приложения учёта финансов.
-Твой стиль: живой русский язык, лёгкий дружеский юмор, метафоры про жаб/болото/кувшинки и финансовую дисциплину, но всегда конкретные цифры, чёткие расчёты и практическая польза.
+# Главный Вердикт: $verdictTitle
+$currentProfileName, финансовый аудит за период **$period** сформирован! Доходы составили **+${income.toInt()} ₽**, расходы — **-${expense.toInt()} ₽**. Чистый итог: **${if (net >= 0) "+" else ""}${net.toInt()} ₽**.
 
-ТЕКУЩИЕ ФИНАНСОВЫЕ ДАННЫЕ ПОЛЬЗОВАТЕЛЯ:
-- Общий доход: ${ctx.totalIncome.toInt()} ₽
-- Общий расход: ${ctx.totalExpense.toInt()} ₽
-- Текущий баланс: ${ctx.balance.toInt()} ₽
-- Всего операций: ${ctx.totalTransactionsCount}
-- Топ категорий расходов: $topExpensesStr
-- Установленные лимиты по категориям: $limitsStr
-- Финансовые цели: $goalsStr
-- Последние операции: $recentStr
+## Цифры и Динамика
+- Совокупный доход: **+${income.toInt()} ₽**
+- Совокупный расход: **-${expense.toInt()} ₽**
+- Чистый остаток: **${if (net >= 0) "+" else ""}${net.toInt()} ₽**
+- Главная статья трат: **$topCatName** ($topCatAmount ₽)
 
-ПРАВИЛА ОТВЕТА:
-1. Опирайся на реальные цифры пользователя выше. Не выдумывай транзакции, которых нет.
-2. Структурируй ответ с помощью списков и жирного шрифта, чтобы его было легко читать с экрана телефона.
-3. В самом начале ответа можешь указать тег настроения в квадратных скобках: [HAPPY], [PROUD], [THINKING], [SHOCKED], [ANGRY] или [COOL].
+## Прожарка Транжиры 🔥
+${if (expenses.isNotEmpty()) "Твоя главная финансовая слабость — это категория «$topCatName», куда улетело аж $topCatAmount ₽! Даже Скупой рыцарь Пушкина прослезился бы от такой щедрости к торговцам. Если продолжить в том же духе, инвестиционный портфель придется собирать из скидочных купонов." else "В этом периоде подозрительно мало расходов. Либо режим жесткой аскезы, либо ты забыл внести чек за вчерашний пир!"}
+
+## Ачивки и Достижения 🏆
+🏆 **Спонсор категории «$topCatName»** — инвестировал $topCatAmount ₽ в чужой бизнес
+🥇 **${if (net >= 0) "Мастер финансового баланса" else "Герой кредитного лимита"}** — ${if (net >= 0) "удержал бюджет в зеленой зоне!" else "умудрился выйти за рамки доходов!"}
+
+## Рекомендации Жабова 💡
+Поставь строгий лимит на категорию «$topCatName» и направь как минимум 20% свободного остатка на пополнение финансовой подушки безопасности!
 """.trimIndent()
     }
 
-    private fun parseStructuredBotResponse(
-        rawText: String,
-        userQuery: String,
-        context: FinancialContextData
-    ): BotResponseResult {
-        var cleanedText = rawText
-        var detectedMood = DavidMood.HAPPY
+    /**
+     * Разделение отчета по смысловым блокам/заголовкам Markdown для раздельных баблов
+     */
+    private fun splitReportIntoSections(report: String): List<String> {
+        if (report.isBlank()) return emptyList()
+        val lines = report.lines()
+        val sections = mutableListOf<String>()
+        val currentSection = StringBuilder()
 
-        val moodTags = mapOf(
-            "[HAPPY]" to DavidMood.HAPPY,
-            "[PROUD]" to DavidMood.PROUD,
-            "[THINKING]" to DavidMood.THINKING,
-            "[SHOCKED]" to DavidMood.SHOCKED,
-            "[ANGRY]" to DavidMood.ANGRY,
-            "[COOL]" to DavidMood.COOL,
-            "[NEUTRAL]" to DavidMood.NEUTRAL
-        )
-
-        for ((tag, moodEnum) in moodTags) {
-            if (cleanedText.contains(tag, ignoreCase = true)) {
-                detectedMood = moodEnum
-                cleanedText = cleanedText.replace(tag, "", ignoreCase = true).trim()
-                break
-            }
-        }
-
-        val chartData = if (userQuery.contains("разбор", ignoreCase = true) ||
-            userQuery.contains("категор", ignoreCase = true) ||
-            userQuery.contains("трат", ignoreCase = true) ||
-            userQuery.contains("расход", ignoreCase = true)
-        ) {
-            buildExpenseChartData(context)
-        } else null
-
-        val insights = buildAutomatedInsights(context)
-
-        val suggestions = listOf(
-            "📉 Как сократить топ-расход?",
-            "💰 План сбережений на месяц",
-            "🐸 Оцени мою дисциплину"
-        )
-
-        return BotResponseResult(
-            text = cleanedText,
-            mood = detectedMood,
-            chartData = chartData,
-            suggestions = suggestions,
-            insights = insights
-        )
-    }
-
-    private fun generateLocalSmartResponse(
-        query: String,
-        ctx: FinancialContextData
-    ): BotResponseResult {
-        val q = query.lowercase(Locale.getDefault())
-        val savingsRate = if (ctx.totalIncome > 0) {
-            ((ctx.totalIncome - ctx.totalExpense) / ctx.totalIncome * 100).toInt()
-        } else 0
-
-        val topExpense = ctx.expensesByCategory.firstOrNull()
-        val insights = buildAutomatedInsights(ctx)
-
-        return when {
-            ctx.totalTransactionsCount == 0 -> {
-                BotResponseResult(
-                    text = "Ква-ква! 🐸 В твоём болоте пока тишина — ни одной записи о доходах или расходах.\n\n" +
-                            "Добавь пару операций через кнопку **«+»** или голосовой ввод на главном экране, и я сразу разложу твой бюджет по полочкам!",
-                    mood = DavidMood.HAPPY,
-                    suggestions = listOf(
-                        "💡 С чего начать учёт финансов?",
-                        "🎯 Как правильно ставить цели?",
-                        "📊 Зачем нужны лимиты категорий?"
-                    )
-                )
-            }
-
-            q.contains("разбор") || q.contains("анализ") || q.contains("бюджет") || q.contains("баланс") -> {
-                val mood = when {
-                    ctx.balance < 0 -> DavidMood.SHOCKED
-                    savingsRate >= 20 -> DavidMood.PROUD
-                    else -> DavidMood.HAPPY
-                }
-
-                val topCatText = if (topExpense != null) {
-                    val share = if (ctx.totalExpense > 0) (topExpense.second / ctx.totalExpense * 100).toInt() else 0
-                    "Главная статья расходов — **${topExpense.first}** (${topExpense.second.toInt()} ₽, или **$share%** всех трат)."
-                } else {
-                    "Расходов пока не зафиксировано."
-                }
-
-                val verdict = when {
-                    ctx.balance < 0 -> "⚠️ Внимание: расходы превысили доходы на **${(-ctx.balance).toInt()} ₽**. Пора притормозить импульсивные покупки!"
-                    savingsRate >= 25 -> "🏆 Отличная жабья выдержка! Ты сохраняешь **$savingsRate%** от дохода."
-                    savingsRate in 10..24 -> "👍 Неплохой темп: норма сбережений составляет **$savingsRate%**. Если дотянуть до 20–25%, капитал будет расти вдвое быстрее."
-                    else -> "🧐 Запас прочности тонковат (сохранено всего **$savingsRate%**). Давай проверим, какие подписки или спонтанные траты съедают остаток."
-                }
-
-                BotResponseResult(
-                    text = "### 📊 Финансовый аудит от Давида Жабова\n\n" +
-                            "• **Доходы:** ${ctx.totalIncome.toInt()} ₽\n" +
-                            "• **Расходы:** ${ctx.totalExpense.toInt()} ₽\n" +
-                            "• **Чистый остаток:** ${ctx.balance.toInt()} ₽\n\n" +
-                            "$topCatText\n\n$verdict",
-                    mood = mood,
-                    chartData = buildExpenseChartData(ctx),
-                    insights = insights,
-                    suggestions = listOf(
-                        "🔥 Где я теряю деньги?",
-                        "🎯 Проверить мои цели",
-                        "💡 Как откладывать 20% без боли?"
-                    )
-                )
-            }
-
-            q.contains("теряю") || q.contains("дыр") || q.contains("сократ") || q.contains("экономи") -> {
-                if (ctx.expensesByCategory.isEmpty()) {
-                    BotResponseResult(
-                        text = "Трат пока нет — твоя кувшинка в полной безопасности! 🐸 Добавь расходы, чтобы я нашёл точки оптимизации.",
-                        mood = DavidMood.COOL
-                    )
-                } else {
-                    val top3 = ctx.expensesByCategory.take(3)
-                    val listText = top3.mapIndexed { idx, pair ->
-                        val pct = if (ctx.totalExpense > 0) (pair.second / ctx.totalExpense * 100).toInt() else 0
-                        "${idx + 1}. **${pair.first}** — ${pair.second.toInt()} ₽ ($pct%)"
-                    }.joinToString("\n")
-
-                    val potentialSave = (ctx.totalExpense * 0.15).toInt()
-
-                    BotResponseResult(
-                        text = "### 🔍 Поиск утечек в бюджете\n\n" +
-                                "Вот топ категорий, куда уходит больше всего денег:\n$listText\n\n" +
-                                "**Рекомендация Жабова:** если урезать топ-категорию **${top3.first().first}** хотя бы на 15% и поставить на неё жёсткий лимит в приложении, ты освободишь около **$potentialSave ₽** уже в этом месяце!",
-                        mood = DavidMood.THINKING,
-                        chartData = buildExpenseChartData(ctx),
-                        insights = insights,
-                        suggestions = listOf(
-                            "📊 Полный разбор бюджета",
-                            "🎯 Как быстрее накопить на цель?",
-                            "💡 Правило 50/30/20"
-                        )
-                    )
+        for (line in lines) {
+            val trimmed = line.trimStart()
+            if (trimmed.startsWith("# ") || trimmed.startsWith("## ")) {
+                if (currentSection.isNotBlank()) {
+                    sections.add(currentSection.toString().trim())
+                    currentSection.clear()
                 }
             }
-
-            q.contains("цел") || q.contains("накоп") -> {
-                if (ctx.goals.isEmpty()) {
-                    val recommendedMonthly = if (ctx.totalIncome > 0) (ctx.totalIncome * 0.2).toInt() else 10000
-                    BotResponseResult(
-                        text = "У тебя пока нет активных целей накоплений в разделе **Цели** 🎯.\n\n" +
-                                "При твоём текущем потоке оптимально откладывать по **$recommendedMonthly ₽** (20% дохода) сразу в день зарплаты. Создай цель на главном экране, и я помогу рассчитать точный срок её достижения!",
-                        mood = DavidMood.HAPPY,
-                        suggestions = listOf(
-                            "📊 Полный разбор бюджета",
-                            "💡 Финансовая подушка безопасности"
-                        )
-                    )
-                } else {
-                    val goalsReport = ctx.goals.joinToString("\n\n") { g ->
-                        val pct = if (g.targetAmount > 0) ((g.currentAmount / g.targetAmount) * 100).toInt().coerceIn(0, 100) else 0
-                        val remaining = (g.targetAmount - g.currentAmount).coerceAtLeast(0.0).toInt()
-                        "• **${g.name}**: накоплено **${g.currentAmount.toInt()} ₽** из ${g.targetAmount.toInt()} ₽ ($pct%). Осталось: **$remaining ₽**."
-                    }
-                    BotResponseResult(
-                        text = "### 🎯 Разбор твоих финансовых целей\n\n$goalsReport\n\n" +
-                                "Чтобы закрыть цели быстрее, направляй туда любой неплановый остаток в конце недели — даже по 500–1000 ₽ дают мощный эффект сложного ускорения!",
-                        mood = DavidMood.PROUD,
-                        insights = insights,
-                        suggestions = listOf(
-                            "📊 Полный разбор бюджета",
-                            "🔥 Где я теряю деньги?"
-                        )
-                    )
-                }
-            }
-
-            else -> {
-                val topCatInfo = topExpense?.let { "Лидер по расходам сейчас — **${it.first}** (${it.second.toInt()} ₽)." } ?: ""
-                BotResponseResult(
-                    text = "Я внимательно изучил твой запрос! 🐸\n\n" +
-                            "Сейчас твой баланс составляет **${ctx.balance.toInt()} ₽** (доходы: ${ctx.totalIncome.toInt()} ₽, расходы: ${ctx.totalExpense.toInt()} ₽). $topCatInfo\n\n" +
-                            "Золотое правило болотной бухгалтерии: сначала заплати себе (отложи минимум 10–20% в накопления), зафиксируй лимиты на импульсивные категории и проверяй динамику раз в 3 дня.\n\n" +
-                            "Хочешь, чтобы я подключал глубокий генеративный ИИ Gemini к каждому твоему вопросу? Добавь свой Gemini API-ключ в настройках чата (иконка шестерёнки сверху)!",
-                    mood = DavidMood.COOL,
-                    insights = insights,
-                    suggestions = listOf(
-                        "📊 Полный разбор бюджета",
-                        "🔥 Где я теряю деньги?",
-                        "🎯 Как быстрее накопить на цель?"
-                    )
-                )
-            }
+            currentSection.appendLine(line)
         }
-    }
-
-    private fun buildExpenseChartData(ctx: FinancialContextData): List<ChartDataPoint>? {
-        if (ctx.expensesByCategory.isEmpty() || ctx.totalExpense <= 0) return null
-        val palette = listOf(
-            0xFF10B981,
-            0xFF6366F1,
-            0xFFF43F5E,
-            0xFFF59E0B,
-            0xFF06B6D4,
-            0xFF8B5CF6
-        )
-        return ctx.expensesByCategory.take(5).mapIndexed { index, (cat, amount) ->
-            ChartDataPoint(
-                label = cat,
-                value = amount.toFloat(),
-                percentage = (amount / ctx.totalExpense * 100).toFloat(),
-                colorHex = palette[index % palette.size]
-            )
+        if (currentSection.isNotBlank()) {
+            sections.add(currentSection.toString().trim())
         }
-    }
-
-    private fun buildAutomatedInsights(ctx: FinancialContextData): List<FinancialInsight> {
-        val list = mutableListOf<FinancialInsight>()
-        if (ctx.totalIncome > 0) {
-            val rate = ((ctx.totalIncome - ctx.totalExpense) / ctx.totalIncome * 100).toInt()
-            list.add(
-                FinancialInsight(
-                    title = "Норма сбережений",
-                    value = "$rate%",
-                    isPositive = rate >= 15
-                )
-            )
-        }
-        ctx.expensesByCategory.firstOrNull()?.let { top ->
-            list.add(
-                FinancialInsight(
-                    title = "Топ расход",
-                    value = "${top.first} (${top.second.toInt()} ₽)",
-                    isPositive = false
-                )
-            )
-        }
-        return list
-    }
-
-    private suspend fun saveMessageToDb(msg: ChatMessage) = withContext(Dispatchers.IO) {
-        val entity = msg.toEntity(currentBudgetIdFlow.value)
-        davidMessageDao.insertMessage(entity)
-    }
-
-    private fun ChatMessage.toEntity(budgetId: String): DavidMessageEntity {
-        val extras = MessageExtrasPayload(
-            chartData = chartData,
-            actionButton = actionButton,
-            suggestions = suggestions,
-            financialInsights = financialInsights
-        )
-        return DavidMessageEntity(
-            id = id,
-            budgetId = budgetId,
-            text = text,
-            isUser = isUser,
-            timestamp = timestamp,
-            mood = mood.name,
-            extrasJson = jsonFormat.encodeToString(extras),
-            createdAtMillis = System.currentTimeMillis()
-        )
-    }
-
-    private fun DavidMessageEntity.toChatMessage(): ChatMessage {
-        val extras = try {
-            if (extrasJson.isNotBlank()) {
-                jsonFormat.decodeFromString<MessageExtrasPayload>(extrasJson)
-            } else null
-        } catch (_: Exception) {
-            null
-        }
-        val parsedMood = try {
-            DavidMood.valueOf(mood)
-        } catch (_: Exception) {
-            DavidMood.NEUTRAL
-        }
-        return ChatMessage(
-            id = id,
-            text = text,
-            isUser = isUser,
-            timestamp = timestamp,
-            mood = parsedMood,
-            chartData = extras?.chartData,
-            actionButton = extras?.actionButton,
-            suggestions = extras?.suggestions ?: emptyList(),
-            financialInsights = extras?.financialInsights ?: emptyList()
-        )
-    }
-
-    private fun getCurrentTimeFormatted(): String {
-        val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
-        return sdf.format(Date())
+        return if (sections.isNotEmpty()) sections else listOf(report.trim())
     }
 
     /**
-     * Generates a proactive financial greeting or warning if there are overspent limits.
+     * Отправка произвольного сообщения от пользователя
      */
-    fun checkAndTriggerProactiveGreeting() {
-        viewModelScope.launch {
-            val ctx = buildFinancialContext()
-            for (limit in ctx.limits) {
-                val spent = ctx.expensesByCategory.find { it.first == limit.category }?.second ?: 0.0
-                if (spent > limit.limitAmount) {
-                    _proactiveNotification.value = "🐸 Ква! По категории «${limit.category}» превышен лимит на ${(spent - limit.limitAmount).toInt()} ₽!"
-                    return@launch
-                }
-            }
-        }
-    }
+    fun sendUserMessage(text: String, soundManager: SoundManager? = null) {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return
+        AchievementManager.unlock(getApplication(), "first_chat")
 
-    /**
-     * Builds a dynamic system prompt string used by external callers or tests.
-     */
-    fun generateDynamicSystemPrompt(
-        totalIncome: Double,
-        totalExpense: Double,
-        expenses: Map<String, Double>
-    ): String {
-        val topCat = expenses.maxByOrNull { it.value }
-        return """
-Ты — Давид Жабов, финансовый помощник.
-Доходы: ${totalIncome.toInt()} ₽, Расходы: ${totalExpense.toInt()} ₽.
-${if (expenses.isNotEmpty()) "Твоя главная финансовая слабость сейчас: ${topCat?.key} (${topCat?.value?.toInt()} ₽)." else "Расходов пока нет."}
-        """.trimIndent()
-    }
+        // 1. Проверка, не вставил ли пользователь Gemini API-ключ прямо в чат
+        val looksLikeApiKey = trimmed.startsWith("AIza") ||
+            trimmed.startsWith("AQ.") ||
+            (trimmed.length >= 25 && !trimmed.contains(" ") && trimmed.all { it.isLetterOrDigit() || it == '_' || it == '-' || it == '.' })
 
-    // =========================================================================
-    // DAVID LIVE PUBLIC API
-    // =========================================================================
-
-    fun startDavidLiveSession(soundManager: SoundManager? = null) {
-        if (!_hasGeminiConsent.value) {
-            pendingLiveStartAfterConsent = true
-            pendingSoundManagerAfterConsent = soundManager
-            _showConsentDialog.value = true
+        if (looksLikeApiKey) {
+            soundManager?.playSend()
+            val maskedMsg = ChatMessage(
+                sender = currentProfileName,
+                type = ChatMessageType.Text("🔑 API-ключ: ••••••••••••"),
+                timestamp = currentTime(),
+                isUser = true,
+                timestampMillis = System.currentTimeMillis()
+            )
+            addSessionMessage(maskedMsg)
+            saveApiKeyFromChat(trimmed, soundManager)
             return
         }
 
-        val key = _apiKey.value.trim()
-        _isLiveOverlayVisible.value = true
-        _isLiveSessionActive.value = true
-        soundManager?.playClick()
-
-        val appContext: Context = getApplication()
-        activeAssistantAudioFocusRequest = DavidLiveAudioEngine.requestAssistantAudioFocus(
-            context = appContext,
-            onFocusLost = {
-                liveSessionController.setMicMuted(true)
-            }
-        )
-
-        liveSessionController.startSession(
-            context = appContext,
-            apiKey = key
-        )
-
         viewModelScope.launch {
-            achievementManager.unlockAchievement("first_chat")
+            soundManager?.playSend()
+
+            val userMsg = ChatMessage(
+                sender = currentProfileName,
+                type = ChatMessageType.Text(trimmed),
+                timestamp = currentTime(),
+                isUser = true,
+                timestampMillis = System.currentTimeMillis()
+            )
+            addSessionMessage(userMsg)
+
+            val prevStage = _stage.value
+            _isDavidTyping.value = true
+            _stage.value = DavidStage.PROCESSING
+
+            // 2. Попытка распознать операцию из естественной фразы в чате (например, «Такси 500» или «Купил кофе за 350»)
+            val proposedOp = tryParseOperationFromChat(trimmed)
+
+            val reply = if (currentApiKey.isNotBlank()) {
+                generateGeminiReply(trimmed)
+            } else {
+                generateSmartDavidReply(trimmed)
+            }
+
+            delay(650)
+            _isDavidTyping.value = false
+            soundManager?.playReceive()
+
+            val botMsg = ChatMessage(
+                sender = "Давид Жабов 🐸",
+                type = ChatMessageType.Text(reply),
+                timestamp = currentTime(),
+                isUser = false,
+                timestampMillis = System.currentTimeMillis()
+            )
+            addSessionMessage(botMsg)
+
+            if (proposedOp != null && proposedOp.amount > 0.0) {
+                val proposalMsg = ChatMessage(
+                    sender = "Давид Жабов 🐸",
+                    type = ChatMessageType.ParsedTransactionProposal(
+                        operation = proposedOp,
+                        isAdded = false
+                    ),
+                    timestamp = currentTime(),
+                    isUser = false,
+                    timestampMillis = System.currentTimeMillis() + 1L
+                )
+                addSessionMessage(proposalMsg)
+            }
+
+            _stage.value = if (prevStage == DavidStage.INITIAL) DavidStage.FILE_SELECTION else prevStage
         }
     }
 
-    fun toggleDavidLiveMicMute(soundManager: SoundManager? = null) {
+    private suspend fun tryParseOperationFromChat(text: String): com.example.data.repository.ParsedVoiceOperation? {
+        val lower = text.lowercase(Locale.getDefault())
+        if (lower.contains("?") ||
+            lower.startsWith("покажи") ||
+            lower.startsWith("сделай") ||
+            lower.startsWith("на чем") ||
+            lower.startsWith("на чём") ||
+            lower.startsWith("мой баланс") ||
+            lower.startsWith("жабий аудит")
+        ) {
+            return null
+        }
+
+        val cats = try {
+            repository.getCategoriesForBudget(currentBudgetId).first()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val expNames = cats.filter { it.type == "expense" }.map { it.name }.ifEmpty {
+            listOf("Продукты", "Кафе и рестораны", "Транспорт", "ЖКХ", "Развлечения", "Покупки", "Здоровье", "Прочее")
+        }
+        val incNames = cats.filter { it.type == "income" }.map { it.name }.ifEmpty {
+            listOf("Зарплата", "Фриланс", "Кэшбэк", "Подарки")
+        }
+
+        val parsedList = com.example.utils.VoiceParserHelper.parseHeuristically(text, expNames, incNames)
+        val firstOp = parsedList.firstOrNull { it.amount > 0.0 } ?: return null
+
+        val semanticMatch = com.example.ui.components.detectCategoryAndTypeByTitle(text, cats, firstOp.type)
+        return if (semanticMatch != null) {
+            firstOp.copy(
+                type = semanticMatch.first,
+                category = semanticMatch.second,
+                subcategory = firstOp.title.ifBlank { semanticMatch.second }
+            )
+        } else {
+            firstOp.copy(
+                subcategory = firstOp.title.ifBlank { firstOp.category }
+            )
+        }
+    }
+
+    fun confirmChatProposedOperation(messageId: String, soundManager: SoundManager? = null) {
+        viewModelScope.launch {
+            val index = sessionMessages.indexOfFirst { it.id == messageId }
+            if (index == -1) return@launch
+            val msg = sessionMessages[index]
+            val proposal = msg.type as? ChatMessageType.ParsedTransactionProposal ?: return@launch
+            if (proposal.isAdded) return@launch
+
+            val op = proposal.operation
+            soundManager?.playClick()
+            database.transactionDao().insertTransaction(
+                TransactionEntity(
+                    budgetId = currentBudgetId,
+                    type = op.type,
+                    date = op.date.ifBlank { isoFormat.format(Date()) },
+                    category = op.category.ifBlank { "Прочее" },
+                    subcategory = op.subcategory.ifBlank { op.title.ifBlank { op.category } },
+                    amount = op.amount
+                )
+            )
+            val appCtx = getApplication<Application>()
+            if (op.type == "expense" && com.example.notifications.ReminderManager.isCroakAlertEnabled(appCtx)) {
+                val baseThreshold = com.example.notifications.ReminderManager.getCroakThresholdAmount(appCtx)
+                if (op.amount >= baseThreshold) {
+                    com.example.notifications.ReminderManager.triggerCroakAlertNotification(
+                        context = appCtx,
+                        category = op.subcategory.ifBlank { op.title.ifBlank { op.category } },
+                        amount = op.amount.toInt(),
+                        overrideThreshold = baseThreshold
+                    )
+                }
+            }
+            sessionMessages[index] = msg.copy(
+                type = proposal.copy(isAdded = true)
+            )
+            rebuildChronologicalMessages()
+        }
+    }
+
+    fun dismissChatProposedOperation(messageId: String) {
+        val removed = sessionMessages.removeAll { it.id == messageId }
+        if (removed) {
+            rebuildChronologicalMessages()
+        }
+    }
+
+
+    private suspend fun generateGeminiReply(query: String): String {
+        return try {
+            val recentTxs = repository.getTransactionsForBudget(currentBudgetId).first()
+            val debts = repository.getAccountsForBudget(currentBudgetId).first()
+            val goals = repository.getGoalsForBudget(currentBudgetId).first()
+
+            val comment = repository.generateDavidComment(
+                apiKey = currentApiKey,
+                type = "expense",
+                category = "Вопрос аудитору",
+                subcategory = query,
+                amount = 0.0,
+                recentTransactions = recentTxs.take(5),
+                activeDebts = debts,
+                activeGoals = goals,
+                extraContext = "Пользователь $currentProfileName задает вопрос в чате: \"$query\". Ответь остроумно и по существу его финансов.",
+                allTransactions = recentTxs
+            )
+            comment.ifBlank { generateSmartDavidReply(query) }
+        } catch (_: Exception) {
+            generateSmartDavidReply(query)
+        }
+    }
+
+    private fun generateSmartDavidReply(query: String): String {
+        val q = query.lowercase(Locale.getDefault())
+        return when {
+            q.contains("привет") || q.contains("салют") || q.contains("здравствуй") ->
+                "Салют, $currentProfileName! Хватит любезностей, давай проверим твои расходы. Нажми **«🐸 Давид, сделай отчет»**!"
+
+            q.contains("отчет") || q.contains("выписк") || q.contains("аудит") || q.contains("трат") ->
+                "Готов провести жесткий разбор трат для профиля **$currentProfileName**. Выбери интервал: **День**, **Неделя**, **Месяц** или **Год**!"
+
+            q.contains("цел") || q.contains("накоп") || q.contains("копилк") ->
+                "Финансовые цели любят дисциплину. Нажми кнопку **«🎯 Цели»** для статуса накоплений!"
+
+            q.contains("долг") || q.contains("кредит") || q.contains("займ") ->
+                "Долги — это аренда чужой свободы. Закрывай их в первую очередь, пока проценты не сожрали твой бюджет!"
+
+            q.contains("кофе") || q.contains("шаурм") || q.contains("еда") || q.contains("ресторан") ->
+                "Ага, опять гастрономические слабости! Каждая третья чашка навынос отдаляет тебя от финансовой независимости."
+
+            q.contains("совет") || q.contains("как сэконом") || q.contains("что делать") ->
+                "Золотое правило Жабова: сначала отложи 20% дохода на накопительный счет, а уже потом распределяй остаток по категориям."
+
+            else ->
+                "Запрос принят к сведению, $currentProfileName! Но лучший способ навести порядок в кошельке — сформировать полный PDF-аудит. Выбирай период выше!"
+        }
+    }
+
+    fun sendTextMessage(text: String, soundManager: SoundManager? = null) {
+        sendUserMessage(text, soundManager)
+    }
+
+    /**
+     * Экспорт отчета в PDF
+     */
+    fun exportPdf(soundManager: SoundManager? = null) {
+        viewModelScope.launch {
+            soundManager?.playClick()
+
+            val userMsg = ChatMessage(
+                sender = currentProfileName,
+                type = ChatMessageType.Text("📄 Экспортировать аудит в файл PDF"),
+                timestamp = currentTime(),
+                isUser = true,
+                timestampMillis = System.currentTimeMillis()
+            )
+            addSessionMessage(userMsg)
+
+            _isDavidTyping.value = true
+            delay(500)
+            _isDavidTyping.value = false
+            soundManager?.playReceive()
+
+            val pdfMsg = ChatMessage(
+                sender = "Давид Жабов 🐸",
+                type = ChatMessageType.File(
+                    name = "Финансовый_Аудит_${currentProfileName}_${SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())}.pdf",
+                    size = "3.8 MB",
+                    extension = "PDF"
+                ),
+                timestamp = currentTime(),
+                isUser = false,
+                timestampMillis = System.currentTimeMillis()
+            )
+            addSessionMessage(pdfMsg)
+        }
+    }
+
+    fun cancelPeriodSelection() {
+        if (_stage.value == DavidStage.FILE_SELECTION) {
+            _stage.value = DavidStage.INITIAL
+        }
+    }
+
+    fun resetSession(soundManager: SoundManager? = null) {
         soundManager?.playClick()
+        sessionMessages.clear()
+        _stage.value = DavidStage.INITIAL
+        rebuildChronologicalMessages()
+    }
+
+    // --- Управление голосовым режимом David Live и пост-резюме разговора ---
+
+    fun updateChatDraftText(text: String) {
+        _chatDraftText.value = text
+    }
+
+    fun startDavidLive(soundManager: SoundManager? = null) {
+        soundManager?.playClick()
+        liveFinancialToolsProvider.setBudgetId(currentBudgetId)
+        if (liveSessionController.displayMode.value == DavidLiveDisplayMode.MINIMIZED &&
+            liveSessionController.isSessionActive()
+        ) {
+            expandDavidLive()
+            return
+        }
+        if (activeAssistantAudioFocusRequest == null) {
+            activeAssistantAudioFocusRequest =
+                DavidLiveAudioEngine.requestAssistantAudioFocus(getApplication())
+        }
+        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
+        val userKey = currentApiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        liveSessionController.startSession(userKey)
+        _isLiveOverlayVisible.value = true
+        _isLiveSessionActive.value = true
+    }
+
+    fun minimizeDavidLive(soundManager: SoundManager? = null) {
+        val now = System.currentTimeMillis()
+        if (now - lastDisplayModeTransitionMs < 180L) return
+        if (liveSessionController.displayMode.value != DavidLiveDisplayMode.EXPANDED) return
+        lastDisplayModeTransitionMs = now
+        soundManager?.playClick()
+        liveSessionController.minimizeSession()
+        _isLiveOverlayVisible.value = false
+        _isLiveSessionActive.value = true
+    }
+
+    fun expandDavidLive(soundManager: SoundManager? = null) {
+        val now = System.currentTimeMillis()
+        if (now - lastDisplayModeTransitionMs < 180L) return
+        if (liveSessionController.displayMode.value != DavidLiveDisplayMode.MINIMIZED) return
+        lastDisplayModeTransitionMs = now
+        soundManager?.playClick()
+        liveSessionController.expandSession()
+        _isLiveOverlayVisible.value = true
+        _isLiveSessionActive.value = true
+    }
+
+    fun toggleLiveMicMute() {
         liveSessionController.toggleMicMute()
     }
 
-    fun interruptDavidLiveSpeech() {
-        liveSessionController.interruptModelSpeech()
+    fun retryLiveConnection() {
+        liveSessionController.retryConnection()
     }
 
     fun endDavidLiveSession(soundManager: SoundManager? = null) {
@@ -947,134 +1021,130 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
 
     internal fun processCompletedLiveSession(
         turns: List<DavidLiveTranscriptTurn>,
-        facts: List<DavidLiveFactCard>,
+        facts: List<DavidLiveToolFact>,
         soundManager: SoundManager? = null
     ) {
-        if (!DavidLiveSummaryGenerator.shouldGenerateSummary(turns, facts)) {
+        if (!liveSummaryGenerator.hasEnoughSubstanceForSummary(turns, facts)) {
+            // Слишком короткий или пустой вызов — завершаем аккуратно без засорения чата резюме
             return
         }
 
-        val currentKey = _apiKey.value.trim()
-        val userSpokenSummary = turns
-            .filter { it.speaker == DavidLiveSpeaker.USER }
-            .joinToString(" ") { it.text }
-            .trim()
+        val summaryMsgId = "live_summary_${System.currentTimeMillis()}"
+        val loadingMsg = ChatMessage(
+            id = summaryMsgId,
+            sender = "Давид Жабов 🐸",
+            type = ChatMessageType.LiveSessionSummary(
+                summary = null,
+                isGenerating = true,
+                errorMessage = null,
+                capturedTurns = turns,
+                capturedFacts = facts
+            ),
+            timestamp = currentTime(),
+            isUser = false,
+            timestampMillis = System.currentTimeMillis()
+        )
+        addSessionMessage(loadingMsg)
 
-        if (userSpokenSummary.isNotBlank()) {
-            val voiceUserMsg = ChatMessage(
-                id = UUID.randomUUID().toString(),
-                text = "🎙️ *Голосовой сеанс David Live:*\n«${userSpokenSummary.take(280)}${if (userSpokenSummary.length > 280) "…" else ""}»",
-                isUser = true,
-                timestamp = getCurrentTimeFormatted()
-            )
-            _messages.value = _messages.value + voiceUserMsg
-            viewModelScope.launch { saveMessageToDb(voiceUserMsg) }
-        }
-
-        viewModelScope.launch {
-            _isGeneratingLiveSummary.value = true
-            _isTyping.value = true
-            _mood.value = DavidMood.THINKING
-
-            val summaryText = try {
-                if (currentKey.isNotBlank()) {
-                    callGeminiForLiveSummary(turns, facts, currentKey)
-                } else {
-                    DavidLiveSummaryGenerator.buildLocalFallbackSummary(turns, facts)
-                }
-            } catch (_: Exception) {
-                DavidLiveSummaryGenerator.buildLocalFallbackSummary(turns, facts)
-            }
-
-            _isGeneratingLiveSummary.value = false
-            _isTyping.value = false
-            _mood.value = DavidMood.PROUD
-            soundManager?.playReceive()
-
-            val insights = facts.take(4).map {
-                FinancialInsight(
-                    title = it.title,
-                    value = it.value,
-                    isPositive = it.isPositive
-                )
-            }
-
-            val summaryBotMsg = ChatMessage(
-                id = UUID.randomUUID().toString(),
-                text = summaryText,
-                isUser = false,
-                timestamp = getCurrentTimeFormatted(),
-                mood = DavidMood.PROUD,
-                financialInsights = insights,
-                suggestions = listOf(
-                    "📊 Полный разбор бюджета",
-                    "🔥 Где я теряю деньги?",
-                    "🎯 Как быстрее накопить на цель?"
-                )
-            )
-            _messages.value = _messages.value + summaryBotMsg
-            saveMessageToDb(summaryBotMsg)
-        }
+        generateAndApplyLiveSummary(summaryMsgId, turns, facts, soundManager)
     }
 
-    private suspend fun callGeminiForLiveSummary(
+    fun retryLiveSummary(messageId: String, soundManager: SoundManager? = null) {
+        val index = sessionMessages.indexOfFirst { it.id == messageId }
+        if (index == -1) return
+        val existingMsg = sessionMessages[index]
+        val existingType = existingMsg.type as? ChatMessageType.LiveSessionSummary ?: return
+
+        soundManager?.playClick()
+        sessionMessages[index] = existingMsg.copy(
+            type = existingType.copy(
+                isGenerating = true,
+                errorMessage = null
+            )
+        )
+        rebuildChronologicalMessages()
+
+        generateAndApplyLiveSummary(
+            messageId = messageId,
+            turns = existingType.capturedTurns,
+            facts = existingType.capturedFacts,
+            soundManager = soundManager
+        )
+    }
+
+    private fun generateAndApplyLiveSummary(
+        messageId: String,
         turns: List<DavidLiveTranscriptTurn>,
-        facts: List<DavidLiveFactCard>,
-        apiKey: String
-    ): String = withContext(Dispatchers.IO) {
-        val prompt = DavidLiveSummaryGenerator.buildGeminiSummaryPrompt(turns, facts)
-        val payload = JSONObject().apply {
-            put(
-                "contents",
-                JSONArray().put(
-                    JSONObject().apply {
-                        put("role", "user")
-                        put("parts", JSONArray().put(JSONObject().put("text", prompt)))
-                    }
-                )
+        facts: List<DavidLiveToolFact>,
+        soundManager: SoundManager?
+    ) {
+        viewModelScope.launch {
+            val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
+            val userKey = currentApiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+
+            val outcome = liveSummaryGenerator.generateSummary(
+                userApiKey = userKey,
+                turns = turns,
+                verifiedFacts = facts
             )
-            put(
-                "generationConfig",
-                JSONObject().apply {
-                    put("temperature", 0.5)
-                    put("maxOutputTokens", 700)
+
+            val index = sessionMessages.indexOfFirst { it.id == messageId }
+            if (index == -1) return@launch
+            val currentMsg = sessionMessages[index]
+
+            when (outcome) {
+                is DavidLiveSummaryGenerator.SummaryOutcome.SkippedTooShort -> {
+                    sessionMessages.removeAt(index)
+                    rebuildChronologicalMessages()
                 }
-            )
-        }
-
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
-        val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-        val request = Request.Builder().url(url).post(body).build()
-
-        val response = httpClient.newCall(request).execute()
-        val responseBody = response.body?.string() ?: ""
-        if (!response.isSuccessful) {
-            throw IllegalStateException("Summary HTTP ${response.code}")
-        }
-
-        val rootJson = JSONObject(responseBody)
-        val text = rootJson.optJSONArray("candidates")
-            ?.optJSONObject(0)
-            ?.optJSONObject("content")
-            ?.optJSONArray("parts")
-            ?.optJSONObject(0)
-            ?.optString("text")
-            ?.trim()
-
-        if (text.isNullOrBlank()) {
-            DavidLiveSummaryGenerator.buildLocalFallbackSummary(turns, facts)
-        } else {
-            text
+                is DavidLiveSummaryGenerator.SummaryOutcome.Success -> {
+                    soundManager?.playReceive()
+                    sessionMessages[index] = currentMsg.copy(
+                        type = ChatMessageType.LiveSessionSummary(
+                            summary = outcome.summary,
+                            isGenerating = false,
+                            errorMessage = null,
+                            capturedTurns = turns,
+                            capturedFacts = facts
+                        )
+                    )
+                    rebuildChronologicalMessages()
+                }
+                is DavidLiveSummaryGenerator.SummaryOutcome.Error -> {
+                    sessionMessages[index] = currentMsg.copy(
+                        type = ChatMessageType.LiveSessionSummary(
+                            summary = null,
+                            isGenerating = false,
+                            errorMessage = outcome.message,
+                            capturedTurns = turns,
+                            capturedFacts = facts
+                        )
+                    )
+                    rebuildChronologicalMessages()
+                }
+            }
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        liveCollectorJob?.cancel()
-        liveSessionController.release()
-        DavidLiveAudioEngine.abandonAssistantAudioFocus(
-            getApplication(),
-            activeAssistantAudioFocusRequest
-        )
+        try {
+            DavidLiveAudioEngine.abandonAssistantAudioFocus(
+                getApplication(),
+                activeAssistantAudioFocusRequest
+            )
+            activeAssistantAudioFocusRequest = null
+            liveSessionController.endSession()
+        } catch (_: Exception) {
+        }
     }
 }
+
+private data class AuditPeriodData(
+    val income: Double,
+    val expense: Double,
+    val deltaPercent: Double,
+    val dataPoints: List<Float>,
+    val chartSummary: String,
+    val sarcasticReport: String
+)
