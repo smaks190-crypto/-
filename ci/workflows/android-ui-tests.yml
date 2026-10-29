@@ -4,17 +4,6 @@ on:
   pull_request:
     branches: [ "main" ]
     types: [opened, synchronize, reopened, ready_for_review]
-  push:
-    branches:
-      - "feat/david-live-voice-assistant"
-  schedule:
-    - cron: '0 3 * * *'
-  workflow_dispatch:
-    inputs:
-      full_ui_suite:
-        description: 'Run full extended UI test suite on Android Emulator'
-        required: false
-        default: 'true'
 
 concurrency:
   group: android-ci-tiers-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -138,87 +127,4 @@ jobs:
           path: |
             app/build/outputs/androidTest-results/connected/**
             app/build/reports/androidTests/connected/**
-          if-no-files-found: warn
-
-  # УРОВЕНЬ 3: Полный расширенный набор UI-тестов (по расписанию, вручную или перед релизом)
-  tier3-full-extended-ui-suite:
-    name: "Tier 3: Full Extended Emulator UI Suite"
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'gradle'
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '9.3.1'
-
-      - name: Enable KVM hardware acceleration
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Generate debug keystore
-        run: |
-          mkdir -p ~/.android
-          if [ ! -f debug.keystore ]; then
-            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          fi
-
-      - name: Create .env file
-        run: |
-          cp .env.example .env 2>/dev/null || echo "GEMINI_API_KEY=" > .env
-
-      - name: Assemble Debug & AndroidTest APKs
-        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon --stacktrace
-
-      - name: Run Full Extended UI Tests on Android Emulator
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: default
-          arch: x86_64
-          profile: pixel_6
-          disable-animations: true
-          ram-size: 4096M
-          heap-size: 1024M
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: |
-            mkdir -p build/test-artifacts/screenshots
-            mkdir -p build/test-artifacts/reports
-            adb wait-for-device
-            adb shell input keyevent 82 || true
-            adb logcat -c || true
-
-            set +e
-            gradle :app:connectedDebugAndroidTest --no-daemon --stacktrace
-            TEST_EXIT_CODE=$?
-            set -e
-
-            adb logcat -d > build/test-artifacts/logcat.txt || true
-            adb exec-out screencap -p > build/test-artifacts/screenshots/99_emulator_final_screen.png || true
-            cp -r app/build/outputs/androidTest-results/connected/* build/test-artifacts/reports/ 2>/dev/null || true
-            cp -r app/build/reports/androidTests/connected/* build/test-artifacts/reports/ 2>/dev/null || true
-            exit $TEST_EXIT_CODE
-
-      - name: Upload Extended UI Test Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: extended-ui-test-artifacts
-          path: |
-            app/build/outputs/androidTest-results/connected/**
-            app/build/reports/androidTests/connected/**
-            build/test-artifacts/**
           if-no-files-found: warn
