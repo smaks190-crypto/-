@@ -112,6 +112,7 @@ object GeminiModelConfig {
                     )
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 GlobalConsoleLogger.recordNetworkCall(
                     operationType = operationType,
                     modelName = model,
@@ -136,17 +137,18 @@ data class GeminiRequest(
 )
 
 data class GeminiContent(
-    val parts: List<GeminiPart>
+    val parts: List<GeminiPart>,
+    val role: String? = null
 )
 
 data class GeminiInlineData(
-    @field:Json(name = "mime_type") val mimeType: String,
-    val data: String
+    @field:Json(name = "mimeType") val mimeType: String,
+    @field:Json(name = "data") val data: String
 )
 
 data class GeminiPart(
     val text: String? = null,
-    @field:Json(name = "inline_data") val inlineData: GeminiInlineData? = null
+    @field:Json(name = "inlineData") val inlineData: GeminiInlineData? = null
 )
 
 data class GeminiResponse(
@@ -168,7 +170,7 @@ interface GeminiApiService {
     @POST("v1beta/models/{model}:generateContent")
     suspend fun generateContent(
         @Path("model") model: String,
-        @Header("x-goog-api-key") apiKey: String,
+        @Query("key") apiKey: String,
         @Body request: GeminiRequest
     ): GeminiResponse
 
@@ -176,7 +178,7 @@ interface GeminiApiService {
     @POST("v1beta/models/{model}:streamGenerateContent")
     suspend fun streamGenerateContent(
         @Path("model") model: String,
-        @Header("x-goog-api-key") apiKey: String,
+        @Query("key") apiKey: String,
         @Query("alt") alt: String = "sse",
         @Body request: GeminiRequest
     ): Response<ResponseBody>
@@ -185,7 +187,7 @@ interface GeminiApiService {
 object RetrofitClient {
     private const val BASE_URL = "https://generativelanguage.googleapis.com/"
 
-    val moshi: Moshi = Moshi.Builder()
+    private val moshi = Moshi.Builder()
         .add(KotlinJsonAdapterFactory())
         .build()
 
