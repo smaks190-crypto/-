@@ -71,7 +71,7 @@ class DavidLiveUnitTest {
     }
 
     @Test
-    fun `session controller filters out English model thought blocks and displays clean Russian outputTranscription subtitles`() {
+    fun `session controller keeps user speech transcription and ignores all assistant output`() {
         val provider = DavidLiveFinancialToolsProvider(
             budgetId = "default",
             transactionDao = null,
@@ -81,68 +81,19 @@ class DavidLiveUnitTest {
         )
         val controller = DavidLiveSessionController(financialToolsProvider = provider)
 
-        // 1. Модель присылает внутренние размышления (Chain-of-Thought) в modelTurn.parts
-        val thoughtFrameJson = """
-            {
-              "serverContent": {
-                "modelTurn": {
-                  "parts": [
-                    {
-                      "text": "**Crafting The Greeting**\n\nI'm working on the appropriate response, focusing on a lively and slightly playful tone.",
-                      "thought": true
-                    },
-                    {
-                      "text": "**Providing Budget Details**\n\nI need to use the 'get_financial_overview' tool. My goal is to summarize the user's balance."
-                    }
-                  ]
-                }
-              }
-            }
-        """.trimIndent()
-        controller.processServerMessageForTest(thoughtFrameJson)
-
-        // Субтитры НЕ должны показывать английские мысли модели
-        assertFalse(controller.liveSubtitle.value.contains("Crafting The Greeting"))
-        assertFalse(controller.liveSubtitle.value.contains("Providing Budget Details"))
-        assertFalse(controller.liveSubtitle.value.contains("I'm working on"))
-
-        // 2. Следом приходит реальная русская речь Давида через outputTranscription
-        val russianSpeechChunk1 = """
-            {
-              "serverContent": {
-                "outputTranscription": {
-                  "text": "Слушай, цифры интересные! "
-                }
-              }
-            }
-        """.trimIndent()
-        val russianSpeechChunk2 = """
-            {
-              "serverContent": {
-                "outputTranscription": {
-                  "text": "Твой общий баланс — 217 тысяч рублей."
-                },
-                "turnComplete": true
-              }
-            }
-        """.trimIndent()
-
-        controller.processServerMessageForTest(russianSpeechChunk1)
-        assertEquals("Слушай, цифры интересные!", controller.liveSubtitle.value)
-
-        controller.processServerMessageForTest(russianSpeechChunk2)
-        assertEquals(
-            "Слушай, цифры интересные! Твой общий баланс — 217 тысяч рублей.",
-            controller.liveSubtitle.value
+        controller.processServerMessageForTest(
+            """{"serverContent":{"inputTranscription":{"text":"Запиши покупку кофе "}}}"""
         )
+        assertEquals("Запиши покупку кофе", controller.liveSubtitle.value)
 
-        // В истории реплик для итогового резюме сохранён только чистый русский ответ Давида без мыслей
+        // Even if the server sends assistant text/audio transcription, the UI must not show it.
+        controller.processServerMessageForTest(
+            """{"serverContent":{"outputTranscription":{"text":"Я отвечу голосом."},"turnComplete":true}}"""
+        )
+        assertEquals("Говорите, я слушаю...", controller.liveSubtitle.value)
         assertEquals(1, controller.transcriptTurns.size)
-        assertEquals(DavidLiveSpeaker.DAVID, controller.transcriptTurns.first().speaker)
-        assertEquals(
-            "Слушай, цифры интересные! Твой общий баланс — 217 тысяч рублей.",
-            controller.transcriptTurns.first().text
-        )
+        assertEquals(DavidLiveSpeaker.USER, controller.transcriptTurns.first().speaker)
+        assertEquals("Запиши покупку кофе", controller.transcriptTurns.first().text)
     }
 
     @Test
