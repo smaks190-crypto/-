@@ -15,7 +15,7 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v11.03 (сборка 215)
+### Версия v11.04 (сборка 227)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
@@ -24,9 +24,12 @@
 ## Что изменилось
 
 ### Добавлено
-- Новые возможности ([PR #29](https://github.com/smaks190-crypto/-/pull/29))
+- Новые возможности ([PR #31](https://github.com/smaks190-crypto/-/pull/31))
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.02-build.209...v11.03-build.215
+### Документация и сборка
+- обновить README по актуальным функциям main ([PR #33](https://github.com/smaks190-crypto/-/pull/33))
+
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.03-build.215...v11.04-build.227
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
