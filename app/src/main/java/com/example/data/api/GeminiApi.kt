@@ -187,7 +187,7 @@ interface GeminiApiService {
 object RetrofitClient {
     private const val BASE_URL = "https://generativelanguage.googleapis.com/"
 
-    private val moshi = Moshi.Builder()
+    val moshi: Moshi = Moshi.Builder()
         .add(KotlinJsonAdapterFactory())
         .build()
 
