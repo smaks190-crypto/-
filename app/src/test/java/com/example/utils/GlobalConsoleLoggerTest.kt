@@ -927,7 +927,75 @@ class GlobalConsoleLoggerTest {
         assertEquals(1, filteredByCategoryAndSearch.size)
         assertEquals("Кофе Раф", filteredByCategoryAndSearch.first().subcategory)
     }
+
+    @Test
+    fun `GeminiModelConfig extracts HTTP 400 error body details and aborts fallback chain on fatal API_KEY_INVALID`() = runTest {
+        assertEquals("", GeminiModelConfig.sanitizeApiKey("your_api_key_here"))
+        assertEquals("", GeminiModelConfig.sanitizeApiKey("MY_GEMINI_API_KEY"))
+        assertEquals("AIzaSyValidKey1234567890", GeminiModelConfig.sanitizeApiKey("  \"AIzaSyValidKey1234567890\" \n"))
+        assertFalse(GeminiModelConfig.isValidGeminiApiKey("MY_GEMINI_API_KEY"))
+        assertTrue(GeminiModelConfig.isValidGeminiApiKey("AIzaSyValidKey1234567890"))
+
+        val errorJson = """
+            {
+              "error": {
+                "code": 400,
+                "message": "API key not valid. Please pass a valid API key.",
+                "status": "INVALID_ARGUMENT",
+                "details": [
+                  {
+                    "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                    "reason": "API_KEY_INVALID"
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+
+        val parsedDetails = GeminiModelConfig.parseErrorBodyJson(errorJson, 400)
+        assertEquals(400, parsedDetails.httpCode)
+        assertEquals("API_KEY_INVALID", parsedDetails.errorType)
+        assertTrue(parsedDetails.isFatalForAllModels)
+        assertTrue(parsedDetails.userMessage.contains("API_KEY_INVALID"))
+
+        val attemptedModels = mutableListOf<String>()
+        val fatalHttp400Api = object : GeminiApiService {
+            override suspend fun generateContent(
+                model: String,
+                apiKey: String,
+                request: GeminiRequest
+            ): GeminiResponse {
+                attemptedModels.add(model)
+                val body = okhttp3.ResponseBody.create(null, errorJson)
+                throw retrofit2.HttpException(retrofit2.Response.error<GeminiResponse>(400, body))
+            }
+
+            override suspend fun streamGenerateContent(
+                model: String,
+                apiKey: String,
+                alt: String,
+                request: GeminiRequest
+            ): Response<ResponseBody> = throw UnsupportedOperationException()
+        }
+
+        val sampleRequest = GeminiRequest(
+            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Такси 500 ₽"))))
+        )
+
+        val result = GeminiModelConfig.executeDavidReactionWithFallback(
+            apiService = fatalHttp400Api,
+            apiKey = "invalid-key",
+            request = sampleRequest,
+            operationType = "Разбор голоса (Текст)",
+            operationPrefix = "VOICE-TXT",
+            details = "test"
+        )
+
+        assertNull(result)
+        assertEquals(
+            "Fatal HTTP 400 API_KEY_INVALID must abort immediately on the first model without hammering all fallback models",
+            1,
+            attemptedModels.size
+        )
+    }
 }
-
-
-

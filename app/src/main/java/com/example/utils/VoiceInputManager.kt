@@ -108,16 +108,19 @@ class VoiceInputManager(context: Context) {
         private const val GEMINI_LIVE_WS_ENDPOINT =
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
+        const val LISTENING_PLACEHOLDER = "Говорите..."
+
         val LIVE_STT_MODELS = listOf(
-            "models/gemini-2.5-flash-native-audio-preview-12-2025",
             "models/gemini-2.0-flash-live-001",
-            "models/gemini-2.0-flash-exp"
+            "models/gemini-2.0-flash-exp",
+            "models/gemini-2.5-flash-native-audio-preview-12-2025"
         )
 
         /**
          * Конфигурация сессии Gemini Live строго для распознавания речи пользователя без ответов ИИ.
          */
         internal fun buildLiveTranscriptionSetupJson(modelName: String): JSONObject {
+            val modality = if (modelName.contains("native-audio", ignoreCase = true)) "AUDIO" else "TEXT"
             return JSONObject().apply {
                 put(
                     "setup",
@@ -126,7 +129,7 @@ class VoiceInputManager(context: Context) {
                         put(
                             "generationConfig",
                             JSONObject().apply {
-                                put("responseModalities", JSONArray().put("TEXT"))
+                                put("responseModalities", JSONArray().put(modality))
                             }
                         )
                         put("inputAudioTranscription", JSONObject())
@@ -159,22 +162,56 @@ class VoiceInputManager(context: Context) {
         }
     }
 
-    private fun resolveUserApiKey(callerContext: Context): String {
+    private fun resolveUserApiKey(callerContext: Context, explicitKey: String = ""): String {
+        val fromExplicit = com.example.data.api.GeminiModelConfig.sanitizeApiKey(explicitKey)
+        if (fromExplicit.isNotBlank()) return fromExplicit
+
         return try {
+            val secureKey = try {
+                val masterKey = androidx.security.crypto.MasterKey.Builder(callerContext)
+                    .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+                val securePrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
+                    callerContext,
+                    "secure_prefs",
+                    masterKey,
+                    androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+                com.example.data.api.GeminiModelConfig.sanitizeApiKey(
+                    securePrefs.getString("gemini_api_key", "")
+                )
+            } catch (_: Throwable) {
+                ""
+            }
+            if (secureKey.isNotBlank()) return secureKey
+
             val prefs = callerContext.getSharedPreferences("budget_prefs", Context.MODE_PRIVATE)
-            (prefs.getString("gemini_api_key", "") ?: "").trim()
+            val legacyKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
+                prefs.getString("gemini_api_key", "")
+            )
+            if (legacyKey.isNotBlank()) return legacyKey
+
+            val defaultKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
+                com.example.BuildConfig.GEMINI_API_KEY
+            )
+            if (com.example.data.api.GeminiModelConfig.isValidGeminiApiKey(defaultKey)) {
+                defaultKey
+            } else {
+                ""
+            }
         } catch (_: Throwable) {
             ""
         }
     }
 
     @SuppressLint("MissingPermission")
-    fun startListening(callerContext: Context = context) {
+    fun startListening(callerContext: Context = context, apiKeyOverride: String = "") {
         GlobalConsoleLogger.i("VOICE", "Запуск потокового режима Gemini Live STT (text-only)...")
         stopInternal()
 
         _recognizedText.value = ""
-        _partialText.value = "Говорите..."
+        _partialText.value = LISTENING_PLACEHOLDER
         _errorState.value = null
         synchronized(pendingLiveTurnTranscript) {
             pendingLiveTurnTranscript.clear()
@@ -183,7 +220,7 @@ class VoiceInputManager(context: Context) {
             preSetupPcmQueue.clear()
         }
 
-        currentLiveApiKey = resolveUserApiKey(callerContext)
+        currentLiveApiKey = resolveUserApiKey(callerContext, apiKeyOverride)
         if (currentLiveApiKey.isNotBlank()) {
             liveIntentionalClose.set(false)
             liveModelAttemptIndex = 0
@@ -527,6 +564,8 @@ class VoiceInputManager(context: Context) {
         if (pendingText.isNotBlank()) {
             _recognizedText.value = pendingText
             _partialText.value = pendingText
+        } else if (_partialText.value == LISTENING_PLACEHOLDER) {
+            _partialText.value = ""
         }
 
         val hadLiveSetup = liveSetupCompleted.get()

@@ -124,7 +124,9 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         currentProfileName = if (profileName.isNotBlank()) profileName else "Пользователь"
         liveFinancialToolsProvider.setBudgetId(currentBudgetId)
         val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-        val effectiveKey = apiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        val effectiveKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
+            apiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        )
         currentApiKey = effectiveKey
         _hasApiKey.value = effectiveKey.isNotBlank()
 
@@ -136,7 +138,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveApiKeyFromChat(newKey: String, soundManager: SoundManager? = null) {
-        val clean = newKey.trim()
+        val clean = com.example.data.api.GeminiModelConfig.sanitizeApiKey(newKey)
         val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
         prefs.edit().putString("gemini_api_key", clean).putBoolean("gemini_consent_given", true).apply()
         currentApiKey = clean
