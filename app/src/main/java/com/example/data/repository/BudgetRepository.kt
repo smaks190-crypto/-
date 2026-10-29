@@ -1706,26 +1706,41 @@ class BudgetRepository(
                 val response = apiService.generateContent(model, cleanKey, request)
                 if (response.error == null) {
                     val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                    if (!responseText.isNullOrEmpty()) {
-                        val jsonString = extractJsonArray(responseText)
-                        if (jsonString.isNotBlank()) {
-                            val parsed = parseJsonOperations(jsonString, todayStr)
-                            if (parsed.isNotEmpty()) {
-                                GlobalConsoleLogger.recordNetworkCall(
-                                    operationType = "Разбор голоса (Текст)",
-                                    modelName = model,
-                                    durationMs = System.currentTimeMillis() - startMs,
-                                    status = NetworkCallStatus.SUCCESS,
-                                    httpCode = 200,
-                                    attemptNumber = attempt,
-                                    totalModelsInChain = modelsToTry.size,
-                                    details = "распознано=${parsed.size} шт.",
-                                    operationId = opId
-                                )
-                                return parsed
-                            }
-                        }
+                    val jsonString = responseText?.let { extractJsonArray(it) }.orEmpty()
+                    if (jsonString.isNotBlank()) {
+                        // Валидный JSON-массив получен. Пустой массив [] означает «в этой фразе нет операций»
+                        // и НЕ является ошибкой: перебирать остальные модели не нужно.
+                        val parsed = parseJsonOperations(jsonString, todayStr)
+                        GlobalConsoleLogger.recordNetworkCall(
+                            operationType = "Разбор голоса (Текст)",
+                            modelName = model,
+                            durationMs = System.currentTimeMillis() - startMs,
+                            status = NetworkCallStatus.SUCCESS,
+                            httpCode = 200,
+                            attemptNumber = attempt,
+                            totalModelsInChain = modelsToTry.size,
+                            details = "распознано=${parsed.size} шт.",
+                            operationId = opId
+                        )
+                        return parsed
                     }
+                    lastError = if (responseText.isNullOrEmpty()) {
+                        "Пустой ответ модели"
+                    } else {
+                        "Ответ модели не содержит JSON-массива"
+                    }
+                    GlobalConsoleLogger.recordNetworkCall(
+                        operationType = "Разбор голоса (Текст)",
+                        modelName = model,
+                        durationMs = System.currentTimeMillis() - startMs,
+                        status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
+                        httpCode = 200,
+                        errorType = "EmptyResponse",
+                        errorMessage = lastError,
+                        attemptNumber = attempt,
+                        totalModelsInChain = modelsToTry.size,
+                        operationId = opId
+                    )
                 } else {
                     lastError = response.error.message
                     GlobalConsoleLogger.recordNetworkCall(
@@ -1765,7 +1780,7 @@ class BudgetRepository(
         }
 
         GlobalConsoleLogger.e("GEMINI", "Все Gemini модели завершились ошибкой: $lastError")
-        throw IllegalStateException(lastError ?: "Не удалось разбрать операции из текста. Попробуйте сформулировать точнее.")
+        throw IllegalStateException(lastError ?: "Не удалось разобрать операции из текста. Попробуйте сформулировать точнее.")
     }
 
     suspend fun parseVoiceAudioOperations(
