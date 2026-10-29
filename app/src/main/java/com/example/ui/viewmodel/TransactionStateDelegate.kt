@@ -56,7 +56,8 @@ class TransactionStateDelegate(
         voiceInputManager.onAudioChunkReady = { wavBytes ->
             processLiveAudioChunk(wavBytes, isFinalFlush = false)
         }
-        voiceInputManager.startListening(context)
+        val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
+        voiceInputManager.startListening(context, effectiveKey)
     }
 
     fun stopVoiceRecordingAndProcess() {
@@ -66,10 +67,12 @@ class TransactionStateDelegate(
         } else {
             isVoiceActive.value = false
             if (activeChunkJobs.get() == 0 && parsedVoiceOperations.value.isNullOrEmpty()) {
+                val partialCandidate = voiceInputManager.partialText.value
+                    .takeIf { it.isNotBlank() && it != com.example.utils.VoiceInputManager.LISTENING_PLACEHOLDER }
                 val textToProcess = when {
                     manualText.value.isNotBlank() -> manualText.value
                     voiceInputManager.recognizedText.value.isNotBlank() -> voiceInputManager.recognizedText.value
-                    voiceInputManager.partialText.value.isNotBlank() -> voiceInputManager.partialText.value
+                    partialCandidate != null -> partialCandidate
                     else -> ""
                 }
                 if (textToProcess.isNotBlank()) {

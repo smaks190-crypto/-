@@ -1,6 +1,7 @@
 package com.example.davidapp.live
 
 import android.media.AudioAttributes
+import androidx.test.core.app.ApplicationProvider
 import com.example.data.db.AccountDao
 import com.example.data.db.AccountEntity
 import com.example.data.db.CategoryDao
@@ -9,6 +10,7 @@ import com.example.data.db.GoalDao
 import com.example.data.db.GoalEntity
 import com.example.data.db.TransactionDao
 import com.example.data.db.TransactionEntity
+import com.example.utils.VoiceInputManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
@@ -143,6 +145,35 @@ class DavidLiveUnitTest {
             "Слушай, цифры интересные! Твой общий баланс — 217 тысяч рублей.",
             controller.transcriptTurns.first().text
         )
+    }
+
+    @Test
+    fun `voice input manager live STT mode keeps user speech transcription and ignores assistant output`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val voiceManager = VoiceInputManager(context)
+        val recognizedChunks = mutableListOf<String>()
+        voiceManager.onChunkRecognized = { recognizedChunks.add(it) }
+
+        val setup = VoiceInputManager.buildLiveTranscriptionSetupJson("models/gemini-2.0-flash-live-001")
+        val setupObj = setup.getJSONObject("setup")
+        assertTrue(setupObj.has("inputAudioTranscription"))
+        assertFalse(setupObj.has("outputAudioTranscription"))
+        assertEquals(
+            "TEXT",
+            setupObj.getJSONObject("generationConfig").getJSONArray("responseModalities").getString(0)
+        )
+
+        voiceManager.processLiveServerMessageForTest(
+            """{"serverContent":{"inputTranscription":{"text":"Кофе 350 и такси 500 "}}}"""
+        )
+        assertEquals("Кофе 350 и такси 500", voiceManager.recognizedText.value)
+
+        // Ответы модели игнорируются, а по turnComplete фраза пользователя передается в onChunkRecognized
+        voiceManager.processLiveServerMessageForTest(
+            """{"serverContent":{"outputTranscription":{"text":"Я записал ваши расходы."},"turnComplete":true}}"""
+        )
+        assertEquals("Кофе 350 и такси 500", voiceManager.recognizedText.value)
+        assertEquals(listOf("Кофе 350 и такси 500"), recognizedChunks)
     }
 
     @Test

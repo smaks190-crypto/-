@@ -435,20 +435,35 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun getSavedApiKey(): String {
-        val saved = securePrefs.getString("gemini_api_key", "") ?: ""
-        if (saved.isNotBlank() && saved != "your_api_key_here") {
+        val legacyKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
+            prefs.getString("gemini_api_key", null)
+        )
+        if (legacyKey.isNotEmpty()) {
+            securePrefs.edit().putString("gemini_api_key", legacyKey).apply()
+            prefs.edit().remove("gemini_api_key").apply()
+            return legacyKey
+        }
+
+        val saved = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
+            securePrefs.getString("gemini_api_key", "")
+        )
+        if (saved.isNotBlank()) {
             return saved
         }
-        val defaultKey = com.example.BuildConfig.GEMINI_API_KEY
-        if (defaultKey.isNotBlank() && defaultKey != "your_api_key_here") {
+
+        val defaultKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
+            com.example.BuildConfig.GEMINI_API_KEY
+        )
+        if (com.example.data.api.GeminiModelConfig.isValidGeminiApiKey(defaultKey)) {
             return defaultKey
         }
         return ""
     }
 
     fun saveApiKey(key: String) {
-        val trimmed = key.trim()
+        val trimmed = com.example.data.api.GeminiModelConfig.sanitizeApiKey(key)
         securePrefs.edit().putString("gemini_api_key", trimmed).apply()
+        prefs.edit().remove("gemini_api_key").apply()
         _apiKey.value = trimmed
         viewModelScope.launch {
             _toastMessage.emit(if (trimmed.isEmpty()) "API ключ удален" else "API ключ сохранен!")

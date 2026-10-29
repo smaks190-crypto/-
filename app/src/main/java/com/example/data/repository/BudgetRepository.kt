@@ -363,6 +363,7 @@ class BudgetRepository(
                     }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 e.printStackTrace()
             }
         }
@@ -446,17 +447,22 @@ class BudgetRepository(
                     )
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                val err = GeminiModelConfig.extractHttpErrorDetails(e)
+                val isLastOrFatal = err.isFatalForAllModels || attempt >= modelsToTry.size
                 GlobalConsoleLogger.recordNetworkCall(
                     operationType = "Автоподбор категории (ИИ)",
                     modelName = model,
                     durationMs = System.currentTimeMillis() - startMs,
-                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                    errorType = e.javaClass.simpleName,
-                    errorMessage = e.localizedMessage ?: e.message,
+                    status = if (isLastOrFatal) NetworkCallStatus.ERROR else NetworkCallStatus.FALLBACK,
+                    httpCode = err.httpCode,
+                    errorType = err.errorType,
+                    errorMessage = err.userMessage,
                     attemptNumber = attempt,
                     totalModelsInChain = modelsToTry.size,
                     operationId = opId
                 )
+                if (err.isFatalForAllModels) break
             }
         }
 
@@ -1216,6 +1222,7 @@ class BudgetRepository(
                     )
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 lastExceptionMessage = e.message ?: e.toString()
                 GlobalConsoleLogger.recordNetworkCall(
                     operationType = "Аудит бюджета (SSE Stream)",
@@ -1347,6 +1354,7 @@ class BudgetRepository(
                     }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 lastExceptionMessage = e.message ?: e.toString()
             }
         }
@@ -1485,7 +1493,8 @@ class BudgetRepository(
                         return responseText
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 // Try next model or fallback
             }
         }
@@ -1564,10 +1573,11 @@ class BudgetRepository(
         incomeCategories: List<String>
     ): List<ParsedVoiceOperation> {
         val trimmedText = voiceText.trim()
-        if (trimmedText.isEmpty()) return emptyList()
+        if (trimmedText.isEmpty() || trimmedText.equals("Говорите...", ignoreCase = true)) return emptyList()
 
-        if (apiKey.isBlank()) {
-            throw IllegalArgumentException("Для анализа речи с помощью ИИ укажите API ключ Gemini в настройках приложения.")
+        val cleanKey = GeminiModelConfig.sanitizeApiKey(apiKey)
+        if (cleanKey.isBlank()) {
+            throw IllegalArgumentException("Для анализа речи с помощью ИИ укажите действующий API ключ Gemini в настройках приложения.")
         }
 
         val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
@@ -1618,9 +1628,11 @@ class BudgetRepository(
         var lastError: String? = null
 
         val modelsToTry = listOf(
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
             "gemini-3.5-flash",
             "gemini-3.8-flash",
-            "gemini-2.5-flash",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite"
         )
@@ -1632,7 +1644,7 @@ class BudgetRepository(
             val attempt = idx + 1
             val startMs = System.currentTimeMillis()
             try {
-                val response = apiService.generateContent(model, apiKey, request)
+                val response = apiService.generateContent(model, cleanKey, request)
                 if (response.error == null) {
                     val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                     if (!responseText.isNullOrEmpty()) {
@@ -1671,18 +1683,25 @@ class BudgetRepository(
                     )
                 }
             } catch (e: Exception) {
-                lastError = e.message
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                val err = GeminiModelConfig.extractHttpErrorDetails(e)
+                lastError = err.userMessage
+                val isLastOrFatal = err.isFatalForAllModels || attempt >= modelsToTry.size
                 GlobalConsoleLogger.recordNetworkCall(
                     operationType = "Разбор голоса (Текст)",
                     modelName = model,
                     durationMs = System.currentTimeMillis() - startMs,
-                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                    errorType = e.javaClass.simpleName,
-                    errorMessage = e.localizedMessage ?: e.message,
+                    status = if (isLastOrFatal) NetworkCallStatus.ERROR else NetworkCallStatus.FALLBACK,
+                    httpCode = err.httpCode,
+                    errorType = err.errorType,
+                    errorMessage = err.userMessage,
                     attemptNumber = attempt,
                     totalModelsInChain = modelsToTry.size,
                     operationId = opId
                 )
+                if (err.isFatalForAllModels) {
+                    break
+                }
             }
         }
 
@@ -1699,8 +1718,9 @@ class BudgetRepository(
     ): List<ParsedVoiceOperation> = withContext(Dispatchers.IO) {
         if (audioBytes.isEmpty()) return@withContext emptyList()
 
-        if (apiKey.isBlank()) {
-            throw IllegalArgumentException("Для анализа речи с помощью ИИ укажите API ключ Gemini в настройках приложения.")
+        val cleanKey = GeminiModelConfig.sanitizeApiKey(apiKey)
+        if (cleanKey.isBlank()) {
+            throw IllegalArgumentException("Для анализа речи с помощью ИИ укажите действующий API ключ Gemini в настройках приложения.")
         }
 
         val base64Audio = android.util.Base64.encodeToString(audioBytes, android.util.Base64.NO_WRAP)
@@ -1761,6 +1781,8 @@ class BudgetRepository(
         var lastError: String? = null
         val modelsToTry = listOf(
             "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite"
         )
@@ -1772,7 +1794,7 @@ class BudgetRepository(
             val attempt = idx + 1
             val startMs = System.currentTimeMillis()
             try {
-                val response = apiService.generateContent(model, apiKey, request)
+                val response = apiService.generateContent(model, cleanKey, request)
                 if (response.error == null) {
                     val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                     if (!responseText.isNullOrEmpty()) {
@@ -1810,19 +1832,26 @@ class BudgetRepository(
                     )
                 }
             } catch (e: Exception) {
-                lastError = e.message
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                val err = GeminiModelConfig.extractHttpErrorDetails(e)
+                lastError = err.userMessage
+                val isLastOrFatal = err.isFatalForAllModels || attempt >= modelsToTry.size
                 GlobalConsoleLogger.recordNetworkCall(
                     operationType = "Gemini Live Аудио (WAV)",
                     modelName = model,
                     durationMs = System.currentTimeMillis() - startMs,
-                    status = if (attempt < modelsToTry.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                    errorType = e.javaClass.simpleName,
-                    errorMessage = e.localizedMessage ?: e.message,
+                    status = if (isLastOrFatal) NetworkCallStatus.ERROR else NetworkCallStatus.FALLBACK,
+                    httpCode = err.httpCode,
+                    errorType = err.errorType,
+                    errorMessage = err.userMessage,
                     attemptNumber = attempt,
                     totalModelsInChain = modelsToTry.size,
                     details = "bytes=${audioBytes.size}",
                     operationId = opId
                 )
+                if (err.isFatalForAllModels) {
+                    break
+                }
             }
         }
 

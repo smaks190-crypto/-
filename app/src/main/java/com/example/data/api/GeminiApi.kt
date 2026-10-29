@@ -10,6 +10,7 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.ResponseBody
 import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.HttpException
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
@@ -20,6 +21,14 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 import retrofit2.http.Streaming
 import java.util.concurrent.TimeUnit
+
+data class GeminiHttpErrorDetails(
+    val httpCode: Int?,
+    val errorType: String,
+    val rawMessage: String,
+    val userMessage: String,
+    val isFatalForAllModels: Boolean
+)
 
 object GeminiModelConfig {
     /**
@@ -53,6 +62,133 @@ object GeminiModelConfig {
         "gemini-2.5-flash"
     )
 
+    private val PLACEHOLDER_KEYS = setOf(
+        "your_api_key_here",
+        "my_gemini_api_key",
+        "your_api_key",
+        "api_key_here",
+        "null",
+        "undefined",
+        "none",
+        "placeholder"
+    )
+
+    /**
+     * Очищает API-ключ от пробелов, переносов строк, управляющих символов и кавычек из .env,
+     * отсекая заглушки сборки.
+     */
+    fun sanitizeApiKey(rawKey: String?): String {
+        if (rawKey.isNullOrBlank()) return ""
+        val cleaned = rawKey
+            .trim()
+            .trim('"', '\'', '`', ' ', '\t', '\r', '\n')
+            .trim()
+        if (cleaned.isEmpty()) return ""
+        if (cleaned.lowercase() in PLACEHOLDER_KEYS) return ""
+        return cleaned
+    }
+
+    /**
+     * Проверяет, имеет ли строка формат реального ключа Google Gemini API (AIza...).
+     */
+    fun isValidGeminiApiKey(rawKey: String?): Boolean {
+        val clean = sanitizeApiKey(rawKey)
+        return clean.length >= 20 && clean.startsWith("AIza")
+    }
+
+    /**
+     * Извлекает структурированную причину ошибки из ответа Gemini REST API (включая тело ошибки при HttpException).
+     */
+    fun parseErrorBodyJson(rawBody: String?, httpCode: Int): GeminiHttpErrorDetails {
+        val bodyText = rawBody?.trim().orEmpty()
+        var status = ""
+        var message = ""
+        var reason = ""
+
+        if (bodyText.isNotEmpty()) {
+            try {
+                val parsed = RetrofitClient.moshi.adapter(GeminiResponse::class.java).fromJson(bodyText)
+                val err = parsed?.error
+                if (err != null) {
+                    status = err.status?.trim().orEmpty()
+                    message = err.message?.trim().orEmpty()
+                }
+            } catch (_: Exception) {
+            }
+            if (status.isEmpty()) {
+                status = Regex(""""status"\s*:\s*"([^"]+)"""").find(bodyText)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            }
+            if (message.isEmpty()) {
+                message = Regex(""""message"\s*:\s*"([^"]+)"""").find(bodyText)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            }
+            reason = Regex(""""reason"\s*:\s*"([^"]+)"""").find(bodyText)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+            if (message.isEmpty() && !bodyText.startsWith("{")) {
+                message = bodyText.take(240)
+            }
+        }
+
+        val effectiveErrorType = when {
+            reason.isNotEmpty() -> reason
+            status.isNotEmpty() -> status
+            else -> "HTTP_$httpCode"
+        }
+
+        val isInvalidKey = reason.equals("API_KEY_INVALID", ignoreCase = true) ||
+            reason.equals("API_KEY_SERVICE_BLOCKED", ignoreCase = true) ||
+            message.contains("API key not valid", ignoreCase = true) ||
+            message.contains("API_KEY_INVALID", ignoreCase = true)
+
+        val isUnsupportedLocation = (status.equals("FAILED_PRECONDITION", ignoreCase = true) || httpCode == 400) &&
+            message.contains("location is not supported", ignoreCase = true)
+
+        val isPermissionDenied = httpCode == 403 || status.equals("PERMISSION_DENIED", ignoreCase = true)
+
+        val isFatalForAllModels = isInvalidKey || isUnsupportedLocation || isPermissionDenied
+
+        val userMessage = when {
+            isInvalidKey ->
+                "Недействительный API-ключ Gemini (HTTP $httpCode: API_KEY_INVALID). Проверьте или обновите ключ в настройках ИИ."
+            isUnsupportedLocation ->
+                "Gemini API недоступен в вашем регионе без VPN (HTTP $httpCode: FAILED_PRECONDITION — User location is not supported)."
+            isPermissionDenied ->
+                "Доступ к Gemini API отклонён (HTTP $httpCode: ${message.ifBlank { "PERMISSION_DENIED" }}). Проверьте права API-ключа."
+            message.isNotBlank() && status.isNotBlank() ->
+                "HTTP $httpCode ($status): $message"
+            message.isNotBlank() ->
+                "HTTP $httpCode: $message"
+            else ->
+                "HTTP $httpCode"
+        }
+
+        return GeminiHttpErrorDetails(
+            httpCode = httpCode,
+            errorType = effectiveErrorType,
+            rawMessage = message.ifBlank { "HTTP $httpCode" },
+            userMessage = userMessage,
+            isFatalForAllModels = isFatalForAllModels
+        )
+    }
+
+    fun extractHttpErrorDetails(throwable: Throwable): GeminiHttpErrorDetails {
+        if (throwable is HttpException) {
+            val code = throwable.code()
+            val errorBody = try {
+                throwable.response()?.errorBody()?.string()
+            } catch (_: Exception) {
+                null
+            }
+            return parseErrorBodyJson(errorBody, code)
+        }
+        val msg = (throwable.localizedMessage ?: throwable.message ?: throwable.javaClass.simpleName).trim()
+        return GeminiHttpErrorDetails(
+            httpCode = null,
+            errorType = throwable.javaClass.simpleName,
+            rawMessage = msg,
+            userMessage = msg,
+            isFatalForAllModels = false
+        )
+    }
+
     /**
      * Выполняет генерацию реакции Давида Жабова (одиночной или групповой) с использованием
      * основной модели по умолчанию [DEFAULT_DAVID_REACTION_MODEL] и автоматического fallback-переключения
@@ -67,13 +203,14 @@ object GeminiModelConfig {
         details: String,
         models: List<String> = DAVID_REACTION_MODELS
     ): String? {
+        val cleanKey = sanitizeApiKey(apiKey).ifEmpty { apiKey.trim() }
         val opId = GlobalConsoleLogger.newOperationId(operationPrefix)
 
         for ((idx, model) in models.withIndex()) {
             val attempt = idx + 1
             val startMs = System.currentTimeMillis()
             try {
-                val response = apiService.generateContent(model, apiKey, request)
+                val response = apiService.generateContent(model, cleanKey, request)
                 if (response.error == null) {
                     val responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
                         ?.trim()
@@ -112,18 +249,25 @@ object GeminiModelConfig {
                     )
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                val err = extractHttpErrorDetails(e)
+                val isLastOrFatal = err.isFatalForAllModels || attempt >= models.size
                 GlobalConsoleLogger.recordNetworkCall(
                     operationType = operationType,
                     modelName = model,
                     durationMs = (System.currentTimeMillis() - startMs).coerceAtLeast(0L),
-                    status = if (attempt < models.size) NetworkCallStatus.FALLBACK else NetworkCallStatus.ERROR,
-                    errorType = e.javaClass.simpleName,
-                    errorMessage = e.localizedMessage ?: e.message,
+                    status = if (isLastOrFatal) NetworkCallStatus.ERROR else NetworkCallStatus.FALLBACK,
+                    httpCode = err.httpCode,
+                    errorType = err.errorType,
+                    errorMessage = err.userMessage,
                     attemptNumber = attempt,
                     totalModelsInChain = models.size,
                     details = details,
                     operationId = opId
                 )
+                if (err.isFatalForAllModels) {
+                    break
+                }
             }
         }
         return null
@@ -136,17 +280,18 @@ data class GeminiRequest(
 )
 
 data class GeminiContent(
-    val parts: List<GeminiPart>
+    val parts: List<GeminiPart>,
+    val role: String? = null
 )
 
 data class GeminiInlineData(
-    @field:Json(name = "mime_type") val mimeType: String,
-    val data: String
+    @field:Json(name = "mimeType") val mimeType: String,
+    @field:Json(name = "data") val data: String
 )
 
 data class GeminiPart(
     val text: String? = null,
-    @field:Json(name = "inline_data") val inlineData: GeminiInlineData? = null
+    @field:Json(name = "inlineData") val inlineData: GeminiInlineData? = null
 )
 
 data class GeminiResponse(
@@ -212,10 +357,16 @@ object RetrofitClient {
                     details = "host=${request.url.host} | protocol=${response.protocol}"
                 )
             } else {
+                val peekedError = try {
+                    val raw = response.peekBody(4096).string()
+                    GeminiModelConfig.parseErrorBodyJson(raw, code).userMessage
+                } catch (_: Exception) {
+                    response.message.ifBlank { "HTTP Error" }
+                }
                 GlobalConsoleLogger.w(
                     tag = "NETWORK",
                     message = "HTTP $code ${request.method} $actionSegment ($modelSegment) за ${durationMs}ms",
-                    details = "message=${response.message.ifBlank { "HTTP Error" }}"
+                    details = "message=$peekedError"
                 )
             }
             response
