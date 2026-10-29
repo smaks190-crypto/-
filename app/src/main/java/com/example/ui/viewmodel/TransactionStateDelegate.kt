@@ -56,19 +56,28 @@ class TransactionStateDelegate(
         voiceInputManager.onAudioChunkReady = { wavBytes ->
             processLiveAudioChunk(wavBytes, isFinalFlush = false)
         }
+        voiceInputManager.onChunkRecognized = { chunkText ->
+            processLiveTextChunk(chunkText, isFinalFlush = false)
+        }
         val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
         voiceInputManager.startListening(context, effectiveKey)
     }
 
     fun stopVoiceRecordingAndProcess() {
         val remainingWav = voiceInputManager.stopListeningAndFlushRemaining()
+        val pendingFinalText = voiceInputManager.consumePendingFinalText()
         if (remainingWav != null) {
             processLiveAudioChunk(remainingWav, isFinalFlush = true)
+        } else if (pendingFinalText.isNotBlank()) {
+            processLiveTextChunk(pendingFinalText, isFinalFlush = true)
         } else {
-            isVoiceActive.value = false
             if (activeChunkJobs.get() == 0 && parsedVoiceOperations.value.isNullOrEmpty()) {
                 val partialCandidate = voiceInputManager.partialText.value
-                    .takeIf { it.isNotBlank() && it != com.example.utils.VoiceInputManager.LISTENING_PLACEHOLDER }
+                    .takeIf {
+                        it.isNotBlank() &&
+                            it != com.example.utils.VoiceInputManager.LISTENING_PLACEHOLDER &&
+                            it != "Слушаю..."
+                    }
                 val textToProcess = when {
                     manualText.value.isNotBlank() -> manualText.value
                     voiceInputManager.recognizedText.value.isNotBlank() -> voiceInputManager.recognizedText.value
@@ -77,21 +86,89 @@ class TransactionStateDelegate(
                 }
                 if (textToProcess.isNotBlank()) {
                     processVoiceText(textToProcess)
+                    isVoiceActive.value = false
                 } else {
+                    isVoiceActive.value = false
                     cancelVoiceRecording()
+                }
+            } else {
+                isVoiceActive.value = false
+            }
+        }
+    }
+
+    private fun processLiveTextChunk(chunkText: String, isFinalFlush: Boolean) {
+        val trimmed = chunkText.trim()
+        if (trimmed.isBlank() || trimmed == com.example.utils.VoiceInputManager.LISTENING_PLACEHOLDER || trimmed == "Слушаю...") {
+            if (isFinalFlush) {
+                isVoiceActive.value = false
+            }
+            return
+        }
+        // Синхронно выставляем флаг анализа ДО сброса isVoiceActive и запуска корутины,
+        // чтобы MorphingBottomBar не увидел промежуточный кадр (!isListening && !isAnalyzingVoice) и не закрыл капсулу!
+        activeChunkJobs.incrementAndGet()
+        isAnalyzingVoice.value = true
+        voiceErrorMessage.value = null
+        if (isFinalFlush) {
+            isVoiceActive.value = false
+        }
+        scope.launch {
+            try {
+                val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
+                val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
+                val incCats = categories.value.filter { it.type == "income" }.map { it.name }
+
+                val result = repository.parseVoiceOperations(
+                    voiceText = trimmed,
+                    apiKey = effectiveKey,
+                    expenseCategories = expCats,
+                    incomeCategories = incCats
+                )
+
+                if (result.isNotEmpty()) {
+                    val currentList = parsedVoiceOperations.value.orEmpty()
+                    val updatedList = currentList + result
+                    parsedVoiceOperations.value = updatedList
+
+                    val lastOp = updatedList.last()
+                    val lastOpLabel = lastOp.subcategory.ifBlank { lastOp.title.ifBlank { lastOp.category } }
+                    val lastOpTranscript = "$lastOpLabel ${lastOp.amount.toInt()} ₽"
+                    voiceInputManager.setRecognizedTextManually(lastOpTranscript)
+                    com.example.utils.GlobalConsoleLogger.i(
+                        "UI",
+                        "Gemini Live STT: +${result.size} операций (всего ${updatedList.size}), последняя: $lastOpTranscript"
+                    )
+                } else if (isFinalFlush && activeChunkJobs.get() <= 1 && parsedVoiceOperations.value.isNullOrEmpty()) {
+                    val msg = "Не удалось распознать операции. Назовите покупку и сумму, например: «Кофе 300 и такси 500»"
+                    voiceErrorMessage.value = msg
+                    toastMessage.emit(msg)
+                }
+            } catch (e: Exception) {
+                com.example.utils.GlobalConsoleLogger.e("VOICE", "Ошибка Gemini Live текстового чанка: ${e.message}", e)
+                if (isFinalFlush && activeChunkJobs.get() <= 1 && parsedVoiceOperations.value.isNullOrEmpty()) {
+                    val msg = e.message ?: "Ошибка анализа голоса"
+                    voiceErrorMessage.value = msg
+                    toastMessage.emit(msg)
+                }
+            } finally {
+                if (activeChunkJobs.decrementAndGet() <= 0) {
+                    activeChunkJobs.set(0)
+                    isAnalyzingVoice.value = false
                 }
             }
         }
     }
 
     private fun processLiveAudioChunk(wavBytes: ByteArray, isFinalFlush: Boolean) {
+        // Синхронно выставляем флаг анализа ДО сброса isVoiceActive и запуска корутины
+        activeChunkJobs.incrementAndGet()
+        isAnalyzingVoice.value = true
+        voiceErrorMessage.value = null
         if (isFinalFlush) {
             isVoiceActive.value = false
         }
         scope.launch {
-            activeChunkJobs.incrementAndGet()
-            isAnalyzingVoice.value = true
-            voiceErrorMessage.value = null
             try {
                 val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
                 val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
@@ -142,6 +219,7 @@ class TransactionStateDelegate(
     fun cancelVoiceRecording() {
         activeChunkJobs.set(0)
         voiceInputManager.onAudioChunkReady = null
+        voiceInputManager.onChunkRecognized = null
         voiceInputManager.stopListening()
         isVoiceActive.value = false
         isAnalyzingVoice.value = false
@@ -162,10 +240,10 @@ class TransactionStateDelegate(
 
     fun processVoiceText(voiceText: String) {
         if (voiceText.isBlank()) return
+        activeChunkJobs.incrementAndGet()
+        isAnalyzingVoice.value = true
+        voiceErrorMessage.value = null
         scope.launch {
-            activeChunkJobs.incrementAndGet()
-            isAnalyzingVoice.value = true
-            voiceErrorMessage.value = null
             try {
                 val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
                 val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
@@ -179,10 +257,12 @@ class TransactionStateDelegate(
                 )
 
                 if (result.isEmpty()) {
-                    val msg = "Не удалось распознать операции из текста. Укажите суммы и название, например: «Потратил 500 рублей на такси»"
-                    voiceErrorMessage.value = msg
-                    toastMessage.emit(msg)
-                    parsedVoiceOperations.value = null
+                    if (parsedVoiceOperations.value.isNullOrEmpty()) {
+                        val msg = "Не удалось распознать операции из текста. Укажите суммы и название, например: «Потратил 500 рублей на такси»"
+                        voiceErrorMessage.value = msg
+                        toastMessage.emit(msg)
+                        parsedVoiceOperations.value = null
+                    }
                 } else {
                     val currentList = parsedVoiceOperations.value.orEmpty()
                     val updatedList = currentList + result
@@ -192,10 +272,12 @@ class TransactionStateDelegate(
                     voiceInputManager.setRecognizedTextManually("$lastOpLabel ${lastOp.amount.toInt()} ₽")
                 }
             } catch (e: Exception) {
-                val msg = "Ошибка при анализе: ${e.message}"
-                voiceErrorMessage.value = msg
-                toastMessage.emit(msg)
-                parsedVoiceOperations.value = null
+                if (parsedVoiceOperations.value.isNullOrEmpty()) {
+                    val msg = "Ошибка при анализе: ${e.message}"
+                    voiceErrorMessage.value = msg
+                    toastMessage.emit(msg)
+                    parsedVoiceOperations.value = null
+                }
             } finally {
                 if (activeChunkJobs.decrementAndGet() <= 0) {
                     activeChunkJobs.set(0)
