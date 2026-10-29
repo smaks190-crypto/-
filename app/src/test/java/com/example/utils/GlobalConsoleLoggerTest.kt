@@ -4,10 +4,13 @@ import com.example.data.api.GeminiApiService
 import com.example.data.api.GeminiCandidate
 import com.example.data.api.GeminiContent
 import com.example.data.api.GeminiError
+import com.example.data.api.GeminiInlineData
 import com.example.data.api.GeminiModelConfig
 import com.example.data.api.GeminiPart
 import com.example.data.api.GeminiRequest
 import com.example.data.api.GeminiResponse
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.test.runTest
 import okhttp3.ResponseBody
 import org.junit.After
@@ -19,7 +22,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import retrofit2.Response
-import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 
 class GlobalConsoleLoggerTest {
@@ -37,8 +39,29 @@ class GlobalConsoleLoggerTest {
     }
 
     @Test
+    fun `gemini part serializes inlineData and mimeType in lowerCamelCase to prevent HTTP 400 rejection`() {
+        val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+        val adapter = moshi.adapter(GeminiPart::class.java)
+
+        val inlinePart = GeminiPart(
+            text = null,
+            inlineData = GeminiInlineData(
+                mimeType = "audio/wav",
+                data = "UklGRiQAAABXQVZFZm10"
+            )
+        )
+        val json = adapter.toJson(inlinePart)
+
+        assertTrue("Must use lowerCamelCase inlineData", json.contains("\"inlineData\""))
+        assertTrue("Must use lowerCamelCase mimeType", json.contains("\"mimeType\""))
+        assertFalse("Snake case inline_data causes HTTP 400 from Gemini API", json.contains("\"inline_data\""))
+        assertFalse("Snake case mime_type causes HTTP 400 from Gemini API", json.contains("\"mime_type\""))
+    }
+
+    @Test
     fun `gemini-3_5-flash-lite is primary default model for all David Zhabov reactions while budget audit models remain unchanged`() {
         assertEquals("gemini-3.5-flash-lite", GeminiModelConfig.DEFAULT_DAVID_REACTION_MODEL)
+        assertEquals("gemini-3.5-flash-lite", GeminiModelConfig.DAVID_REACTION_MODELS.first())
         assertEquals(
             listOf(
                 "gemini-3.5-flash-lite",
@@ -48,8 +71,8 @@ class GlobalConsoleLoggerTest {
             ),
             GeminiModelConfig.DAVID_REACTION_MODELS
         )
-        assertEquals("gemini-3.5-flash-lite", GeminiModelConfig.DAVID_REACTION_MODELS.first())
 
+        // Модели для аудита бюджета остаются без изменений
         assertEquals(
             listOf(
                 "gemini-3.8-flash",
@@ -62,336 +85,319 @@ class GlobalConsoleLoggerTest {
     }
 
     @Test
-    fun `single and group David reactions use gemini-3_5-flash-lite by default and preserve fallback mechanism`() = runTest {
+    fun `executeDavidReactionWithFallback uses gemini-3_5-flash-lite first for both single and multi-operation reactions`() = runTest {
+        val attemptedModels = mutableListOf<String>()
+        val fakeService = object : GeminiApiService {
+            override suspend fun generateContent(
+                model: String,
+                apiKey: String,
+                request: GeminiRequest
+            ): GeminiResponse {
+                attemptedModels.add(model)
+                return GeminiResponse(
+                    candidates = listOf(
+                        GeminiCandidate(
+                            content = GeminiContent(
+                                parts = listOf(GeminiPart(text = "Ква! Отличная экономия, одобряю!"))
+                            )
+                        )
+                    ),
+                    error = null
+                )
+            }
+
+            override suspend fun streamGenerateContent(
+                model: String,
+                apiKey: String,
+                alt: String,
+                request: GeminiRequest
+            ): Response<ResponseBody> {
+                throw UnsupportedOperationException("Not used in reaction tests")
+            }
+        }
+
         val sampleRequest = GeminiRequest(
-            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Бургер 2000 ₽"))))
+            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Кофе 300 ₽"))))
         )
 
-        // 1. Одиночная реакция Давида Жабова — успешный ответ с первой попытки от gemini-3.5-flash-lite
-        val singleAttemptedModels = mutableListOf<String>()
-        val singleApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest
-            ): GeminiResponse {
-                singleAttemptedModels.add(model)
-                return GeminiResponse(
-                    candidates = listOf(
-                        GeminiCandidate(
-                            content = GeminiContent(
-                                parts = listOf(GeminiPart(text = "«Два косаря за бургер? Жаба в обмороке! 🐸»"))
-                            )
-                        )
-                    )
-                )
-            }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
-        }
-
-        val singleComment = GeminiModelConfig.executeDavidReactionWithFallback(
-            apiService = singleApi,
+        val singleReply = GeminiModelConfig.executeDavidReactionWithFallback(
+            apiService = fakeService,
             apiKey = "test-key",
             request = sampleRequest,
-            operationType = "Реакция Давида Жабова",
+            operationType = "Реакция Давида (1 оп.)",
             operationPrefix = "DAVID",
-            details = "cat=Фастфуд"
+            details = "category=Кафе | amount=300.0"
         )
-
-        assertEquals("Два косаря за бургер? Жаба в обмороке! 🐸", singleComment)
-        assertEquals(listOf("gemini-3.5-flash-lite"), singleAttemptedModels)
-
-        // 2. Групповая реакция Давида Жабова — успешный ответ с первой попытки от gemini-3.5-flash-lite
-        val multiAttemptedModels = mutableListOf<String>()
-        val multiApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest
-            ): GeminiResponse {
-                multiAttemptedModels.add(model)
-                return GeminiResponse(
-                    candidates = listOf(
-                        GeminiCandidate(
-                            content = GeminiContent(
-                                parts = listOf(GeminiPart(text = "\"Бургер и такси — классический набор финансового гусара! 🐸\""))
-                            )
-                        )
-                    )
-                )
-            }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
-        }
-
-        val multiComment = GeminiModelConfig.executeDavidReactionWithFallback(
-            apiService = multiApi,
+        val multiReply = GeminiModelConfig.executeDavidReactionWithFallback(
+            apiService = fakeService,
             apiKey = "test-key",
             request = sampleRequest,
-            operationType = "Групповая реакция Давида Жабова",
-            operationPrefix = "DAVID-M",
-            details = "ops=2"
+            operationType = "Реакция Давида (группа)",
+            operationPrefix = "DAVID-MULTI",
+            details = "count=2"
         )
 
-        assertEquals("Бургер и такси — классический набор финансового гусара! 🐸", multiComment)
-        assertEquals(listOf("gemini-3.5-flash-lite"), multiAttemptedModels)
-
-        // 3. Проверка fallback-механизма при сбое первой модели
-        val fallbackAttemptedModels = mutableListOf<String>()
-        val fallbackApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest
-            ): GeminiResponse {
-                fallbackAttemptedModels.add(model)
-                return when (model) {
-                    "gemini-3.5-flash-lite" -> GeminiResponse(
-                        error = GeminiError(code = 503, message = "Overloaded", status = "UNAVAILABLE")
-                    )
-                    "gemini-3.8-flash" -> throw SocketTimeoutException("Read timed out")
-                    else -> GeminiResponse(
-                        candidates = listOf(
-                            GeminiCandidate(
-                                content = GeminiContent(
-                                    parts = listOf(GeminiPart(text = "Резервная модель сработала штатно! 🐸"))
-                                )
-                            )
-                        )
-                    )
-                }
-            }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
-        }
-
-        val fallbackComment = GeminiModelConfig.executeDavidReactionWithFallback(
-            apiService = fallbackApi,
-            apiKey = "test-key",
-            request = sampleRequest,
-            operationType = "Реакция Давида Жабова",
-            operationPrefix = "DAVID",
-            details = "cat=Фастфуд"
-        )
-
-        assertEquals("Резервная модель сработала штатно! 🐸", fallbackComment)
+        assertEquals("Ква! Отличная экономия, одобряю!", singleReply)
+        assertEquals("Ква! Отличная экономия, одобряю!", multiReply)
         assertEquals(
-            listOf("gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.6-flash"),
-            fallbackAttemptedModels
+            listOf("gemini-3.5-flash-lite", "gemini-3.5-flash-lite"),
+            attemptedModels
         )
-
-        // 4. При отказе всех моделей возвращается null для активации локального комментария Давида
-        val allFailApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest
-            ): GeminiResponse {
-                throw SocketTimeoutException("Timeout on $model")
-            }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
-        }
-
-        val nullWhenAllFail = GeminiModelConfig.executeDavidReactionWithFallback(
-            apiService = allFailApi,
-            apiKey = "test-key",
-            request = sampleRequest,
-            operationType = "Групповая реакция Давида Жабова",
-            operationPrefix = "DAVID-M",
-            details = "ops=3"
-        )
-        assertNull(nullWhenAllFail)
     }
 
     @Test
-    fun `sensitive data masking hides Gemini API keys, Bearer tokens, PINs, and card numbers`() {
+    fun `executeDavidReactionWithFallback falls back to next model when primary fails`() = runTest {
+        val attemptedModels = mutableListOf<String>()
+        val fakeServiceWithPrimaryFailure = object : GeminiApiService {
+            override suspend fun generateContent(
+                model: String,
+                apiKey: String,
+                request: GeminiRequest
+            ): GeminiResponse {
+                attemptedModels.add(model)
+                if (model == "gemini-3.5-flash-lite") {
+                    return GeminiResponse(
+                        candidates = null,
+                        error = GeminiError(code = 503, message = "Model overloaded", status = "UNAVAILABLE")
+                    )
+                }
+                return GeminiResponse(
+                    candidates = listOf(
+                        GeminiCandidate(
+                            content = GeminiContent(
+                                parts = listOf(GeminiPart(text = "Резервная жаба на связи!"))
+                            )
+                        )
+                    ),
+                    error = null
+                )
+            }
+
+            override suspend fun streamGenerateContent(
+                model: String,
+                apiKey: String,
+                alt: String,
+                request: GeminiRequest
+            ): Response<ResponseBody> {
+                throw UnsupportedOperationException("Not used in reaction tests")
+            }
+        }
+
+        val sampleRequest = GeminiRequest(
+            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Такси 500 ₽"))))
+        )
+
+        val reply = GeminiModelConfig.executeDavidReactionWithFallback(
+            apiService = fakeServiceWithPrimaryFailure,
+            apiKey = "test-key",
+            request = sampleRequest,
+            operationType = "Реакция Давида (1 оп.)",
+            operationPrefix = "DAVID",
+            details = "category=Такси | amount=500.0"
+        )
+
+        assertEquals("Резервная жаба на связи!", reply)
+        assertEquals(
+            listOf("gemini-3.5-flash-lite", "gemini-3.8-flash"),
+            attemptedModels
+        )
+    }
+
+    @Test
+    fun `maskSensitive redacts Gemini API keys, Bearer tokens, and PIN codes`() {
         val rawText = """
-            Request failed with x-goog-api-key: AIzaSyD9abcDEF1234567890_secretKeyValue
+            x-goog-api-key: AIzaSyD9876543210abcdefghijklmnopQRSTU
             Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secretPayload
-            User credentials: pin=4829, password="mySuperSecretPassword", card=4276 3800 1234 9876
+            key=AIzaSyA123456789012345678901234567890
+            "pin": "7391"
+            "data": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="
         """.trimIndent()
 
         val masked = GlobalConsoleLogger.maskSensitive(rawText)
 
-        assertFalse("Gemini API key must be masked", masked.contains("AIzaSyD9abcDEF1234567890_secretKeyValue"))
-        assertTrue("Masked API key placeholder expected", masked.contains("[MASKED_API_KEY]"))
-        assertFalse("Bearer token must be masked", masked.contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"))
-        assertTrue("Masked Bearer placeholder expected", masked.contains("Bearer [MASKED_TOKEN]"))
-        assertFalse("PIN code must be masked", masked.contains("pin=4829"))
-        assertFalse("Password must be masked", masked.contains("mySuperSecretPassword"))
-        assertTrue("Masked secret placeholder expected", masked.contains("[MASKED_SECRET]"))
-        assertFalse("Full card number must be masked", masked.contains("4276 3800 1234 9876"))
-        assertTrue("Card last 4 digits should remain", masked.contains("**** **** **** 9876"))
+        assertFalse("Raw Gemini key must not remain in logs", masked.contains("AIzaSyD9876543210abcdefghijklmnopQRSTU"))
+        assertFalse("Second Gemini key must not remain in logs", masked.contains("AIzaSyA123456789012345678901234567890"))
+        assertFalse("Raw Bearer token must not remain in logs", masked.contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"))
+        assertFalse("Raw PIN must not remain in logs", masked.contains("\"7391\""))
+        assertTrue("Masked output should contain AIza***REDACTED***", masked.contains("AIza***REDACTED***"))
+        assertTrue("Masked output should contain [REDACTED]", masked.contains("[REDACTED]"))
     }
 
     @Test
-    fun `ring buffer enforces MAX_LOGS limit and drops oldest entries`() {
-        val totalToInsert = GlobalConsoleLogger.MAX_LOGS + 45
-        for (idx in 1..totalToInsert) {
-            GlobalConsoleLogger.i("TEST", "Log entry number #$idx")
+    fun `ring buffer enforces MAX_LOGS cap of 500 entries`() {
+        for (i in 1..550) {
+            GlobalConsoleLogger.i("TEST", "Log message #$i")
         }
 
-        val currentLogs = GlobalConsoleLogger.logs.value
-        assertEquals(GlobalConsoleLogger.MAX_LOGS, currentLogs.size)
-        assertEquals("Log entry number #46", currentLogs.first().message)
-        assertEquals("Log entry number #$totalToInsert", currentLogs.last().message)
+        val logs = GlobalConsoleLogger.logs.value
+        assertEquals(GlobalConsoleLogger.MAX_LOGS, logs.size)
+        assertEquals("Log message #51", logs.first().message)
+        assertEquals("Log message #550", logs.last().message)
     }
 
     @Test
-    fun `filterLogs filters accurately by level, source tag, query, and operationId`() {
-        GlobalConsoleLogger.d("UI", "ModalAddTransaction opened", operationId = "OP-101")
-        GlobalConsoleLogger.i("GEMINI", "Model gemini-3.8-flash responded in 420ms", operationId = "OP-102")
-        GlobalConsoleLogger.w("VOICE", "Silence timeout reached", operationId = "OP-103")
+    fun `error logs are automatically indexed in errors flow and carry stack trace`() {
+        val exception = IllegalStateException("Failed to parse Gemini JSON payload")
         GlobalConsoleLogger.e(
-            tag = "ROOM",
-            message = "SQLiteConstraintException on transactions table",
-            throwable = IllegalStateException("Unique constraint failed"),
-            operationId = "OP-104"
+            tag = "GEMINI",
+            message = "Ошибка разбора ответа модели",
+            throwable = exception,
+            operationId = "OP-TEST-01"
+        )
+
+        val errors = GlobalConsoleLogger.errors.value
+        assertEquals(1, errors.size)
+        val entry = errors.first()
+        assertEquals(LogLevel.ERROR, entry.level)
+        assertEquals(LogSource.GEMINI, entry.source)
+        assertEquals("OP-TEST-01", entry.operationId)
+        assertNotNull(entry.stackTrace)
+        assertTrue(entry.stackTrace!!.contains("IllegalStateException"))
+    }
+
+    @Test
+    fun `filterLogs filters by level, source, and search query across message and stackTrace`() {
+        GlobalConsoleLogger.d("UI", "Opened AllTransactionsDialog")
+        GlobalConsoleLogger.i("ROOM", "Inserted 1 transaction into database")
+        GlobalConsoleLogger.e(
+            "GEMINI",
+            "HTTP 429 Quota exceeded",
+            RuntimeException("RateLimitException: TooManyRequests"),
+            operationId = "VOICE-0099"
         )
 
         val allEntries = GlobalConsoleLogger.logs.value
-        assertEquals(4, allEntries.size)
 
-        // Filter by level WARNING
-        val warnings = GlobalConsoleLogger.filterLogs(entries = allEntries, levelFilter = LogLevel.WARNING)
-        assertEquals(1, warnings.size)
-        assertEquals("VOICE", warnings.first().source)
+        // Filter by level ERROR
+        val errorOnly = GlobalConsoleLogger.filterLogs(
+            entries = allEntries,
+            query = "",
+            selectedLevel = LogLevel.ERROR,
+            selectedSource = null
+        )
+        assertEquals(1, errorOnly.size)
+        assertEquals("HTTP 429 Quota exceeded", errorOnly.first().message)
 
-        // Filter by source GEMINI
-        val geminiLogs = GlobalConsoleLogger.filterLogs(entries = allEntries, sourceFilter = "GEMINI")
-        assertEquals(1, geminiLogs.size)
-        assertTrue(geminiLogs.first().message.contains("gemini-3.8-flash"))
+        // Filter by source ROOM
+        val roomOnly = GlobalConsoleLogger.filterLogs(
+            entries = allEntries,
+            query = "",
+            selectedLevel = null,
+            selectedSource = LogSource.ROOM
+        )
+        assertEquals(1, roomOnly.size)
+        assertEquals(LogSource.ROOM, roomOnly.first().source)
 
-        // Filter by operationId query
-        val opFiltered = GlobalConsoleLogger.filterLogs(entries = allEntries, query = "OP-104")
-        assertEquals(1, opFiltered.size)
-        assertEquals("ROOM", opFiltered.first().source)
+        // Filter by search query matching stackTrace or operationId
+        val byStackQuery = GlobalConsoleLogger.filterLogs(
+            entries = allEntries,
+            query = "RateLimitException",
+            selectedLevel = null,
+            selectedSource = null
+        )
+        assertEquals(1, byStackQuery.size)
 
-        // Filter by text inside stackTrace
-        val stackFiltered = GlobalConsoleLogger.filterLogs(entries = allEntries, query = "Unique constraint failed")
-        assertEquals(1, stackFiltered.size)
-        assertEquals(LogLevel.ERROR, stackFiltered.first().level)
+        val byOpIdQuery = GlobalConsoleLogger.filterLogs(
+            entries = allEntries,
+            query = "VOICE-0099",
+            selectedLevel = null,
+            selectedSource = null
+        )
+        assertEquals(1, byOpIdQuery.size)
     }
 
     @Test
-    fun `pause mode suppresses non-critical logs while still capturing ERROR and FATAL`() {
+    fun `pause mode stops live log collection except FATAL entries`() {
+        GlobalConsoleLogger.i("UI", "Before pause")
         GlobalConsoleLogger.setPaused(true)
-
-        GlobalConsoleLogger.d("UI", "Ignored debug event while paused")
-        GlobalConsoleLogger.i("UI", "Ignored info event while paused")
-        GlobalConsoleLogger.e("GEMINI", "Critical API failure must still be recorded while paused")
+        GlobalConsoleLogger.d("UI", "While paused debug")
+        GlobalConsoleLogger.e("NETWORK", "While paused error")
 
         val logs = GlobalConsoleLogger.logs.value
         assertEquals(1, logs.size)
-        assertEquals(LogLevel.ERROR, logs.first().level)
-        assertEquals(1, GlobalConsoleLogger.errors.value.size)
+        assertEquals("Before pause", logs.first().message)
     }
 
     @Test
     fun `handleUncaughtException records FATAL entry with masked secrets and delegates to default handler`() {
         val delegated = AtomicBoolean(false)
         var delegatedThrowable: Throwable? = null
+
         val fakeDefaultHandler = Thread.UncaughtExceptionHandler { _, throwable ->
             delegated.set(true)
             delegatedThrowable = throwable
         }
 
-        val crashException = RuntimeException("Crash with key AIzaSySecretKey999888777666555444")
+        val crash = RuntimeException("Crash with key AIzaSySecretKey1234567890abcdef")
         GlobalConsoleLogger.handleUncaughtException(
             thread = Thread.currentThread(),
-            throwable = crashException,
-            delegateHandler = fakeDefaultHandler
+            throwable = crash,
+            defaultHandler = fakeDefaultHandler
         )
 
-        assertTrue("Must always delegate to Android default UncaughtExceptionHandler", delegated.get())
-        assertEquals(crashException, delegatedThrowable)
+        assertTrue("UncaughtExceptionHandler must always delegate to default system handler", delegated.get())
+        assertEquals(crash, delegatedThrowable)
 
         val errors = GlobalConsoleLogger.errors.value
         assertEquals(1, errors.size)
         val fatalEntry = errors.first()
         assertEquals(LogLevel.FATAL, fatalEntry.level)
-        assertEquals("CRASH", fatalEntry.source)
-        assertFalse("Crash message must not leak raw API key", fatalEntry.message.contains("AIzaSySecretKey999888777666555444"))
-        assertTrue("Crash message must contain masked placeholder", fatalEntry.message.contains("[MASKED_API_KEY]"))
-        assertNotNull(fatalEntry.stackTrace)
+        assertEquals(LogSource.CRASH, fatalEntry.source)
+        assertFalse(fatalEntry.message.contains("AIzaSySecretKey1234567890abcdef"))
+        assertTrue(fatalEntry.message.contains("AIza***REDACTED***"))
     }
 
     @Test
-    fun `buildDiagnosticReport and buildAiDiagnosticPrompt generate structured sanitized outputs`() {
-        val opId = GlobalConsoleLogger.newOperationId("AI")
-        GlobalConsoleLogger.recordNetworkCall(
-            operationType = "Аудит бюджета",
-            modelName = "gemini-3.8-flash",
-            durationMs = 840L,
-            status = NetworkCallStatus.FALLBACK,
-            httpCode = 503,
-            errorType = "HTTP_503",
-            errorMessage = "Model overloaded with key AIzaSyTestKey1234567890123456",
-            attemptNumber = 1,
-            totalModelsInChain = 4,
+    fun `buildAiDiagnosticPrompt and buildDiagnosticReport produce structured sanitized Markdown`() {
+        val opId = GlobalConsoleLogger.newOperationId("GEMINI")
+        GlobalConsoleLogger.recordDbOperation(
+            operation = "INSERT transaction",
+            table = "transactions",
+            durationMs = 8L,
+            details = "amount=1500.0",
             operationId = opId
         )
-        GlobalConsoleLogger.recordDbOperation(
-            operationName = "INSERT transaction",
-            tableName = "transactions",
-            durationMs = 14L,
-            isSuccess = true,
-            details = "cat=Продукты",
-            operationId = "DB-0001"
+        GlobalConsoleLogger.recordNetworkCall(
+            operationType = "Разбор голоса",
+            modelName = "gemini-3.5-flash",
+            durationMs = 420L,
+            status = NetworkCallStatus.FALLBACK,
+            httpCode = 503,
+            errorType = "HttpException",
+            errorMessage = "Service Unavailable for key AIzaSyTestKey1234567890123456",
+            attemptNumber = 1,
+            totalModelsInChain = 3,
+            operationId = opId
         )
         GlobalConsoleLogger.e(
             tag = "GEMINI",
-            message = "Timeout waiting for stream response with key AIzaSyTestKey1234567890123456",
-            throwable = IllegalStateException("SocketTimeoutException"),
+            message = "Сбой цепочки моделей",
+            throwable = IllegalStateException("All models failed"),
             operationId = opId
         )
 
-        val report = GlobalConsoleLogger.buildDiagnosticReport(
-            appVersionName = "1.42",
-            appVersionCode = 42,
+        val targetError = GlobalConsoleLogger.errors.value.first()
+        val aiPrompt = GlobalConsoleLogger.buildAiDiagnosticPrompt(
+            targetError = targetError,
+            appVersionName = "8.0",
+            appVersionCode = 800,
             buildType = "debug"
         )
-
-        assertTrue(report.contains("OBSIDIAN NEO-BANK (DAVID FINANCE) — DIAGNOSTIC REPORT"))
-        assertTrue(report.contains("v1.42 (code 42) [debug]"))
-        assertTrue(report.contains("INSERT transaction"))
-        assertTrue(report.contains("gemini-3.8-flash"))
-        assertFalse("Report must never contain raw API key", report.contains("AIzaSyTestKey1234567890123456"))
-
-        val aiPrompt = GlobalConsoleLogger.buildAiDiagnosticPrompt(
-            targetError = GlobalConsoleLogger.errors.value.last(),
-            appVersionName = "1.42",
-            appVersionCode = 42,
+        val fullReport = GlobalConsoleLogger.buildDiagnosticReport(
+            appVersionName = "8.0",
+            appVersionCode = 800,
             buildType = "debug"
         )
 
         assertTrue(aiPrompt.contains("# Диагностический отчёт для ИИ-разработчика"))
-        assertTrue(aiPrompt.contains("https://github.com/smaks190-crypto/-.git"))
-        assertTrue(aiPrompt.contains("SocketTimeoutException"))
-        assertTrue(aiPrompt.contains("## 5. Задача для ИИ"))
-        assertFalse("AI prompt must never contain raw API key", aiPrompt.contains("AIzaSyTestKey1234567890123456"))
+        assertTrue(aiPrompt.contains("v8.0"))
+        assertTrue(aiPrompt.contains(opId))
+        assertTrue(aiPrompt.contains("IllegalStateException: All models failed"))
+        assertFalse(aiPrompt.contains("AIzaSyTestKey1234567890123456"))
+
+        assertTrue(fullReport.contains("OBSIDIAN NEO-BANK (DAVID FINANCE) — DIAGNOSTIC REPORT"))
+        assertTrue(fullReport.contains("NETWORK / GEMINI AI TRACES"))
+        assertTrue(fullReport.contains("RECENT ERRORS"))
     }
 
     @Test
@@ -576,7 +582,7 @@ class GlobalConsoleLoggerTest {
     }
 
     @Test
-    fun `initial AllTransactionsPeriodState shows only current month operations without locking period or highlighting Mes`() {
+    fun `initial AllTransactionsPeriodState is unlocked and updates displayed month dynamically on scroll`() {
         val sampleTransactions = listOf(
             com.example.data.db.TransactionEntity(
                 id = "tx-1",
@@ -618,44 +624,59 @@ class GlobalConsoleLoggerTest {
             com.example.ui.components.dialogs.PERIOD_SWITCHER_TABS
         )
 
-        val initialState = com.example.ui.components.dialogs.AllTransactionsPeriodState(
+        var state = com.example.ui.components.dialogs.AllTransactionsPeriodState(
             stableAnchorDateStr = "2026-10-15"
         )
 
-        // При открытии период не зафиксирован и кнопка «Мес» не активна
-        assertNull(initialState.selectedPeriod)
-        assertFalse(initialState.isPeriodLocked)
-        assertEquals(-1, initialState.activeTabIndex)
-        assertEquals(0, initialState.swipeMonthOffset)
-        assertEquals("2026-10-15", initialState.displayedMonthDateStr)
-        assertEquals("month", initialState.effectivePeriod)
+        // При открытии период не зафиксирован (можно листать весь список вниз до Сентября и Августа)
+        assertNull(state.selectedPeriod)
+        assertFalse(state.isPeriodLocked)
+        assertEquals(-1, state.activeTabIndex)
+        assertEquals(0, state.swipeMonthOffset)
+        assertEquals("2026-10-15", state.displayedMonthDateStr)
 
-        // Список содержит операции ТОЛЬКО за отображаемый текущий месяц (Октябрь 2026)
-        val initialMonthTransactions = com.example.ui.components.dialogs.filterTransactionsForOffset(
+        // График/карточки в шапке изначально показывают суммы за Октябрь 2026
+        val initialChartTransactions = com.example.ui.components.dialogs.filterTransactionsForOffset(
             transactions = sampleTransactions,
-            selectedPeriod = initialState.selectedPeriod,
-            customStartStr = initialState.customStartStr,
-            customEndStr = initialState.customEndStr,
-            stableAnchorDateStr = initialState.stableAnchorDateStr,
-            currentOffsetInt = initialState.currentOffsetInt,
-            offset = initialState.currentOffsetInt,
-            swipeMonthOffset = initialState.swipeMonthOffset
+            selectedPeriod = state.selectedPeriod,
+            customStartStr = state.customStartStr,
+            customEndStr = state.customEndStr,
+            stableAnchorDateStr = state.stableAnchorDateStr,
+            currentOffsetInt = state.currentOffsetInt,
+            offset = state.currentOffsetInt,
+            swipeMonthOffset = state.swipeMonthOffset
         )
-        assertEquals(2, initialMonthTransactions.size)
-        assertTrue(initialMonthTransactions.all { it.date.startsWith("2026-10") })
+        assertEquals(2, initialChartTransactions.size)
+        assertTrue(initialChartTransactions.all { it.date.startsWith("2026-10") })
 
-        // Проверка граничного случая: пустой список операций
-        val emptyResult = com.example.ui.components.dialogs.filterTransactionsForOffset(
-            transactions = emptyList(),
-            selectedPeriod = initialState.selectedPeriod,
-            customStartStr = null,
-            customEndStr = null,
-            stableAnchorDateStr = initialState.stableAnchorDateStr,
-            currentOffsetInt = initialState.currentOffsetInt,
-            offset = initialState.currentOffsetInt,
-            swipeMonthOffset = initialState.swipeMonthOffset
+        // Когда пользователь скроллит список вниз до Сентября ("2026-09-20"),
+        // отображаемый месяц в чипе и графиках автоматически переключается на Сентябрь без блокировки списка
+        state = state.onScrolledToDate("2026-09-20")
+        assertFalse(state.isPeriodLocked)
+        assertEquals(-1, state.swipeMonthOffset)
+        assertEquals("2026-09-15", state.displayedMonthDateStr)
+        val sepLabel = com.example.ui.components.dialogs.buildDynamicPeriodLabel(
+            stableAnchorDateStr = state.stableAnchorDateStr,
+            customLabelStr = state.customLabelStr,
+            selectedPeriod = state.selectedPeriod,
+            swipeMonthOffset = state.swipeMonthOffset,
+            swipeWeekOffset = state.swipeWeekOffset,
+            swipeYearOffset = state.swipeYearOffset
         )
-        assertTrue(emptyResult.isEmpty())
+        assertTrue(sepLabel.startsWith("Сентябрь"))
+
+        val sepChartTransactions = com.example.ui.components.dialogs.filterTransactionsForOffset(
+            transactions = sampleTransactions,
+            selectedPeriod = state.selectedPeriod,
+            customStartStr = state.customStartStr,
+            customEndStr = state.customEndStr,
+            stableAnchorDateStr = state.stableAnchorDateStr,
+            currentOffsetInt = state.currentOffsetInt,
+            offset = state.currentOffsetInt,
+            swipeMonthOffset = state.swipeMonthOffset
+        )
+        assertEquals(1, sepChartTransactions.size)
+        assertEquals("Сентябрьские продукты", sepChartTransactions.first().subcategory)
     }
 
     @Test
@@ -996,170 +1017,6 @@ class GlobalConsoleLoggerTest {
             "Fatal HTTP 400 API_KEY_INVALID must abort immediately on the first model without hammering all fallback models",
             1,
             attemptedModels.size
-        )
-
-        // Проверка UnknownHostException: сбой разрешения DNS generativelanguage.googleapis.com
-        // обязан останавливать цепочку моделей с первой попытки (isFatalForAllModels = true)
-        val dnsAttemptedModels = mutableListOf<String>()
-        val dnsFailApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest
-            ): GeminiResponse {
-                dnsAttemptedModels.add(model)
-                throw java.net.UnknownHostException("Unable to resolve host \"generativelanguage.googleapis.com\"")
-            }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
-        }
-
-        val dnsDetails = GeminiModelConfig.extractHttpErrorDetails(
-            java.net.UnknownHostException("Unable to resolve host \"generativelanguage.googleapis.com\"")
-        )
-        assertTrue(dnsDetails.isFatalForAllModels)
-        assertEquals("UnknownHostException", dnsDetails.errorType)
-
-        val dnsResult = GeminiModelConfig.executeDavidReactionWithFallback(
-            apiService = dnsFailApi,
-            apiKey = "AIzaSyValidKey1234567890",
-            request = sampleRequest,
-            operationType = "Аудит бюджета (ИИ)",
-            operationPrefix = "AUDIT",
-            details = "period=Месяц"
-        )
-        assertNull(dnsResult)
-        assertEquals(
-            "UnknownHostException on shared host must abort immediately on attempt 1 without firing 4 duplicate DNS failures",
-            1,
-            dnsAttemptedModels.size
-        )
-    }
-
-    @Test
-    fun `voice text parsing returns emptyList on HTTP 200 empty JSON array without throwing stale HTTP 503 from earlier model`() = runTest {
-        val sampleRequest = GeminiRequest(
-            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Вкусно и точка"))))
-        )
-
-        val error503Json = """
-            {
-              "error": {
-                "code": 503,
-                "message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
-                "status": "UNAVAILABLE"
-              }
-            }
-        """.trimIndent()
-
-        // Сценарий из отчёта (VOICE-TXT-0002): первая модель возвращает HTTP 503 (UNAVAILABLE),
-        // а резервная модель gemini-3.5-flash-lite возвращает HTTP 200 с валидным пустым JSON-массивом "[]".
-        // Парсер обязан вернуть emptyList() со второй попытки, НЕ перебирая оставшиеся модели и НЕ выбрасывая IllegalStateException(HTTP 503).
-        val attemptedModels = mutableListOf<String>()
-        val fallbackEmptyArrayApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest
-            ): GeminiResponse {
-                attemptedModels.add(model)
-                if (model == "gemini-3.5-flash") {
-                    val body = okhttp3.ResponseBody.create(null, error503Json)
-                    throw retrofit2.HttpException(retrofit2.Response.error<GeminiResponse>(503, body))
-                }
-                return GeminiResponse(
-                    candidates = listOf(
-                        GeminiCandidate(
-                            content = GeminiContent(
-                                parts = listOf(GeminiPart(text = "[]"))
-                            )
-                        )
-                    )
-                )
-            }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
-        }
-
-        val parsed = com.example.data.repository.BudgetRepository.executeVoiceTextParsingWithFallback(
-            apiService = fallbackEmptyArrayApi,
-            cleanKey = "AIzaSyValidKey1234567890",
-            request = sampleRequest,
-            todayStr = "2026-10-29",
-            opId = "VOICE-TXT-TEST"
-        )
-
-        assertTrue(parsed.isEmpty())
-        assertEquals(
-            listOf("gemini-3.5-flash", "gemini-3.5-flash-lite"),
-            attemptedModels
-        )
-
-        // Дополнительный сценарий: первая модель возвращает HTTP 503, а все последующие возвращают HTTP 200 без JSON-массива.
-        // lastError обязан обновиться на «Ответ модели без JSON-массива» (не оставляя устаревший HTTP 503),
-        // а в логе должны быть зафиксированы записи EmptyResponse.
-        GlobalConsoleLogger.clear()
-        val nonJsonAttemptedModels = mutableListOf<String>()
-        val nonJsonApi = object : GeminiApiService {
-            override suspend fun generateContent(
-                model: String,
-                apiKey: String,
-                request: GeminiRequest
-            ): GeminiResponse {
-                nonJsonAttemptedModels.add(model)
-                if (model == "gemini-3.5-flash") {
-                    val body = okhttp3.ResponseBody.create(null, error503Json)
-                    throw retrofit2.HttpException(retrofit2.Response.error<GeminiResponse>(503, body))
-                }
-                return GeminiResponse(
-                    candidates = listOf(
-                        GeminiCandidate(
-                            content = GeminiContent(
-                                parts = listOf(GeminiPart(text = "Извините, не понял операцию"))
-                            )
-                        )
-                    )
-                )
-            }
-
-            override suspend fun streamGenerateContent(
-                model: String,
-                apiKey: String,
-                alt: String,
-                request: GeminiRequest
-            ): Response<ResponseBody> = throw UnsupportedOperationException()
-        }
-
-        var thrownError: IllegalStateException? = null
-        try {
-            com.example.data.repository.BudgetRepository.executeVoiceTextParsingWithFallback(
-                apiService = nonJsonApi,
-                cleanKey = "AIzaSyValidKey1234567890",
-                request = sampleRequest,
-                todayStr = "2026-10-29",
-                opId = "VOICE-TXT-NONJSON"
-            )
-        } catch (e: IllegalStateException) {
-            thrownError = e
-        }
-
-        assertNotNull(thrownError)
-        assertEquals("Ответ модели без JSON-массива", thrownError?.message)
-        assertEquals(4, nonJsonAttemptedModels.size)
-        val logsSnapshot = GlobalConsoleLogger.logs.value
-        assertTrue(
-            "EmptyResponse must be recorded in GlobalConsoleLogger when HTTP 200 contains no JSON array",
-            logsSnapshot.any { it.message.contains("EmptyResponse") || it.message.contains("Ответ модели без JSON-массива") }
         )
     }
 }

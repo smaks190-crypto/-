@@ -63,10 +63,13 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -97,6 +100,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -185,10 +190,8 @@ fun MorphingBottomBar(
     val rmsDb by voiceManager.rmsDb.collectAsState()
     val errorState by voiceManager.errorState.collectAsState()
 
-    val isVoiceActive by viewModel.isVoiceActive.collectAsState()
     val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
     val parsedOperations by viewModel.parsedVoiceOperations.collectAsState()
-    val latestVoiceTickerEvent by viewModel.latestVoiceTickerEvent.collectAsState()
     val categories by viewModel.categories.collectAsState(initial = emptyList())
     val isConsentGiven by viewModel.isGeminiConsentGiven.collectAsState()
     val apiKey by viewModel.apiKey.collectAsState()
@@ -207,32 +210,14 @@ fun MorphingBottomBar(
     }
     val effectiveModal = if (activeModal != BottomCapsuleModal.None) activeModal else renderedModal
 
-    // Мгновенный тактильный отклик в руку на каждый пойманный или скорректированный голосом расход/доход (toolCall)
-    LaunchedEffect(latestVoiceTickerEvent?.id) {
-        if (latestVoiceTickerEvent != null && activeModal is BottomCapsuleModal.VoiceInput) {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        }
-    }
-
     LaunchedEffect(parsedOperations) {
         val ops = parsedOperations
         if (ops != null) {
             if (editableList.isEmpty()) {
                 editableList.addAll(ops)
             } else if (ops.size > editableList.size) {
-                for (i in editableList.indices) {
-                    if (editableList[i] != ops[i] && editingIndex != i) {
-                        editableList[i] = ops[i]
-                    }
-                }
                 val newItems = ops.subList(editableList.size, ops.size)
                 editableList.addAll(newItems)
-            } else if (ops.size == editableList.size) {
-                for (i in ops.indices) {
-                    if (editableList[i] != ops[i] && editingIndex != i) {
-                        editableList[i] = ops[i]
-                    }
-                }
             }
             if (ops.isNotEmpty()) {
                 viewModel.openModal(BottomCapsuleModal.VoiceInput)
@@ -253,21 +238,10 @@ fun MorphingBottomBar(
     }
 
     // Если голосовой ввод завершился без распознанных операций и без открытых под-окон — возвращаемся к вкладкам
-    LaunchedEffect(
-        isListening,
-        isAnalyzingVoice,
-        isVoiceActive,
-        parsedOperations,
-        editableList.size,
-        showInlineConsent,
-        showInlineApiKey,
-        activeModal
-    ) {
+    LaunchedEffect(isListening, isAnalyzingVoice, editableList.size, showInlineConsent, showInlineApiKey, activeModal) {
         if (activeModal is BottomCapsuleModal.VoiceInput &&
             !isListening &&
             !isAnalyzingVoice &&
-            !isVoiceActive &&
-            parsedOperations.isNullOrEmpty() &&
             editableList.isEmpty() &&
             !showInlineConsent &&
             !showInlineApiKey
@@ -314,7 +288,7 @@ fun MorphingBottomBar(
         }
     }
 
-    fun triggerVoiceMode() {
+    fun triggerVoiceMode(overrideConsentGiven: Boolean? = null, overrideApiKey: String? = null) {
         if (isDavidLiveActive) {
             Toast.makeText(
                 context,
@@ -328,11 +302,13 @@ fun MorphingBottomBar(
             onDismissManualInput()
         }
         viewModel.openModal(BottomCapsuleModal.VoiceInput)
-        if (!isConsentGiven) {
+        val effectiveConsent = overrideConsentGiven ?: isConsentGiven
+        if (!effectiveConsent) {
             showInlineConsent = true
             return
         }
-        if (apiKey.isBlank()) {
+        val effectiveKey = (overrideApiKey ?: apiKey).trim()
+        if (effectiveKey.isBlank()) {
             showInlineApiKey = true
             return
         }
@@ -358,9 +334,7 @@ fun MorphingBottomBar(
     DisposableEffect(Unit) {
         onDispose {
             if (voiceManager.isListening.value) {
-                voiceManager.onOperationsCaptured = null
-                voiceManager.onLastOperationCorrected = null
-                voiceManager.onChunkRecognized = null
+                voiceManager.onAudioChunkReady = null
                 voiceManager.stopListening()
             }
         }
@@ -865,7 +839,7 @@ fun MorphingBottomBar(
                                                         if (apiKey.isBlank()) {
                                                             showInlineApiKey = true
                                                         } else {
-                                                            triggerVoiceMode()
+                                                            triggerVoiceMode(overrideConsentGiven = true)
                                                         }
                                                     },
                                                     onDecline = {
@@ -880,9 +854,21 @@ fun MorphingBottomBar(
                                                     currentKey = apiKey,
                                                     contentAlpha = 1f,
                                                     onSaveKey = { newKey ->
-                                                        viewModel.saveApiKey(newKey)
-                                                        showInlineApiKey = false
-                                                        triggerVoiceMode()
+                                                        val sanitized = com.example.data.api.GeminiModelConfig.sanitizeApiKey(newKey)
+                                                        if (sanitized.isBlank()) {
+                                                            Toast.makeText(
+                                                                context,
+                                                                "Введите корректный API ключ Gemini",
+                                                                Toast.LENGTH_SHORT
+                                                            ).show()
+                                                        } else {
+                                                            viewModel.saveApiKey(sanitized)
+                                                            showInlineApiKey = false
+                                                            triggerVoiceMode(
+                                                                overrideConsentGiven = true,
+                                                                overrideApiKey = sanitized
+                                                            )
+                                                        }
                                                     },
                                                     onCancel = {
                                                         cancelAndCollapseToNav()
@@ -997,43 +983,14 @@ fun MorphingBottomBar(
                                                                 )
                                                             )
                                                             Spacer(modifier = Modifier.width(6.dp))
-                                                            val tickerEvent = latestVoiceTickerEvent
-                                                            if (tickerEvent != null) {
-                                                                val tickerAccent = if (tickerEvent.isCorrection) {
-                                                                    Color(0xFF06B6D4)
-                                                                } else {
-                                                                    Emerald400
-                                                                }
-                                                                Box(
-                                                                    modifier = Modifier
-                                                                        .clip(RoundedCornerShape(10.dp))
-                                                                        .background(tickerAccent.copy(alpha = 0.16f))
-                                                                        .border(
-                                                                            width = 1.dp,
-                                                                            color = tickerAccent.copy(alpha = 0.55f),
-                                                                            shape = RoundedCornerShape(10.dp)
-                                                                        )
-                                                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                                                ) {
-                                                                    Text(
-                                                                        text = tickerEvent.formattedChipText,
-                                                                        color = tickerAccent,
-                                                                        fontSize = 10.sp,
-                                                                        fontFamily = ManropeFontFamily,
-                                                                        fontWeight = FontWeight.ExtraBold,
-                                                                        maxLines = 1
-                                                                    )
-                                                                }
-                                                            } else {
-                                                                Text(
-                                                                    text = if (isAnalyzingVoice) "ИИ разбор" else "Нажмите для стопа",
-                                                                    color = Color(0xFF94A3B8).copy(alpha = 0.78f),
-                                                                    fontSize = 10.sp,
-                                                                    fontFamily = ManropeFontFamily,
-                                                                    fontWeight = FontWeight.Medium,
-                                                                    maxLines = 1
-                                                                )
-                                                            }
+                                                            Text(
+                                                                text = if (isAnalyzingVoice) "ИИ разбор" else "Нажмите для стопа",
+                                                                color = Color(0xFF94A3B8).copy(alpha = 0.78f),
+                                                                fontSize = 10.sp,
+                                                                fontFamily = ManropeFontFamily,
+                                                                fontWeight = FontWeight.Medium,
+                                                                maxLines = 1
+                                                            )
                                                         }
 
                                                         // 32-полосный горизонтальный спектральный визуализатор реального голоса (FFT + Hann)
@@ -1042,6 +999,7 @@ fun MorphingBottomBar(
                                                             rmsLevel = rmsDb,
                                                             barCount = 32,
                                                             compact = false,
+                                                            spectrumBands = voiceManager.frequencyBands.collectAsState().value,
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
                                                                 .height(40.dp)
@@ -1252,6 +1210,7 @@ private fun VoiceApiKeyPane(
 ) {
     val context = LocalContext.current
     var keyText by remember(currentKey) { mutableStateOf(currentKey) }
+    var isKeyVisible by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -1312,6 +1271,24 @@ private fun VoiceApiKeyPane(
             onValueChange = { keyText = it },
             placeholder = { Text("AIzaSy...", color = Slate400, fontSize = 13.sp) },
             singleLine = true,
+            visualTransformation = if (isKeyVisible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation('•')
+            },
+            trailingIcon = {
+                IconButton(
+                    onClick = { isKeyVisible = !isKeyVisible },
+                    modifier = Modifier.testTag("toggle_voice_api_key_visibility")
+                ) {
+                    Icon(
+                        imageVector = if (isKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = if (isKeyVisible) "Скрыть ключ" else "Показать ключ",
+                        tint = Slate400,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("voice_api_key_input"),
@@ -1345,4 +1322,3 @@ private fun VoiceApiKeyPane(
         }
     }
 }
-

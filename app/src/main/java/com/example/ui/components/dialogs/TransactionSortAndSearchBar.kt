@@ -51,33 +51,36 @@ import com.example.ui.theme.Slate900
 
 @Composable
 fun TransactionSortAndSearchBar(
+    isSearchExpandedInPlace: Boolean,
+    onSetSearchExpandedInPlace: (Boolean) -> Unit,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     focusRequester: FocusRequester,
     selectedCategoryFilter: String?,
     isDrilledDownToMixed: Boolean,
     remainingCategoryNames: List<String>,
-    onClearCategoryFilter: () -> Unit,
     getCategoryColor: (String) -> Color,
+    onClearCategoryFilter: () -> Unit,
     selectedPeriod: String?,
     customStartStr: String?,
     dynamicMonthLabel: String,
+    onToggleMonthLock: () -> Unit = {},
     onOpenDatePickerModal: () -> Unit,
-    onResetPeriodLock: () -> Unit,
+    onResetPeriodToAll: () -> Unit,
     sortOption: String,
-    onSortOptionChange: (String) -> Unit
+    onSortOptionChange: (String) -> Unit,
+    isScrolled: Boolean
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("search_and_sort_bar"),
+        modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Unified Obsidian Search Field (stable position, never jumps on scroll)
+        // Единая строка поиска (без дублирующего ряда «Все | Траты | Доходы» под ней)
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(42.dp),
+                .height(42.dp)
+                .testTag("all_transactions_search_bar"),
             color = Color(0xFF0E1525),
             shape = RoundedCornerShape(13.dp),
             border = BorderStroke(
@@ -102,7 +105,7 @@ fun TransactionSortAndSearchBar(
                     modifier = Modifier
                         .weight(1f)
                         .focusRequester(focusRequester)
-                        .testTag("search_input_field"),
+                        .testTag("all_transactions_search_input"),
                     singleLine = true,
                     cursorBrush = SolidColor(Emerald400),
                     textStyle = TextStyle(
@@ -130,18 +133,21 @@ fun TransactionSortAndSearchBar(
                         tint = Slate400,
                         modifier = Modifier
                             .size(16.dp)
-                            .testTag("search_clear_button")
-                            .clickable { onSearchQueryChange("") }
+                            .clickable {
+                                onSearchQueryChange("")
+                                onSetSearchExpandedInPlace(false)
+                            }
+                            .testTag("all_transactions_search_clear")
                     )
                 }
             }
         }
 
-        // Sorting & Filter Chips Row (without duplicate type filter buttons)
+        // Строка сортировки и активных фильтров (Категория | Период/Даты | Сумма | A-Z)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .testTag("sort_and_filter_chips_row"),
+                .padding(vertical = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -159,21 +165,16 @@ fun TransactionSortAndSearchBar(
 
                 val isCatActive = !selectedCategoryFilter.isNullOrBlank() || isDrilledDownToMixed
                 if (isCatActive) {
-                    val catLabel = selectedCategoryFilter
-                        ?: if (remainingCategoryNames.size <= 1) "Прочие" else "Смешанные"
-                    val catColor = if (!selectedCategoryFilter.isNullOrBlank()) {
-                        getCategoryColor(selectedCategoryFilter)
-                    } else {
-                        Indigo500
-                    }
+                    val catLabel = selectedCategoryFilter ?: if (remainingCategoryNames.size <= 1) "Прочие" else "Смешанные"
+                    val catColor = if (!selectedCategoryFilter.isNullOrBlank()) getCategoryColor(selectedCategoryFilter) else Indigo500
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(9.dp))
                             .background(catColor.copy(alpha = 0.22f))
                             .border(1.dp, catColor.copy(alpha = 0.55f), RoundedCornerShape(9.dp))
-                            .testTag("active_category_filter_chip")
                             .clickable { onClearCategoryFilter() }
                             .padding(horizontal = 9.dp, vertical = 5.dp)
+                            .testTag("active_category_filter_chip")
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -203,8 +204,7 @@ fun TransactionSortAndSearchBar(
                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Period / Custom Date Range Selector Chip
-                val isPeriodActive = !selectedPeriod.isNullOrBlank() || !customStartStr.isNullOrBlank()
+                val isPeriodActive = selectedPeriod != null || !customStartStr.isNullOrBlank()
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(9.dp))
@@ -214,9 +214,9 @@ fun TransactionSortAndSearchBar(
                             color = if (isPeriodActive) Indigo500.copy(alpha = 0.65f) else Slate800,
                             shape = RoundedCornerShape(9.dp)
                         )
-                        .testTag("period_date_chip")
-                        .clickable { onOpenDatePickerModal() }
+                        .clickable { onToggleMonthLock() }
                         .padding(horizontal = 10.dp, vertical = 5.dp)
+                        .testTag("period_date_picker_chip")
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -224,9 +224,11 @@ fun TransactionSortAndSearchBar(
                     ) {
                         Icon(
                             imageVector = Icons.Default.DateRange,
-                            contentDescription = null,
+                            contentDescription = "Выбрать диапазон дат",
                             tint = if (isPeriodActive) Color.White else Slate400,
-                            modifier = Modifier.size(13.dp)
+                            modifier = Modifier
+                                .size(13.dp)
+                                .clickable { onOpenDatePickerModal() }
                         )
                         Text(
                             text = dynamicMonthLabel,
@@ -242,16 +244,22 @@ fun TransactionSortAndSearchBar(
                                 fontSize = 9.sp,
                                 modifier = Modifier
                                     .padding(start = 2.dp)
-                                    .testTag("period_chip_reset")
-                                    .clickable { onResetPeriodLock() }
+                                    .clickable { onResetPeriodToAll() }
+                                    .testTag("clear_period_filter_button")
                             )
                         } else {
-                            Text("▼", color = Slate400, fontSize = 8.sp)
+                            Text(
+                                text = "▼",
+                                color = Slate400,
+                                fontSize = 8.sp,
+                                modifier = Modifier
+                                    .padding(start = 2.dp)
+                                    .clickable { onOpenDatePickerModal() }
+                            )
                         }
                     }
                 }
 
-                // Sort by Amount Chip
                 val isAmountActive = sortOption == "desc" || sortOption == "asc"
                 val arrowRotation by animateFloatAsState(
                     targetValue = if (sortOption == "asc") 180f else 0f,
@@ -268,7 +276,6 @@ fun TransactionSortAndSearchBar(
                             color = if (isAmountActive) Indigo500.copy(alpha = 0.65f) else Slate800,
                             shape = RoundedCornerShape(9.dp)
                         )
-                        .testTag("sort_amount_chip")
                         .clickable {
                             onSortOptionChange(
                                 when (sortOption) {
@@ -279,6 +286,7 @@ fun TransactionSortAndSearchBar(
                             )
                         }
                         .padding(horizontal = 10.dp, vertical = 5.dp)
+                        .testTag("sort_amount_chip")
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -301,7 +309,6 @@ fun TransactionSortAndSearchBar(
                     }
                 }
 
-                // Sort A-Z / Z-A Chip
                 val isNameActive = sortOption == "name" || sortOption == "name_desc"
                 Box(
                     modifier = Modifier
@@ -312,7 +319,6 @@ fun TransactionSortAndSearchBar(
                             color = if (isNameActive) Indigo500.copy(alpha = 0.65f) else Slate800,
                             shape = RoundedCornerShape(9.dp)
                         )
-                        .testTag("sort_name_chip")
                         .clickable {
                             onSortOptionChange(
                                 when (sortOption) {
@@ -323,6 +329,7 @@ fun TransactionSortAndSearchBar(
                             )
                         }
                         .padding(horizontal = 10.dp, vertical = 5.dp)
+                        .testTag("sort_name_chip")
                 ) {
                     Text(
                         text = if (sortOption == "name_desc") "Z-A" else "A-Z",
