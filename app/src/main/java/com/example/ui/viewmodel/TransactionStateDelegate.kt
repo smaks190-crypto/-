@@ -16,6 +16,22 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.flow.asStateFlow
+
+data class VoiceTickerEvent(
+    val id: Long = System.nanoTime(),
+    val label: String,
+    val amount: Double,
+    val category: String,
+    val type: String,
+    val isCorrection: Boolean = false
+) {
+    val formattedChipText: String
+        get() {
+            val prefix = if (isCorrection) "✎" else "+"
+            return "$prefix $label ${amount.toInt()} ₽"
+        }
+}
 
 class TransactionStateDelegate(
     private val context: Context,
@@ -47,88 +63,178 @@ class TransactionStateDelegate(
 
     private val activeChunkJobs = java.util.concurrent.atomic.AtomicInteger(0)
 
+    private val _latestVoiceTickerEvent = MutableStateFlow<VoiceTickerEvent?>(null)
+    val latestVoiceTickerEvent: StateFlow<VoiceTickerEvent?> = _latestVoiceTickerEvent.asStateFlow()
+
     fun startVoiceRecording(context: Context) {
         _voiceStartTime = System.currentTimeMillis()
         isVoiceActive.value = true
         manualText.value = ""
         voiceErrorMessage.value = null
+        _latestVoiceTickerEvent.value = null
         voiceInputManager.onErrorCallback = { cancelVoiceRecording() }
-        voiceInputManager.onAudioChunkReady = { wavBytes ->
-            processLiveAudioChunk(wavBytes, isFinalFlush = false)
+        voiceInputManager.onOperationsCaptured = { liveOps ->
+            appendLiveCapturedVoiceOperations(liveOps)
+        }
+        voiceInputManager.onLastOperationCorrected = { correction ->
+            correctLastCapturedVoiceOperation(correction)
         }
         val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
-        voiceInputManager.startListening(context, effectiveKey)
+        val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
+        val incCats = categories.value.filter { it.type == "income" }.map { it.name }
+        voiceInputManager.startListening(
+            callerContext = context,
+            apiKeyOverride = effectiveKey,
+            expenseCategories = expCats,
+            incomeCategories = incCats
+        )
+    }
+
+    internal fun appendLiveCapturedVoiceOperations(liveOps: List<ParsedVoiceOperation>) {
+        if (liveOps.isEmpty()) return
+        val currentList = parsedVoiceOperations.value.orEmpty()
+        val updatedList = currentList + liveOps
+        parsedVoiceOperations.value = updatedList
+
+        val lastOp = updatedList.last()
+        val lastOpLabel = lastOp.subcategory.ifBlank { lastOp.title.ifBlank { lastOp.category } }
+        val lastOpTranscript = "$lastOpLabel ${lastOp.amount.toInt()} ₽"
+        voiceInputManager.setRecognizedTextManually(lastOpTranscript)
+        _latestVoiceTickerEvent.value = VoiceTickerEvent(
+            label = lastOpLabel,
+            amount = lastOp.amount,
+            category = lastOp.category,
+            type = lastOp.type,
+            isCorrection = false
+        )
+        com.example.utils.GlobalConsoleLogger.i(
+            "UI",
+            "Gemini Live BidiGenerateContent: +${liveOps.size} операций (всего ${updatedList.size}), последняя: $lastOpTranscript"
+        )
+    }
+
+    internal fun correctLastCapturedVoiceOperation(correction: com.example.utils.VoiceOperationCorrection) {
+        if (!correction.hasAnyField()) return
+        val currentList = parsedVoiceOperations.value.orEmpty()
+        if (currentList.isEmpty()) {
+            // Если пользователь исправил самую первую фразу до первичного toolCall, а сумма передана — создаём карточку
+            val fallbackAmount = correction.amount?.takeIf { it > 0.0 } ?: return
+            val effectiveType = correction.type?.takeIf { it == "income" || it == "expense" } ?: "expense"
+            val effectiveTitle = correction.title?.takeIf { it.isNotBlank() }
+                ?: correction.subcategory?.takeIf { it.isNotBlank() }
+                ?: correction.category?.takeIf { it.isNotBlank() }
+                ?: "Операция"
+            val effectiveCategory = correction.category?.takeIf { it.isNotBlank() }
+                ?: if (effectiveType == "income") "Доходы" else "Прочее"
+            val effectiveSubcategory = correction.subcategory?.takeIf { it.isNotBlank() } ?: effectiveTitle
+            val effectiveDate = correction.date?.takeIf { it.isNotBlank() }
+                ?: selectedDateDay.value.ifBlank { SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) }
+            val createdOp = ParsedVoiceOperation(
+                title = effectiveTitle,
+                type = effectiveType,
+                amount = fallbackAmount,
+                category = effectiveCategory,
+                subcategory = effectiveSubcategory,
+                date = effectiveDate
+            )
+            parsedVoiceOperations.value = listOf(createdOp)
+            val label = createdOp.subcategory.ifBlank { createdOp.title.ifBlank { createdOp.category } }
+            voiceInputManager.setRecognizedTextManually("✎ $label ${createdOp.amount.toInt()} ₽")
+            _latestVoiceTickerEvent.value = VoiceTickerEvent(
+                label = label,
+                amount = createdOp.amount,
+                category = createdOp.category,
+                type = createdOp.type,
+                isCorrection = true
+            )
+            return
+        }
+
+        val lastOp = currentList.last()
+        val updatedAmount = correction.amount?.takeIf { it > 0.0 } ?: lastOp.amount
+        val updatedType = correction.type?.takeIf { it == "income" || it == "expense" } ?: lastOp.type
+        val updatedCategory = correction.category?.takeIf { it.isNotBlank() } ?: lastOp.category
+        val updatedTitle = correction.title?.takeIf { it.isNotBlank() }
+            ?: correction.subcategory?.takeIf { it.isNotBlank() }
+            ?: lastOp.title
+        val updatedSubcategory = correction.subcategory?.takeIf { it.isNotBlank() }
+            ?: correction.title?.takeIf { it.isNotBlank() }
+            ?: lastOp.subcategory
+        val updatedDate = correction.date?.takeIf { it.isNotBlank() } ?: lastOp.date
+
+        val updatedOp = lastOp.copy(
+            title = updatedTitle,
+            type = updatedType,
+            amount = updatedAmount,
+            category = updatedCategory,
+            subcategory = updatedSubcategory,
+            date = updatedDate
+        )
+        val updatedList = currentList.dropLast(1) + updatedOp
+        parsedVoiceOperations.value = updatedList
+
+        val updatedLabel = updatedOp.subcategory.ifBlank { updatedOp.title.ifBlank { updatedOp.category } }
+        val updatedTranscript = "✎ $updatedLabel ${updatedOp.amount.toInt()} ₽"
+        voiceInputManager.setRecognizedTextManually(updatedTranscript)
+        _latestVoiceTickerEvent.value = VoiceTickerEvent(
+            label = updatedLabel,
+            amount = updatedOp.amount,
+            category = updatedOp.category,
+            type = updatedOp.type,
+            isCorrection = true
+        )
+        com.example.utils.GlobalConsoleLogger.i(
+            "UI",
+            "Gemini Live BidiGenerateContent: исправлена последняя операция -> $updatedTranscript"
+        )
     }
 
     fun stopVoiceRecordingAndProcess() {
-        val remainingWav = voiceInputManager.stopListeningAndFlushRemaining()
-        if (remainingWav != null) {
-            processLiveAudioChunk(remainingWav, isFinalFlush = true)
-        } else {
-            isVoiceActive.value = false
-            if (activeChunkJobs.get() == 0 && parsedVoiceOperations.value.isNullOrEmpty()) {
-                val partialCandidate = voiceInputManager.partialText.value
-                    .takeIf { it.isNotBlank() && it != com.example.utils.VoiceInputManager.LISTENING_PLACEHOLDER }
-                val textToProcess = when {
-                    manualText.value.isNotBlank() -> manualText.value
-                    voiceInputManager.recognizedText.value.isNotBlank() -> voiceInputManager.recognizedText.value
-                    partialCandidate != null -> partialCandidate
-                    else -> ""
-                }
-                if (textToProcess.isNotBlank()) {
-                    processVoiceText(textToProcess)
-                } else {
-                    cancelVoiceRecording()
-                }
-            }
-        }
-    }
-
-    private fun processLiveAudioChunk(wavBytes: ByteArray, isFinalFlush: Boolean) {
-        if (isFinalFlush) {
-            isVoiceActive.value = false
-        }
         scope.launch {
             activeChunkJobs.incrementAndGet()
             isAnalyzingVoice.value = true
             voiceErrorMessage.value = null
             try {
-                val effectiveKey = apiKey.value.ifBlank { getSavedApiKey() }
-                val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
-                val incCats = categories.value.filter { it.type == "income" }.map { it.name }
+                val finalSessionTranscript = voiceInputManager.finishListeningAndAwaitLiveFlush()
+                isVoiceActive.value = false
 
-                val result = repository.parseVoiceAudioOperations(
-                    audioBytes = wavBytes,
-                    apiKey = effectiveKey,
-                    expenseCategories = expCats,
-                    incomeCategories = incCats,
-                    mimeType = "audio/wav"
-                )
-
-                if (result.isNotEmpty()) {
-                    val currentList = parsedVoiceOperations.value.orEmpty()
-                    val updatedList = currentList + result
-                    parsedVoiceOperations.value = updatedList
-
-                    val lastOp = updatedList.last()
-                    val lastOpLabel = lastOp.subcategory.ifBlank { lastOp.title.ifBlank { lastOp.category } }
-                    val lastOpTranscript = "$lastOpLabel ${lastOp.amount.toInt()} ₽"
-                    voiceInputManager.setRecognizedTextManually(lastOpTranscript)
-                    com.example.utils.GlobalConsoleLogger.i(
-                        "UI",
-                        "Gemini Live: +${result.size} операций (всего ${updatedList.size}), последняя: $lastOpTranscript"
-                    )
-                } else if (isFinalFlush && activeChunkJobs.get() <= 1 && parsedVoiceOperations.value.isNullOrEmpty()) {
-                    val msg = "Не удалось распознать операции. Назовите покупку и сумму, например: «Кофе 300 и такси 500»"
-                    voiceErrorMessage.value = msg
-                    toastMessage.emit(msg)
+                // Если операции уже захвачены на лету через BidiGenerateContent toolCall —
+                // завершаем мгновенно без единого REST POST запроса
+                if (!parsedVoiceOperations.value.isNullOrEmpty()) {
+                    return@launch
                 }
-            } catch (e: Exception) {
-                com.example.utils.GlobalConsoleLogger.e("VOICE", "Ошибка Gemini Live чанка: ${e.message}", e)
-                if (isFinalFlush && activeChunkJobs.get() <= 1 && parsedVoiceOperations.value.isNullOrEmpty()) {
-                    val msg = e.message ?: "Ошибка анализа голоса"
-                    voiceErrorMessage.value = msg
-                    toastMessage.emit(msg)
+
+                val partialCandidate = voiceInputManager.partialText.value
+                    .takeIf {
+                        it.isNotBlank() &&
+                            it != com.example.utils.VoiceInputManager.LISTENING_PLACEHOLDER &&
+                            it != "Слушаю..."
+                    }
+                val textToProcess = when {
+                    manualText.value.isNotBlank() -> manualText.value
+                    finalSessionTranscript.isNotBlank() -> finalSessionTranscript
+                    voiceInputManager.recognizedText.value.isNotBlank() -> voiceInputManager.recognizedText.value
+                    partialCandidate != null -> partialCandidate
+                    else -> ""
+                }
+
+                if (textToProcess.isNotBlank()) {
+                    val expCats = categories.value.filter { it.type == "expense" }.map { it.name }
+                    val incCats = categories.value.filter { it.type == "income" }.map { it.name }
+                    val heuristicOps = com.example.utils.VoiceParserHelper
+                        .parseHeuristically(textToProcess, expCats, incCats)
+                        .filter { it.amount > 0.0 }
+
+                    if (heuristicOps.isNotEmpty()) {
+                        appendLiveCapturedVoiceOperations(heuristicOps)
+                    } else {
+                        val msg = "Не удалось распознать операции. Назовите покупку и сумму, например: «Кофе 300 и такси 500»"
+                        voiceErrorMessage.value = msg
+                        toastMessage.emit(msg)
+                        cancelVoiceRecording()
+                    }
+                } else {
+                    cancelVoiceRecording()
                 }
             } finally {
                 if (activeChunkJobs.decrementAndGet() <= 0) {
@@ -141,11 +247,14 @@ class TransactionStateDelegate(
 
     fun cancelVoiceRecording() {
         activeChunkJobs.set(0)
-        voiceInputManager.onAudioChunkReady = null
+        voiceInputManager.onOperationsCaptured = null
+        voiceInputManager.onLastOperationCorrected = null
+        voiceInputManager.onChunkRecognized = null
         voiceInputManager.stopListening()
         isVoiceActive.value = false
         isAnalyzingVoice.value = false
         voiceErrorMessage.value = null
+        _latestVoiceTickerEvent.value = null
         clearParsedVoiceOperations()
     }
 
@@ -184,12 +293,7 @@ class TransactionStateDelegate(
                     toastMessage.emit(msg)
                     parsedVoiceOperations.value = null
                 } else {
-                    val currentList = parsedVoiceOperations.value.orEmpty()
-                    val updatedList = currentList + result
-                    parsedVoiceOperations.value = updatedList
-                    val lastOp = updatedList.last()
-                    val lastOpLabel = lastOp.subcategory.ifBlank { lastOp.title.ifBlank { lastOp.category } }
-                    voiceInputManager.setRecognizedTextManually("$lastOpLabel ${lastOp.amount.toInt()} ₽")
+                    appendLiveCapturedVoiceOperations(result)
                 }
             } catch (e: Exception) {
                 val msg = "Ошибка при анализе: ${e.message}"
@@ -211,6 +315,7 @@ class TransactionStateDelegate(
         isAnalyzingVoice.value = false
         isVoiceActive.value = false
         manualText.value = ""
+        _latestVoiceTickerEvent.value = null
         voiceInputManager.clear()
     }
 

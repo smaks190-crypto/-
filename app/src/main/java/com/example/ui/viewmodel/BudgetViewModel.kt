@@ -179,6 +179,9 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     val voiceStartTime: Long get() = if (::stateDelegate.isInitialized) stateDelegate.voiceStartTime else 0L
 
+    val latestVoiceTickerEvent: StateFlow<VoiceTickerEvent?>
+        get() = stateDelegate.latestVoiceTickerEvent
+
     fun setDavidLiveSessionActive(active: Boolean) {
         _isDavidLiveSessionActive.value = active
         if (active && _isVoiceActive.value && ::stateDelegate.isInitialized) {

@@ -148,32 +148,225 @@ class DavidLiveUnitTest {
     }
 
     @Test
-    fun `voice input manager live STT mode keeps user speech transcription and ignores assistant output`() {
+    fun `voice input manager live BidiGenerateContent mode captures operations and self-corrections via toolCall`() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val voiceManager = VoiceInputManager(context)
-        val recognizedChunks = mutableListOf<String>()
-        voiceManager.onChunkRecognized = { recognizedChunks.add(it) }
+        val capturedBatches = mutableListOf<List<com.example.data.repository.ParsedVoiceOperation>>()
+        val capturedCorrections = mutableListOf<com.example.utils.VoiceOperationCorrection>()
+
+        voiceManager.onOperationsCaptured = { ops -> capturedBatches.add(ops) }
+        voiceManager.onLastOperationCorrected = { corr -> capturedCorrections.add(corr) }
+
+        assertEquals(
+            "models/gemini-2.5-flash-native-audio-preview-12-2025",
+            VoiceInputManager.LIVE_STT_MODELS.first()
+        )
+
+        val funcDecls = VoiceInputManager.buildVoiceOperationsFunctionDeclarations()
+        assertEquals(2, funcDecls.length())
+        assertEquals(
+            VoiceInputManager.TOOL_RECORD_VOICE_OPERATIONS,
+            funcDecls.getJSONObject(0).getString("name")
+        )
+        assertEquals(
+            VoiceInputManager.TOOL_CORRECT_LAST_VOICE_OPERATION,
+            funcDecls.getJSONObject(1).getString("name")
+        )
+
+        val nativeSetup = VoiceInputManager.buildLiveTranscriptionSetupJson(
+            modelName = VoiceInputManager.LIVE_STT_MODELS.first(),
+            expenseCategories = listOf("Продукты", "Кафе", "Транспорт"),
+            incomeCategories = listOf("Зарплата")
+        )
+        val nativeSetupObj = nativeSetup.getJSONObject("setup")
+        assertTrue(nativeSetupObj.has("inputAudioTranscription"))
+        assertTrue(nativeSetupObj.has("systemInstruction"))
+        assertTrue(nativeSetupObj.has("tools"))
+        assertEquals(
+            "AUDIO",
+            nativeSetupObj.getJSONObject("generationConfig").getJSONArray("responseModalities").getString(0)
+        )
 
         val setup = VoiceInputManager.buildLiveTranscriptionSetupJson("models/gemini-2.0-flash-live-001")
         val setupObj = setup.getJSONObject("setup")
         assertTrue(setupObj.has("inputAudioTranscription"))
         assertFalse(setupObj.has("outputAudioTranscription"))
+        assertTrue(setupObj.has("tools"))
         assertEquals(
             "TEXT",
             setupObj.getJSONObject("generationConfig").getJSONArray("responseModalities").getString(0)
         )
 
+        // 1. Живая транскрипция речи пользователя обновляет UI-строку
         voiceManager.processLiveServerMessageForTest(
-            """{"serverContent":{"inputTranscription":{"text":"Кофе 350 и такси 500 "}}}"""
+            """{"serverContent":{"inputTranscription":{"text":"Кофе 350 и булочка 200 "}}}"""
         )
-        assertEquals("Кофе 350 и такси 500", voiceManager.recognizedText.value)
+        assertEquals("Кофе 350 и булочка 200", voiceManager.recognizedText.value)
 
-        // Ответы модели игнорируются, а по turnComplete фраза пользователя передается в onChunkRecognized
+        // 2. Приходит toolCall record_voice_operations — операции мгновенно захватываются без HTTP POST
         voiceManager.processLiveServerMessageForTest(
-            """{"serverContent":{"outputTranscription":{"text":"Я записал ваши расходы."},"turnComplete":true}}"""
+            """
+            {
+              "toolCall": {
+                "functionCalls": [
+                  {
+                    "id": "call-1",
+                    "name": "record_voice_operations",
+                    "args": {
+                      "operations": [
+                        {"title": "Кофе", "amount": 350, "type": "expense", "category": "Кафе", "subcategory": "Кофе"},
+                        {"title": "Булочка", "amount": 200, "type": "expense", "category": "Кафе", "subcategory": "Булочка"}
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+            """.trimIndent()
         )
-        assertEquals("Кофе 350 и такси 500", voiceManager.recognizedText.value)
-        assertEquals(listOf("Кофе 350 и такси 500"), recognizedChunks)
+        assertEquals(1, capturedBatches.size)
+        assertEquals(2, capturedBatches.first().size)
+        assertEquals("Кофе", capturedBatches.first()[0].title)
+        assertEquals(350.0, capturedBatches.first()[0].amount, 0.01)
+        assertEquals("Булочка", capturedBatches.first()[1].title)
+        assertEquals(200.0, capturedBatches.first()[1].amount, 0.01)
+
+        // 3. Пользователь поправляет себя на лету («а нет, булочка 150») -> toolCall correct_last_voice_operation
+        voiceManager.processLiveServerMessageForTest(
+            """
+            {
+              "toolCall": {
+                "functionCalls": [
+                  {
+                    "id": "call-2",
+                    "name": "correct_last_voice_operation",
+                    "args": {
+                      "title": "Булочка",
+                      "amount": 150,
+                      "category": "Кафе"
+                    }
+                  }
+                ]
+              }
+            }
+            """.trimIndent()
+        )
+        assertEquals(1, capturedCorrections.size)
+        assertEquals("Булочка", capturedCorrections.first().title)
+        assertEquals(150.0, capturedCorrections.first().amount ?: 0.0, 0.01)
+    }
+
+    @Test
+    fun `TransactionStateDelegate captures live operations and applies on-the-fly self-correction with ticker events`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val db = androidx.room.Room.inMemoryDatabaseBuilder(
+            context,
+            com.example.data.db.AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+
+        val delegateJob = kotlinx.coroutines.SupervisorJob()
+        val delegateScope = kotlinx.coroutines.CoroutineScope(
+            delegateJob + kotlinx.coroutines.Dispatchers.Default
+        )
+        try {
+            val repo = com.example.data.repository.BudgetRepository(
+                context = context,
+                budgetProfileDao = db.budgetProfileDao(),
+                transactionDao = db.transactionDao(),
+                goalDao = db.goalDao(),
+                categoryDao = db.categoryDao(),
+                aiAuditDao = db.aiAuditDao(),
+                accountDao = db.accountDao(),
+                notificationDao = db.notificationDao(),
+                db = db
+            )
+            val voiceManager = VoiceInputManager(context)
+            val parsedOpsFlow = kotlinx.coroutines.flow.MutableStateFlow<List<com.example.data.repository.ParsedVoiceOperation>?>(null)
+            val isAnalyzingFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
+            val isVoiceActiveFlow = kotlinx.coroutines.flow.MutableStateFlow(true)
+
+            val delegate = com.example.ui.viewmodel.TransactionStateDelegate(
+                context = context,
+                repository = repo,
+                scope = delegateScope,
+                selectedBudgetId = kotlinx.coroutines.flow.MutableStateFlow("default"),
+                apiKey = kotlinx.coroutines.flow.MutableStateFlow("AIzaSyTestKey1234567890"),
+                selectedDateDay = kotlinx.coroutines.flow.MutableStateFlow("2026-10-29"),
+                toastMessage = kotlinx.coroutines.flow.MutableSharedFlow(extraBufferCapacity = 8),
+                isGeneratingReaction = kotlinx.coroutines.flow.MutableStateFlow(false),
+                isAnalyzingVoice = isAnalyzingFlow,
+                voiceErrorMessage = kotlinx.coroutines.flow.MutableStateFlow(null),
+                parsedVoiceOperations = parsedOpsFlow,
+                completedGoalEvent = kotlinx.coroutines.flow.MutableStateFlow(null),
+                transactions = kotlinx.coroutines.flow.MutableStateFlow(emptyList()),
+                accounts = kotlinx.coroutines.flow.MutableStateFlow(emptyList()),
+                goals = kotlinx.coroutines.flow.MutableStateFlow(emptyList()),
+                categories = kotlinx.coroutines.flow.MutableStateFlow(emptyList()),
+                voiceInputManager = voiceManager,
+                isVoiceActive = isVoiceActiveFlow,
+                manualText = kotlinx.coroutines.flow.MutableStateFlow(""),
+                aiAuditResult = kotlinx.coroutines.flow.MutableStateFlow(null),
+                aiAuditLoading = kotlinx.coroutines.flow.MutableStateFlow(false),
+                getSavedApiKey = { "AIzaSyTestKey1234567890" }
+            )
+
+            delegate.appendLiveCapturedVoiceOperations(
+                listOf(
+                    com.example.data.repository.ParsedVoiceOperation(
+                        title = "Кофе",
+                        type = "expense",
+                        amount = 350.0,
+                        category = "Кафе",
+                        subcategory = "Кофе",
+                        date = "2026-10-29"
+                    ),
+                    com.example.data.repository.ParsedVoiceOperation(
+                        title = "Булочка",
+                        type = "expense",
+                        amount = 200.0,
+                        category = "Кафе",
+                        subcategory = "Булочка",
+                        date = "2026-10-29"
+                    )
+                )
+            )
+
+            val afterCapture = parsedOpsFlow.value
+            assertNotNull(afterCapture)
+            assertEquals(2, afterCapture!!.size)
+            val captureTicker = delegate.latestVoiceTickerEvent.value
+            assertNotNull(captureTicker)
+            assertFalse(captureTicker!!.isCorrection)
+            assertEquals("+ Булочка 200 ₽", captureTicker.formattedChipText)
+
+            // Применяем live-самоисправление («а нет, булочка 150»)
+            delegate.correctLastCapturedVoiceOperation(
+                com.example.utils.VoiceOperationCorrection(
+                    amount = 150.0,
+                    title = "Булочка",
+                    category = "Кафе",
+                    subcategory = "Булочка",
+                    type = "expense"
+                )
+            )
+
+            val afterCorrection = parsedOpsFlow.value
+            assertNotNull(afterCorrection)
+            assertEquals(2, afterCorrection!!.size)
+            assertEquals(350.0, afterCorrection[0].amount, 0.01)
+            assertEquals(150.0, afterCorrection[1].amount, 0.01)
+
+            val correctionTicker = delegate.latestVoiceTickerEvent.value
+            assertNotNull(correctionTicker)
+            assertTrue(correctionTicker!!.isCorrection)
+            assertEquals("✎ Булочка 150 ₽", correctionTicker.formattedChipText)
+
+            delegate.clearParsedVoiceOperations()
+            assertNull(delegate.latestVoiceTickerEvent.value)
+        } finally {
+            delegateJob.cancel()
+            db.close()
+        }
     }
 
     @Test

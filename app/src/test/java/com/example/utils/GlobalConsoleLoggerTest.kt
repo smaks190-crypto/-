@@ -997,5 +997,169 @@ class GlobalConsoleLoggerTest {
             1,
             attemptedModels.size
         )
+
+        // Проверка UnknownHostException: сбой разрешения DNS generativelanguage.googleapis.com
+        // обязан останавливать цепочку моделей с первой попытки (isFatalForAllModels = true)
+        val dnsAttemptedModels = mutableListOf<String>()
+        val dnsFailApi = object : GeminiApiService {
+            override suspend fun generateContent(
+                model: String,
+                apiKey: String,
+                request: GeminiRequest
+            ): GeminiResponse {
+                dnsAttemptedModels.add(model)
+                throw java.net.UnknownHostException("Unable to resolve host \"generativelanguage.googleapis.com\"")
+            }
+
+            override suspend fun streamGenerateContent(
+                model: String,
+                apiKey: String,
+                alt: String,
+                request: GeminiRequest
+            ): Response<ResponseBody> = throw UnsupportedOperationException()
+        }
+
+        val dnsDetails = GeminiModelConfig.extractHttpErrorDetails(
+            java.net.UnknownHostException("Unable to resolve host \"generativelanguage.googleapis.com\"")
+        )
+        assertTrue(dnsDetails.isFatalForAllModels)
+        assertEquals("UnknownHostException", dnsDetails.errorType)
+
+        val dnsResult = GeminiModelConfig.executeDavidReactionWithFallback(
+            apiService = dnsFailApi,
+            apiKey = "AIzaSyValidKey1234567890",
+            request = sampleRequest,
+            operationType = "Аудит бюджета (ИИ)",
+            operationPrefix = "AUDIT",
+            details = "period=Месяц"
+        )
+        assertNull(dnsResult)
+        assertEquals(
+            "UnknownHostException on shared host must abort immediately on attempt 1 without firing 4 duplicate DNS failures",
+            1,
+            dnsAttemptedModels.size
+        )
+    }
+
+    @Test
+    fun `voice text parsing returns emptyList on HTTP 200 empty JSON array without throwing stale HTTP 503 from earlier model`() = runTest {
+        val sampleRequest = GeminiRequest(
+            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = "Вкусно и точка"))))
+        )
+
+        val error503Json = """
+            {
+              "error": {
+                "code": 503,
+                "message": "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+                "status": "UNAVAILABLE"
+              }
+            }
+        """.trimIndent()
+
+        // Сценарий из отчёта (VOICE-TXT-0002): первая модель возвращает HTTP 503 (UNAVAILABLE),
+        // а резервная модель gemini-3.5-flash-lite возвращает HTTP 200 с валидным пустым JSON-массивом "[]".
+        // Парсер обязан вернуть emptyList() со второй попытки, НЕ перебирая оставшиеся модели и НЕ выбрасывая IllegalStateException(HTTP 503).
+        val attemptedModels = mutableListOf<String>()
+        val fallbackEmptyArrayApi = object : GeminiApiService {
+            override suspend fun generateContent(
+                model: String,
+                apiKey: String,
+                request: GeminiRequest
+            ): GeminiResponse {
+                attemptedModels.add(model)
+                if (model == "gemini-3.5-flash") {
+                    val body = okhttp3.ResponseBody.create(null, error503Json)
+                    throw retrofit2.HttpException(retrofit2.Response.error<GeminiResponse>(503, body))
+                }
+                return GeminiResponse(
+                    candidates = listOf(
+                        GeminiCandidate(
+                            content = GeminiContent(
+                                parts = listOf(GeminiPart(text = "[]"))
+                            )
+                        )
+                    )
+                )
+            }
+
+            override suspend fun streamGenerateContent(
+                model: String,
+                apiKey: String,
+                alt: String,
+                request: GeminiRequest
+            ): Response<ResponseBody> = throw UnsupportedOperationException()
+        }
+
+        val parsed = com.example.data.repository.BudgetRepository.executeVoiceTextParsingWithFallback(
+            apiService = fallbackEmptyArrayApi,
+            cleanKey = "AIzaSyValidKey1234567890",
+            request = sampleRequest,
+            todayStr = "2026-10-29",
+            opId = "VOICE-TXT-TEST"
+        )
+
+        assertTrue(parsed.isEmpty())
+        assertEquals(
+            listOf("gemini-3.5-flash", "gemini-3.5-flash-lite"),
+            attemptedModels
+        )
+
+        // Дополнительный сценарий: первая модель возвращает HTTP 503, а все последующие возвращают HTTP 200 без JSON-массива.
+        // lastError обязан обновиться на «Ответ модели без JSON-массива» (не оставляя устаревший HTTP 503),
+        // а в логе должны быть зафиксированы записи EmptyResponse.
+        GlobalConsoleLogger.clear()
+        val nonJsonAttemptedModels = mutableListOf<String>()
+        val nonJsonApi = object : GeminiApiService {
+            override suspend fun generateContent(
+                model: String,
+                apiKey: String,
+                request: GeminiRequest
+            ): GeminiResponse {
+                nonJsonAttemptedModels.add(model)
+                if (model == "gemini-3.5-flash") {
+                    val body = okhttp3.ResponseBody.create(null, error503Json)
+                    throw retrofit2.HttpException(retrofit2.Response.error<GeminiResponse>(503, body))
+                }
+                return GeminiResponse(
+                    candidates = listOf(
+                        GeminiCandidate(
+                            content = GeminiContent(
+                                parts = listOf(GeminiPart(text = "Извините, не понял операцию"))
+                            )
+                        )
+                    )
+                )
+            }
+
+            override suspend fun streamGenerateContent(
+                model: String,
+                apiKey: String,
+                alt: String,
+                request: GeminiRequest
+            ): Response<ResponseBody> = throw UnsupportedOperationException()
+        }
+
+        var thrownError: IllegalStateException? = null
+        try {
+            com.example.data.repository.BudgetRepository.executeVoiceTextParsingWithFallback(
+                apiService = nonJsonApi,
+                cleanKey = "AIzaSyValidKey1234567890",
+                request = sampleRequest,
+                todayStr = "2026-10-29",
+                opId = "VOICE-TXT-NONJSON"
+            )
+        } catch (e: IllegalStateException) {
+            thrownError = e
+        }
+
+        assertNotNull(thrownError)
+        assertEquals("Ответ модели без JSON-массива", thrownError?.message)
+        assertEquals(4, nonJsonAttemptedModels.size)
+        val logsSnapshot = GlobalConsoleLogger.logs.value
+        assertTrue(
+            "EmptyResponse must be recorded in GlobalConsoleLogger when HTTP 200 contains no JSON array",
+            logsSnapshot.any { it.message.contains("EmptyResponse") || it.message.contains("Ответ модели без JSON-массива") }
+        )
     }
 }
