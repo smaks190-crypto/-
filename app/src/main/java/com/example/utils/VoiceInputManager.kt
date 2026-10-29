@@ -94,6 +94,9 @@ class VoiceInputManager(context: Context) {
     private var currentLiveApiKey: String = ""
     private val pendingLiveTurnTranscript = StringBuilder()
     private val preSetupPcmQueue = ArrayDeque<String>(64)
+    private var liveTranscriptDebounceJob: Job? = null
+    @Volatile
+    private var pendingFinalLiveText: String = ""
 
     companion object {
         private const val SAMPLE_RATE = 16000
@@ -101,9 +104,11 @@ class VoiceInputManager(context: Context) {
         private const val FRAME_BYTES = FRAME_SAMPLES * 2 // 1024 байта (16-bit PCM)
         private const val PRE_ROLL_FRAMES = 8 // ~256 мс предзаписи до начала фразы
         private const val SILENCE_FRAMES_TO_SPLIT = 26 // ~830 мс паузы для отправки готовой фразы в Gemini Live
+        private const val SILENCE_FRAMES_WAV_FALLBACK = 42 // ~1.34 сек паузы до резервной отправки WAV, если Live STT ещё не прислал текст
         private const val MIN_SPEECH_FRAMES = 11 // ~350 мс минимальной длительности речи во фразе
         private const val MAX_CHUNK_FRAMES = 375 // ~12 секунд максимум на один непрерывный чанк
         private const val SPEECH_RMS_THRESHOLD = 360.0 // Порог чувствительности голоса (16-bit PCM)
+        private const val LIVE_TRANSCRIPT_DEBOUNCE_MS = 950L
 
         private const val GEMINI_LIVE_WS_ENDPOINT =
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
@@ -111,16 +116,17 @@ class VoiceInputManager(context: Context) {
         const val LISTENING_PLACEHOLDER = "Говорите..."
 
         val LIVE_STT_MODELS = listOf(
+            "models/gemini-2.5-flash-native-audio-preview-12-2025",
             "models/gemini-2.0-flash-live-001",
-            "models/gemini-2.0-flash-exp",
-            "models/gemini-2.5-flash-native-audio-preview-12-2025"
+            "models/gemini-2.0-flash-exp"
         )
 
         /**
          * Конфигурация сессии Gemini Live строго для распознавания речи пользователя без ответов ИИ.
          */
         internal fun buildLiveTranscriptionSetupJson(modelName: String): JSONObject {
-            val modality = if (modelName.contains("native-audio", ignoreCase = true)) "AUDIO" else "TEXT"
+            val isNativeAudio = modelName.contains("native-audio", ignoreCase = true)
+            val modality = if (isNativeAudio) "AUDIO" else "TEXT"
             return JSONObject().apply {
                 put(
                     "setup",
@@ -132,6 +138,21 @@ class VoiceInputManager(context: Context) {
                                 put("responseModalities", JSONArray().put(modality))
                             }
                         )
+                        if (isNativeAudio) {
+                            put(
+                                "systemInstruction",
+                                JSONObject().apply {
+                                    put(
+                                        "parts",
+                                        JSONArray().put(
+                                            JSONObject().apply {
+                                                put("text", "Ты работаешь в тихом режиме распознавания речи. Отвечай одним коротким словом «Ок» только после паузы пользователя.")
+                                            }
+                                        )
+                                    )
+                                }
+                            )
+                        }
                         put("inputAudioTranscription", JSONObject())
                     }
                 )
@@ -213,6 +234,9 @@ class VoiceInputManager(context: Context) {
         _recognizedText.value = ""
         _partialText.value = LISTENING_PLACEHOLDER
         _errorState.value = null
+        pendingFinalLiveText = ""
+        liveTranscriptDebounceJob?.cancel()
+        liveTranscriptDebounceJob = null
         synchronized(pendingLiveTurnTranscript) {
             pendingLiveTurnTranscript.clear()
         }
@@ -322,29 +346,36 @@ class VoiceInputManager(context: Context) {
 
                                     // Если пользователь сделал паузу (~0.83 сек) или фраза длится > 12 сек:
                                     if (silenceFramesCount >= SILENCE_FRAMES_TO_SPLIT || totalFramesInChunk >= MAX_CHUNK_FRAMES) {
-                                        if (activeSpeechFrames >= MIN_SPEECH_FRAMES) {
-                                            val liveTextSoFar = synchronized(pendingLiveTurnTranscript) {
-                                                sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
-                                            }
-                                            if (liveSetupCompleted.get() && liveTextSoFar.isNotBlank()) {
-                                                // В режиме Live STT отправляем распознанный текст без создания WAV-файла!
+                                        val liveTextSoFar = synchronized(pendingLiveTurnTranscript) {
+                                            sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
+                                        }
+                                        if (liveSetupCompleted.get() && liveTextSoFar.isNotBlank()) {
+                                            if (activeSpeechFrames >= MIN_SPEECH_FRAMES) {
+                                                liveTranscriptDebounceJob?.cancel()
                                                 synchronized(pendingLiveTurnTranscript) {
                                                     pendingLiveTurnTranscript.clear()
                                                 }
                                                 GlobalConsoleLogger.i("VOICE_LIVE", "Фраза распознана в Live STT по паузе: «$liveTextSoFar»")
                                                 onChunkRecognized?.invoke(liveTextSoFar)
-                                            } else if (!liveSetupCompleted.get()) {
-                                                // Резервный fallback на случай, если WebSocket еще не установил соединение
+                                            }
+                                            activeSpeechBuffer.reset()
+                                            activeSpeechFrames = 0
+                                            totalFramesInChunk = 0
+                                            silenceFramesCount = 0
+                                            isInSpeech = false
+                                        } else if (!liveSetupCompleted.get() || silenceFramesCount >= SILENCE_FRAMES_WAV_FALLBACK || totalFramesInChunk >= MAX_CHUNK_FRAMES) {
+                                            // Резервный fallback: если WebSocket еще не подключился или за 1.34 сек паузы не прислал текст
+                                            if (activeSpeechFrames >= MIN_SPEECH_FRAMES) {
                                                 val pcmData = activeSpeechBuffer.toByteArray()
                                                 val wavBytes = pcmToWavBytes(pcmData, SAMPLE_RATE)
                                                 onAudioChunkReady?.invoke(wavBytes)
                                             }
+                                            activeSpeechBuffer.reset()
+                                            activeSpeechFrames = 0
+                                            totalFramesInChunk = 0
+                                            silenceFramesCount = 0
+                                            isInSpeech = false
                                         }
-                                        activeSpeechBuffer.reset()
-                                        activeSpeechFrames = 0
-                                        totalFramesInChunk = 0
-                                        silenceFramesCount = 0
-                                        isInSpeech = false
                                     }
                                 } else {
                                     if (preRollQueue.size >= PRE_ROLL_FRAMES) {
@@ -478,6 +509,24 @@ class VoiceInputManager(context: Context) {
         handleLiveServerJsonMessage(ws = null, rawJson = rawJson)
     }
 
+    private fun flushCompletedLiveTurnTranscript() {
+        val completedTurnText = synchronized(pendingLiveTurnTranscript) {
+            val text = sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
+            pendingLiveTurnTranscript.clear()
+            text
+        }
+        if (completedTurnText.isNotBlank()) {
+            _recognizedText.value = completedTurnText
+            _partialText.value = completedTurnText
+            synchronized(chunkLock) {
+                activeSpeechBuffer.reset()
+                activeSpeechFrames = 0
+            }
+            GlobalConsoleLogger.i("VOICE_LIVE", "Фраза завершена в Live STT: «$completedTurnText»")
+            onChunkRecognized?.invoke(completedTurnText)
+        }
+    }
+
     private fun handleLiveServerJsonMessage(ws: WebSocket?, rawJson: String) {
         val root = try {
             JSONObject(rawJson)
@@ -509,24 +558,29 @@ class VoiceInputManager(context: Context) {
                 _partialText.value = cleaned
                 _recognizedText.value = cleaned
             }
+            liveTranscriptDebounceJob?.cancel()
+            if (ws != null) {
+                liveTranscriptDebounceJob = scope.launch {
+                    kotlinx.coroutines.delay(LIVE_TRANSCRIPT_DEBOUNCE_MS)
+                    flushCompletedLiveTurnTranscript()
+                }
+            }
         }
 
-        if (serverContent.optBoolean("turnComplete", false)) {
-            val completedTurnText = synchronized(pendingLiveTurnTranscript) {
-                val text = sanitizeTranscriptText(pendingLiveTurnTranscript.toString())
-                pendingLiveTurnTranscript.clear()
-                text
-            }
-            if (completedTurnText.isNotBlank()) {
-                _recognizedText.value = completedTurnText
-                _partialText.value = completedTurnText
-                synchronized(chunkLock) {
-                    activeSpeechBuffer.reset()
-                    activeSpeechFrames = 0
-                }
-                onChunkRecognized?.invoke(completedTurnText)
-            }
+        val isUserTurnFinished = serverContent.optBoolean("turnComplete", false) ||
+            serverContent.has("modelTurn") ||
+            serverContent.has("outputTranscription")
+
+        if (isUserTurnFinished) {
+            liveTranscriptDebounceJob?.cancel()
+            flushCompletedLiveTurnTranscript()
         }
+    }
+
+    fun consumePendingFinalText(): String {
+        val text = pendingFinalLiveText
+        pendingFinalLiveText = ""
+        return text
     }
 
     /**
@@ -536,6 +590,8 @@ class VoiceInputManager(context: Context) {
     fun stopListeningAndFlushRemaining(): ByteArray? {
         GlobalConsoleLogger.i("VOICE", "Завершение сессии Gemini Live STT...")
         _isListening.value = false
+        liveTranscriptDebounceJob?.cancel()
+        liveTranscriptDebounceJob = null
         recordingJob?.cancel()
         recordingJob = null
 
@@ -561,6 +617,7 @@ class VoiceInputManager(context: Context) {
             pendingLiveTurnTranscript.clear()
             t
         }
+        pendingFinalLiveText = pendingText
         if (pendingText.isNotBlank()) {
             _recognizedText.value = pendingText
             _partialText.value = pendingText
@@ -571,9 +628,9 @@ class VoiceInputManager(context: Context) {
         val hadLiveSetup = liveSetupCompleted.get()
         closeLiveWebSocket()
 
-        // Если Live WebSocket уже распознал текст в реальном времени, возвращаем null,
-        // чтобы TransactionStateDelegate сразу разобрал готовый текст без отправки WAV-файла!
-        if (hadLiveSetup && (_recognizedText.value.isNotBlank() || pendingText.isNotBlank())) {
+        // Если для текущей финальной фразы Live WebSocket уже прислал непустой pendingText,
+        // возвращаем null, чтобы TransactionStateDelegate сразу разобрал готовый текст без отправки WAV-файла!
+        if (hadLiveSetup && pendingText.isNotBlank()) {
             synchronized(chunkLock) {
                 activeSpeechBuffer.reset()
                 activeSpeechFrames = 0
@@ -604,6 +661,8 @@ class VoiceInputManager(context: Context) {
     private fun closeLiveWebSocket() {
         liveIntentionalClose.set(true)
         liveSetupCompleted.set(false)
+        liveTranscriptDebounceJob?.cancel()
+        liveTranscriptDebounceJob = null
         try {
             liveWebSocket?.close(1000, "Voice input finished")
         } catch (_: Throwable) {}

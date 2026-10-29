@@ -185,6 +185,7 @@ fun MorphingBottomBar(
     val rmsDb by voiceManager.rmsDb.collectAsState()
     val errorState by voiceManager.errorState.collectAsState()
 
+    val isVoiceActive by viewModel.isVoiceActive.collectAsState()
     val isAnalyzingVoice by viewModel.isAnalyzingVoice.collectAsState()
     val parsedOperations by viewModel.parsedVoiceOperations.collectAsState()
     val categories by viewModel.categories.collectAsState(initial = emptyList())
@@ -233,10 +234,21 @@ fun MorphingBottomBar(
     }
 
     // Если голосовой ввод завершился без распознанных операций и без открытых под-окон — возвращаемся к вкладкам
-    LaunchedEffect(isListening, isAnalyzingVoice, editableList.size, showInlineConsent, showInlineApiKey, activeModal) {
+    LaunchedEffect(
+        isListening,
+        isAnalyzingVoice,
+        isVoiceActive,
+        parsedOperations,
+        editableList.size,
+        showInlineConsent,
+        showInlineApiKey,
+        activeModal
+    ) {
         if (activeModal is BottomCapsuleModal.VoiceInput &&
             !isListening &&
             !isAnalyzingVoice &&
+            !isVoiceActive &&
+            parsedOperations.isNullOrEmpty() &&
             editableList.isEmpty() &&
             !showInlineConsent &&
             !showInlineApiKey
@@ -328,6 +340,7 @@ fun MorphingBottomBar(
         onDispose {
             if (voiceManager.isListening.value) {
                 voiceManager.onAudioChunkReady = null
+                voiceManager.onChunkRecognized = null
                 voiceManager.stopListening()
             }
         }

@@ -154,6 +154,19 @@ class DavidLiveUnitTest {
         val recognizedChunks = mutableListOf<String>()
         voiceManager.onChunkRecognized = { recognizedChunks.add(it) }
 
+        assertEquals(
+            "models/gemini-2.5-flash-native-audio-preview-12-2025",
+            VoiceInputManager.LIVE_STT_MODELS.first()
+        )
+
+        val nativeSetup = VoiceInputManager.buildLiveTranscriptionSetupJson(VoiceInputManager.LIVE_STT_MODELS.first())
+        val nativeSetupObj = nativeSetup.getJSONObject("setup")
+        assertTrue(nativeSetupObj.has("inputAudioTranscription"))
+        assertEquals(
+            "AUDIO",
+            nativeSetupObj.getJSONObject("generationConfig").getJSONArray("responseModalities").getString(0)
+        )
+
         val setup = VoiceInputManager.buildLiveTranscriptionSetupJson("models/gemini-2.0-flash-live-001")
         val setupObj = setup.getJSONObject("setup")
         assertTrue(setupObj.has("inputAudioTranscription"))
@@ -168,12 +181,21 @@ class DavidLiveUnitTest {
         )
         assertEquals("Кофе 350 и такси 500", voiceManager.recognizedText.value)
 
-        // Ответы модели игнорируются, а по turnComplete фраза пользователя передается в onChunkRecognized
+        // Ответы модели игнорируются, а при начале ответа модели / turnComplete фраза пользователя передается в onChunkRecognized ровно 1 раз
         voiceManager.processLiveServerMessageForTest(
             """{"serverContent":{"outputTranscription":{"text":"Я записал ваши расходы."},"turnComplete":true}}"""
         )
         assertEquals("Кофе 350 и такси 500", voiceManager.recognizedText.value)
         assertEquals(listOf("Кофе 350 и такси 500"), recognizedChunks)
+
+        // Если пользователь нажимает «Стоп» сразу после произнесения второй фразы до прихода turnComplete,
+        // фраза сохраняется в consumePendingFinalText() и не теряется
+        voiceManager.processLiveServerMessageForTest(
+            """{"serverContent":{"inputTranscription":{"text":"Вкусвилл 500 рублей"}}}"""
+        )
+        voiceManager.stopListeningAndFlushRemaining()
+        assertEquals("Вкусвилл 500 рублей", voiceManager.consumePendingFinalText())
+        assertEquals("", voiceManager.consumePendingFinalText())
     }
 
     @Test
