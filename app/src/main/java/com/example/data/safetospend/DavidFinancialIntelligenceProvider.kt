@@ -45,11 +45,12 @@ object DavidFinancialIntelligenceProvider {
     ): UnifiedFinancialIntelligenceSnapshot {
         val todayDate = LocalDate.ofEpochDay(todayEpochDay)
         val todayYearMonth = YearMonth.from(todayDate).toString() // "YYYY-MM"
-        val periodTransactions = transactions.filter { it.date.startsWith(todayYearMonth) }
+        val nonTransferTransactions = transactions.filterNot { isInternalTransferTransaction(it) }
+        val periodTransactions = nonTransferTransactions.filter { it.date.startsWith(todayYearMonth) }
 
         // 1. Single source of truth for B_avail and debts from PR #58 FinancialSemanticsCalculator
         val semantics = FinancialSemanticsCalculator.calculateSnapshot(
-            allTransactions = transactions,
+            allTransactions = nonTransferTransactions,
             periodTransactions = periodTransactions,
             accounts = accounts
         )
@@ -61,16 +62,16 @@ object DavidFinancialIntelligenceProvider {
             .associateBy { it.linkedTransactionId!! }
         val recurringById = domainRecurring.associateBy { it.id }
 
-        // 2. Parse historical expense samples & today's expenses (excluding debt ledger & savings transfers)
+        // 2. Parse historical expense samples & today's expenses (excluding debt ledger, internal transfers & savings transfers)
         val debtAccountIds = accounts.filter { FinancialSemanticsCalculator.isDebtAccount(it) }.map { it.id }.toSet()
         val historicalSamples = mutableListOf<HistoricalExpenseSample>()
         val todayExpenses = mutableListOf<TodayClassifiedExpense>()
 
-        for (tx in transactions) {
+        for (tx in nonTransferTransactions) {
             if (!tx.type.equals("expense", ignoreCase = true)) continue
             if (tx.accountId != null && tx.accountId in debtAccountIds) continue
             if (FinancialSemanticsCalculator.isDebtTransaction(tx)) continue
-            if (tx.category.equals("Сбережения", ignoreCase = true)) continue
+            if (isSavingsGoalTransaction(tx)) continue
             if (tx.amount <= 0.0) continue
 
             val txEpochDay = parseTransactionEpochDay(tx.date) ?: continue
@@ -220,6 +221,21 @@ object DavidFinancialIntelligenceProvider {
         request: WhatIfScenarioRequest
     ): WhatIfSimulationResult {
         return WhatIfSimulator.simulate(input, request)
+    }
+
+    fun isInternalTransferTransaction(tx: TransactionEntity): Boolean {
+        val cat = tx.category.trim().lowercase(Locale("ru", "RU"))
+        val sub = tx.subcategory.trim().lowercase(Locale("ru", "RU"))
+        return cat.contains("перевод между счетами") ||
+            cat == "перевод" ||
+            cat == "внутренний перевод" ||
+            cat == "между своими счетами" ||
+            sub.contains("перевод между счетами")
+    }
+
+    fun isSavingsGoalTransaction(tx: TransactionEntity): Boolean {
+        val cat = tx.category.trim().lowercase(Locale("ru", "RU"))
+        return cat == "сбережения" || cat == "копилка" || cat == "цели"
     }
 
     fun parseTransactionEpochDay(rawDate: String): Long? {

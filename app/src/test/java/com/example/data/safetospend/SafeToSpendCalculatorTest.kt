@@ -61,8 +61,8 @@ class SafeToSpendCalculatorTest {
             incomeCertainty = IncomeCertainty.GUARANTEED,
             categoryName = "Зарплата",
             frequency = PaymentFrequency.MONTHLY,
-            anchorDayOfMonth = 20,
-            nextDueDateEpochDay = baseDay + 10
+            anchorDayOfMonth = 16,
+            nextDueDateEpochDay = baseDay + 6
         )
         val input = SafeToSpendInput(
             todayEpochDay = baseDay,
@@ -431,7 +431,7 @@ class SafeToSpendCalculatorTest {
         assertEquals(0.0, result.canSpendTodayDiscRub, 0.01)
         assertEquals(0.0, result.canSpendTodayEssRub, 0.01)
         assertFalse(result.isReserveRequirementMet)
-        assertEquals(8_500.0, result.reserveDeficitRub, 0.01)
+        assertEquals(13_500.0, result.reserveDeficitRub, 0.01)
     }
 
     // Test 17: Крупное разовое поступление в середине месяца

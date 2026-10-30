@@ -226,6 +226,8 @@ object EssentialSpendingEstimator {
         return if (observedHistoryDays < 14) {
             val alpha = (observedHistoryDays.toDouble() / SHRINKAGE_FULL_CREDIBILITY_DAYS).coerceIn(0.0, 1.0)
             val blendedRate = alpha * historicalRateRub + (1.0 - alpha) * priorDailyRateRub
+            val isColdStartUnverified = observedHistoryDays < 7 &&
+                priorMethod == EssentialEstimationMethod.CONSERVATIVE_SYSTEM_FALLBACK
             EssentialForecastResult(
                 dailyEssentialRateRub = blendedRate,
                 weeklyBucketEstimateRub = weeklyBucketEstimateRub,
@@ -233,9 +235,17 @@ object EssentialSpendingEstimator {
                 priorDailyRateRub = priorDailyRateRub,
                 observedHistoryDays = observedHistoryDays,
                 method = EssentialEstimationMethod.EMPIRICAL_BAYES_SHRINKAGE,
-                confidenceLevel = EssentialConfidenceLevel.MODERATE_BLENDED,
-                requiresEssentialBudgetPrompt = false,
-                warningMessage = null
+                confidenceLevel = if (isColdStartUnverified) {
+                    EssentialConfidenceLevel.UNVERIFIED_FALLBACK
+                } else {
+                    EssentialConfidenceLevel.MODERATE_BLENDED
+                },
+                requiresEssentialBudgetPrompt = isColdStartUnverified,
+                warningMessage = if (isColdStartUnverified) {
+                    "Недостаточно истории базовых расходов ($observedHistoryDays дн.): используется ориентировочный резерв ${priorDailyRateRub.toInt()} ₽/день (низкая достоверность). Укажите ваш дневной бюджет на базовые нужды."
+                } else {
+                    null
+                }
             )
         } else {
             EssentialForecastResult(
