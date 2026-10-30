@@ -11,6 +11,10 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
+import com.example.ui.components.dialogs.buildFinancialStateUiModel
+import com.example.ui.components.dialogs.buildSafeToSpendBreakdownUiModel
+import com.example.ui.components.dialogs.localizeBottleneckReason
+import com.example.ui.components.dialogs.localizeWhatIfVerdict
 
 class SafeToSpendCalculatorTest {
 
@@ -1013,5 +1017,136 @@ class SafeToSpendCalculatorTest {
             )
         )
         assertEquals(200.0, withEssSpend.canSpendTodayEssRub, 0.01)
+    }
+
+    // =========================================================================
+    // IV. ТЕСТЫ МОДЕЛИ ОТОБРАЖЕНИЯ UI (ISSUE #64: FINANCIAL STATE & SAFE-TO-SPEND 2.0)
+    // =========================================================================
+
+    @Test
+    fun test_issue64_financialStateUiModel_separatesLiquidityNetWorthAndFreeMoneyWithExplicitDeficitWarning() {
+        val todayStr = "2026-04-10"
+        val txs = listOf(
+            TransactionEntity(
+                id = "tx_bal",
+                budgetId = "b1",
+                type = "income",
+                date = todayStr,
+                category = "Начальный баланс",
+                subcategory = "Остаток на карте",
+                amount = 10_000.0
+            )
+        )
+        val debtAccounts = listOf(
+            AccountEntity(id = "d_credit", budgetId = "b1", name = "Кредитка", balance = 85_000.0, type = "we_owe"),
+            AccountEntity(id = "d_friend", budgetId = "b1", name = "Долг друга нам", balance = 40_000.0, type = "owes_us")
+        )
+        val recurring = listOf(
+            RecurringPaymentEntity(
+                id = 1L,
+                budgetId = "b1",
+                title = "Мобильная связь и интернет",
+                amount = 2_000.0,
+                isIncome = false,
+                categoryName = "Связь",
+                frequency = "MONTHLY",
+                anchorDayOfMonth = 12,
+                nextDueDateEpochDay = baseDay + 2,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            RecurringPaymentEntity(
+                id = 2L,
+                budgetId = "b1",
+                title = "Зарплата",
+                amount = 60_000.0,
+                isIncome = true,
+                incomeCertainty = "GUARANTEED",
+                categoryName = "Зарплата",
+                frequency = "MONTHLY",
+                anchorDayOfMonth = 16,
+                nextDueDateEpochDay = baseDay + 6,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            )
+        )
+
+        val snap = DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = txs,
+            accounts = debtAccounts,
+            goals = emptyList(),
+            categories = emptyList(),
+            recurringPayments = recurring,
+            executionLogs = emptyList(),
+            todayEpochDay = baseDay,
+            userSafetyFloorRub = 2_000.0,
+            userEssentialDailyNormRub = 500.0
+        )
+
+        val uiState = buildFinancialStateUiModel(snap.semantics, snap.safeToSpendResult)
+        val sheetBreakdown = buildSafeToSpendBreakdownUiModel(snap.safeToSpendResult)
+
+        // 1. Доступный остаток = 10 000 ₽ (без подмены чистым капиталом и без включения owes_us 40 000 ₽)
+        assertEquals(10_000.0, uiState.availableBalanceRub, 0.01)
+        // 2. Чистый капитал = 10 000 - 85 000 = -75 000 ₽
+        assertEquals(-75_000.0, uiState.netWorthRub, 0.01)
+        // 3. Свободные деньги (Вариант А): 10 000 - 2 000 (резерв) - 2 000 (связь) - 6*500 (3 000 база) = 3 000 ₽
+        assertEquals(3_000.0, uiState.freeMoneyAfterReservationRub, 0.01)
+        assertFalse(uiState.hasExplicitDeficitWarning)
+        // 4. Единая сумма «Можно потратить сегодня» на главной и в Bottom Sheet = 500 ₽
+        assertEquals(500.0, uiState.canSpendTodayRub, 0.01)
+        assertEquals(uiState.canSpendTodayRub, sheetBreakdown.canSpendTodayRub, 0.001)
+
+        // Проверка сценария отрицательного свободного пула: UI показывает 0 ₽, но обязательно выставляет предупреждение о дефиците
+        val deficitSnap = DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = txs,
+            accounts = debtAccounts,
+            goals = emptyList(),
+            categories = emptyList(),
+            recurringPayments = recurring,
+            executionLogs = emptyList(),
+            todayEpochDay = baseDay,
+            userSafetyFloorRub = 9_000.0,
+            userEssentialDailyNormRub = 500.0
+        )
+        val deficitUi = buildFinancialStateUiModel(deficitSnap.semantics, deficitSnap.safeToSpendResult)
+        assertEquals(0.0, deficitUi.freeMoneyAfterReservationRub, 0.01)
+        assertTrue("Negative pool must never be hidden without explicit deficit warning", deficitUi.hasExplicitDeficitWarning)
+        assertTrue(deficitUi.freeMoneyDeficitRub > 0.0)
+        assertNotNull(deficitUi.deficitWarningTitle)
+    }
+
+    @Test
+    fun test_issue64_breakdownAndVerdictLocalization_containsZeroTechnicalTokens() {
+        val input = SafeToSpendInput(
+            todayEpochDay = baseDay,
+            horizonDaysOverride = 10,
+            availableBalanceRub = 40_000.0,
+            userSafetyFloorRub = 3_000.0,
+            essentialDailyRateRub = 500.0,
+            essentialConfidenceLevel = EssentialConfidenceLevel.HIGH_HISTORICAL
+        )
+        val result = SafeToSpendCalculator.calculate(input)
+        val breakdown = buildSafeToSpendBreakdownUiModel(result)
+
+        assertEquals(40_000.0, breakdown.availableFundsRub, 0.01)
+        assertEquals(5_000.0, breakdown.essentialHorizonReserveRub, 0.01)
+        assertEquals(500.0, breakdown.essentialDailyNormRub, 0.01)
+        assertEquals(3_000.0, breakdown.protectedReserveRub, 0.01)
+        assertEquals(10, breakdown.horizonDays)
+
+        val forbiddenTokens = listOf("S_disc", "e_ess", "k*", "R_floor", "SAFE_WITHIN_TODAY_LIMIT", "CASH_GAP_RISK")
+        WhatIfVerdict.values().forEach { v ->
+            val localized = localizeWhatIfVerdict(v, isPurchaseScenario = true)
+            forbiddenTokens.forEach { token ->
+                assertFalse("Localized verdict '$localized' must not contain '$token'", localized.contains(token))
+            }
+        }
+        BottleneckReason.values().forEach { r ->
+            val localized = localizeBottleneckReason(r)
+            forbiddenTokens.forEach { token ->
+                assertFalse("Localized reason '$localized' must not contain '$token'", localized.contains(token))
+            }
+        }
     }
 }
