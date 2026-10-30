@@ -535,11 +535,11 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         val totalIncome = semantics.earnedIncomeRub
-        val totalExpense = semantics.totalPeriodExpenseRub
+        val totalExpense = semantics.totalExpenseRub
         val net = totalIncome - totalExpense
 
         val prevIncome = prevSemantics.earnedIncomeRub
-        val prevExpense = prevSemantics.totalPeriodExpenseRub
+        val prevExpense = prevSemantics.totalExpenseRub
         val prevNet = prevIncome - prevExpense
 
         val deltaPercent = if (prevIncome + prevExpense > 0) {
@@ -794,15 +794,15 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         // Не превращаем упоминания долгов, обязательств, текущего баланса или сводных перечней в одиночную транзакцию
         val mention = com.example.data.repository.FinancialSemanticsCalculator.extractConversationalFinancialMention(text)
         val mentionedCount = listOfNotNull(
-            mention.salaryAmountRub,
-            mention.currentBalanceRub,
-            mention.weOweAmountRub,
-            mention.owesUsAmountRub
+            mention.salaryAmount,
+            mention.currentBalanceAmount,
+            mention.weOweAmount,
+            mention.owesUsAmount
         ).size
         if (mentionedCount > 1 ||
-            mention.currentBalanceRub != null ||
-            mention.weOweAmountRub != null ||
-            mention.owesUsAmountRub != null
+            mention.currentBalanceAmount != null ||
+            mention.weOweAmount != null ||
+            mention.owesUsAmount != null
         ) {
             return null
         }
@@ -893,8 +893,8 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         )
         val userMessageTexts = sessionMessages
             .filter { it.isUser }
-            .mapNotNull { (it.type as? ChatMessageType.Text)?.text }
-            .let { list ->
+            .mapNotNull { msg -> (msg.type as? ChatMessageType.Text)?.content }
+            .let { list: List<String> ->
                 if (list.lastOrNull() == currentQuery) list else list + currentQuery
             }
         return com.example.data.repository.FinancialSemanticsCalculator.mergeSnapshotWithConversationalMentions(
@@ -905,24 +905,21 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
 
     private suspend fun generateGeminiReply(query: String): String {
         return try {
-            val recentTxs = repository.getTransactionsForBudget(currentBudgetId).first()
-            val debts = repository.getAccountsForBudget(currentBudgetId).first()
             val goals = repository.getGoalsForBudget(currentBudgetId).first()
             val snapshot = buildConversationFinancialSnapshot(query)
             val historySnippet = sessionMessages
                 .takeLast(8)
                 .mapNotNull { msg ->
-                    val txt = (msg.type as? ChatMessageType.Text)?.text ?: return@mapNotNull null
+                    val txt = (msg.type as? ChatMessageType.Text)?.content ?: return@mapNotNull null
                     val role = if (msg.isUser) currentProfileName else "Давид"
                     "$role: $txt"
                 }
 
             val answer = repository.generateDavidChatAnswer(
                 apiKey = currentApiKey,
-                userName = currentProfileName,
-                userQuery = query,
-                semanticsSnapshot = snapshot,
-                recentTransactions = recentTxs.take(8),
+                profileName = currentProfileName,
+                userMessage = query,
+                snapshot = snapshot,
                 activeGoals = goals,
                 conversationHistory = historySnippet
             )

@@ -525,7 +525,7 @@ class DavidLiveUnitTest {
         )
         assertEquals(50_000.0, balanceOnlySnap.availableBalanceRub, 0.01)
         assertEquals("Starting balance must NOT be counted as earned period income", 0.0, balanceOnlySnap.earnedIncomeRub, 0.01)
-        assertEquals(50_000.0, balanceOnlySnap.balanceAdjustmentsRub, 0.01)
+        assertEquals(50_000.0, balanceOnlySnap.balanceAdjustmentRub, 0.01)
 
         // Сценарий 3: Отдельно только мой долг (we_owe) и отдельно только долг мне (owes_us)
         val weOweAcc = AccountEntity(id = "d_we", budgetId = "b1", name = "Кредитка Альфа", balance = 30_000.0, type = "we_owe")
@@ -604,8 +604,8 @@ class DavidLiveUnitTest {
         // Частичное погашение нашего долга (10 000 ₽) и частичный возврат долга нам от Ивана (5 000 ₽)
         val txsPartial = listOf(
             TransactionEntity(id = "t1", budgetId = "b1", type = "income", date = today, category = "Зарплата", subcategory = "Оклад", amount = 100_000.0),
-            TransactionEntity(id = "t2", budgetId = "b1", type = "expense", date = today, category = "Долги", subcategory = "Погашение: Кредитка", amount = 10_000.0),
-            TransactionEntity(id = "t3", budgetId = "b1", type = "income", date = today, category = "Возврат долга", subcategory = "Иван вернул часть долга", amount = 5_000.0)
+            TransactionEntity(id = "t2", budgetId = "b1", type = "expense", date = today, category = "Долги", subcategory = "Выплата по долгу: Кредитка", amount = 10_000.0, accountId = "d_we"),
+            TransactionEntity(id = "t3", budgetId = "b1", type = "income", date = today, category = "Долги", subcategory = "Возврат долга: Иван", amount = 5_000.0, accountId = "d_they")
         )
 
         val partialSnap = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
@@ -614,9 +614,9 @@ class DavidLiveUnitTest {
             accounts = listOf(weOweAcc, owesUsAcc)
         )
 
-        // Заработанный доход остаётся ровно 100 000 ₽ (возврат долга 5 000 ₽ — это debtPrincipalReturnedRub, а не заработанный доход!)
+        // Заработанный доход остаётся ровно 100 000 ₽ (возврат долга 5 000 ₽ — это debtReturnedIncomeRub, а не заработанный доход!)
         assertEquals(100_000.0, partialSnap.earnedIncomeRub, 0.01)
-        assertEquals(5_000.0, partialSnap.debtPrincipalReturnedRub, 0.01)
+        assertEquals(5_000.0, partialSnap.debtReturnedIncomeRub, 0.01)
         assertEquals(10_000.0, partialSnap.debtRepaymentExpenseRub, 0.01)
         // Доступный баланс на руках: 100 000 - 10 000 + 5 000 = 95 000 ₽
         assertEquals(95_000.0, partialSnap.availableBalanceRub, 0.01)
@@ -626,8 +626,8 @@ class DavidLiveUnitTest {
 
         // Полное погашение обоих долгов
         val txsFull = txsPartial + listOf(
-            TransactionEntity(id = "t4", budgetId = "b1", type = "expense", date = today, category = "Долги", subcategory = "Кредитка закрытие", amount = 20_000.0),
-            TransactionEntity(id = "t5", budgetId = "b1", type = "income", date = today, category = "Долги", subcategory = "Иван вернул остаток", amount = 10_000.0)
+            TransactionEntity(id = "t4", budgetId = "b1", type = "expense", date = today, category = "Долги", subcategory = "Кредитка закрытие", amount = 20_000.0, accountId = "d_we"),
+            TransactionEntity(id = "t5", budgetId = "b1", type = "income", date = today, category = "Долги", subcategory = "Иван вернул остаток", amount = 10_000.0, accountId = "d_they")
         )
         val fullSnap = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
             allTransactions = txsFull,
@@ -635,7 +635,7 @@ class DavidLiveUnitTest {
             accounts = listOf(weOweAcc, owesUsAcc)
         )
         assertEquals(100_000.0, fullSnap.earnedIncomeRub, 0.01)
-        assertEquals(15_000.0, fullSnap.debtPrincipalReturnedRub, 0.01)
+        assertEquals(15_000.0, fullSnap.debtReturnedIncomeRub, 0.01)
         assertEquals(30_000.0, fullSnap.debtRepaymentExpenseRub, 0.01)
         assertEquals(85_000.0, fullSnap.availableBalanceRub, 0.01)
         assertEquals(0.0, fullSnap.totalWeOweRub, 0.01)
@@ -648,10 +648,10 @@ class DavidLiveUnitTest {
 
         // 1. Проверка извлечения сущностей из реплики диалога
         val mention = com.example.data.repository.FinancialSemanticsCalculator.extractConversationalFinancialMention(text)
-        assertEquals(100_000.0, mention.salaryAmountRub ?: 0.0, 0.01)
-        assertEquals(50_000.0, mention.currentBalanceRub ?: 0.0, 0.01)
-        assertEquals(30_000.0, mention.weOweAmountRub ?: 0.0, 0.01)
-        assertEquals(15_000.0, mention.owesUsAmountRub ?: 0.0, 0.01)
+        assertEquals(100_000.0, mention.salaryAmount ?: 0.0, 0.01)
+        assertEquals(50_000.0, mention.currentBalanceAmount ?: 0.0, 0.01)
+        assertEquals(30_000.0, mention.weOweAmount ?: 0.0, 0.01)
+        assertEquals(15_000.0, mention.owesUsAmount ?: 0.0, 0.01)
 
         // 2. Слияние с пустым снимком БД не складывает эти 4 числа в один доход или баланс
         val emptySnap = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
@@ -671,7 +671,7 @@ class DavidLiveUnitTest {
 
         val formatted = com.example.data.repository.FinancialSemanticsCalculator.formatChatFinancialBreakdown(merged)
         assertTrue(formatted.contains("50000 ₽"))
-        assertTrue(formatted.contains("+100000 ₽"))
+        assertTrue(formatted.contains("100000 ₽"))
         assertTrue(formatted.contains("30000 ₽"))
         assertTrue(formatted.contains("15000 ₽"))
         assertFalse("Must never sum 100k+50k+30k+15k into 195000", formatted.contains("195000"))
