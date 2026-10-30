@@ -9,7 +9,8 @@
    Английские заголовки коммитов в публичный список не попадают.
 
 Ссылки на отдельные коммиты и PR в списке не выводятся; остаётся одна ссылка
-«Полная история изменений».
+«Полная история изменений». Заголовок «Что изменилось» не добавляется: в README он
+уже есть, а у релиза на GitHub достаточно заголовков разделов.
 """
 import json
 import os
@@ -229,7 +230,7 @@ def build_notes(original, repo="", pr_body_loader=fetch_pr_body, commit_loader=f
         if count:
             sections[name].append(f"- {FALLBACK_TEXT}: {count}")
 
-    output = ["## Что изменилось", ""]
+    output = []
     for heading, entries in sections.items():
         if entries:
             output.extend([f"### {heading}", *entries, ""])
