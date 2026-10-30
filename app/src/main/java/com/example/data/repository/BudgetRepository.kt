@@ -752,18 +752,18 @@ class BudgetRepository(
         if (existing.isEmpty()) {
             val default = BudgetProfileEntity(id = "default", name = "Казума Сато")
             budgetProfileDao.insertProfile(default)
-            loadDemoData("default")
-            return default
-        } else {
-            val firstProfile = existing.first()
-            val currentTxs = allTransactions.first()
-            if (currentTxs.isEmpty()) {
-                loadDemoData(firstProfile.id)
-            } else if (firstProfile.name == "Казума Сато" && currentTxs.none { it.subcategory.contains("Белуга") }) {
-                // Автоматическое обновление старого неполного демо-бюджета на полный сатирический год
-                loadDemoData(firstProfile.id)
+            // Only a genuine first installation is seeded. Persist the decision before loading:
+            // an interrupted seed must never overwrite data or recreate a deleted demo later.
+            val seedPrefs = context.getSharedPreferences("demo_seed_lifecycle", android.content.Context.MODE_PRIVATE)
+            if (!seedPrefs.getBoolean("initial_seed_decided", false)) {
+                seedPrefs.edit().putBoolean("initial_seed_decided", true).commit()
+                loadDemoData("default")
             }
+            return default
         }
+        // Existing profiles (including empty ones) must never be silently replaced by DEMO.
+        context.getSharedPreferences("demo_seed_lifecycle", android.content.Context.MODE_PRIVATE)
+            .edit().putBoolean("initial_seed_decided", true).apply()
         return existing.first()
     }
 
@@ -1050,6 +1050,8 @@ class BudgetRepository(
                 goalDao.deleteGoalsByBudgetId(budgetId)
                 categoryDao.deleteCategoriesByBudgetId(budgetId)
                 accountDao.deleteAccountsByBudgetId(budgetId)
+                recurringPaymentDao.deleteExecutionLogsByBudgetId(budgetId)
+                recurringPaymentDao.deleteRecurringPaymentsByBudgetId(budgetId)
 
                 val accountIdMap = mutableMapOf<String, String>()
                 val accs = (backup.accounts ?: emptyList()).map { oldAcc ->
@@ -1067,7 +1069,40 @@ class BudgetRepository(
                 if (accs.isNotEmpty()) accountDao.insertAccounts(accs)
                 if (cats.isNotEmpty()) categoryDao.insertCategories(cats)
                 if (goals.isNotEmpty()) goalDao.insertGoals(goals)
-                if (txs.isNotEmpty()) transactionDao.insertTransactions(txs)
+                // Historical operations are real history; future dated entries are not actual cash flow.
+                val today = java.time.LocalDate.now()
+                val historicalTxs = txs.filter { tx ->
+                    runCatching { !java.time.LocalDate.parse(tx.date).isAfter(today) }.getOrDefault(true)
+                }
+                if (historicalTxs.isNotEmpty()) transactionDao.insertTransactions(historicalTxs)
+
+                // Demo recurring obligations and income are forecast inputs, not pre-booked transactions.
+                val recurringJson = org.json.JSONObject(jsonWithYear).optJSONArray("recurringPayments")
+                if (recurringJson != null) {
+                    val seeded = (0 until recurringJson.length()).map { index ->
+                        val item = recurringJson.getJSONObject(index)
+                        val day = item.getInt("dayOfMonth")
+                        val nextDate = today.withDayOfMonth(minOf(day, today.lengthOfMonth()))
+                            .let { if (it.isBefore(today)) today.plusMonths(1).withDayOfMonth(minOf(day, today.plusMonths(1).lengthOfMonth())) else it }
+                        com.example.data.db.RecurringPaymentEntity(
+                            budgetId = budgetId,
+                            title = item.getString("title"),
+                            amount = item.getDouble("amount"),
+                            estimatedMaxAmount = if (item.has("estimatedMaxAmount")) item.getDouble("estimatedMaxAmount") else null,
+                            amountType = item.optString("amountType", "FIXED"),
+                            isIncome = item.optBoolean("isIncome", false),
+                            incomeCertainty = item.optString("incomeCertainty", "GUARANTEED"),
+                            categoryName = item.getString("categoryName"),
+                            subcategoryName = item.optString("subcategoryName", ""),
+                            frequency = "MONTHLY",
+                            anchorDayOfMonth = day,
+                            nextDueDateEpochDay = nextDate.toEpochDay(),
+                            priority = item.optString("priority", "MANDATORY"),
+                            autoConfirm = false
+                        )
+                    }
+                    if (seeded.isNotEmpty()) recurringPaymentDao.insertRecurringPayments(seeded)
+                }
                 syncToFile()
             }
         } catch (e: Exception) {
