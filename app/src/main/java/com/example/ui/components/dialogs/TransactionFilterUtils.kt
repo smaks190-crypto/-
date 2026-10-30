@@ -1,10 +1,47 @@
 package com.example.ui.components.dialogs
 
 import com.example.data.db.TransactionEntity
+import androidx.compose.ui.graphics.Color
+import com.example.ui.screens.getCategoryColorAndIcon
+import com.example.ui.theme.Emerald400
+import com.example.ui.theme.Indigo500
+import com.example.ui.theme.Rose500
+import com.example.ui.theme.Slate400
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+
+fun buildCategoryColorMap(categoryTotalsMap: List<Pair<String, Double>>, filterType: String): Map<String, Color> {
+    val palette = if (filterType == "income") listOf(
+        Color(0xFF10B981), Color(0xFF6366F1), Color(0xFF3B82F6),
+        Color(0xFFF59E0B), Color(0xFF8B5CF6), Color(0xFF14B8A6)
+    ) else listOf(
+        Color(0xFFF43F5E), Color(0xFF3B82F6), Color(0xFFF59E0B),
+        Color(0xFF8B5CF6), Color(0xFF10B981), Color(0xFF14B8A6)
+    )
+    return buildMap {
+        categoryTotalsMap.forEachIndexed { index, (name, _) ->
+            val (systemColor, _) = getCategoryColorAndIcon(name, "")
+            put(name, if (systemColor == Slate400) palette[index % palette.size] else systemColor)
+        }
+        put("✨ Смешанные", Indigo500)
+        put("✨ Прочие", Indigo500)
+        put("Смешанные траты", Indigo500)
+    }
+}
+
+fun resolveCategoryColor(name: String, categoryColorMap: Map<String, Color>, filterType: String): Color {
+    val normalized = if (name.startsWith("✨")) {
+        if (name.contains("Прочие")) "✨ Прочие" else "✨ Смешанные"
+    } else name
+    return categoryColorMap[normalized] ?: run {
+        val (color, _) = getCategoryColorAndIcon(normalized, "")
+        if (color == Slate400) {
+            if (filterType == "expense") Rose500 else Emerald400
+        } else color
+    }
+}
 
 private val RussianLocale = Locale("ru", "RU")
 private val NominativeMonths = arrayOf(
