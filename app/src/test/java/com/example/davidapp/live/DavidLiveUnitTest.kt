@@ -768,9 +768,17 @@ class DavidLiveUnitTest {
         // Имитируем сбой записи (commit() == false) в зашифрованное хранилище
         val failingCommitPrefs = object : android.content.SharedPreferences by healthyEncryptedPrefs {
             override fun edit(): android.content.SharedPreferences.Editor {
-                val delegateEditor = healthyEncryptedPrefs.edit()
-                return object : android.content.SharedPreferences.Editor by delegateEditor {
+                return object : android.content.SharedPreferences.Editor {
+                    override fun putString(key: String?, value: String?): android.content.SharedPreferences.Editor = this
+                    override fun putStringSet(key: String?, values: MutableSet<String>?): android.content.SharedPreferences.Editor = this
+                    override fun putInt(key: String?, value: Int): android.content.SharedPreferences.Editor = this
+                    override fun putLong(key: String?, value: Long): android.content.SharedPreferences.Editor = this
+                    override fun putFloat(key: String?, value: Float): android.content.SharedPreferences.Editor = this
+                    override fun putBoolean(key: String?, value: Boolean): android.content.SharedPreferences.Editor = this
+                    override fun remove(key: String?): android.content.SharedPreferences.Editor = this
+                    override fun clear(): android.content.SharedPreferences.Editor = this
                     override fun commit(): Boolean = false
+                    override fun apply() {}
                 }
             }
         }
