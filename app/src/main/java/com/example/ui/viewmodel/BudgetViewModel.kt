@@ -637,9 +637,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         val budgetId = _selectedBudgetId.value ?: "default"
         viewModelScope.launch {
             if (mode == "demo") {
-                repository.loadDemoData(budgetId)
-                repository.renameProfile(budgetId, "Казума Сато")
-                _toastMessage.emit("💀 Бюджет Казумы Сато на весь год загружен!")
+                // The initial demo was already seeded on first install; never overwrite edits.
+                _toastMessage.emit("Демо доступно только при первой установке; существующие данные сохранены.")
             } else {
                 repository.initializeDefaultCategories(budgetId)
                 _toastMessage.emit("Бюджет сформирован!")
@@ -650,9 +649,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     fun loadFullYearDemoData() {
         val budgetId = _selectedBudgetId.value ?: "default"
         viewModelScope.launch {
-            repository.loadDemoData(budgetId)
-            repository.renameProfile(budgetId, "Казума Сато")
-            _toastMessage.emit("🔥 Бюджет Казумы Сато на весь год успешно добавлен!")
+            // An explicit reload would resurrect a deleted demo and destroy user edits.
+            _toastMessage.emit("Повторная загрузка DEMO отключена. Удалённые данные не восстанавливаются.")
         }
     }
 
