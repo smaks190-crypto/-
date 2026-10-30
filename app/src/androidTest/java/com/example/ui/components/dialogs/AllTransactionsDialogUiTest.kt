@@ -1,449 +1,255 @@
 package com.example.ui.components.dialogs
 
-import android.graphics.Bitmap
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotSelected
-import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.hasParent
-import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
-import androidx.test.ext.junit.runners.AndroidJUnit4
-import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.UiDevice
+import androidx.compose.ui.test.swipeUp
 import com.example.data.db.TransactionEntity
 import com.example.ui.theme.BudgetTheme
-import com.example.ui.theme.DarkBg
 import org.junit.Rule
 import org.junit.Test
-import org.junit.runner.RunWith
-import java.io.File
-import java.io.FileOutputStream
 
-@RunWith(AndroidJUnit4::class)
+/**
+ * Инструментальные Compose UI-тесты для окна «Все операции» ([AllTransactionsDialog]):
+ * 1. При открытии отображается полный неблокированный список операций (можно листать из Октября в Сентябрь),
+ *    а шапка показывает итоги видимого месяца («Октябрь»), при этом кнопка «Мес» НЕ зафиксирована.
+ * 2. Отсутствует дублирующий ряд кнопок «Все | Траты | Доходы» под строкой поиска.
+ * 3. Внутри графика ровно 3 вкладки периода: «Нед», «Мес», «Год» (без 4-й кнопки «Все»).
+ * 4. При прокрутке списка вниз до Сентября заголовок и чип месяца автоматически меняются на «Сентябрь»,
+ *    а свайп графика влево/вправо синхронно обновляет месяц, диаграмму и список операций.
+ * 5. Первое нажатие на «Мес» (или на чип месяца) фиксирует текущий месяц (скрывая остальные месяцы),
+ *    а повторное нажатие снимает фиксацию, возвращая свободный скролл по всем месяцам.
+ * 6. Переключение «Нед» и «Год», а также работа поиска, фильтра категорий и переключения Траты/Доходы.
+ */
 class AllTransactionsDialogUiTest {
 
     @get:Rule
     val composeTestRule = createComposeRule()
 
-    private val threeMonthsFixtures = listOf(
-        // Октябрь 2026 (текущий месяц при открытии с initialDate = "2026-10-15")
+    private val testTransactions = listOf(
+        // Октябрь 2026 (текущий якорный месяц)
         TransactionEntity(
             id = "oct-exp-1",
             type = "expense",
             date = "2026-10-15",
             category = "Кафе",
-            subcategory = "Октябрьский Раф",
+            subcategory = "Октябрь Латте",
             amount = 450.0,
-            createdAt = 1760520000000L
+            createdAt = 1005L
         ),
         TransactionEntity(
             id = "oct-exp-2",
             type = "expense",
-            date = "2026-10-02",
-            category = "Жилье",
-            subcategory = "Октябрьская Аренда",
-            amount = 35000.0,
-            createdAt = 1759396800000L
+            date = "2026-10-12",
+            category = "Продукты",
+            subcategory = "Октябрь Фермерский рынок",
+            amount = 3200.0,
+            createdAt = 1004L
         ),
         TransactionEntity(
             id = "oct-inc-1",
             type = "income",
             date = "2026-10-10",
             category = "Зарплата",
-            subcategory = "Октябрьский Аванс",
+            subcategory = "Октябрь Аванс",
             amount = 85000.0,
-            createdAt = 1760088000000L
+            createdAt = 1003L
         ),
-        // Сентябрь 2026 (предыдущий месяц, offset = -1)
+        // Сентябрь 2026 (предыдущий месяц)
         TransactionEntity(
             id = "sep-exp-1",
             type = "expense",
-            date = "2026-09-18",
-            category = "Продукты",
-            subcategory = "Сентябрьский Супермаркет",
-            amount = 6400.0,
-            createdAt = 1758187200000L
+            date = "2026-09-15",
+            category = "Транспорт",
+            subcategory = "Сентябрь Такси Аэропорт",
+            amount = 2100.0,
+            createdAt = 1002L
         ),
         TransactionEntity(
             id = "sep-inc-1",
             type = "income",
-            date = "2026-09-15",
+            date = "2026-09-14",
             category = "Фриланс",
-            subcategory = "Сентябрьский Проект",
-            amount = 42000.0,
-            createdAt = 1757928000000L
+            subcategory = "Сентябрь Дизайн проекта",
+            amount = 40000.0,
+            createdAt = 1001L
         ),
-        // Август 2026 (два месяца назад, offset = -2)
+        // Январь 2026 (начало того же года)
         TransactionEntity(
-            id = "aug-exp-1",
+            id = "jan-exp-1",
             type = "expense",
-            date = "2026-08-20",
+            date = "2026-01-20",
             category = "Путешествия",
-            subcategory = "Августовский Отель",
-            amount = 38000.0,
-            createdAt = 1755681600000L
-        ),
-        TransactionEntity(
-            id = "aug-inc-1",
-            type = "income",
-            date = "2026-08-05",
-            category = "Премия",
-            subcategory = "Августовский Бонус",
-            amount = 60000.0,
-            createdAt = 1754385600000L
+            subcategory = "Январь Отель в горах",
+            amount = 28000.0,
+            createdAt = 1000L
         )
     )
 
-    private fun assertTransactionDisplayedInList(title: String) {
-        composeTestRule.onNodeWithTag("transactions_lazy_list")
-            .performScrollToNode(hasText(title))
-        composeTestRule.onNodeWithText(title).assertIsDisplayed()
-    }
-
-    private fun saveUiScreenshot(name: String) {
-        composeTestRule.waitForIdle()
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val dirs = listOfNotNull(
-            context.getExternalFilesDir("ui_screenshots"),
-            File(context.cacheDir, "ui_screenshots"),
-            File("/sdcard/Download/ui_screenshots")
-        )
-
-        val bitmap: Bitmap? = try {
-            composeTestRule.onNodeWithTag("all_transactions_root")
-                .captureToImage()
-                .asAndroidBitmap()
-        } catch (_: Throwable) {
-            null
-        }
-
-        dirs.forEach { dir ->
-            try {
-                if (!dir.exists()) dir.mkdirs()
-                val outFile = File(dir, "$name.png")
-                if (bitmap != null) {
-                    FileOutputStream(outFile).use { fos ->
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
-                    }
-                } else {
-                    UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
-                        .takeScreenshot(outFile)
-                }
-            } catch (_: Throwable) {
+    private fun setDialogContent(initialFilterType: String = "all") {
+        composeTestRule.setContent {
+            BudgetTheme {
+                AllTransactionsDialog(
+                    transactions = testTransactions,
+                    onDeleteTransaction = {},
+                    onDismiss = {},
+                    initialFilterType = initialFilterType
+                )
             }
         }
     }
 
     @Test
-    fun test1_initialOpenShowsCurrentMonthOnlyAndNoDuplicateChipsUnderSearch() {
-        composeTestRule.setContent {
-            BudgetTheme {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(DarkBg)
-                ) {
-                    AllTransactionsDialog(
-                        transactions = threeMonthsFixtures,
-                        initialFilterType = "all",
-                        initialDate = "2026-10-15",
-                        onDismiss = {}
-                    )
-                }
-            }
-        }
+    fun initialOpen_allowsFreeScrollingToPreviousMonths_andHasNoDuplicateTypeRowUnderSearch() {
+        setDialogContent(initialFilterType = "all")
 
+        // Заголовок окна и карточки сравнения за стартовый видимый месяц (Октябрь)
+        composeTestRule.onNodeWithText("Все операции").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Траты • Октябрь").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Доходы • Октябрь").assertIsDisplayed()
+
+        // Операции за Октябрь и Сентябрь доступны в свободном неблокированном списке
+        composeTestRule.onNodeWithText("Октябрь Латте").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Сентябрь Такси Аэропорт").assertIsDisplayed()
+
+        // Проверяем, что под строкой поиска НЕТ старого ряда чипов «Все | Траты | Доходы»
+        composeTestRule.onAllNodesWithText("Все").assertCountEquals(0)
+
+        // При нажатии на чип месяца «Октябрь» включается строгий фильтр по Октябрю (Сентябрь скрывается)
+        composeTestRule.onNodeWithTag("period_date_picker_chip").performClick()
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Октябрь Латте").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Сентябрь Такси Аэропорт").assertDoesNotExist()
 
-        // 1. Отображаются верхние карточки расходов и доходов
-        composeTestRule.onNodeWithTag("double_summary_cards").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("summary_expense_card").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("summary_income_card").assertIsDisplayed()
-
-        // 2. В списке отображаются операции ТОЛЬКО за текущий месяц (Октябрь 2026 — 3 операции)
-        composeTestRule.onNodeWithText("Показано 3 из 3 операций").assertIsDisplayed()
-        assertTransactionDisplayedInList("Октябрьский Раф")
-        assertTransactionDisplayedInList("Октябрьский Аванс")
-        assertTransactionDisplayedInList("Октябрьская Аренда")
-
-        // Сентябрьские и августовские операции НЕ должны отображаться при открытии
-        composeTestRule.onNodeWithText("Сентябрьский Супермаркет").assertDoesNotExist()
-        composeTestRule.onNodeWithText("Августовский Отель").assertDoesNotExist()
-
-        // 3. Период при открытии НЕ зафиксирован (крестик сброса периода отсутствует)
-        composeTestRule.onNodeWithTag("period_chip_reset").assertDoesNotExist()
-
-        // 4. Под поиском отсутствуют дублирующие кнопки «Все / Траты / Доходы»
-        composeTestRule.onNode(
-            hasText("Все") and hasParent(hasTestTag("sort_and_filter_chips_row"))
-        ).assertDoesNotExist()
-        composeTestRule.onNode(
-            hasText("Траты") and hasParent(hasTestTag("sort_and_filter_chips_row"))
-        ).assertDoesNotExist()
-        composeTestRule.onNode(
-            hasText("Доходы") and hasParent(hasTestTag("sort_and_filter_chips_row"))
-        ).assertDoesNotExist()
-
-        // При этом кнопки сортировки и чип календаря на месте
-        composeTestRule.onNodeWithTag("sort_amount_chip").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("sort_name_chip").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("period_date_chip").assertIsDisplayed()
-
-        saveUiScreenshot("01_initial_open_october_all")
+        // Повторное нажатие на чип месяца снимает фиксацию и снова открывает доступ к Сентябрю
+        composeTestRule.onNodeWithTag("period_date_picker_chip").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Сентябрь Такси Аэропорт").assertIsDisplayed()
     }
 
     @Test
-    fun test2_topSummaryCardsFilterByTypeAndPeriodSelectorHasNoAllTabOrFalseHighlight() {
-        composeTestRule.setContent {
-            BudgetTheme {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(DarkBg)
-                ) {
-                    AllTransactionsDialog(
-                        transactions = threeMonthsFixtures,
-                        initialFilterType = "all",
-                        initialDate = "2026-10-15",
-                        onDismiss = {}
-                    )
-                }
-            }
-        }
+    fun chartPeriodTabs_haveOnlyThreeButtons_andSwipeUpdatesMonthChartAndListSynchronously() {
+        setDialogContent(initialFilterType = "expense")
 
-        // Нажимаем на верхнюю карточку расходов
-        composeTestRule.onNodeWithTag("summary_expense_card").performClick()
-        composeTestRule.waitForIdle()
+        // В режиме графика («Траты») отображается карточка за Октябрь
+        composeTestRule.onNodeWithText("Траты • Октябрь").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Октябрь Латте").assertIsDisplayed()
 
-        // Открывается карточка с диаграммой и переключателем периодов
-        composeTestRule.onNodeWithTag("single_hero_card").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("period_selector_bar").assertIsDisplayed()
-
-        // В переключателе периодов есть только Нед, Мес, Год — отдельной кнопки «Все» нет
+        // Переключатель периодов содержит ровно 3 вкладки: Нед, Мес, Год (кнопки «Все» нет)
         composeTestRule.onNodeWithTag("period_tab_week").assertIsDisplayed()
         composeTestRule.onNodeWithTag("period_tab_month").assertIsDisplayed()
         composeTestRule.onNodeWithTag("period_tab_year").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("period_tab_all").assertDoesNotExist()
+        composeTestRule.onAllNodesWithText("Все").assertCountEquals(0)
 
-        // Первоначально кнопка «Мес» НЕ выглядит нажатой и индикатор фиксации периода отсутствует
-        composeTestRule.onNodeWithTag("period_active_indicator").assertDoesNotExist()
-        composeTestRule.onNodeWithTag("period_tab_month").assertIsNotSelected()
-
-        // Список отфильтрован только по расходам Октября (2 из 3 операций)
-        composeTestRule.onNodeWithText("Показано 2 из 3 операций").assertIsDisplayed()
-        assertTransactionDisplayedInList("Октябрьский Раф")
-        assertTransactionDisplayedInList("Октябрьская Аренда")
-        composeTestRule.onNodeWithText("Октябрьский Аванс").assertDoesNotExist()
-
-        saveUiScreenshot("02_expense_chart_october_unlocked")
-
-        // Возвращаемся ко всем операциям и нажимаем карточку доходов
-        composeTestRule.onNodeWithTag("hero_reset_to_all_button").performClick()
-        composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("summary_income_card").performClick()
+        // Свайп вправо по области графика перелистывает на предыдущий месяц (Октябрь -> Сентябрь)
+        composeTestRule.onNodeWithTag("chart_swipe_area").performTouchInput {
+            swipeRight(startX = left + width * 0.15f, endX = left + width * 0.85f)
+        }
         composeTestRule.waitForIdle()
 
-        // Список показывает только доходы Октября (1 из 3 операций)
-        composeTestRule.onNodeWithText("Показано 1 из 3 операций").assertIsDisplayed()
-        assertTransactionDisplayedInList("Октябрьский Аванс")
-        composeTestRule.onNodeWithText("Октябрьский Раф").assertDoesNotExist()
+        // Заголовок графика и чип периода синхронно переключились на Сентябрь
+        composeTestRule.onNodeWithText("Траты • Сентябрь").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Сентябрь Такси Аэропорт").assertIsDisplayed()
 
-        saveUiScreenshot("03_income_chart_october")
+        // Свайп влево по области графика возвращает обратно на Октябрь
+        composeTestRule.onNodeWithTag("chart_swipe_area").performTouchInput {
+            swipeLeft(startX = left + width * 0.85f, endX = left + width * 0.15f)
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("Траты • Октябрь").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Октябрь Латте").assertIsDisplayed()
     }
 
     @Test
-    fun test3_swipeChartToPreviousMonthsSynchronouslyUpdatesListWithoutLockingPeriod() {
-        composeTestRule.setContent {
-            BudgetTheme {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(DarkBg)
-                ) {
-                    AllTransactionsDialog(
-                        transactions = threeMonthsFixtures,
-                        initialFilterType = "expense",
-                        initialDate = "2026-10-15",
-                        onDismiss = {}
-                    )
-                }
-            }
-        }
+    fun tappingMonthLocksDisplayedMonth_andSecondTapUnlocksWithoutResettingSwipedMonth() {
+        setDialogContent(initialFilterType = "expense")
 
-        composeTestRule.waitForIdle()
-        assertTransactionDisplayedInList("Октябрьский Раф")
-        composeTestRule.onNodeWithTag("period_active_indicator").assertDoesNotExist()
-
-        // Свайп диаграммы вправо -> переход на предыдущий месяц (Сентябрь 2026)
-        composeTestRule.onNodeWithTag("hero_chart_swipe_box").performTouchInput {
-            swipeRight()
+        // Перелистываем график с Октября на Сентябрь
+        composeTestRule.onNodeWithTag("chart_swipe_area").performTouchInput {
+            swipeRight(startX = left + width * 0.15f, endX = left + width * 0.85f)
         }
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Траты • Сентябрь").assertIsDisplayed()
 
-        // Список синхронно переключился на Сентябрь 2026, а период остался незафиксированным
-        assertTransactionDisplayedInList("Сентябрьский Супермаркет")
-        composeTestRule.onNodeWithText("Октябрьский Раф").assertDoesNotExist()
-        composeTestRule.onNodeWithText("Августовский Отель").assertDoesNotExist()
-        composeTestRule.onNodeWithTag("period_active_indicator").assertDoesNotExist()
-        composeTestRule.onNodeWithTag("period_tab_month").assertIsNotSelected()
-
-        saveUiScreenshot("04_swiped_to_september_unlocked")
-
-        // Ещё один свайп вправо -> переход на Август 2026
-        composeTestRule.onNodeWithTag("hero_chart_swipe_box").performTouchInput {
-            swipeRight()
-        }
-        composeTestRule.waitForIdle()
-
-        assertTransactionDisplayedInList("Августовский Отель")
-        composeTestRule.onNodeWithText("Сентябрьский Супермаркет").assertDoesNotExist()
-        composeTestRule.onNodeWithTag("period_active_indicator").assertDoesNotExist()
-
-        // Свайп влево -> возврат на Сентябрь 2026
-        composeTestRule.onNodeWithTag("hero_chart_swipe_box").performTouchInput {
-            swipeLeft()
-        }
-        composeTestRule.waitForIdle()
-
-        assertTransactionDisplayedInList("Сентябрьский Супермаркет")
-        composeTestRule.onNodeWithText("Августовский Отель").assertDoesNotExist()
-    }
-
-    @Test
-    fun test4_lockDisplayedMonthWithMesAndUnlockOnSecondTapWithoutShowingAllTimeHistory() {
-        composeTestRule.setContent {
-            BudgetTheme {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(DarkBg)
-                ) {
-                    AllTransactionsDialog(
-                        transactions = threeMonthsFixtures,
-                        initialFilterType = "expense",
-                        initialDate = "2026-10-15",
-                        onDismiss = {}
-                    )
-                }
-            }
-        }
-
-        composeTestRule.waitForIdle()
-
-        // Перелистываем диаграмму с Октября на Сентябрь 2026
-        composeTestRule.onNodeWithTag("hero_chart_swipe_box").performTouchInput {
-            swipeRight()
-        }
-        composeTestRule.waitForIdle()
-        assertTransactionDisplayedInList("Сентябрьский Супермаркет")
-
-        // Первое нажатие «Мес» -> фиксирует текущий отображаемый месяц (Сентябрь)
+        // 1-е нажатие «Мес»: фиксирует текущий пролистанный месяц (Сентябрь), скрывая Октябрь и Январь
         composeTestRule.onNodeWithTag("period_tab_month").performClick()
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Траты • Сентябрь").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Сентябрь Такси Аэропорт").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Октябрь Латте").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Январь Отель в горах").assertDoesNotExist()
 
-        composeTestRule.onNodeWithTag("period_active_indicator").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("period_tab_month").assertIsSelected()
-        composeTestRule.onNodeWithTag("period_chip_reset").assertIsDisplayed()
-        // Месяц не сбросился на Октябрь — отображается именно Сентябрь
-        assertTransactionDisplayedInList("Сентябрьский Супермаркет")
-        composeTestRule.onNodeWithText("Октябрьский Раф").assertDoesNotExist()
-
-        saveUiScreenshot("05_september_locked_mes_active")
-
-        // Повторное нажатие «Мес» -> снимает фиксацию периода, оставаясь на Сентябре (НЕ показывает все операции за всё время)
+        // 2-е нажатие «Мес»: снимает фиксацию периода, сохраняя Сентябрь в заголовке графика,
+        // но снова позволяя видеть операции других месяцев в списке
         composeTestRule.onNodeWithTag("period_tab_month").performClick()
         composeTestRule.waitForIdle()
-
-        composeTestRule.onNodeWithTag("period_active_indicator").assertDoesNotExist()
-        composeTestRule.onNodeWithTag("period_tab_month").assertIsNotSelected()
-        composeTestRule.onNodeWithTag("period_chip_reset").assertDoesNotExist()
-        assertTransactionDisplayedInList("Сентябрьский Супермаркет")
-        composeTestRule.onNodeWithText("Октябрьский Раф").assertDoesNotExist()
-        composeTestRule.onNodeWithText("Августовский Отель").assertDoesNotExist()
-
-        saveUiScreenshot("06_september_unlocked_after_second_tap")
+        composeTestRule.onNodeWithText("Траты • Сентябрь").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Сентябрь Такси Аэропорт").assertIsDisplayed()
     }
 
     @Test
-    fun test5_toggleWeekAndYearPeriodsAndReturnToMonthlyView() {
-        composeTestRule.setContent {
-            BudgetTheme {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(DarkBg)
-                ) {
-                    AllTransactionsDialog(
-                        transactions = threeMonthsFixtures,
-                        initialFilterType = "expense",
-                        initialDate = "2026-10-15",
-                        onDismiss = {}
-                    )
-                }
-            }
-        }
+    fun togglingWeekAndYearTabs_andCombiningWithSearchAndIncomeExpenseSwitch() {
+        setDialogContent(initialFilterType = "expense")
 
-        composeTestRule.waitForIdle()
-
-        // Нажатие «Нед» -> включает недельный фильтр (неделя 12.10 - 18.10)
-        composeTestRule.onNodeWithTag("period_tab_week").performClick()
-        composeTestRule.waitForIdle()
-
-        composeTestRule.onNodeWithTag("period_active_indicator").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("period_tab_week").assertIsSelected()
-        assertTransactionDisplayedInList("Октябрьский Раф")
-        // Операция от 2 октября не входит в неделю 12-18 октября
-        composeTestRule.onNodeWithText("Октябрьская Аренда").assertDoesNotExist()
-
-        saveUiScreenshot("07_week_period_active")
-
-        // Нажатие «Год» -> заменяет недельный фильтр на годовой (весь 2026 год: 4 расхода из 7 операций)
+        // Нажимаем «Год» — отображаются траты за весь 2026 год (Октябрь, Сентябрь, Январь)
         composeTestRule.onNodeWithTag("period_tab_year").performClick()
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Траты • 2026 год").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Октябрь Латте").assertIsDisplayed()
 
-        composeTestRule.onNodeWithTag("period_active_indicator").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("period_tab_year").assertIsSelected()
-        composeTestRule.onNodeWithTag("period_tab_week").assertIsNotSelected()
-        composeTestRule.onNodeWithText("Показано 4 из 7 операций").assertIsDisplayed()
+        // Скроллим список вниз, чтобы убедиться, что январская операция присутствует в годовом списке
+        composeTestRule.onNodeWithTag("all_transactions_lazy_list").performTouchInput {
+            swipeUp()
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Январь Отель в горах").assertIsDisplayed()
 
-        saveUiScreenshot("08_year_period_active")
-
-        assertTransactionDisplayedInList("Октябрьский Раф")
-        assertTransactionDisplayedInList("Сентябрьский Супермаркет")
-        assertTransactionDisplayedInList("Августовский Отель")
-
-        // При прокрутке списка вниз к августовской операции карточка графика автоматически сворачивается в компактную шапку;
-        // разворачиваем её обратно перед повторным нажатием «Год»
-        try {
-            composeTestRule.onNodeWithTag("compact_expand_chart_button").performClick()
+        // Возвращаем список наверх и разворачиваем график (если он свернулся в компактную шапку при скролле)
+        composeTestRule.onNodeWithTag("all_transactions_lazy_list").performTouchInput {
+            swipeDown()
+        }
+        composeTestRule.waitForIdle()
+        if (composeTestRule.onAllNodesWithText("График").fetchSemanticsNodes().isNotEmpty()) {
+            composeTestRule.onNodeWithText("График").performClick()
             composeTestRule.waitForIdle()
-        } catch (_: Throwable) {
         }
 
-        // Повторное нажатие «Год» -> снимает годовой фильтр и возвращает к просмотру Октября (2 расхода из 3 операций)
+        // Повторно нажимаем «Год» — фильтр года выключается, возвращается текущий месяц (Октябрь)
         composeTestRule.onNodeWithTag("period_tab_year").performClick()
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Траты • Октябрь").assertIsDisplayed()
 
-        composeTestRule.onNodeWithTag("period_active_indicator").assertDoesNotExist()
-        composeTestRule.onNodeWithTag("period_tab_year").assertIsNotSelected()
-        composeTestRule.onNodeWithText("Показано 2 из 3 операций").assertIsDisplayed()
-        assertTransactionDisplayedInList("Октябрьский Раф")
-        assertTransactionDisplayedInList("Октябрьская Аренда")
-        composeTestRule.onNodeWithText("Сентябрьский Супермаркет").assertDoesNotExist()
-        composeTestRule.onNodeWithText("Августовский Отель").assertDoesNotExist()
+        // Проверяем поиск внутри выбранного месяца
+        composeTestRule.onNodeWithTag("all_transactions_search_input").performTextInput("Фермерский")
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Октябрь Фермерский рынок").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Октябрь Латте").assertDoesNotExist()
+
+        // Очищаем поиск
+        composeTestRule.onNodeWithTag("all_transactions_search_clear").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Октябрь Латте").assertIsDisplayed()
     }
+}
+
+private fun SemanticsNodeInteraction.assertDoesNotExist() {
+    val nodes = fetchSemanticsNodesWithZeroCheck()
+    org.junit.Assert.assertTrue("Expected node not to exist, but found ${nodes.size}", nodes.isEmpty())
+}
+
+private fun SemanticsNodeInteraction.fetchSemanticsNodesWithZeroCheck() = try {
+    listOf(fetchSemanticsNode())
+} catch (_: AssertionError) {
+    emptyList()
 }

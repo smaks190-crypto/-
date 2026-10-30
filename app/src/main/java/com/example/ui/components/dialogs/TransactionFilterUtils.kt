@@ -96,6 +96,18 @@ data class AllTransactionsPeriodState(
             else -> swipeMonthOffset
         }
 
+    fun onScrolledToDate(visibleDateStr: String): AllTransactionsPeriodState {
+        if (isPeriodLocked) return this
+        val format = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
+        val anchor = try { format.parse(stableAnchorDateStr) } catch (_: Exception) { null } ?: return this
+        val visible = try { format.parse(visibleDateStr) } catch (_: Exception) { null } ?: return this
+        val anchorCal = Calendar.getInstance().apply { time = anchor }
+        val visibleCal = Calendar.getInstance().apply { time = visible }
+        val offset = (visibleCal.get(Calendar.YEAR) - anchorCal.get(Calendar.YEAR)) * 12 +
+            visibleCal.get(Calendar.MONTH) - anchorCal.get(Calendar.MONTH)
+        return if (offset == swipeMonthOffset) this else copy(swipeMonthOffset = offset)
+    }
+
     fun onSwipePeriod(delta: Int): AllTransactionsPeriodState {
         return when (effectivePeriod) {
             "week" -> copy(swipeWeekOffset = swipeWeekOffset + delta)
