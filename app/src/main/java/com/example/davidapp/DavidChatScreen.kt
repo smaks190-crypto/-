@@ -273,7 +273,7 @@ fun DavidChatScreen(
                             isSelectingPeriod = false
                             triggerDavidLiveWithPermissionCheck()
                         }
-                    
+                    )
                             }
                         }
                     }
