@@ -231,6 +231,13 @@ fun AllTransactionsDialog(
         }
     }
 
+    val categoryColorMap = remember(categoryTotalsMap, filterType) {
+        buildCategoryColorMap(categoryTotalsMap, filterType)
+    }
+
+    fun getCategoryColor(name: String): Color =
+        resolveCategoryColor(name, categoryColorMap, filterType)
+
     val currentActiveCategoryTotals = remember(categoryTotalsMap, isDrilledDownToMixed, categoryThreshold) {
         computeActiveCategoryTotals(categoryTotalsMap, isDrilledDownToMixed, categoryThreshold)
     }
