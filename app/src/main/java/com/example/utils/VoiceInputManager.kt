@@ -481,51 +481,27 @@ class VoiceInputManager(context: Context) {
         }
     }
 
-    private fun resolveUserApiKey(callerContext: Context, explicitKey: String = ""): String {
+    internal fun resolveUserApiKey(
+        callerContext: Context,
+        explicitKey: String = "",
+        securePrefsProvider: (Context) -> android.content.SharedPreferences? =
+            com.example.davidapp.DavidViewModel::createSecurePrefsOrNull
+    ): String {
         val fromExplicit = com.example.data.api.GeminiModelConfig.sanitizeApiKey(explicitKey)
         if (fromExplicit.isNotBlank()) return fromExplicit
 
         return try {
-            val securePrefs = try {
-                val masterKey = androidx.security.crypto.MasterKey.Builder(callerContext)
-                    .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
-                    .build()
-                androidx.security.crypto.EncryptedSharedPreferences.create(
-                    callerContext,
-                    "secure_prefs",
-                    masterKey,
-                    androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                )
-            } catch (_: Throwable) {
-                callerContext.getSharedPreferences("secure_prefs", Context.MODE_PRIVATE)
-            }
-
-            val prefs = callerContext.getSharedPreferences("budget_prefs", Context.MODE_PRIVATE)
-            if (prefs.contains("gemini_api_key")) {
-                val legacyKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-                    prefs.getString("gemini_api_key", "")
-                )
-                if (legacyKey.isNotBlank()) {
-                    securePrefs.edit().putString("gemini_api_key", legacyKey).apply()
-                }
-                prefs.edit().remove("gemini_api_key").apply()
-                if (legacyKey.isNotBlank()) return legacyKey
-            }
-
-            val secureKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-                securePrefs.getString("gemini_api_key", "")
+            val prefs = callerContext.getSharedPreferences(
+                com.example.davidapp.DavidViewModel.LEGACY_PREFS_NAME,
+                Context.MODE_PRIVATE
             )
-            if (secureKey.isNotBlank()) return secureKey
-
-            val defaultKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-                com.example.BuildConfig.GEMINI_API_KEY
+            val securePrefs = securePrefsProvider(callerContext)
+            com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+                legacyPrefs = prefs,
+                securePrefs = securePrefs,
+                explicitKey = explicitKey,
+                allowBuildConfigFallback = true
             )
-            if (com.example.data.api.GeminiModelConfig.isValidGeminiApiKey(defaultKey)) {
-                defaultKey
-            } else {
-                ""
-            }
         } catch (_: Throwable) {
             ""
         }

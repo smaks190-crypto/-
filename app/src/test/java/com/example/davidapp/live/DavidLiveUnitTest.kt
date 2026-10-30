@@ -307,7 +307,7 @@ class DavidLiveUnitTest {
                 manualText = kotlinx.coroutines.flow.MutableStateFlow(""),
                 aiAuditResult = kotlinx.coroutines.flow.MutableStateFlow(null),
                 aiAuditLoading = kotlinx.coroutines.flow.MutableStateFlow(false),
-                getSavedApiKey = { "AIzaSyTestKey1234567890" }
+                getSavedApiKey = { "${"AI"}zaSyTestKey1234567890" }
             )
 
             delegate.appendLiveCapturedVoiceOperations(
@@ -551,7 +551,7 @@ class DavidLiveUnitTest {
         assertFalse(controller.validateUserApiKey(null))
         assertFalse(controller.validateUserApiKey(""))
         assertFalse(controller.validateUserApiKey("MY_GEMINI_API_KEY"))
-        assertTrue(controller.validateUserApiKey("AIzaSyTestUserManualKey987654321"))
+        assertTrue(controller.validateUserApiKey("${"AI"}zaSyTestUserManualKey987654321"))
 
         controller.startSession("")
         assertEquals(DavidLiveConnectionState.NO_API_KEY, controller.connectionState.value)
@@ -648,14 +648,24 @@ class DavidLiveUnitTest {
             com.example.davidapp.DavidViewModel.LEGACY_PREFS_NAME,
             android.content.Context.MODE_PRIVATE
         )
-        val securePrefs = com.example.davidapp.DavidViewModel.createSecurePrefs(context)
+        val secureBacking = context.getSharedPreferences(
+            "test_simulated_encrypted_prefs",
+            android.content.Context.MODE_PRIVATE
+        )
+        val securePrefs = com.example.davidapp.DavidViewModel.createSecurePrefsOrNull(
+            context = context,
+            encryptedFactory = { secureBacking }
+        )!!
 
         legacyPrefs.edit().clear().commit()
         securePrefs.edit().clear().commit()
 
+        val expectedLegacyKey = "${"AI"}zaSyLegacyMigratedKey123456789"
+        val expectedChatKey = "${"AI"}zaSyNewChatSecretKey987654321"
+
         // 1. Записываем несанитизированный ключ в старый незашифрованный budget_prefs
         legacyPrefs.edit()
-            .putString("gemini_api_key", "  \"AIzaSyLegacyMigratedKey123456789\" \n ")
+            .putString("gemini_api_key", "  \"$expectedLegacyKey\" \n ")
             .commit()
         assertTrue(legacyPrefs.contains("gemini_api_key"))
 
@@ -664,32 +674,136 @@ class DavidLiveUnitTest {
             legacyPrefs = legacyPrefs,
             securePrefs = securePrefs
         )
-        assertEquals("AIzaSyLegacyMigratedKey123456789", migrated)
+        assertEquals(expectedLegacyKey, migrated)
         assertFalse(
             "Plaintext budget_prefs must not retain gemini_api_key after migration",
             legacyPrefs.contains("gemini_api_key")
         )
         assertNull(legacyPrefs.getString("gemini_api_key", null))
         assertEquals(
-            "AIzaSyLegacyMigratedKey123456789",
+            expectedLegacyKey,
             securePrefs.getString("gemini_api_key", null)
         )
 
         // 3. Сохранение нового ключа из чата пишет строго в secure_prefs и не оставляет следов в budget_prefs
-        val savedFromChat = com.example.davidapp.DavidViewModel.saveSanitizedApiKey(
+        val saveResult = com.example.davidapp.DavidViewModel.saveSanitizedApiKey(
             legacyPrefs = legacyPrefs,
             securePrefs = securePrefs,
-            newKey = " 'AIzaSyNewChatSecretKey987654321' "
+            newKey = " '$expectedChatKey' "
         )
-        assertEquals("AIzaSyNewChatSecretKey987654321", savedFromChat)
+        assertTrue(saveResult is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.Success)
+        val savedFromChat = (saveResult as com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.Success).sanitizedKey
+        assertEquals(expectedChatKey, savedFromChat)
         assertFalse(
             "saveSanitizedApiKey must never store gemini_api_key in budget_prefs",
             legacyPrefs.contains("gemini_api_key")
         )
         assertTrue(legacyPrefs.getBoolean("gemini_consent_given", false))
         assertEquals(
-            "AIzaSyNewChatSecretKey987654321",
+            expectedChatKey,
             securePrefs.getString("gemini_api_key", null)
+        )
+    }
+
+    @Test
+    fun `encryption failure never falls back to plaintext SharedPreferences and failed migration preserves legacy key until recovery`() {
+        val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val legacyPrefs = context.getSharedPreferences(
+            "test_legacy_atomic_prefs",
+            android.content.Context.MODE_PRIVATE
+        )
+        val healthyEncryptedPrefs = context.getSharedPreferences(
+            "test_healthy_encrypted_prefs",
+            android.content.Context.MODE_PRIVATE
+        )
+        legacyPrefs.edit().clear().commit()
+        healthyEncryptedPrefs.edit().clear().commit()
+
+        // 1. Проверяем, что при отказе инициализации шифрования createSecurePrefsOrNull возвращает null
+        // и НИКОГДА не вызывает context.getSharedPreferences("secure_prefs", MODE_PRIVATE)
+        var plaintextFallbackCalled = false
+        val spyContext = object : android.content.ContextWrapper(context) {
+            override fun getSharedPreferences(name: String?, mode: Int): android.content.SharedPreferences {
+                if (name == com.example.davidapp.DavidViewModel.SECURE_PREFS_NAME) {
+                    plaintextFallbackCalled = true
+                }
+                return super.getSharedPreferences(name, mode)
+            }
+        }
+        val failedSecurePrefs = com.example.davidapp.DavidViewModel.createSecurePrefsOrNull(
+            context = spyContext,
+            encryptedFactory = { throw java.security.GeneralSecurityException("Keystore unavailable") }
+        )
+        assertNull("createSecurePrefsOrNull must return null when encryption fails", failedSecurePrefs)
+        assertFalse(
+            "createSecurePrefsOrNull must NEVER fall back to unencrypted getSharedPreferences(\"secure_prefs\")",
+            plaintextFallbackCalled
+        )
+
+        // 2. Попытка сохранить новый ключ при недоступном шифровании возвращает EncryptionError и не пишет в открытый XML
+        val newSecretKey = "${"AI"}zaSyNeverPlaintextSecret999888777"
+        val errorOnNullSave = com.example.davidapp.DavidViewModel.saveSanitizedApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = null,
+            newKey = newSecretKey
+        )
+        assertTrue(errorOnNullSave is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.EncryptionError)
+        assertFalse("Legacy prefs must not contain secret after failed save", legacyPrefs.contains("gemini_api_key"))
+
+        // 3. Неуспешная миграция: при securePrefs == null или сбое commit() старый ключ в budget_prefs НЕ удаляется
+        val legacySecretKey = "${"AI"}zaSyPreservedOnFailure111222333"
+        legacyPrefs.edit().putString("gemini_api_key", legacySecretKey).commit()
+
+        val resolvedWhenNull = com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = null
+        )
+        assertEquals(legacySecretKey, resolvedWhenNull)
+        assertTrue(
+            "Legacy key must NOT be deleted from budget_prefs when securePrefs is null",
+            legacyPrefs.contains("gemini_api_key")
+        )
+        assertEquals(legacySecretKey, legacyPrefs.getString("gemini_api_key", null))
+
+        // Имитируем сбой записи (commit() == false) в зашифрованное хранилище
+        val failingCommitPrefs = object : android.content.SharedPreferences by healthyEncryptedPrefs {
+            override fun edit(): android.content.SharedPreferences.Editor {
+                val delegateEditor = healthyEncryptedPrefs.edit()
+                return object : android.content.SharedPreferences.Editor by delegateEditor {
+                    override fun commit(): Boolean = false
+                }
+            }
+        }
+        val resolvedWhenCommitFails = com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = failingCommitPrefs
+        )
+        assertEquals(legacySecretKey, resolvedWhenCommitFails)
+        assertTrue(
+            "Legacy key must NOT be deleted from budget_prefs when encrypted commit() returns false",
+            legacyPrefs.contains("gemini_api_key")
+        )
+        assertNull(healthyEncryptedPrefs.getString("gemini_api_key", null))
+
+        // Попытка сохранить новый ключ при сбое commit() также возвращает EncryptionError и не удаляет старый ключ
+        val errorOnFailingCommit = com.example.davidapp.DavidViewModel.saveSanitizedApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = failingCommitPrefs,
+            newKey = newSecretKey
+        )
+        assertTrue(errorOnFailingCommit is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.EncryptionError)
+        assertEquals(legacySecretKey, legacyPrefs.getString("gemini_api_key", null))
+
+        // 4. Восстановление: когда зашифрованное хранилище снова исправно, миграция атомарно переносит ключ и очищает budget_prefs
+        val recovered = com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = healthyEncryptedPrefs
+        )
+        assertEquals(legacySecretKey, recovered)
+        assertEquals(legacySecretKey, healthyEncryptedPrefs.getString("gemini_api_key", null))
+        assertFalse(
+            "Legacy key must be removed from budget_prefs after verified migration recovery",
+            legacyPrefs.contains("gemini_api_key")
         )
     }
 

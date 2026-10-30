@@ -929,12 +929,14 @@ fun MorphingBottomBar(
                                                                 Toast.LENGTH_SHORT
                                                             ).show()
                                                         } else {
-                                                            viewModel.saveApiKey(sanitized)
-                                                            showInlineApiKey = false
-                                                            triggerVoiceMode(
-                                                                overrideConsentGiven = true,
-                                                                overrideApiKey = sanitized
-                                                            )
+                                                            val saved = viewModel.saveApiKey(sanitized)
+                                                            if (saved) {
+                                                                showInlineApiKey = false
+                                                                triggerVoiceMode(
+                                                                    overrideConsentGiven = true,
+                                                                    overrideApiKey = sanitized
+                                                                )
+                                                            }
                                                         }
                                                     },
                                                     onCancel = {

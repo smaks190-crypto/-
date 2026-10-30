@@ -114,7 +114,12 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs: SharedPreferences =
         application.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
-    private val securePrefs: SharedPreferences = createSecurePrefs(application)
+    private var securePrefs: SharedPreferences? = createSecurePrefsOrNull(application)
+
+    private fun obtainSecurePrefs(): SharedPreferences? {
+        securePrefs?.let { return it }
+        return createSecurePrefsOrNull(getApplication()).also { securePrefs = it }
+    }
 
     private var currentBudgetId: String = "default"
     private var currentProfileName: String = "Максим"
@@ -130,7 +135,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     init {
         val migratedKey = resolveAndMigrateApiKey(
             legacyPrefs = prefs,
-            securePrefs = securePrefs
+            securePrefs = obtainSecurePrefs()
         )
         if (migratedKey.isNotBlank()) {
             currentApiKey = migratedKey
@@ -145,7 +150,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         liveFinancialToolsProvider.setBudgetId(currentBudgetId)
         val effectiveKey = resolveAndMigrateApiKey(
             legacyPrefs = prefs,
-            securePrefs = securePrefs,
+            securePrefs = obtainSecurePrefs(),
             explicitKey = apiKey
         )
         currentApiKey = effectiveKey
@@ -159,29 +164,49 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveApiKeyFromChat(newKey: String, soundManager: SoundManager? = null) {
-        val clean = saveSanitizedApiKey(
-            legacyPrefs = prefs,
-            securePrefs = securePrefs,
-            newKey = newKey
-        )
-        currentApiKey = clean
-        _hasApiKey.value = clean.isNotBlank()
-        soundManager?.playReceive()
-        addSessionMessage(
-            ChatMessage(
-                sender = "Давид Жабов 🐸",
-                type = ChatMessageType.Text(
-                    if (clean.isNotBlank()) {
-                        "🐸 Ква! API-ключ успешно сохранён и активирован! Теперь я работаю на базе **Gemini 3.8** — спрашивай про бюджет или пиши траты прямо сюда (например: *«Такси 500»*)!"
-                    } else {
-                        "API-ключ очищен. Я переключился в локальный офлайн-режим."
-                    }
-                ),
-                timestamp = currentTime(),
-                isUser = false,
-                timestampMillis = System.currentTimeMillis()
+        when (
+            val result = saveSanitizedApiKey(
+                legacyPrefs = prefs,
+                securePrefs = obtainSecurePrefs(),
+                newKey = newKey
             )
-        )
+        ) {
+            is SaveApiKeyResult.Success -> {
+                val clean = result.sanitizedKey
+                currentApiKey = clean
+                _hasApiKey.value = clean.isNotBlank()
+                soundManager?.playReceive()
+                addSessionMessage(
+                    ChatMessage(
+                        sender = "Давид Жабов 🐸",
+                        type = ChatMessageType.Text(
+                            if (clean.isNotBlank()) {
+                                "🐸 Ква! API-ключ успешно сохранён и активирован! Теперь я работаю на базе **Gemini 3.8** — спрашивай про бюджет или пиши траты прямо сюда (например: *«Такси 500»*)!"
+                            } else {
+                                "API-ключ очищен. Я переключился в локальный офлайн-режим."
+                            }
+                        ),
+                        timestamp = currentTime(),
+                        isUser = false,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+                )
+            }
+            is SaveApiKeyResult.EncryptionError -> {
+                soundManager?.playReceive()
+                addSessionMessage(
+                    ChatMessage(
+                        sender = "Давид Жабов 🐸",
+                        type = ChatMessageType.Text(
+                            "⚠️ Ошибка безопасности: ${result.message} Секрет не был записан в открытом виде."
+                        ),
+                        timestamp = currentTime(),
+                        isUser = false,
+                        timestampMillis = System.currentTimeMillis()
+                    )
+                )
+            }
+        }
     }
 
 
@@ -998,7 +1023,7 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             currentApiKey.ifBlank {
                 resolveAndMigrateApiKey(
                     legacyPrefs = prefs,
-                    securePrefs = securePrefs
+                    securePrefs = obtainSecurePrefs()
                 )
             }
         )
@@ -1116,7 +1141,7 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
                 currentApiKey.ifBlank {
                     resolveAndMigrateApiKey(
                         legacyPrefs = prefs,
-                        securePrefs = securePrefs
+                        securePrefs = obtainSecurePrefs()
                     )
                 }
             )
@@ -1186,39 +1211,97 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         internal const val KEY_GEMINI_API = "gemini_api_key"
         internal const val KEY_GEMINI_CONSENT = "gemini_consent_given"
 
-        internal fun createSecurePrefs(context: Context): SharedPreferences {
+        sealed class SaveApiKeyResult {
+            data class Success(val sanitizedKey: String) : SaveApiKeyResult()
+            data class EncryptionError(val message: String) : SaveApiKeyResult()
+        }
+
+        private fun defaultCreateEncryptedPrefs(context: Context): SharedPreferences {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            return EncryptedSharedPreferences.create(
+                context,
+                SECURE_PREFS_NAME,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }
+
+        /**
+         * Инициализирует зашифрованное хранилище `secure_prefs` через Android Keystore (`AES256_GCM`).
+         * При ошибке шифрования возвращает `null` и НИКОГДА не делает fallback на обычный незашифрованный SharedPreferences.
+         */
+        internal fun createSecurePrefsOrNull(
+            context: Context,
+            encryptedFactory: (Context) -> SharedPreferences = ::defaultCreateEncryptedPrefs
+        ): SharedPreferences? {
             return try {
-                val masterKey = MasterKey.Builder(context)
-                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                    .build()
-                EncryptedSharedPreferences.create(
-                    context,
-                    SECURE_PREFS_NAME,
-                    masterKey,
-                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                encryptedFactory(context)
+            } catch (e: Throwable) {
+                com.example.utils.GlobalConsoleLogger.e(
+                    "SECURITY",
+                    "Не удалось инициализировать EncryptedSharedPreferences ($SECURE_PREFS_NAME): ${e.javaClass.simpleName}. Небезопасный fallback отключён."
                 )
-            } catch (_: Throwable) {
-                context.getSharedPreferences(SECURE_PREFS_NAME, Context.MODE_PRIVATE)
+                null
             }
         }
 
         /**
          * Мигрирует `gemini_api_key` из открытого `budget_prefs` в зашифрованный `secure_prefs`,
-         * удаляет ключ из `budget_prefs` и возвращает санитизированный через `GeminiModelConfig.sanitizeApiKey` ключ.
+         * удаляя старую запись из `budget_prefs` ТОЛЬКО после синхронного подтверждения записи (`commit()`)
+         * и успешной обратной сверки прочитанного значения.
          */
         internal fun resolveAndMigrateApiKey(
-            legacyPrefs: SharedPreferences,
-            securePrefs: SharedPreferences,
-            explicitKey: String = ""
+            legacyPrefs: SharedPreferences?,
+            securePrefs: SharedPreferences?,
+            explicitKey: String = "",
+            allowBuildConfigFallback: Boolean = false
         ): String {
-            if (legacyPrefs.contains(KEY_GEMINI_API)) {
-                val rawLegacy = legacyPrefs.getString(KEY_GEMINI_API, null)
-                val sanitizedLegacy = GeminiModelConfig.sanitizeApiKey(rawLegacy)
-                if (sanitizedLegacy.isNotBlank()) {
-                    securePrefs.edit().putString(KEY_GEMINI_API, sanitizedLegacy).apply()
+            var unmigratedLegacyKey = ""
+            if (legacyPrefs != null) {
+                val hasLegacy = try {
+                    legacyPrefs.contains(KEY_GEMINI_API)
+                } catch (_: Throwable) {
+                    false
                 }
-                legacyPrefs.edit().remove(KEY_GEMINI_API).apply()
+                if (hasLegacy) {
+                    val rawLegacy = try {
+                        legacyPrefs.getString(KEY_GEMINI_API, null)
+                    } catch (_: Throwable) {
+                        null
+                    }
+                    val sanitizedLegacy = GeminiModelConfig.sanitizeApiKey(rawLegacy)
+                    if (sanitizedLegacy.isBlank()) {
+                        try {
+                            legacyPrefs.edit().remove(KEY_GEMINI_API).commit()
+                        } catch (_: Throwable) {
+                        }
+                    } else if (securePrefs != null) {
+                        val migratedAndVerified = try {
+                            val committed = securePrefs.edit()
+                                .putString(KEY_GEMINI_API, sanitizedLegacy)
+                                .commit()
+                            val readBack = GeminiModelConfig.sanitizeApiKey(
+                                securePrefs.getString(KEY_GEMINI_API, null)
+                            )
+                            committed && readBack == sanitizedLegacy
+                        } catch (_: Throwable) {
+                            false
+                        }
+                        if (migratedAndVerified) {
+                            try {
+                                legacyPrefs.edit().remove(KEY_GEMINI_API).commit()
+                            } catch (_: Throwable) {
+                            }
+                        } else {
+                            unmigratedLegacyKey = sanitizedLegacy
+                        }
+                    } else {
+                        unmigratedLegacyKey = sanitizedLegacy
+                    }
+                }
             }
 
             val cleanExplicit = GeminiModelConfig.sanitizeApiKey(explicitKey)
@@ -1226,27 +1309,84 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
                 return cleanExplicit
             }
 
-            return GeminiModelConfig.sanitizeApiKey(
-                securePrefs.getString(KEY_GEMINI_API, "")
-            )
+            if (securePrefs != null) {
+                val fromSecure = try {
+                    GeminiModelConfig.sanitizeApiKey(
+                        securePrefs.getString(KEY_GEMINI_API, "")
+                    )
+                } catch (_: Throwable) {
+                    ""
+                }
+                if (fromSecure.isNotBlank()) {
+                    return fromSecure
+                }
+            }
+
+            if (unmigratedLegacyKey.isNotBlank()) {
+                return unmigratedLegacyKey
+            }
+
+            if (allowBuildConfigFallback) {
+                val defaultKey = GeminiModelConfig.sanitizeApiKey(
+                    com.example.BuildConfig.GEMINI_API_KEY
+                )
+                if (GeminiModelConfig.isValidGeminiApiKey(defaultKey)) {
+                    return defaultKey
+                }
+            }
+
+            return ""
         }
 
         /**
-         * Сохраняет санитизированный `gemini_api_key` исключительно в `secure_prefs`,
-         * удаляя любые следы ключа из открытого `budget_prefs`.
+         * Сохраняет санитизированный `gemini_api_key` исключительно в зашифрованный `secure_prefs`.
+         * При недоступности или сбое `securePrefs` возвращает `EncryptionError` и никогда не записывает
+         * секрет в открытый `budget_prefs`.
          */
         internal fun saveSanitizedApiKey(
-            legacyPrefs: SharedPreferences,
-            securePrefs: SharedPreferences,
+            legacyPrefs: SharedPreferences?,
+            securePrefs: SharedPreferences?,
             newKey: String
-        ): String {
+        ): SaveApiKeyResult {
+            if (securePrefs == null) {
+                return SaveApiKeyResult.EncryptionError(
+                    "Защищённое хранилище (Android Keystore) недоступно. Ключ не сохранён."
+                )
+            }
+
             val clean = GeminiModelConfig.sanitizeApiKey(newKey)
-            securePrefs.edit().putString(KEY_GEMINI_API, clean).apply()
-            legacyPrefs.edit()
-                .remove(KEY_GEMINI_API)
-                .putBoolean(KEY_GEMINI_CONSENT, true)
-                .apply()
-            return clean
+            val writeVerified = try {
+                val editor = securePrefs.edit()
+                if (clean.isEmpty()) {
+                    editor.remove(KEY_GEMINI_API)
+                } else {
+                    editor.putString(KEY_GEMINI_API, clean)
+                }
+                val committed = editor.commit()
+                val readBack = GeminiModelConfig.sanitizeApiKey(
+                    securePrefs.getString(KEY_GEMINI_API, "")
+                )
+                committed && readBack == clean
+            } catch (_: Throwable) {
+                false
+            }
+
+            if (!writeVerified) {
+                return SaveApiKeyResult.EncryptionError(
+                    "Не удалось записать API-ключ в зашифрованное хранилище."
+                )
+            }
+
+            try {
+                val legacyEditor = legacyPrefs?.edit()?.remove(KEY_GEMINI_API)
+                if (clean.isNotBlank()) {
+                    legacyEditor?.putBoolean(KEY_GEMINI_CONSENT, true)
+                }
+                legacyEditor?.commit()
+            } catch (_: Throwable) {
+            }
+
+            return SaveApiKeyResult.Success(clean)
         }
     }
 }

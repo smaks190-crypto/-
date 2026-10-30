@@ -1025,8 +1025,8 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             triggerAuditAfterKeySave = false
                                         },
                                         onSaveApiKey = { newKey ->
-                                            viewModel.saveApiKey(newKey)
-                                            if (triggerAuditAfterKeySave && newKey.isNotBlank()) {
+                                            val saved = viewModel.saveApiKey(newKey)
+                                            if (saved && triggerAuditAfterKeySave && newKey.isNotBlank()) {
                                                 triggerAuditAfterKeySave = false
                                                 viewModel.requestAiAudit(filteredTransactions)
                                             }

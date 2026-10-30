@@ -64,19 +64,13 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     private val repository: BudgetRepository
     private val prefs = application.getSharedPreferences("budget_prefs", Context.MODE_PRIVATE)
-    private val securePrefs: SharedPreferences = try {
-        val masterKey = MasterKey.Builder(application)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            application,
-            "secure_prefs",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    } catch (_: Exception) {
-        application.getSharedPreferences("secure_prefs", Context.MODE_PRIVATE)
+    private var securePrefs: SharedPreferences? =
+        com.example.davidapp.DavidViewModel.createSecurePrefsOrNull(application)
+
+    private fun obtainSecurePrefs(): SharedPreferences? {
+        securePrefs?.let { return it }
+        return com.example.davidapp.DavidViewModel.createSecurePrefsOrNull(getApplication())
+            .also { securePrefs = it }
     }
 
     val budgetProfiles: StateFlow<List<BudgetProfileEntity>>
@@ -258,16 +252,12 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     val showSetupModal: StateFlow<Boolean> = _showSetupModal.asStateFlow()
 
     init {
-        // One-time migration of legacy API key to EncryptedSharedPreferences
-        if (prefs.contains("gemini_api_key")) {
-            val oldKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-                prefs.getString("gemini_api_key", null)
-            )
-            if (oldKey.isNotEmpty()) {
-                securePrefs.edit().putString("gemini_api_key", oldKey).apply()
-            }
-            prefs.edit().remove("gemini_api_key").apply()
-        }
+        // One-time atomic migration of legacy API key to EncryptedSharedPreferences
+        com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = prefs,
+            securePrefs = obtainSecurePrefs(),
+            allowBuildConfigFallback = true
+        )
 
         val database = AppDatabase.getDatabase(application)
         repository = BudgetRepository(
@@ -442,38 +432,38 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun getSavedApiKey(): String {
-        val legacyKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            prefs.getString("gemini_api_key", null)
+        return com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = prefs,
+            securePrefs = obtainSecurePrefs(),
+            allowBuildConfigFallback = true
         )
-        if (legacyKey.isNotEmpty()) {
-            securePrefs.edit().putString("gemini_api_key", legacyKey).apply()
-            prefs.edit().remove("gemini_api_key").apply()
-            return legacyKey
-        }
-
-        val saved = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            securePrefs.getString("gemini_api_key", "")
-        )
-        if (saved.isNotBlank()) {
-            return saved
-        }
-
-        val defaultKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            com.example.BuildConfig.GEMINI_API_KEY
-        )
-        if (com.example.data.api.GeminiModelConfig.isValidGeminiApiKey(defaultKey)) {
-            return defaultKey
-        }
-        return ""
     }
 
-    fun saveApiKey(key: String) {
-        val trimmed = com.example.data.api.GeminiModelConfig.sanitizeApiKey(key)
-        securePrefs.edit().putString("gemini_api_key", trimmed).apply()
-        prefs.edit().remove("gemini_api_key").apply()
-        _apiKey.value = trimmed
-        viewModelScope.launch {
-            _toastMessage.emit(if (trimmed.isEmpty()) "API ключ удален" else "API ключ сохранен!")
+    fun saveApiKey(key: String): Boolean {
+        return when (
+            val result = com.example.davidapp.DavidViewModel.saveSanitizedApiKey(
+                legacyPrefs = prefs,
+                securePrefs = obtainSecurePrefs(),
+                newKey = key
+            )
+        ) {
+            is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.Success -> {
+                val trimmed = result.sanitizedKey
+                _apiKey.value = trimmed
+                if (trimmed.isNotBlank()) {
+                    _isGeminiConsentGiven.value = true
+                }
+                viewModelScope.launch {
+                    _toastMessage.emit(if (trimmed.isEmpty()) "API ключ удален" else "API ключ сохранен!")
+                }
+                true
+            }
+            is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.EncryptionError -> {
+                viewModelScope.launch {
+                    _toastMessage.emit(result.message)
+                }
+                false
+            }
         }
     }
 
