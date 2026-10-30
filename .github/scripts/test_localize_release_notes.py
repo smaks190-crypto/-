@@ -104,7 +104,7 @@ class ReleaseNotesTest(unittest.TestCase):
 
     def test_empty_release(self):
         result = build(original())
-        self.assertTrue(result.startswith("## Что изменилось\n"))
+        self.assertNotIn("## Что изменилось", result)
         self.assertIn(notes.EMPTY_TEXT, result)
 
     def test_single_compare_link_only(self):
