@@ -242,7 +242,7 @@ fun AllTransactionsDialog(
         resolveCategoryColor(name, categoryColorMap, filterType)
 
     val currentActiveCategoryTotals = remember(categoryTotalsMap, isDrilledDownToMixed, categoryThreshold) {
-        computeActiveCategoryTotals(categoryTotalsMap, isDrilledDownToMixed, categoryThreshold)
+        computeActiveCategoryTotals(categoryTotalsMap, isDrilledDownToMixed, 3)
     }
 
     val sortedList = remember(listTypeFilteredTransactions, searchQuery, selectedCategoryFilter, isDrilledDownToMixed, remainingCategoryNames, sortOption) {
