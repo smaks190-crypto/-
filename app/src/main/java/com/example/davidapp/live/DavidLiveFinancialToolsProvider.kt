@@ -185,8 +185,19 @@ class DavidLiveFinancialToolsProvider(
 
     /**
      * Executes a read-only tool call requested by Gemini Live and records verified facts.
+     * Deduplicates identical tool queries within the active session window so a reconnected
+     * session never repeats completed actions or duplicates verified facts.
      */
     suspend fun executeToolCall(toolName: String, args: JSONObject?): JSONObject {
+        val cacheKey = "$toolName:${args?.toString().orEmpty()}"
+        val nowMs = System.currentTimeMillis()
+        synchronized(recentToolResultsCache) {
+            val cached = recentToolResultsCache[cacheKey]
+            if (cached != null && nowMs - cached.first <= 60_000L) {
+                return JSONObject(cached.second.toString())
+            }
+        }
+
         val result = when (toolName) {
             TOOL_FINANCIAL_OVERVIEW -> queryFinancialOverview()
             TOOL_CATEGORY_SPENDING -> {
@@ -208,15 +219,21 @@ class DavidLiveFinancialToolsProvider(
             }
         }
 
+        synchronized(recentToolResultsCache) {
+            recentToolResultsCache[cacheKey] = nowMs to JSONObject(result.toString())
+        }
+
         val summaryText = result.optString("humanSummary").takeIf { it.isNotBlank() }
             ?: result.toString().take(240)
         synchronized(_verifiedFacts) {
-            _verifiedFacts.add(
-                DavidLiveToolFact(
-                    toolName = toolName,
-                    summary = summaryText
+            if (_verifiedFacts.none { it.toolName == toolName && it.summary == summaryText }) {
+                _verifiedFacts.add(
+                    DavidLiveToolFact(
+                        toolName = toolName,
+                        summary = summaryText
+                    )
                 )
-            )
+            }
         }
         return result
     }
