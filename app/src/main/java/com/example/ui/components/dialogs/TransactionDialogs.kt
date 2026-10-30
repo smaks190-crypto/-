@@ -54,6 +54,7 @@ fun AllTransactionsDialog(
     onDeleteTransaction: (String) -> Unit,
     onDismiss: () -> Unit,
     initialFilterType: String = "all",
+    initialDate: String? = null,
     onRestoreTransaction: ((TransactionEntity) -> Unit)? = null,
     onEditTransaction: ((TransactionEntity) -> Unit)? = null
 ) {
@@ -119,8 +120,10 @@ fun AllTransactionsDialog(
         }
     }
 
-    val stableAnchorDateStr = remember(transactions) {
-        transactions.firstOrNull()?.date ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+    val stableAnchorDateStr = remember(transactions, initialDate) {
+        initialDate?.takeIf { it.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) }
+            ?: transactions.firstOrNull()?.date
+            ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
     }
 
     // Единое состояние периода:
@@ -339,8 +342,8 @@ fun AllTransactionsDialog(
                 .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
             AllTransactionsDragHandleAndHeaderBar(
-                dragOffsetY = dragOffsetY,
-                onDragOffsetChange = { dragOffsetY = it },
+                headerDragOffsetY = dragOffsetY,
+                onUpdateHeaderDragOffsetY = { dragOffsetY = it },
                 onDismiss = onDismiss,
                 shownCount = sortedList.size,
                 totalCount = transactions.size
@@ -370,7 +373,8 @@ fun AllTransactionsDialog(
                 chartViewMode = chartViewMode,
                 onSelectChartViewMode = { chartViewMode = it },
                 categoryTotalsMap = categoryTotalsMap,
-                categoryThreshold = categoryThreshold,
+                shouldGroup = categoryTotalsMap.size > 3,
+                swipeMonthOffset = periodState.swipeMonthOffset,
                 getFilteredListForOffset = getFilteredListForOffset,
                 getCategoryTotalsForOffset = getCategoryTotalsForOffset,
                 getCategoryColor = ::getCategoryColor,
@@ -410,7 +414,7 @@ fun AllTransactionsDialog(
                 },
                 onOpenDatePickerModal = { showDatePickerModal = true },
                 onResetPeriodToAll = {
-                    periodState = periodState.onClearCustomOrLockedPeriod()
+                    periodState = periodState.onClearPeriodLock()
                 },
                 sortOption = sortOption,
                 onSortOptionChange = { sortOption = it },
@@ -426,6 +430,7 @@ fun AllTransactionsDialog(
                 sortedList = sortedList,
                 groupedByDate = groupedByDate,
                 filterType = filterType,
+                allTransactions = transactions,
                 onDeleteTransaction = onDeleteTransaction,
                 onRestoreTransaction = onRestoreTransaction,
                 onEditTransaction = onEditTransaction,
@@ -456,7 +461,7 @@ fun AllTransactionsDialog(
                 initialStart = periodState.customStartStr ?: visibleDateStr.value.ifBlank { "2026-07-01" },
                 initialEnd = periodState.customEndStr ?: visibleDateStr.value.ifBlank { "2026-08-31" },
                 onDismiss = { showDatePickerModal = false },
-                onRangeSelected = { s, e ->
+                onConfirm = { s, e ->
                     val label = try {
                         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
                         val outFmt = SimpleDateFormat("d MMM", Locale("ru", "RU"))
@@ -466,7 +471,7 @@ fun AllTransactionsDialog(
                     } catch (_: Exception) {
                         "$s .. $e"
                     }
-                    periodState = periodState.onCustomRangeSelected(s, e, label)
+                    periodState = periodState.onApplyCustomDateRange(s, e, label)
                     showDatePickerModal = false
                 }
             )
@@ -475,8 +480,6 @@ fun AllTransactionsDialog(
         if (showMixedCategoriesDialog) {
             MixedCategoriesDialog(
                 categoryTotalsMap = categoryTotalsMap,
-                totalCategorySum = totalCategorySum,
-                selectedCategoryFilter = selectedCategoryFilter,
                 getCategoryColor = ::getCategoryColor,
                 onSelectCategory = { catName ->
                     selectedCategoryFilter = if (selectedCategoryFilter == catName) null else catName
