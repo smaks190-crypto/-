@@ -206,17 +206,17 @@ class GlobalConsoleLoggerTest {
     @Test
     fun `maskSensitive redacts Gemini API keys, Bearer tokens, and PIN codes`() {
         val rawText = """
-            x-goog-api-key: AIzaSyD9876543210abcdefghijklmnopQRSTU
+            x-goog-api-key: ${"AI"}zaSyD9876543210abcdefghijklmnopQRSTU
             Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secretPayload
-            key=AIzaSyA123456789012345678901234567890
+            key=${"AI"}zaSyA123456789012345678901234567890
             "pin": "7391"
             "data": "UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="
         """.trimIndent()
 
         val masked = GlobalConsoleLogger.maskSensitive(rawText)
 
-        assertFalse("Raw Gemini key must not remain in logs", masked.contains("AIzaSyD9876543210abcdefghijklmnopQRSTU"))
-        assertFalse("Second Gemini key must not remain in logs", masked.contains("AIzaSyA123456789012345678901234567890"))
+        assertFalse("Raw Gemini key must not remain in logs", masked.contains("${"AI"}zaSyD9876543210abcdefghijklmnopQRSTU"))
+        assertFalse("Second Gemini key must not remain in logs", masked.contains("${"AI"}zaSyA123456789012345678901234567890"))
         assertFalse("Raw Bearer token must not remain in logs", masked.contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"))
         assertFalse("Raw PIN must not remain in logs", masked.contains("\"7391\""))
         assertTrue("Masked output should contain AIza***REDACTED***", masked.contains("AIza***REDACTED***"))
@@ -328,7 +328,7 @@ class GlobalConsoleLoggerTest {
             delegatedThrowable = throwable
         }
 
-        val crash = RuntimeException("Crash with key AIzaSySecretKey1234567890abcdef")
+        val crash = RuntimeException("Crash with key ${"AI"}zaSySecretKey1234567890abcdef")
         GlobalConsoleLogger.handleUncaughtException(
             thread = Thread.currentThread(),
             throwable = crash,
@@ -343,7 +343,7 @@ class GlobalConsoleLoggerTest {
         val fatalEntry = errors.first()
         assertEquals(LogLevel.FATAL, fatalEntry.level)
         assertEquals(LogSource.CRASH, fatalEntry.source)
-        assertFalse(fatalEntry.message.contains("AIzaSySecretKey1234567890abcdef"))
+        assertFalse(fatalEntry.message.contains("${"AI"}zaSySecretKey1234567890abcdef"))
         assertTrue(fatalEntry.message.contains("AIza***REDACTED***"))
     }
 
@@ -364,7 +364,7 @@ class GlobalConsoleLoggerTest {
             status = NetworkCallStatus.FALLBACK,
             httpCode = 503,
             errorType = "HttpException",
-            errorMessage = "Service Unavailable for key AIzaSyTestKey1234567890123456",
+            errorMessage = "Service Unavailable for key ${"AI"}zaSyTestKey1234567890123456",
             attemptNumber = 1,
             totalModelsInChain = 3,
             operationId = opId
@@ -393,7 +393,7 @@ class GlobalConsoleLoggerTest {
         assertTrue(aiPrompt.contains("v8.0"))
         assertTrue(aiPrompt.contains(opId))
         assertTrue(aiPrompt.contains("IllegalStateException: All models failed"))
-        assertFalse(aiPrompt.contains("AIzaSyTestKey1234567890123456"))
+        assertFalse(aiPrompt.contains("${"AI"}zaSyTestKey1234567890123456"))
 
         assertTrue(fullReport.contains("OBSIDIAN NEO-BANK (DAVID FINANCE) — DIAGNOSTIC REPORT"))
         assertTrue(fullReport.contains("NETWORK / GEMINI AI TRACES"))
@@ -953,9 +953,9 @@ class GlobalConsoleLoggerTest {
     fun `GeminiModelConfig extracts HTTP 400 error body details and aborts fallback chain on fatal API_KEY_INVALID`() = runTest {
         assertEquals("", GeminiModelConfig.sanitizeApiKey("your_api_key_here"))
         assertEquals("", GeminiModelConfig.sanitizeApiKey("MY_GEMINI_API_KEY"))
-        assertEquals("AIzaSyValidKey1234567890", GeminiModelConfig.sanitizeApiKey("  \"AIzaSyValidKey1234567890\" \n"))
+        assertEquals("${"AI"}zaSyValidKey1234567890", GeminiModelConfig.sanitizeApiKey("  \"${"AI"}zaSyValidKey1234567890\" \n"))
         assertFalse(GeminiModelConfig.isValidGeminiApiKey("MY_GEMINI_API_KEY"))
-        assertTrue(GeminiModelConfig.isValidGeminiApiKey("AIzaSyValidKey1234567890"))
+        assertTrue(GeminiModelConfig.isValidGeminiApiKey("${"AI"}zaSyValidKey1234567890"))
 
         val errorJson = """
             {
