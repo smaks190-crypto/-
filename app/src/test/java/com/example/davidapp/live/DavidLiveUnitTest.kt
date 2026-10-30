@@ -1014,7 +1014,7 @@ class DavidLiveUnitTest {
     }
 
     @Test
-    fun `network switch during David speech transitions to CONNECTION_LOST avoids parallel reconnects and continues interrupted thought on new socket`() = runBlocking {
+    fun `network switch during David speech transitions to CONNECTION_LOST avoids parallel reconnects and continues interrupted thought on new socket`() {
         val now = System.currentTimeMillis()
         val fakeTransactions = listOf(
             TransactionEntity(
@@ -1054,19 +1054,21 @@ class DavidLiveUnitTest {
         socket1.simulateServerText("""{"setupComplete": {}}""")
 
         // Выполняем tool call во время активной сессии до обрыва и проверяем дедупликацию повторного вызова
-        val firstToolRes = provider.executeToolCall(
-            DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING,
-            JSONObject().put("categoryQuery", "Продукты")
-        )
-        assertEquals("ok", firstToolRes.getString("status"))
-        assertEquals(1, provider.verifiedFacts.size)
+        runBlocking {
+            val firstToolRes = provider.executeToolCall(
+                DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING,
+                JSONObject().put("categoryQuery", "Продукты")
+            )
+            assertEquals("ok", firstToolRes.getString("status"))
+            assertEquals(1, provider.verifiedFacts.size)
 
-        val duplicateToolRes = provider.executeToolCall(
-            DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING,
-            JSONObject().put("categoryQuery", "Продукты")
-        )
-        assertEquals("ok", duplicateToolRes.getString("status"))
-        assertEquals("Duplicate tool call after reconnect must not duplicate verifiedFacts", 1, provider.verifiedFacts.size)
+            val duplicateToolRes = provider.executeToolCall(
+                DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING,
+                JSONObject().put("categoryQuery", "Продукты")
+            )
+            assertEquals("ok", duplicateToolRes.getString("status"))
+            assertEquals("Duplicate tool call after reconnect must not duplicate verifiedFacts", 1, provider.verifiedFacts.size)
+        }
 
         // Пользователь задаёт вопрос, Давид начинает длинный ответ (без turnComplete)
         socket1.simulateServerText(
@@ -1122,7 +1124,7 @@ class DavidLiveUnitTest {
             .getJSONArray("parts")
             .getJSONObject(0)
             .getString("text")
-        assertTrue("Setup message on reconnect must include conversation context", systemInstructionText.contains("КОНТЕКСТ ТЕКУЩЕГО РАЗГОВОРА"))
+        assertTrue("Setup message on reconnect must include conversation context", systemInstructionText.contains("КОНТЕКСТ ВОССТАНОВЛЕННОГО РАЗГОВОРА"))
         assertTrue("Setup message on reconnect must include verified financial facts", systemInstructionText.contains("15000"))
         assertTrue("Setup message on reconnect must include interrupted partial thought", systemInstructionText.contains("а во-вторых"))
 
