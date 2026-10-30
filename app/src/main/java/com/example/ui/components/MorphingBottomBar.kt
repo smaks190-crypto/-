@@ -999,7 +999,6 @@ fun MorphingBottomBar(
                                                             rmsLevel = rmsDb,
                                                             barCount = 32,
                                                             compact = false,
-                                                            spectrumBands = voiceManager.frequencyBands.collectAsState().value,
                                                             modifier = Modifier
                                                                 .fillMaxWidth()
                                                                 .height(40.dp)
