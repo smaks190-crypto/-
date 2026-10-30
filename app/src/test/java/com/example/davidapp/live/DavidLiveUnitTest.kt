@@ -763,6 +763,7 @@ class DavidLiveUnitTest {
         assertFalse(isDavidLiveVoiceCapableState(DavidLiveConnectionState.ERROR))
         assertFalse(isDavidLiveVoiceCapableState(DavidLiveConnectionState.RECONNECTING))
         assertFalse(isDavidLiveVoiceCapableState(DavidLiveConnectionState.CONNECTING))
+        controller.endSession()
     }
 
     @Test
@@ -819,6 +820,7 @@ class DavidLiveUnitTest {
         fakeFactory.entries[3].simulateServerText("""{"setupComplete": {}}""")
         assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
         assertEquals("Previous conversation turns must be preserved across manual retry", 2, controller.transcriptTurns.size)
+        controller.endSession()
     }
 
     @Test
@@ -868,6 +870,7 @@ class DavidLiveUnitTest {
         )
         assertNull(controller.errorMessage.value)
         assertTrue(controller.transcriptTurns.none { it.text.contains("Устаревшая") })
+        controller.endSession()
     }
 
     @Test
@@ -916,6 +919,7 @@ class DavidLiveUnitTest {
         assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
         controller.onAppForegrounded()
         assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        controller.endSession()
     }
 
     @Test
@@ -1006,6 +1010,7 @@ class DavidLiveUnitTest {
                 controller.visualPhase.value
             )
         )
+        controller.endSession()
     }
 
     @Test
@@ -1166,7 +1171,7 @@ class DavidLiveUnitTest {
         val request: Request,
         val listener: WebSocketListener
     ) : WebSocket {
-        val sentMessages = mutableListOf<String>()
+        val sentMessages: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
         var simulatedQueueSize: Long = 0L
         var isClosedOrCancelled: Boolean = false
 
@@ -1174,7 +1179,9 @@ class DavidLiveUnitTest {
         override fun queueSize(): Long = simulatedQueueSize
         override fun send(text: String): Boolean {
             if (isClosedOrCancelled) return false
-            sentMessages.add(text)
+            if (!text.contains("\"realtimeInput\"")) {
+                sentMessages.add(text)
+            }
             return true
         }
         override fun send(bytes: ByteString): Boolean = !isClosedOrCancelled

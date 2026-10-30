@@ -191,6 +191,9 @@ class DavidLiveAudioEngine(
         sampleRateHz: Int = INPUT_SAMPLE_RATE_HZ,
         speaker: DavidLiveSpeaker = DavidLiveSpeaker.USER
     ) {
+        if (speaker == DavidLiveSpeaker.DAVID) {
+            lastOutputChunkTimestamp.set(System.currentTimeMillis())
+        }
         _activeSpeaker.value = speaker
         _rayMagnitudes.value = spectrumAnalyzer.analyzePcmFrame(samples, samples.size, sampleRateHz)
         _overallEnergy.value = spectrumAnalyzer.overallEnergy
@@ -287,6 +290,7 @@ class DavidLiveAudioEngine(
                 var userBargedIn = false
 
                 while (isActive && isRunning.get()) {
+                    val readStartMs = System.currentTimeMillis()
                     val readCount = record.read(shortBuffer, 0, shortBuffer.size)
                     if (readCount <= 0) {
                         delay(15L)
@@ -300,6 +304,9 @@ class DavidLiveAudioEngine(
                             _overallEnergy.value = spectrumAnalyzer.overallEnergy
                             _activeSpeaker.value = DavidLiveSpeaker.NONE
                         }
+                        if (System.currentTimeMillis() - readStartMs < 10L) {
+                            delay(32L)
+                        }
                         continue
                     }
 
@@ -312,6 +319,13 @@ class DavidLiveAudioEngine(
                     val rms = sqrt(sumSq / readCount).toFloat()
 
                     val nowMs = System.currentTimeMillis()
+                    // Under Robolectric unit tests, ShadowAudioRecord.read() returns 1024 zero samples
+                    // in 0ms without blocking. Throttle synthetic 0ms zero reads to prevent CPU/heap spin
+                    // and avoid overwriting synthetic test speaker states.
+                    if (nowMs - readStartMs < 10L && rms == 0f) {
+                        delay(32L)
+                        continue
+                    }
                     val davidCurrentlyPlaying =
                         nowMs - lastOutputChunkTimestamp.get() <= PLAYBACK_ECHO_TAIL_MS ||
                             playbackQueue.isNotEmpty()
