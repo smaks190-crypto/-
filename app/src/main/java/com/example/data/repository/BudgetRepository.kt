@@ -148,21 +148,16 @@ class BudgetRepository(
 
         val typeText = if (type == "income") "Доход" else "Расход"
         
-        val debtsContext = if (activeDebts.isNotEmpty()) {
-            "\nТекущие долги пользователя:\n" +
-            activeDebts.filter { it.type == "we_owe" || it.type == "owes_us" }.joinToString("\n") { d ->
-                val txs = allTransactions.filter { it.accountId == d.id }
-                val isWeOwe = d.type != "owes_us"
-                val remaining = if (isWeOwe) {
-                    val inc = txs.filter { it.type == "income" }.sumOf { it.amount }
-                    val exp = txs.filter { it.type == "expense" }.sumOf { it.amount }
-                    d.balance + inc - exp
-                } else {
-                    val exp = txs.filter { it.type == "expense" }.sumOf { it.amount }
-                    val inc = txs.filter { it.type == "income" }.sumOf { it.amount }
-                    d.balance + exp - inc
-                }
-                "- ${if (isWeOwe) "Взял в долг/Кредит" else "Дал в долг"}: '${d.name}', изначальная сумма: ${d.balance} руб., осталось выплатить/вернуть: $remaining руб."
+        val snapshot = FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = allTransactions,
+            periodTransactions = allTransactions,
+            accounts = activeDebts
+        )
+
+        val debtsContext = if (snapshot.weOweDebts.isNotEmpty() || snapshot.owesUsDebts.isNotEmpty()) {
+            "\nСтрого разделённые долги пользователя (НЕ входят в баланс и доход):\n" +
+            (snapshot.weOweDebts + snapshot.owesUsDebts).joinToString("\n") { d ->
+                "- ${if (d.isWeOwe) "Я должен (обязательство, НЕ доход)" else "Мне должны (дебиторская задолженность, НЕ доход)"}: '${d.name}', изначальная сумма: ${d.initialAmount} руб., осталось выплатить/вернуть: ${d.remainingAmount} руб."
             } + "\n"
         } else ""
 
@@ -193,6 +188,10 @@ class BudgetRepository(
                 fullExtra +
                 historyContext +
                 "Напиши один короткий, саркастичный, ироничный комментарий от лица циничного финансового аудитора Жабова Давида (до 15-20 слов, на русском языке, сочный юмор или мемы).\n" +
+                "СТРОГОЕ ПРАВИЛО РАЗДЕЛЕНИЯ ДОХОДОВ, БАЛАНСА И ДОЛГОВ:\n" +
+                "- НИКОГДА не смешивай и не складывай в одну сумму зарплату (доход), текущий баланс (доступный остаток), обязательства «Я должен» и долги «Мне должны»!\n" +
+                "- «Я должен» — это пассив/обязательство, а НЕ доход и НЕ баланс.\n" +
+                "- «Мне должны» — это дебиторская задолженность (ожидаемый возврат), а НЕ заработанный доход и НЕ текущий остаток на руках.\n" +
                 "СТРОГОЕ ПРАВИЛО ПРО ДОЛГИ И ЦЕЛИ:\n" +
                 "- НЕ приминай долги и цели при каждой обычной бытовой операции!\n" +
                 "- Упоминай долги и цели ТОЛЬКО в следующих ситуациях:\n" +
@@ -227,6 +226,7 @@ class BudgetRepository(
                     "ТРИГГЕР «НОЧНОЙ ДОЗОР»: Операция совершена глубокой ночью (между 23:00 и 05:00). Обязательно упомяни ночной дожор или ночной шопинг!\n"
                 } else "") +
                 "ВАЖНОЕ ПРАВИЛО: Не упоминай долги и цели при каждой обычной бытовой операции! " +
+                "Никогда не смешивай зарплату, текущий баланс, «Я должен» и «Мне должны» в общий доход или общий баланс. " +
                 "Упоминай текущие долги или цели ТОЛЬКО при необоснованно больших тратах на ненужное, при слишком частых тратах на одну категорию (фастфуд, кофе и т.д.), либо при прямой работе с целями и долгами. " +
                 "При создании цели ОБЯЗАТЕЛЬНО разделяй целевую сумму и первый взнос. " +
                 "При возврате долга сравнивай взнос с общей суммой долга (например, 100 ₽ от 100 000 ₽ — это абсурд). " +
@@ -248,6 +248,80 @@ class BudgetRepository(
             details = "cat=$category",
             models = modelsToTry
         ) ?: generateLocalDavidComment(type, category, amount)
+    }
+
+    /**
+     * Генерирует ответ Давида Жабова на произвольный вопрос или сообщение пользователя в текстовом чате
+     * со строгим разделением доступного баланса, заработанного дохода (зарплаты), обязательств («Я должен»)
+     * и дебиторской задолженности («Мне должны»).
+     */
+    suspend fun generateDavidChatAnswer(
+        apiKey: String,
+        profileName: String,
+        userMessage: String,
+        snapshot: FinancialSemanticsSnapshot,
+        activeGoals: List<GoalEntity> = emptyList(),
+        conversationHistory: List<String> = emptyList()
+    ): String {
+        val cleanKey = GeminiModelConfig.sanitizeApiKey(apiKey)
+        if (cleanKey.isBlank()) {
+            return ""
+        }
+
+        val financialContext = FinancialSemanticsCalculator.formatPromptFinancialContext(snapshot)
+        val goalsSection = if (activeGoals.isNotEmpty()) {
+            "\nФинансовые цели пользователя:\n" +
+                activeGoals.joinToString("\n") { g ->
+                    "- '${g.name}': накоплено ${g.currentAmount.toLong()} ₽ из ${g.targetAmount.toLong()} ₽"
+                } + "\n"
+        } else ""
+
+        val historySection = if (conversationHistory.isNotEmpty()) {
+            "\nПоследние реплики диалога:\n" +
+                conversationHistory.takeLast(8).joinToString("\n") + "\n"
+        } else ""
+
+        val strictness = com.example.notifications.ReminderManager.getAuditorStrictness(context)
+        val systemPrompt = """
+            Ты — Жабов Давид 🐸, харизматичный, ироничный и финансово точный ИИ-аудитор в приложении David Finance.
+            ${strictness.systemPromptDirective}
+            ЖЕЛЕЗНЫЕ ПРАВИЛА ФИНАНСОВОЙ СЕМАНТИКИ (ЗАПРЕТ СМЕШИВАНИЯ):
+            1. СТРОГО различай 4 разные сущности и НИКОГДА не складывай их в один «общий доход» или «общий баланс»:
+               - Доступный остаток (текущий баланс на руках) — фактический остаток средств с учётом доходов и расходов;
+               - Заработанный доход за период (включая зарплату) — поступления от работы/подработки за период;
+               - Мои долги («Я должен») — обязательства пользователя (пассив), которые нужно отдать;
+               - Должны мне («Мне должны») — дебиторская задолженность (ожидаемый возврат), которой ещё нет на руках.
+            2. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
+               - прибавлять «Я должен» или «Мне должны» к доходу или к текущему балансу;
+               - складывать текущий баланс с зарплатой повторно как будто это два отдельных дохода;
+               - считать возврат выданного ранее долга новым заработанным доходом (это возврат основного долга, уменьшающий «Мне должны» и пополняющий остаток).
+            3. Когда пользователь спрашивает про свои деньги, доход, баланс или долги — называй эти показатели РАЗДЕЛЬНО и чётко указывай, какая сумма чем является.
+            4. Отвечай на русском языке, лаконично (2–5 предложений), с фирменной иронией Давида Жабова, выделяя ключевые суммы жирным шрифтом.
+        """.trimIndent()
+
+        val userQuery = buildString {
+            appendLine("Профиль пользователя: $profileName")
+            appendLine(financialContext)
+            if (goalsSection.isNotBlank()) appendLine(goalsSection)
+            if (historySection.isNotBlank()) appendLine(historySection)
+            appendLine("Сообщение пользователя: \"$userMessage\"")
+            appendLine("Ответь пользователю по существу его цифр, строго соблюдая разделение между доступным остатком, заработанным доходом (зарплатой), обязательствами «Я должен» и долгами «Мне должны».")
+        }
+
+        val request = GeminiRequest(
+            contents = listOf(GeminiContent(parts = listOf(GeminiPart(text = userQuery)))),
+            systemInstruction = GeminiContent(parts = listOf(GeminiPart(text = systemPrompt)))
+        )
+
+        return GeminiModelConfig.executeDavidReactionWithFallback(
+            apiService = apiService,
+            apiKey = cleanKey,
+            request = request,
+            operationType = "Ответ Давида в чате",
+            operationPrefix = "DAVID-CHAT",
+            details = "chat_reply",
+            models = GeminiModelConfig.DAVID_REACTION_MODELS
+        ).orEmpty()
     }
 
     suspend fun generateDavidCommentMulti(
@@ -1077,12 +1151,23 @@ class BudgetRepository(
             return@flow
         }
 
-        val totalIncome = filteredTransactions.filter { it.type == "income" }.sumOf { it.amount }
-        val totalExpense = filteredTransactions.filter { it.type == "expense" }.sumOf { it.amount }
+        val currentSnapshot = FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = allTransactions.ifEmpty { filteredTransactions },
+            periodTransactions = filteredTransactions,
+            accounts = activeDebts
+        )
+        val prevSnapshot = FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = allTransactions.ifEmpty { previousTransactions },
+            periodTransactions = previousTransactions,
+            accounts = activeDebts
+        )
+
+        val totalIncome = currentSnapshot.earnedIncomeRub
+        val totalExpense = currentSnapshot.totalExpenseRub
         val net = totalIncome - totalExpense
 
-        val prevIncome = previousTransactions.filter { it.type == "income" }.sumOf { it.amount }
-        val prevExpense = previousTransactions.filter { it.type == "expense" }.sumOf { it.amount }
+        val prevIncome = prevSnapshot.earnedIncomeRub
+        val prevExpense = prevSnapshot.totalExpenseRub
         val prevNet = prevIncome - prevExpense
 
         val netDiff = net - prevNet
@@ -1092,18 +1177,27 @@ class BudgetRepository(
         val hasPrev = previousTransactions.isNotEmpty()
         val isBetter = if (hasPrev) netDiff >= 0 else net >= 0
 
-        val incomesSummary = filteredTransactions.filter { it.type == "income" }.map {
-            mapOf("cat" to it.category, "sub" to it.subcategory, "sum" to it.amount)
-        }
+        val incomesSummary = filteredTransactions
+            .filter { it.type == "income" && !FinancialSemanticsCalculator.isDebtTransaction(it) && !FinancialSemanticsCalculator.isBalanceAdjustmentTransaction(it) }
+            .map {
+                mapOf("cat" to it.category, "sub" to it.subcategory, "sum" to it.amount)
+            }
         val expensesSummary = filteredTransactions.filter { it.type == "expense" }.map {
             mapOf("cat" to it.category, "sub" to it.subcategory, "sum" to it.amount)
         }
 
         val comparisonDump = mapOf(
             "period" to periodName,
+            "availableBalanceRub" to currentSnapshot.availableBalanceRub,
             "currentIncome" to totalIncome,
+            "salaryIncomeRub" to currentSnapshot.salaryIncomeRub,
+            "debtReturnedRub" to currentSnapshot.debtReturnedIncomeRub,
             "currentExpense" to totalExpense,
+            "regularExpenseRub" to currentSnapshot.regularExpenseRub,
+            "debtRepaymentRub" to currentSnapshot.debtRepaymentExpenseRub,
             "currentNet" to net,
+            "totalWeOweRub" to currentSnapshot.totalWeOweRub,
+            "totalOwesUsRub" to currentSnapshot.totalOwesUsRub,
             "hasPreviousData" to hasPrev,
             "previousIncome" to prevIncome,
             "previousExpense" to prevExpense,
@@ -1118,11 +1212,12 @@ class BudgetRepository(
 
         val userQuery = "Проведи подробный финансовый аудит бюджета за прошлый период по предоставленным данным.\n\n" +
                 "DATA: $comparisonDump\n\n" +
+                FinancialSemanticsCalculator.formatPromptFinancialContext(currentSnapshot) + "\n" +
                 "СТРУКТУРА ОТВЕТА:\n" +
                 "# Главный Вердикт\n" +
                 "Крупный вывод первой строчкой: результат изменился в **ЛУЧШУЮ** или **ХУДШУЮ** сторону по сравнению с прошлым периодом.\n\n" +
                 "## Цифры и Динамика\n" +
-                "Сравнительные итоги с процентами и разницей.\n\n" +
+                "Сравнительные итоги с процентами и разницей. Обязательно разделяй заработанный доход, текущий доступный остаток, обязательства «Я должен» и задолженность «Мне должны» (не складывай их в один доход!).\n\n" +
                 "## Прожарка Транжиры\n" +
                 "Искрометный разбор нелепых трат с миксом популярных и актуальных мемов, широкой мировой литературы различных авторов и эпох, а также исторических аналогий.\n\n" +
                 "## Ачивки и Достижения\n" +
@@ -1134,7 +1229,8 @@ class BudgetRepository(
         val croakThreshold = com.example.notifications.ReminderManager.getCroakThresholdAmount(context)
         val systemPrompt = "Ты — Давид Жабов 🐸, высокоэрудированный финансовый аудитор.\n" +
                 "${strictness.systemPromptDirective}\n" +
-                "Порог крупной разовой траты («Порог кваканья» пользователя): $croakThreshold ₽. Обращай особое внимание на операции выше этой суммы.\n\n" +
+                "Порог крупной разовой траты («Порог кваканья» пользователя): $croakThreshold ₽. Обращай особое внимание на операции выше этой суммы.\n" +
+                "СТРОГОЕ ПРАВИЛО ФИНАНСОВОЙ СЕМАНТИКИ: НИКОГДА не складывай зарплату (доход за период), доступный остаток (текущий баланс), обязательства «Я должен» и долги «Мне должны» в одну общую сумму дохода или баланса! Это 4 разные экономические сущности.\n\n" +
                 "Дели свой ответ на короткие, законченные по смыслу блоки (как отдельные СМС-сообщения). Разделяй каждый блок двумя переносами строк (\\n\\n). Не пиши всё одним монолитным текстом.\n\n" +
                 "РОЛЬ И СТИЛЬ:\n" +
                 "- Виртуозно миксуй 3 элемента:\n" +
@@ -1272,12 +1368,23 @@ class BudgetRepository(
             return Result.failure(Exception("ERROR_NO_CONNECTION"))
         }
 
-        val totalIncome = filteredTransactions.filter { it.type == "income" }.sumOf { it.amount }
-        val totalExpense = filteredTransactions.filter { it.type == "expense" }.sumOf { it.amount }
+        val currentSnapshot = FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = allTransactions.ifEmpty { filteredTransactions },
+            periodTransactions = filteredTransactions,
+            accounts = activeDebts
+        )
+        val prevSnapshot = FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = allTransactions.ifEmpty { previousTransactions },
+            periodTransactions = previousTransactions,
+            accounts = activeDebts
+        )
+
+        val totalIncome = currentSnapshot.earnedIncomeRub
+        val totalExpense = currentSnapshot.totalExpenseRub
         val net = totalIncome - totalExpense
 
-        val prevIncome = previousTransactions.filter { it.type == "income" }.sumOf { it.amount }
-        val prevExpense = previousTransactions.filter { it.type == "expense" }.sumOf { it.amount }
+        val prevIncome = prevSnapshot.earnedIncomeRub
+        val prevExpense = prevSnapshot.totalExpenseRub
         val prevNet = prevIncome - prevExpense
 
         val netDiff = net - prevNet
@@ -1287,18 +1394,27 @@ class BudgetRepository(
         val hasPrev = previousTransactions.isNotEmpty()
         val isBetter = if (hasPrev) netDiff >= 0 else net >= 0
 
-        val incomesSummary = filteredTransactions.filter { it.type == "income" }.map {
-            mapOf("cat" to it.category, "sub" to it.subcategory, "sum" to it.amount)
-        }
+        val incomesSummary = filteredTransactions
+            .filter { it.type == "income" && !FinancialSemanticsCalculator.isDebtTransaction(it) && !FinancialSemanticsCalculator.isBalanceAdjustmentTransaction(it) }
+            .map {
+                mapOf("cat" to it.category, "sub" to it.subcategory, "sum" to it.amount)
+            }
         val expensesSummary = filteredTransactions.filter { it.type == "expense" }.map {
             mapOf("cat" to it.category, "sub" to it.subcategory, "sum" to it.amount)
         }
 
         val comparisonDump = mapOf(
             "period" to periodName,
+            "availableBalanceRub" to currentSnapshot.availableBalanceRub,
             "currentIncome" to totalIncome,
+            "salaryIncomeRub" to currentSnapshot.salaryIncomeRub,
+            "debtReturnedRub" to currentSnapshot.debtReturnedIncomeRub,
             "currentExpense" to totalExpense,
+            "regularExpenseRub" to currentSnapshot.regularExpenseRub,
+            "debtRepaymentRub" to currentSnapshot.debtRepaymentExpenseRub,
             "currentNet" to net,
+            "totalWeOweRub" to currentSnapshot.totalWeOweRub,
+            "totalOwesUsRub" to currentSnapshot.totalOwesUsRub,
             "hasPreviousData" to hasPrev,
             "previousIncome" to prevIncome,
             "previousExpense" to prevExpense,
@@ -1313,11 +1429,12 @@ class BudgetRepository(
 
         val userQuery = "Проведи подробный финансовый аудит бюджета за прошлый период по предоставленным данным.\n\n" +
                 "DATA: $comparisonDump\n\n" +
+                FinancialSemanticsCalculator.formatPromptFinancialContext(currentSnapshot) + "\n" +
                 "СТРУКТУРА ОТВЕТА:\n" +
                 "# Главный Вердикт\n" +
                 "Крупный вывод первой строчкой: результат изменился в **ЛУЧШУЮ** или **ХУДШУЮ** сторону по сравнению с прошлым периодом.\n\n" +
                 "## Цифры и Динамика\n" +
-                "Сравнительные итоги с процентами и разницей.\n\n" +
+                "Сравнительные итоги с процентами и разницей. Обязательно разделяй заработанный доход, текущий доступный остаток, обязательства «Я должен» и задолженность «Мне должны» (не складывай их в один доход!).\n\n" +
                 "## Прожарка Транжиры\n" +
                 "Искрометный разбор нелепых трат с миксом популярных и актуальных мемов, широкой мировой литературы различных авторов и эпох, а также исторических аналогий.\n\n" +
                 "## Ачивки и Достижения\n" +
@@ -1329,7 +1446,8 @@ class BudgetRepository(
         val croakThreshold = com.example.notifications.ReminderManager.getCroakThresholdAmount(context)
         val systemPrompt = "Ты — Давид Жабов 🐸, высокоэрудированный финансовый аудитор.\n" +
                 "${strictness.systemPromptDirective}\n" +
-                "Порог крупной разовой траты («Порог кваканья» пользователя): $croakThreshold ₽. Обращай особое внимание на операции выше этой суммы.\n\n" +
+                "Порог крупной разовой траты («Порог кваканья» пользователя): $croakThreshold ₽. Обращай особое внимание на операции выше этой суммы.\n" +
+                "СТРОГОЕ ПРАВИЛО ФИНАНСОВОЙ СЕМАНТИКИ: НИКОГДА не складывай зарплату (доход за период), доступный остаток (текущий баланс), обязательства «Я должен» и долги «Мне должны» в одну общую сумму дохода или баланса! Это 4 разные экономические сущности.\n\n" +
                 "РОЛЬ И СТИЛЬ:\n" +
                 "- Виртуозно миксуй 3 элемента:\n" +
                 "  а) популярные классические и самые актуальные интернет-мемы, тренды и вирусы поп-культуры (от культовых мемов прошлых лет до свежих трендов и забавных ситуаций),\n" +

@@ -5,6 +5,7 @@ import com.example.data.db.CategoryDao
 import com.example.data.db.GoalDao
 import com.example.data.db.TransactionDao
 import com.example.data.db.TransactionEntity
+import com.example.data.repository.FinancialSemanticsCalculator
 import kotlinx.coroutines.flow.firstOrNull
 import org.json.JSONArray
 import org.json.JSONObject
@@ -60,8 +61,9 @@ class DavidLiveFinancialToolsProvider(
                     put("name", TOOL_FINANCIAL_OVERVIEW)
                     put(
                         "description",
-                        "Получить реальную сводку по бюджету пользователя за последние 30 дней: " +
-                            "общий баланс, доходы, расходы, чистый денежный поток, дневной темп трат и прогноз остатка до конца месяца."
+                        "Получить реальную сводку по бюджету пользователя за последние 30 дней со строгим разделением: " +
+                            "доступный остаток (текущий баланс), заработанный доход (в т.ч. зарплата), расходы, " +
+                            "мои обязательства («Я должен») и дебиторская задолженность («Мне должны»)."
                     )
                     put(
                         "parameters",
@@ -104,7 +106,8 @@ class DavidLiveFinancialToolsProvider(
                     put("name", TOOL_GOALS_AND_DEBTS)
                     put(
                         "description",
-                        "Получить список реальных финансовых целей (копилок) и счетов/долгов пользователя с текущим прогрессом."
+                        "Получить список реальных финансовых целей (копилок) и отдельно долгов пользователя " +
+                            "(«Я должен» — обязательства и «Мне должны» — дебиторская задолженность) с остатками."
                     )
                     put(
                         "parameters",
@@ -228,41 +231,55 @@ class DavidLiveFinancialToolsProvider(
         val transactions = allTransactions.filter { parseTransactionMillis(it) >= thirtyDaysAgo }
         val accounts = accountDao?.getAccountsByBudgetId(budgetId)?.firstOrNull().orEmpty()
 
-        val accountsBalance = if (accounts.isNotEmpty()) {
-            accounts.sumOf { it.balance }
-        } else {
-            val allIncomes = allTransactions.filter { it.type.equals("income", ignoreCase = true) }.sumOf { it.amount }
-            val allExpenses = allTransactions.filter { it.type.equals("expense", ignoreCase = true) }.sumOf { it.amount }
-            val netAll = allIncomes - allExpenses
-            if (netAll != 0.0 || allTransactions.isNotEmpty()) netAll else currentTotalBalanceProvider()
-        }
+        val snapshot = FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = allTransactions,
+            periodTransactions = transactions,
+            accounts = accounts,
+            fallbackBalance = currentTotalBalanceProvider()
+        )
 
-        val totalIncome = transactions.filter { it.type.equals("income", ignoreCase = true) }
-            .sumOf { it.amount }
-        val totalExpense = transactions.filter { it.type.equals("expense", ignoreCase = true) }
-            .sumOf { it.amount }
-        val netFlow = totalIncome - totalExpense
-        val dailyBurnRate = totalExpense / 30.0
+        val availableBalance = snapshot.availableBalanceRub
+        val earnedIncome = snapshot.earnedIncomeRub
+        val totalExpense = snapshot.totalExpenseRub
+        val netFlow = earnedIncome - totalExpense
+        val dailyBurnRate = snapshot.regularExpenseRub / 30.0
 
         val cal = Calendar.getInstance()
         val maxDay = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
         val currentDay = cal.get(Calendar.DAY_OF_MONTH)
         val remainingDaysInMonth = (maxDay - currentDay).coerceAtLeast(1)
         val projectedRemainingExpense = dailyBurnRate * remainingDaysInMonth
-        val projectedEndOfMonthBalance = accountsBalance - projectedRemainingExpense
+        val projectedEndOfMonthBalance = availableBalance - projectedRemainingExpense
 
-        val summary = "Баланс: ${accountsBalance.roundToLong()} ₽, " +
-            "Доходы (30 дн.): ${totalIncome.roundToLong()} ₽, " +
-            "Расходы (30 дн.): ${totalExpense.roundToLong()} ₽, " +
-            "Средний расход в день: ${dailyBurnRate.roundToLong()} ₽/день, " +
-            "Прогноз остатка к концу месяца: ${projectedEndOfMonthBalance.roundToLong()} ₽."
+        val summary = buildString {
+            append("Доступный остаток (баланс): ${availableBalance.roundToLong()} ₽ (НЕ суммировать с зарплатой и долгами), ")
+            append("Заработанный доход (30 дн.): ${earnedIncome.roundToLong()} ₽ (в т.ч. зарплата: ${snapshot.salaryIncomeRub.roundToLong()} ₽), ")
+            if (snapshot.debtReturnedIncomeRub > 0.0) {
+                append("Возврат долгов мне (30 дн.): ${snapshot.debtReturnedIncomeRub.roundToLong()} ₽ (не является доходом), ")
+            }
+            append("Расходы (30 дн.): ${totalExpense.roundToLong()} ₽, ")
+            append("Я должен (обязательства): ${snapshot.totalWeOweRub.roundToLong()} ₽, ")
+            append("Мне должны (дебиторская задолженность): ${snapshot.totalOwesUsRub.roundToLong()} ₽, ")
+            append("Средний расход в день: ${dailyBurnRate.roundToLong()} ₽/день, ")
+            append("Прогноз остатка к концу месяца: ${projectedEndOfMonthBalance.roundToLong()} ₽.")
+        }
 
         return JSONObject().apply {
             put("status", "ok")
-            put("hasData", transactions.isNotEmpty() || accounts.isNotEmpty() || accountsBalance != 0.0)
-            put("totalBalanceRub", accountsBalance.roundToLong())
-            put("income30dRub", totalIncome.roundToLong())
+            put("hasData", transactions.isNotEmpty() || accounts.isNotEmpty() || availableBalance != 0.0)
+            put("totalBalanceRub", availableBalance.roundToLong())
+            put("availableBalanceRub", availableBalance.roundToLong())
+            put("income30dRub", earnedIncome.roundToLong())
+            put("earnedIncome30dRub", earnedIncome.roundToLong())
+            put("salaryIncome30dRub", snapshot.salaryIncomeRub.roundToLong())
+            put("otherEarnedIncome30dRub", snapshot.otherEarnedIncomeRub.roundToLong())
+            put("balanceAdjustment30dRub", snapshot.balanceAdjustmentRub.roundToLong())
+            put("debtReturned30dRub", snapshot.debtReturnedIncomeRub.roundToLong())
             put("expense30dRub", totalExpense.roundToLong())
+            put("regularExpense30dRub", snapshot.regularExpenseRub.roundToLong())
+            put("debtRepayment30dRub", snapshot.debtRepaymentExpenseRub.roundToLong())
+            put("totalWeOweRub", snapshot.totalWeOweRub.roundToLong())
+            put("totalOwesUsRub", snapshot.totalOwesUsRub.roundToLong())
             put("netCashFlow30dRub", netFlow.roundToLong())
             put("dailyBurnRateRub", dailyBurnRate.roundToLong())
             put("remainingDaysInMonth", remainingDaysInMonth)
@@ -336,8 +353,17 @@ class DavidLiveFinancialToolsProvider(
 
     private suspend fun queryGoalsAndDebts(): JSONObject {
         val goals = goalDao?.getGoalsByBudgetId(budgetId)?.firstOrNull().orEmpty()
+        val accounts = accountDao?.getAccountsByBudgetId(budgetId)?.firstOrNull().orEmpty()
+        val allTransactions = transactionDao?.getTransactionsByBudgetId(budgetId)?.firstOrNull().orEmpty()
+
+        val snapshot = FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = allTransactions,
+            periodTransactions = allTransactions,
+            accounts = accounts
+        )
+
         val goalsArray = JSONArray()
-        val summaryParts = mutableListOf<String>()
+        val goalSummaryParts = mutableListOf<String>()
 
         for (goal in goals) {
             val progressPct = if (goal.targetAmount > 0.0) {
@@ -354,22 +380,73 @@ class DavidLiveFinancialToolsProvider(
                     put("progressPercent", progressPct)
                 }
             )
-            summaryParts.add(
+            goalSummaryParts.add(
                 "${goal.name}: накоплено ${goal.currentAmount.roundToLong()} ₽ из ${goal.targetAmount.roundToLong()} ₽ ($progressPct%)"
             )
         }
 
-        val humanSummary = if (summaryParts.isEmpty()) {
-            "У пользователя пока нет активных финансовых целей."
+        val weOweArray = JSONArray()
+        val owesUsArray = JSONArray()
+        val debtsArray = JSONArray()
+        val debtSummaryParts = mutableListOf<String>()
+
+        for (debt in snapshot.weOweDebts) {
+            val obj = JSONObject().apply {
+                put("id", debt.id)
+                put("name", debt.name)
+                put("direction", "we_owe")
+                put("directionLabel", "Я должен (обязательство)")
+                put("initialAmountRub", debt.initialAmount.roundToLong())
+                put("repaidAmountRub", debt.repaidAmount.roundToLong())
+                put("remainingAmountRub", debt.remainingAmount.roundToLong())
+            }
+            weOweArray.put(obj)
+            debtsArray.put(obj)
+            debtSummaryParts.add(
+                "Я должен '${debt.name}': остаток ${debt.remainingAmount.roundToLong()} ₽ (из ${debt.initialAmount.roundToLong()} ₽)"
+            )
+        }
+
+        for (debt in snapshot.owesUsDebts) {
+            val obj = JSONObject().apply {
+                put("id", debt.id)
+                put("name", debt.name)
+                put("direction", "owes_us")
+                put("directionLabel", "Мне должны (дебиторская задолженность)")
+                put("initialAmountRub", debt.initialAmount.roundToLong())
+                put("returnedAmountRub", debt.repaidAmount.roundToLong())
+                put("remainingAmountRub", debt.remainingAmount.roundToLong())
+            }
+            owesUsArray.put(obj)
+            debtsArray.put(obj)
+            debtSummaryParts.add(
+                "Мне должны '${debt.name}': остаток ${debt.remainingAmount.roundToLong()} ₽ (из ${debt.initialAmount.roundToLong()} ₽)"
+            )
+        }
+
+        val goalsSection = if (goalSummaryParts.isEmpty()) {
+            "Активных финансовых целей нет."
         } else {
-            "Финансовые цели: " + summaryParts.joinToString("; ")
+            "Финансовые цели: " + goalSummaryParts.joinToString("; ")
+        }
+        val debtsSection = if (debtSummaryParts.isEmpty()) {
+            "Активных долгов нет (Я должен: 0 ₽, Мне должны: 0 ₽)."
+        } else {
+            "Долги (НЕ входят в баланс и доход): Я должен всего ${snapshot.totalWeOweRub.roundToLong()} ₽, Мне должны всего ${snapshot.totalOwesUsRub.roundToLong()} ₽ (" +
+                debtSummaryParts.joinToString("; ") + ")."
         }
 
         return JSONObject().apply {
             put("status", "ok")
             put("count", goals.size)
             put("items", goalsArray)
-            put("humanSummary", humanSummary)
+            put("debtsCount", snapshot.weOweDebts.size + snapshot.owesUsDebts.size)
+            put("debts", debtsArray)
+            put("weOweDebts", weOweArray)
+            put("owesUsDebts", owesUsArray)
+            put("totalWeOweRub", snapshot.totalWeOweRub.roundToLong())
+            put("totalOwesUsRub", snapshot.totalOwesUsRub.roundToLong())
+            put("humanSummary", "$goalsSection $debtsSection")
         }
     }
 
@@ -392,10 +469,19 @@ class DavidLiveFinancialToolsProvider(
             ts in previousStart until currentStart
         }
 
-        val currentExpense = currentTx.filter { it.type.equals("expense", ignoreCase = true) }.sumOf { it.amount }
-        val previousExpense = previousTx.filter { it.type.equals("expense", ignoreCase = true) }.sumOf { it.amount }
-        val currentIncome = currentTx.filter { it.type.equals("income", ignoreCase = true) }.sumOf { it.amount }
-        val previousIncome = previousTx.filter { it.type.equals("income", ignoreCase = true) }.sumOf { it.amount }
+        val currentSnapshot = FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = allTx,
+            periodTransactions = currentTx
+        )
+        val previousSnapshot = FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = allTx,
+            periodTransactions = previousTx
+        )
+
+        val currentExpense = currentSnapshot.totalExpenseRub
+        val previousExpense = previousSnapshot.totalExpenseRub
+        val currentIncome = currentSnapshot.earnedIncomeRub
+        val previousIncome = previousSnapshot.earnedIncomeRub
 
         val expenseDiffPercent = if (previousExpense > 0.0) {
             (((currentExpense - previousExpense) / previousExpense) * 100.0).roundToLong()
