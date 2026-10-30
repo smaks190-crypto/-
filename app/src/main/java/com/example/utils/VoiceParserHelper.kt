@@ -45,8 +45,8 @@ object VoiceParserHelper {
             "зарплата" to "Доходы", "доход" to "Доходы", "аванс" to "Доходы", "перевод" to "Доходы", "кешбэк" to "Доходы", "пришло" to "Доходы"
         )
 
-        // Find numbers/amounts and compile matches
-        val numberRegex = "(\\d+(?:\\.\\d+)?)\\s*(?:руб|р|\\s|$)".toRegex()
+        // Find numbers/amounts and compile matches (supporting 'к', 'k', 'тыс' and punctuation boundaries)
+        val numberRegex = "(\\d+(?:\\.\\d+)?)\\s*(тыс(?:яч[аи]?)?|к|k)?\\s*(?:руб(?:л(?:ей|я|ь)?)?|р|₽)?(?=[,;\\s]|$)".toRegex()
         val matches = numberRegex.findAll(cleanText).toList()
 
         val operations = mutableListOf<ParsedVoiceOperation>()
@@ -74,7 +74,13 @@ object VoiceParserHelper {
         }
 
         for ((idx, match) in matches.withIndex()) {
-            val amount = match.groupValues[1].toDoubleOrNull() ?: 0.0
+            val baseAmount = match.groupValues[1].toDoubleOrNull() ?: 0.0
+            val multiplierGroup = match.groupValues.getOrNull(2).orEmpty()
+            val amount = if (multiplierGroup.isNotEmpty() && baseAmount < 1000.0) {
+                baseAmount * 1000.0
+            } else {
+                baseAmount
+            }
             val matchIndex = match.range.first
 
             val prevMatchEnd = if (idx > 0) matches[idx - 1].range.last + 1 else 0
