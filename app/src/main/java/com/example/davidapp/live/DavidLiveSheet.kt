@@ -1093,10 +1093,11 @@ fun DavidLiveSheet(
 
                             Spacer(modifier = Modifier.width(20.dp))
 
-                            // Center: Red End Call / "Отменить" pill button
-                            Row(
+                            // Centered end-call button without the redundant close icon
+                            Box(
                                 modifier = Modifier
                                     .height(54.dp)
+                                    .width(160.dp)
                                     .shadow(
                                         elevation = 12.dp,
                                         shape = RoundedCornerShape(27.dp),
@@ -1116,31 +1117,15 @@ fun DavidLiveSheet(
                                         role = Role.Button,
                                         onClick = onEndSession
                                     )
-                                    .padding(horizontal = 20.dp)
                                     .testTag("david_live_cancel_button"),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.Black.copy(alpha = 0.18f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
                                 Text(
                                     text = "Отменить",
                                     color = Color.White,
                                     fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = TextAlign.Center
                                 )
                             }
 

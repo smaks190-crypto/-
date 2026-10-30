@@ -156,7 +156,7 @@ object GlobalConsoleLogger {
     private val geminiKeyRegex = Regex("""AIza[0-9A-Za-z_\-]{16,}""")
     private val bearerTokenRegex = Regex("""(?i)(Bearer\s+)[A-Za-z0-9._\-+/=]{8,}""")
     private val headerApiKeyRegex = Regex("""(?i)(x-goog-api-key\s*[:=]\s*)(?!AIza\*\*\*\[MASKED_API_KEY\])([^\s,;"]+)""")
-    private val queryKeyParamRegex = Regex("""(?i)(?<![A-Za-z0-9_\-])((?:api[_-]?key|key|token|secret|password|pin|pin[_-]?hash|access[_-]?token)\s*[:=]\s*["']?)(?!\[MASKED|AIza\*\*\*\[MASKED)([^"'\s&,;}{]+)(["']?)""")
+    private val queryKeyParamRegex = Regex("""(?i)(?<![A-Za-z0-9_\-])(["']?(?:api[_-]?key|key|token|secret|password|pin|pin[_-]?hash|access[_-]?token)["']?\s*[:=]\s*["']?)(?!\[MASKED|AIza\*\*\*\[MASKED)([^"'\s&,;}{]+)(["']?)""")
     private val base64AudioBlobRegex = Regex("""("data"\s*:\s*")[A-Za-z0-9+/=\r\n]{80,}(")""")
     private val cardNumberRegex = Regex("""\b(?:\d[ -]*?){13,19}\b""")
 

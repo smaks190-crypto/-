@@ -63,10 +63,13 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -99,6 +102,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -316,7 +321,7 @@ fun MorphingBottomBar(
         }
     }
 
-    fun triggerVoiceMode() {
+    fun triggerVoiceMode(overrideConsentGiven: Boolean? = null, overrideApiKey: String? = null) {
         if (isDavidLiveActive) {
             Toast.makeText(
                 context,
@@ -330,11 +335,13 @@ fun MorphingBottomBar(
             onDismissManualInput()
         }
         viewModel.openModal(BottomCapsuleModal.VoiceInput)
-        if (!isConsentGiven) {
+        val effectiveConsent = overrideConsentGiven ?: isConsentGiven
+        if (!effectiveConsent) {
             showInlineConsent = true
             return
         }
-        if (apiKey.isBlank()) {
+        val effectiveKey = (overrideApiKey ?: apiKey).trim()
+        if (effectiveKey.isBlank()) {
             showInlineApiKey = true
             return
         }
@@ -899,7 +906,7 @@ fun MorphingBottomBar(
                                                         if (apiKey.isBlank()) {
                                                             showInlineApiKey = true
                                                         } else {
-                                                            triggerVoiceMode()
+                                                            triggerVoiceMode(overrideConsentGiven = true)
                                                         }
                                                     },
                                                     onDecline = {
@@ -914,9 +921,21 @@ fun MorphingBottomBar(
                                                     currentKey = apiKey,
                                                     contentAlpha = 1f,
                                                     onSaveKey = { newKey ->
-                                                        viewModel.saveApiKey(newKey)
-                                                        showInlineApiKey = false
-                                                        triggerVoiceMode()
+                                                        val sanitized = com.example.data.api.GeminiModelConfig.sanitizeApiKey(newKey)
+                                                        if (sanitized.isBlank()) {
+                                                            Toast.makeText(
+                                                                context,
+                                                                "Введите корректный API ключ Gemini",
+                                                                Toast.LENGTH_SHORT
+                                                            ).show()
+                                                        } else {
+                                                            viewModel.saveApiKey(sanitized)
+                                                            showInlineApiKey = false
+                                                            triggerVoiceMode(
+                                                                overrideConsentGiven = true,
+                                                                overrideApiKey = sanitized
+                                                            )
+                                                        }
                                                     },
                                                     onCancel = {
                                                         cancelAndCollapseToNav()
@@ -1286,6 +1305,7 @@ private fun VoiceApiKeyPane(
 ) {
     val context = LocalContext.current
     var keyText by remember(currentKey) { mutableStateOf(currentKey) }
+    var isKeyVisible by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -1346,6 +1366,24 @@ private fun VoiceApiKeyPane(
             onValueChange = { keyText = it },
             placeholder = { Text("AIzaSy...", color = Slate400, fontSize = 13.sp) },
             singleLine = true,
+            visualTransformation = if (isKeyVisible) {
+                VisualTransformation.None
+            } else {
+                PasswordVisualTransformation('•')
+            },
+            trailingIcon = {
+                IconButton(
+                    onClick = { isKeyVisible = !isKeyVisible },
+                    modifier = Modifier.testTag("toggle_voice_api_key_visibility")
+                ) {
+                    Icon(
+                        imageVector = if (isKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = if (isKeyVisible) "Скрыть ключ" else "Показать ключ",
+                        tint = Slate400,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("voice_api_key_input"),
@@ -1379,4 +1417,3 @@ private fun VoiceApiKeyPane(
         }
     }
 }
-

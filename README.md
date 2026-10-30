@@ -15,7 +15,7 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v11.05 (сборка 229)
+### Версия v11.06 (сборка 247)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
@@ -23,10 +23,27 @@
 
 ## Что изменилось
 
-### Документация и сборка
-- Apply release notes localization patch directly to main script ([9aa92ba](https://github.com/smaks190-crypto/-/commit/9aa92ba6eaf831a357e774e85bdeae9798cac614))
+### Исправлено
+- Mask voice API key, fix save-and-start transition, and sync AllTransactions month on scroll ([dc95092](https://github.com/smaks190-crypto/-/commit/dc95092fe80b0c424593cfc75ee153458dbfbeb2))
+- Remove nonexistent frequencyBands reference in voice visualizer ([00c7193](https://github.com/smaks190-crypto/-/commit/00c7193ceb152770ca367daaa76d72e16e8b93fb))
+- Restore category color helpers for dialog ([8f204c3](https://github.com/smaks190-crypto/-/commit/8f204c3a4744a5489a41f2e6917b0b83127c62cd))
+- Wire restored category color resolver ([3dcdba4](https://github.com/smaks190-crypto/-/commit/3dcdba4d8237b610d9ce97dc982dae583c6408bf))
+- Center cancel label and remove redundant close icon ([9b62e39](https://github.com/smaks190-crypto/-/commit/9b62e392aa360eb8d86f86ef8e098d2e063c4c4d))
+- Replace input controls with minimized Live capsule ([feb56f0](https://github.com/smaks190-crypto/-/commit/feb56f02a4eba0257688ac4ce17662f1d303b174))
+- Close input composable after AnimatedContent refactor ([31146c6](https://github.com/smaks190-crypto/-/commit/31146c60c95c0a67d6c1c17c68e61b061c7fcf63))
+- Restore MorphingBottomBar voice wiring from main, keep only API-key changes ([b2e5c6e](https://github.com/smaks190-crypto/-/commit/b2e5c6ee390a01edb82ebe8f65b9df539d4105bc))
+- Restore TransactionFilterUtils from main ([08580ac](https://github.com/smaks190-crypto/-/commit/08580ac82906798a37cfc25489306ee6f4ec8947))
+- Align dialog call signatures and restore initial date ([bd6ce95](https://github.com/smaks190-crypto/-/commit/bd6ce95816e935f45ec2d871395e7327240d73d1))
+- Pass category count threshold as Int ([614d85f](https://github.com/smaks190-crypto/-/commit/614d85f0b1feab632d73de4460d9e0707e55e342))
+- Sync unlocked period state with visible scroll month ([4e4234f](https://github.com/smaks190-crypto/-/commit/4e4234fc1777a9be0b1896e61b427c106c72f923))
+- Redact quoted JSON secret keys including PIN ([1baf056](https://github.com/smaks190-crypto/-/commit/1baf056a2d53cf968e4548292bc5fad91a8f3b4c))
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.04-build.227...v11.05-build.229
+### Документация и сборка
+- Construct dummy API keys without literal secret patterns ([3e00cdd](https://github.com/smaks190-crypto/-/commit/3e00cdd065039d3f39716c32bc0d48d14406eae4))
+- Align unit tests with current logger API ([ddee73e](https://github.com/smaks190-crypto/-/commit/ddee73e19ae546fa295f03afa77aae4278ac49d1))
+- Assert current redaction markers, pause policy and report sections ([5d57d10](https://github.com/smaks190-crypto/-/commit/5d57d10c87bd510f79b658de1ced01e8e00a97e4))
+
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.05-build.229...v11.06-build.247
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности

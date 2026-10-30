@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -205,12 +206,11 @@ fun DavidChatScreen(
                         .padding(top = 8.dp, bottom = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Компактная голосовая капсула David Live прямо в чате при свёрнутом разговоре
-                    AnimatedVisibility(
-                        visible = liveDisplayMode == DavidLiveDisplayMode.MINIMIZED,
-                        enter = fadeIn(),
-                        exit = fadeOut()
-                    ) {
+                    androidx.compose.animation.AnimatedContent(
+                        targetState = liveDisplayMode == DavidLiveDisplayMode.MINIMIZED,
+                        label = "chat_bottom_bar_live_vs_input"
+                    ) { minimized ->
+                        if (minimized) {
                         DavidLiveMinimizedCapsule(
                             connectionState = liveConnectionState,
                             rayMagnitudes = liveRayMagnitudes,
@@ -219,11 +219,14 @@ fun DavidChatScreen(
                             isMicMuted = isLiveMicMuted,
                             onExpand = { viewModel.expandDavidLive(effectiveSoundManager) },
                             onToggleMicMute = { viewModel.toggleLiveMicMute() },
-                            onEndSession = { viewModel.endDavidLiveSession(effectiveSoundManager) }
+                            onEndSession = { viewModel.endDavidLiveSession(effectiveSoundManager) },
+                            embeddedInBottomBar = true
                         )
-                    }
-
-                    // Единая морфинг-полоса быстрых действий и выбора периода
+                        } else {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
                     DavidSmartActionStrip(
                         stage = stage,
                         hasApiKey = hasApiKey,
@@ -271,6 +274,9 @@ fun DavidChatScreen(
                             triggerDavidLiveWithPermissionCheck()
                         }
                     )
+                            }
+                        }
+                    }
                 }
             }
         ) { innerPadding ->
