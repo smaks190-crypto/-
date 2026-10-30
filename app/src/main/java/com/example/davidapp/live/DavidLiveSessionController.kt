@@ -1,9 +1,12 @@
 package com.example.davidapp.live
 
 import android.util.Base64
+import com.example.utils.GlobalConsoleLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,8 +19,15 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.EOFException
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Manages the official Gemini Live API (`BidiGenerateContent`) WebSocket session,
@@ -29,15 +39,23 @@ import java.util.concurrent.atomic.AtomicBoolean
 class DavidLiveSessionController(
     private val financialToolsProvider: DavidLiveFinancialToolsProvider,
     val audioEngine: DavidLiveAudioEngine = DavidLiveAudioEngine(),
-    private val okHttpClient: OkHttpClient = defaultLiveHttpClient()
+    private val okHttpClient: OkHttpClient = defaultLiveHttpClient(),
+    private val webSocketFactory: WebSocket.Factory = okHttpClient,
+    private val maxAutoReconnectAttempts: Int = DEFAULT_MAX_AUTO_RECONNECT_ATTEMPTS,
+    private val autoReconnectDelayMs: Long = DEFAULT_AUTO_RECONNECT_DELAY_MS
 ) {
     private val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    @Volatile
     private var webSocket: WebSocket? = null
+    private var reconnectJob: Job? = null
     private var currentApiKey: String = ""
     private var modelAttemptIndex: Int = 0
+    private var autoReconnectAttempts: Int = 0
     private val setupCompleted = AtomicBoolean(false)
     private val intentionalClose = AtomicBoolean(false)
+    private val isBackgrounded = AtomicBoolean(false)
+    private val sessionGeneration = AtomicInteger(0)
 
     private val _displayMode = MutableStateFlow(DavidLiveDisplayMode.HIDDEN)
     val displayMode: StateFlow<DavidLiveDisplayMode> = _displayMode.asStateFlow()
@@ -64,6 +82,10 @@ class DavidLiveSessionController(
     private var _startSessionCount = 0
     val startSessionCount: Int
         get() = _startSessionCount
+
+    private var _reconnectAttemptCount = 0
+    val reconnectAttemptCount: Int
+        get() = _reconnectAttemptCount
 
     /**
      * Returns true when a David Live voice session is currently active (either full-screen or minimized).
@@ -109,8 +131,12 @@ class DavidLiveSessionController(
         }
 
         _displayMode.value = DavidLiveDisplayMode.EXPANDED
+        isBackgrounded.set(false)
+        reconnectJob?.cancel()
+        reconnectJob = null
 
         if (!validateUserApiKey(userApiKey)) {
+            resetAudioAndSpeakingStateOnDisconnect()
             _connectionState.value = DavidLiveConnectionState.NO_API_KEY
             _errorMessage.value = "Для запуска David Live укажите ваш Gemini API ключ в настройках чата (иконка ключа вверху)."
             _liveSubtitle.value = "Требуется пользовательский Gemini API ключ"
@@ -120,6 +146,7 @@ class DavidLiveSessionController(
         _startSessionCount++
         currentApiKey = userApiKey!!.trim()
         modelAttemptIndex = 0
+        autoReconnectAttempts = 0
         synchronized(_transcriptTurns) {
             _transcriptTurns.clear()
         }
@@ -129,7 +156,7 @@ class DavidLiveSessionController(
         _isMicMuted.value = false
         audioEngine.setMicMuted(false)
 
-        connectWebSocket(modelIndex = 0)
+        connectWebSocket(modelIndex = 0, isAutoReconnect = false)
     }
 
     /**
@@ -153,14 +180,60 @@ class DavidLiveSessionController(
     }
 
     /**
-     * Retries connecting after a network or WebSocket failure while preserving session context.
+     * Retries connecting after a network or WebSocket failure while preserving session context
+     * (`transcriptTurns` and `verifiedFacts` already collected in the current conversation).
      */
     fun retryConnection() {
+        reconnectJob?.cancel()
+        reconnectJob = null
         if (!validateUserApiKey(currentApiKey)) {
+            resetAudioAndSpeakingStateOnDisconnect()
             _connectionState.value = DavidLiveConnectionState.NO_API_KEY
+            _errorMessage.value = "Для запуска David Live укажите ваш Gemini API ключ в настройках чата."
+            _liveSubtitle.value = "Требуется пользовательский Gemini API ключ"
             return
         }
-        connectWebSocket(modelIndex = 0)
+        if (_displayMode.value == DavidLiveDisplayMode.HIDDEN) {
+            _displayMode.value = DavidLiveDisplayMode.EXPANDED
+        }
+        autoReconnectAttempts = 0
+        modelAttemptIndex = 0
+        resetAudioAndSpeakingStateOnDisconnect()
+        GlobalConsoleLogger.i("LIVE", "Ручной повтор подключения David Live по запросу пользователя")
+        connectWebSocket(modelIndex = 0, isAutoReconnect = false)
+    }
+
+    /**
+     * Handles app transition to background: stops residual model speech playback, resets activeSpeaker
+     * so the UI never freezes on "Говорит Давид...", and cancels pending auto-reconnect timers.
+     */
+    fun onAppBackgrounded() {
+        isBackgrounded.set(true)
+        reconnectJob?.cancel()
+        reconnectJob = null
+        if (isSessionActive()) {
+            flushPendingTranscripts()
+            audioEngine.clearModelPlaybackQueue()
+            if (_connectionState.value == DavidLiveConnectionState.DAVID_SPEAKING) {
+                _connectionState.value = if (_isMicMuted.value) {
+                    DavidLiveConnectionState.MUTED
+                } else {
+                    DavidLiveConnectionState.LISTENING
+                }
+            }
+        }
+    }
+
+    /**
+     * Handles app return to foreground: if the session was interrupted while backgrounded
+     * and remained in RECONNECTING state, resumes connection cleanly.
+     */
+    fun onAppForegrounded() {
+        val wasBackgrounded = isBackgrounded.getAndSet(false)
+        if (!wasBackgrounded || !isSessionActive()) return
+        if (_connectionState.value == DavidLiveConnectionState.RECONNECTING && reconnectJob == null) {
+            retryConnection()
+        }
     }
 
     /**
@@ -172,9 +245,23 @@ class DavidLiveSessionController(
         _isMicMuted.value = nextMuted
         audioEngine.setMicMuted(nextMuted)
         if (nextMuted) {
-            _liveSubtitle.value = "Микрофон отключён"
-        } else if (_connectionState.value == DavidLiveConnectionState.LISTENING) {
-            _liveSubtitle.value = "Говорите, я слушаю..."
+            if (_connectionState.value == DavidLiveConnectionState.LISTENING ||
+                _connectionState.value == DavidLiveConnectionState.USER_SPEAKING
+            ) {
+                _connectionState.value = DavidLiveConnectionState.MUTED
+            }
+            if (_connectionState.value != DavidLiveConnectionState.ERROR &&
+                _connectionState.value != DavidLiveConnectionState.RECONNECTING
+            ) {
+                _liveSubtitle.value = "Микрофон отключён"
+            }
+        } else {
+            if (_connectionState.value == DavidLiveConnectionState.MUTED) {
+                _connectionState.value = DavidLiveConnectionState.LISTENING
+            }
+            if (_connectionState.value == DavidLiveConnectionState.LISTENING) {
+                _liveSubtitle.value = "Говорите, я слушаю..."
+            }
         }
     }
 
@@ -184,12 +271,17 @@ class DavidLiveSessionController(
      */
     fun endSession(): Pair<List<DavidLiveTranscriptTurn>, List<DavidLiveToolFact>> {
         intentionalClose.set(true)
+        sessionGeneration.incrementAndGet()
+        reconnectJob?.cancel()
+        reconnectJob = null
         flushPendingTranscripts()
+        val oldSocket = webSocket
+        webSocket = null
         try {
-            webSocket?.close(1000, "User ended David Live session")
+            oldSocket?.close(1000, "User ended David Live session")
         } catch (_: Exception) {
         }
-        webSocket = null
+        setupCompleted.set(false)
         audioEngine.stop()
         _displayMode.value = DavidLiveDisplayMode.HIDDEN
         _connectionState.value = DavidLiveConnectionState.ENDED
@@ -224,72 +316,224 @@ class DavidLiveSessionController(
      * Processes a raw JSON message from the Gemini Live server (exposed as `internal` for unit testing).
      */
     internal fun processServerMessageForTest(rawJson: String) {
-        handleServerJsonMessage(ws = null, rawJson = rawJson)
+        // Detach any background real socket started by default OkHttpClient during synthetic tests
+        // so asynchronous DNS/TCP failures cannot overwrite deterministic unit test state.
+        if (webSocketFactory === okHttpClient && webSocket != null) {
+            val oldSocket = webSocket
+            webSocket = null
+            val gen = sessionGeneration.incrementAndGet()
+            try {
+                oldSocket?.cancel()
+            } catch (_: Exception) {
+            }
+            handleServerJsonMessage(ws = null, rawJson = rawJson, connectionGen = gen)
+            return
+        }
+        handleServerJsonMessage(ws = webSocket, rawJson = rawJson, connectionGen = sessionGeneration.get())
     }
 
-    private fun connectWebSocket(modelIndex: Int) {
+    private fun isStaleCallback(ws: WebSocket?, connectionGen: Int): Boolean {
+        if (intentionalClose.get()) return true
+        if (connectionGen != sessionGeneration.get()) return true
+        val activeWs = webSocket
+        if (ws != null && activeWs != null && ws !== activeWs) return true
+        return false
+    }
+
+    /**
+     * Immediately stops audio capture/playback, flushes queued 24 kHz model chunks,
+     * commits any pending transcript fragments into [_transcriptTurns], and resets
+     * `activeSpeaker` to [DavidLiveSpeaker.NONE] so the UI never remains stuck on "Говорит Давид...".
+     */
+    private fun resetAudioAndSpeakingStateOnDisconnect() {
+        flushPendingTranscripts()
+        setupCompleted.set(false)
+        audioEngine.clearModelPlaybackQueue()
+        audioEngine.stop()
+    }
+
+    private fun handleModelPlaybackDrained(connectionGen: Int) {
+        if (intentionalClose.get() || connectionGen != sessionGeneration.get() || !setupCompleted.get()) return
+        if (_connectionState.value == DavidLiveConnectionState.DAVID_SPEAKING) {
+            flushPendingTranscripts()
+            _connectionState.value = if (_isMicMuted.value) {
+                DavidLiveConnectionState.MUTED
+            } else {
+                DavidLiveConnectionState.LISTENING
+            }
+        }
+    }
+
+    private fun connectWebSocket(modelIndex: Int, isAutoReconnect: Boolean) {
+        reconnectJob?.cancel()
+        reconnectJob = null
         intentionalClose.set(false)
         setupCompleted.set(false)
-        _errorMessage.value = null
-        _connectionState.value = if (modelIndex == 0) {
-            DavidLiveConnectionState.CONNECTING
-        } else {
-            DavidLiveConnectionState.RECONNECTING
-        }
-        _liveSubtitle.value = "Подключаюсь к David Live..."
 
+        val connectionGen = sessionGeneration.incrementAndGet()
+        val oldSocket = webSocket
+        webSocket = null
         try {
-            webSocket?.cancel()
+            oldSocket?.cancel()
         } catch (_: Exception) {
+        }
+
+        _errorMessage.value = null
+        if (isAutoReconnect) {
+            _reconnectAttemptCount++
+            _connectionState.value = DavidLiveConnectionState.RECONNECTING
+        } else if (modelIndex == 0) {
+            _connectionState.value = DavidLiveConnectionState.CONNECTING
+            _liveSubtitle.value = "Подключаюсь к David Live..."
+        } else {
+            _connectionState.value = DavidLiveConnectionState.RECONNECTING
+            _liveSubtitle.value = "Переключаюсь на резервную модель Давида..."
         }
 
         val modelName = LIVE_MODELS.getOrElse(modelIndex) { LIVE_MODELS.last() }
         val wsUrl = "$GEMINI_LIVE_WS_ENDPOINT?key=$currentApiKey"
         val request = Request.Builder().url(wsUrl).build()
 
-        webSocket = okHttpClient.newWebSocket(
+        GlobalConsoleLogger.d(
+            "LIVE",
+            "Открытие Gemini Live WebSocket (model=$modelName, attempt=${modelIndex + 1}/${LIVE_MODELS.size}, autoReconnect=$isAutoReconnect)"
+        )
+
+        webSocket = webSocketFactory.newWebSocket(
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    if (isStaleCallback(webSocket, connectionGen)) return
                     val setupPayload = buildSetupMessageJson(modelName)
                     webSocket.send(setupPayload.toString())
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
-                    handleServerJsonMessage(webSocket, text)
+                    if (isStaleCallback(webSocket, connectionGen)) return
+                    handleServerJsonMessage(webSocket, text, connectionGen)
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    handleServerJsonMessage(webSocket, bytes.utf8())
+                    if (isStaleCallback(webSocket, connectionGen)) return
+                    handleServerJsonMessage(webSocket, bytes.utf8(), connectionGen)
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    if (!intentionalClose.get() && !setupCompleted.get() && modelAttemptIndex + 1 < LIVE_MODELS.size) {
-                        modelAttemptIndex++
-                        connectWebSocket(modelAttemptIndex)
-                        return
+                    if (isStaleCallback(webSocket, connectionGen)) return
+                    try {
+                        webSocket.close(code, reason)
+                    } catch (_: Exception) {
                     }
-                    if (!intentionalClose.get()) {
-                        audioEngine.stop()
-                        _connectionState.value = DavidLiveConnectionState.ERROR
-                        _errorMessage.value = "Соединение прервано ($code). Проверьте сеть или попробуйте снова."
-                        _liveSubtitle.value = "Связь потеряна"
-                    }
+                    if (code == 1000 && intentionalClose.get()) return
+                    handleSocketDisconnect(
+                        ws = webSocket,
+                        connectionGen = connectionGen,
+                        throwable = null,
+                        httpCode = null,
+                        closingCode = code,
+                        closingReason = reason
+                    )
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    if (intentionalClose.get()) return
-                    if (!setupCompleted.get() && modelAttemptIndex + 1 < LIVE_MODELS.size) {
-                        modelAttemptIndex++
-                        connectWebSocket(modelAttemptIndex)
-                        return
-                    }
-                    audioEngine.stop()
-                    _connectionState.value = DavidLiveConnectionState.ERROR
-                    _errorMessage.value = "Ошибка подключения: ${t.localizedMessage ?: "Проверьте интернет и API ключ"}"
-                    _liveSubtitle.value = "Не удалось подключиться"
+                    if (isStaleCallback(webSocket, connectionGen)) return
+                    handleSocketDisconnect(
+                        ws = webSocket,
+                        connectionGen = connectionGen,
+                        throwable = t,
+                        httpCode = response?.code,
+                        closingCode = null,
+                        closingReason = response?.message
+                    )
                 }
             }
+        )
+    }
+
+    private fun handleSocketDisconnect(
+        ws: WebSocket,
+        connectionGen: Int,
+        throwable: Throwable?,
+        httpCode: Int?,
+        closingCode: Int?,
+        closingReason: String?
+    ) {
+        if (isStaleCallback(ws, connectionGen)) return
+
+        val wasSetupCompleted = setupCompleted.get()
+        resetAudioAndSpeakingStateOnDisconnect()
+        if (webSocket === ws) {
+            webSocket = null
+        }
+
+        val reasonSummary = classifyDisconnectReason(throwable, httpCode, closingCode, closingReason)
+
+        // 1. If handshake with current model failed before setupComplete, try next fallback model
+        if (!wasSetupCompleted &&
+            isModelFallbackEligible(throwable, httpCode, closingCode) &&
+            modelAttemptIndex + 1 < LIVE_MODELS.size
+        ) {
+            modelAttemptIndex++
+            GlobalConsoleLogger.w(
+                "LIVE",
+                "Не удалось инициализировать модель ${LIVE_MODELS[modelAttemptIndex - 1]} ($reasonSummary). Переход на резервную модель ${LIVE_MODELS[modelAttemptIndex]}"
+            )
+            connectWebSocket(modelIndex = modelAttemptIndex, isAutoReconnect = false)
+            return
+        }
+
+        // 2. If session was already established (or timed out on ping/pong / transient drop),
+        // perform bounded automatic reconnect with backoff before surfacing a fatal error.
+        if (!isBackgrounded.get() &&
+            isAutoReconnectEligible(wasSetupCompleted, throwable, httpCode, closingCode) &&
+            autoReconnectAttempts < maxAutoReconnectAttempts
+        ) {
+            val attempt = ++autoReconnectAttempts
+            _connectionState.value = DavidLiveConnectionState.RECONNECTING
+            _errorMessage.value = null
+            _liveSubtitle.value = "Связь прервалась, переподключаюсь к Давиду ($attempt/$maxAutoReconnectAttempts)..."
+
+            GlobalConsoleLogger.w(
+                "LIVE",
+                "Обрыв активной сессии David Live ($reasonSummary). Автопереподключение $attempt/$maxAutoReconnectAttempts..."
+            )
+
+            val delayMs = (autoReconnectDelayMs * attempt).coerceAtLeast(0L)
+            if (delayMs == 0L) {
+                connectWebSocket(modelIndex = modelAttemptIndex, isAutoReconnect = true)
+            } else {
+                val scheduledGen = sessionGeneration.get()
+                reconnectJob?.cancel()
+                reconnectJob = controllerScope.launch {
+                    delay(delayMs)
+                    if (!intentionalClose.get() &&
+                        !isBackgrounded.get() &&
+                        scheduledGen == sessionGeneration.get() &&
+                        _connectionState.value == DavidLiveConnectionState.RECONNECTING
+                    ) {
+                        connectWebSocket(modelIndex = modelAttemptIndex, isAutoReconnect = true)
+                    }
+                }
+            }
+            return
+        }
+
+        // 3. Final Error State: immediately clear speaking visuals and display Russian diagnostics + retry action.
+        reconnectJob?.cancel()
+        reconnectJob = null
+        val russianError = formatRussianLiveErrorMessage(
+            t = throwable,
+            httpCode = httpCode,
+            closingCode = closingCode,
+            closingReason = closingReason
+        )
+        _connectionState.value = DavidLiveConnectionState.ERROR
+        _errorMessage.value = russianError
+        _liveSubtitle.value = "Связь с Давидом прервана"
+
+        GlobalConsoleLogger.e(
+            "LIVE",
+            "Сессия David Live остановлена из-за ошибки ($reasonSummary): $russianError"
         )
     }
 
@@ -359,7 +603,9 @@ class DavidLiveSessionController(
         }
     }
 
-    private fun handleServerJsonMessage(ws: WebSocket?, rawJson: String) {
+    private fun handleServerJsonMessage(ws: WebSocket?, rawJson: String, connectionGen: Int) {
+        if (isStaleCallback(ws, connectionGen)) return
+
         val root = try {
             JSONObject(rawJson)
         } catch (_: Exception) {
@@ -368,11 +614,24 @@ class DavidLiveSessionController(
 
         // 1. Setup Complete
         if (root.has("setupComplete")) {
+            val wasReconnecting = autoReconnectAttempts > 0 ||
+                _connectionState.value == DavidLiveConnectionState.RECONNECTING
             setupCompleted.set(true)
-            _connectionState.value = DavidLiveConnectionState.LISTENING
-            _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Говорите, я слушаю..."
+            autoReconnectAttempts = 0
+            _errorMessage.value = null
+            _connectionState.value = if (_isMicMuted.value) {
+                DavidLiveConnectionState.MUTED
+            } else {
+                DavidLiveConnectionState.LISTENING
+            }
+            _liveSubtitle.value = when {
+                _isMicMuted.value -> "Микрофон отключён"
+                wasReconnecting -> "Связь восстановлена. Говорите, я слушаю..."
+                else -> "Говорите, я слушаю..."
+            }
+            GlobalConsoleLogger.i("LIVE", "Сессия David Live готова (setupComplete, reconnected=$wasReconnecting)")
             if (ws != null) {
-                startAudioStreaming(ws)
+                startAudioStreaming(ws, connectionGen)
             }
             return
         }
@@ -382,8 +641,10 @@ class DavidLiveSessionController(
         if (toolCall != null) {
             val functionCalls = toolCall.optJSONArray("functionCalls")
             if (functionCalls != null && functionCalls.length() > 0) {
+                _connectionState.value = DavidLiveConnectionState.DAVID_THINKING
                 _liveSubtitle.value = "Проверяю ваши финансовые данные..."
                 controllerScope.launch {
+                    if (isStaleCallback(ws, connectionGen)) return@launch
                     val responsesArray = JSONArray()
                     for (i in 0 until functionCalls.length()) {
                         val fc = functionCalls.optJSONObject(i) ?: continue
@@ -404,6 +665,7 @@ class DavidLiveSessionController(
                             }
                         )
                     }
+                    if (isStaleCallback(ws, connectionGen)) return@launch
                     val toolResponseMsg = JSONObject().apply {
                         put(
                             "toolResponse",
@@ -424,8 +686,12 @@ class DavidLiveSessionController(
         if (serverContent.optBoolean("interrupted", false)) {
             audioEngine.clearModelPlaybackQueue()
             flushPendingTranscripts()
-            _connectionState.value = DavidLiveConnectionState.LISTENING
-            _liveSubtitle.value = "Слушаю вас..."
+            _connectionState.value = if (_isMicMuted.value) {
+                DavidLiveConnectionState.MUTED
+            } else {
+                DavidLiveConnectionState.LISTENING
+            }
+            _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Слушаю вас..."
             return
         }
 
@@ -475,7 +741,7 @@ class DavidLiveSessionController(
                 // We must NEVER display internal thought parts in the user's subtitle bubble!
                 val isThoughtPart = isInternalThoughtPart(part)
                 val textPart = part.optString("text").takeIf { it.isNotBlank() }
-                if (!isThoughtPart && textPart != null && outputTranscription == null && ! part.has("inlineData")) {
+                if (!isThoughtPart && textPart != null && outputTranscription == null && !part.has("inlineData")) {
                     val cleanedPart = sanitizeSpokenSubtitle(textPart)
                     if (cleanedPart.isNotBlank()) {
                         pendingDavidTranscript.append(cleanedPart)
@@ -511,7 +777,11 @@ class DavidLiveSessionController(
 
         if (serverContent.optBoolean("turnComplete", false)) {
             flushPendingTranscripts()
-            _connectionState.value = DavidLiveConnectionState.LISTENING
+            _connectionState.value = if (_isMicMuted.value) {
+                DavidLiveConnectionState.MUTED
+            } else {
+                DavidLiveConnectionState.LISTENING
+            }
             if (!_isMicMuted.value && _liveSubtitle.value.isBlank()) {
                 _liveSubtitle.value = "Говорите, я слушаю..."
             }
@@ -582,10 +852,24 @@ class DavidLiveSessionController(
         return withoutBoldHeaders
     }
 
-    private fun startAudioStreaming(ws: WebSocket) {
+    private fun startAudioStreaming(ws: WebSocket, connectionGen: Int) {
+        audioEngine.stop()
         audioEngine.start(
             onMicPcmChunk = { pcm16kBytes ->
+                if (isStaleCallback(ws, connectionGen)) return@start
                 if (!setupCompleted.get() || _isMicMuted.value) return@start
+                val state = _connectionState.value
+                if (state == DavidLiveConnectionState.ERROR ||
+                    state == DavidLiveConnectionState.RECONNECTING ||
+                    state == DavidLiveConnectionState.ENDED
+                ) {
+                    return@start
+                }
+                // Outbound backpressure protection: prevent continuous PCM audio frames
+                // from congesting OkHttp's writer queue and starving WebSocket PING/PONG frames.
+                if (ws.queueSize() > MAX_WS_OUTBOUND_QUEUE_BYTES) {
+                    return@start
+                }
                 val b64 = Base64.encodeToString(pcm16kBytes, Base64.NO_WRAP)
                 val msg = JSONObject().apply {
                     put(
@@ -606,9 +890,17 @@ class DavidLiveSessionController(
                 ws.send(msg.toString())
             },
             onUserBargeIn = {
+                if (isStaleCallback(ws, connectionGen)) return@start
                 flushPendingTranscripts()
-                _connectionState.value = DavidLiveConnectionState.LISTENING
-                _liveSubtitle.value = "Слушаю вас..."
+                _connectionState.value = if (_isMicMuted.value) {
+                    DavidLiveConnectionState.MUTED
+                } else {
+                    DavidLiveConnectionState.LISTENING
+                }
+                _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Слушаю вас..."
+            },
+            onModelPlaybackDrained = {
+                handleModelPlaybackDrained(connectionGen)
             }
         )
     }
@@ -628,18 +920,155 @@ class DavidLiveSessionController(
         private const val GEMINI_LIVE_WS_ENDPOINT =
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
+        const val DEFAULT_PING_INTERVAL_SECONDS = 40L
+        const val MAX_WS_OUTBOUND_QUEUE_BYTES = 48 * 1024L
+        const val DEFAULT_MAX_AUTO_RECONNECT_ATTEMPTS = 2
+        const val DEFAULT_AUTO_RECONNECT_DELAY_MS = 900L
+
         val LIVE_MODELS = listOf(
             "models/gemini-2.5-flash-native-audio-preview-12-2025",
             "models/gemini-2.0-flash-live-001",
             "models/gemini-3.8-flash"
         )
 
-        private fun defaultLiveHttpClient(): OkHttpClient {
+        fun defaultLiveHttpClient(
+            pingIntervalSeconds: Long = DEFAULT_PING_INTERVAL_SECONDS
+        ): OkHttpClient {
             return OkHttpClient.Builder()
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(0, TimeUnit.MILLISECONDS)
-                .pingInterval(20, TimeUnit.SECONDS)
+                .writeTimeout(15, TimeUnit.SECONDS)
+                .pingInterval(pingIntervalSeconds, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
                 .build()
+        }
+
+        internal fun isPingPongTimeout(t: Throwable?): Boolean {
+            if (t == null) return false
+            val msg = (t.message ?: t.localizedMessage ?: "").lowercase()
+            return msg.contains("sent ping but didn't receive pong") ||
+                (t is SocketTimeoutException && (msg.contains("ping") || msg.contains("pong")))
+        }
+
+        internal fun isOfflineNetworkError(t: Throwable?): Boolean {
+            if (t == null) return false
+            if (t is UnknownHostException || t is ConnectException || t is NoRouteToHostException) {
+                return true
+            }
+            val msg = (t.message ?: t.localizedMessage ?: "").lowercase()
+            return msg.contains("unable to resolve host") ||
+                msg.contains("no address associated with hostname") ||
+                msg.contains("network is unreachable") ||
+                msg.contains("enetunreach") ||
+                msg.contains("econnrefused")
+        }
+
+        internal fun isAuthOrKeyError(t: Throwable?, httpCode: Int?, closingReason: String?): Boolean {
+            if (httpCode == 401 || httpCode == 403) return true
+            val combined = "${t?.message.orEmpty()} ${closingReason.orEmpty()}".lowercase()
+            return combined.contains("api_key_invalid") ||
+                combined.contains("api key not valid") ||
+                combined.contains("permission_denied") ||
+                combined.contains("unauthenticated")
+        }
+
+        internal fun isModelFallbackEligible(
+            t: Throwable?,
+            httpCode: Int?,
+            closingCode: Int?
+        ): Boolean {
+            if (isOfflineNetworkError(t)) return false
+            if (isAuthOrKeyError(t, httpCode, null)) return false
+            if (closingCode == 1000) return false
+            return true
+        }
+
+        internal fun isAutoReconnectEligible(
+            wasSetupCompleted: Boolean,
+            t: Throwable?,
+            httpCode: Int?,
+            closingCode: Int?
+        ): Boolean {
+            if (isOfflineNetworkError(t)) return false
+            if (isAuthOrKeyError(t, httpCode, null)) return false
+            if (closingCode == 1000) return false
+            if (isPingPongTimeout(t)) return true
+            if (wasSetupCompleted) {
+                return t is SocketTimeoutException ||
+                    t is EOFException ||
+                    t is SocketException ||
+                    httpCode == 502 ||
+                    httpCode == 503 ||
+                    httpCode == 504 ||
+                    closingCode != null ||
+                    t != null
+            }
+            return false
+        }
+
+        internal fun classifyDisconnectReason(
+            t: Throwable?,
+            httpCode: Int?,
+            closingCode: Int?,
+            closingReason: String?
+        ): String {
+            return when {
+                isPingPongTimeout(t) -> "PING_PONG_TIMEOUT"
+                isOfflineNetworkError(t) -> "NETWORK_OFFLINE"
+                isAuthOrKeyError(t, httpCode, closingReason) -> "AUTH_ERROR_${httpCode ?: 403}"
+                httpCode != null -> "HTTP_$httpCode"
+                closingCode != null -> "WS_CLOSE_$closingCode"
+                t != null -> t.javaClass.simpleName
+                else -> "UNKNOWN_DISCONNECT"
+            }
+        }
+
+        /**
+         * Translates low-level OkHttp / WebSocket / network exceptions into clear, user-friendly
+         * Russian diagnostic messages without exposing API keys or internal URLs.
+         */
+        internal fun formatRussianLiveErrorMessage(
+            t: Throwable?,
+            httpCode: Int? = null,
+            closingCode: Int? = null,
+            closingReason: String? = null
+        ): String {
+            val rawMsg = "${t?.message.orEmpty()} ${t?.localizedMessage.orEmpty()} ${closingReason.orEmpty()}"
+                .replace(Regex("key=[^&\\s\"']+"), "key=***")
+                .trim()
+            val lower = rawMsg.lowercase()
+
+            return when {
+                isPingPongTimeout(t) ->
+                    "Превышено время ожидания ответа от сервера Gemini Live (тайм-аут пинга). Проверьте стабильность интернета и нажмите «Повторить подключение»."
+
+                isOfflineNetworkError(t) ->
+                    "Нет соединения с интернетом. Проверьте подключение к сети и нажмите «Повторить подключение»."
+
+                isAuthOrKeyError(t, httpCode, closingReason) ->
+                    "Ошибка авторизации Gemini API. Проверьте корректность вашего API-ключа в настройках."
+
+                httpCode == 429 || lower.contains("429") || lower.contains("quota") || lower.contains("resource_exhausted") ->
+                    "Превышен лимит запросов Gemini API (429). Подождите немного или проверьте квоту ключа, затем нажмите «Повторить подключение»."
+
+                httpCode == 503 || httpCode == 502 || httpCode == 504 ||
+                    lower.contains("503") || lower.contains("unavailable") || lower.contains("high demand") ->
+                    "Сервер Gemini Live временно перегружен. Подождите несколько секунд и нажмите «Повторить подключение»."
+
+                t is SocketTimeoutException || lower.contains("timed out") || lower.contains("timeout") ->
+                    "Превышено время ожидания соединения с Gemini Live. Проверьте интернет и нажмите «Повторить подключение»."
+
+                t is EOFException || t is SocketException ||
+                    lower.contains("connection abort") || lower.contains("broken pipe") || lower.contains("connection reset") ->
+                    "Соединение с Давидом неожиданно прервалось. Проверьте сеть и нажмите «Повторить подключение»."
+
+                closingCode != null ->
+                    "Соединение с Давидом закрыто (код $closingCode). Нажмите «Повторить подключение» для продолжения разговора."
+
+                else ->
+                    "Ошибка соединения с Gemini Live. Проверьте интернет и нажмите «Повторить подключение»."
+            }
         }
     }
 }
+

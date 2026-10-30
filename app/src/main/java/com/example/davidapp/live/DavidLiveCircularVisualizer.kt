@@ -96,11 +96,14 @@ fun DavidLiveCircularVisualizer(
         label = "ambient_pulse"
     )
     val energyClamped = overallEnergy.coerceIn(0f, 1f)
-    val isDavidSpeaking = connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
-        activeSpeaker == DavidLiveSpeaker.DAVID
-    val isUserSpeaking = activeSpeaker == DavidLiveSpeaker.USER || energyClamped > 0.18f
+    val voiceCapableState = isDavidLiveVoiceCapableState(connectionState)
+    val isDavidSpeaking = voiceCapableState &&
+        (connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
+            activeSpeaker == DavidLiveSpeaker.DAVID)
+    val isUserSpeaking = voiceCapableState &&
+        (activeSpeaker == DavidLiveSpeaker.USER || (!isMicMuted && energyClamped > 0.18f))
 
-    val voiceActive = activeSpeaker != DavidLiveSpeaker.NONE
+    val voiceActive = voiceCapableState && activeSpeaker != DavidLiveSpeaker.NONE
     val rayVisibility by animateFloatAsState(
         targetValue = if (voiceActive) 1f else 0f,
         animationSpec = tween(durationMillis = if (voiceActive) 90 else 280, easing = LinearEasing),

@@ -1008,6 +1008,14 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         liveSessionController.retryConnection()
     }
 
+    fun onDavidLiveAppBackgrounded() {
+        liveSessionController.onAppBackgrounded()
+    }
+
+    fun onDavidLiveAppForegrounded() {
+        liveSessionController.onAppForegrounded()
+    }
+
     fun endDavidLiveSession(soundManager: SoundManager? = null) {
         soundManager?.playClick()
         val (turns, facts) = liveSessionController.endSession()

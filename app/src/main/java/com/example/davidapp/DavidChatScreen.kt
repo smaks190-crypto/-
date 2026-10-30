@@ -157,6 +157,21 @@ fun DavidChatScreen(
         viewModel.bindProfile(budgetId, profileName, apiKey)
     }
 
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> viewModel.onDavidLiveAppBackgrounded()
+                androidx.lifecycle.Lifecycle.Event.ON_START -> viewModel.onDavidLiveAppForegrounded()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     DisposableEffect(effectiveSoundManager) {
         onDispose {
             if (soundManager == null) {

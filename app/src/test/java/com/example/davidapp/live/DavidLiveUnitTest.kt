@@ -11,9 +11,16 @@ import com.example.data.db.GoalEntity
 import com.example.data.db.TransactionDao
 import com.example.data.db.TransactionEntity
 import com.example.utils.VoiceInputManager
+import com.example.utils.VoiceParserHelper
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,6 +31,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -639,6 +648,348 @@ class DavidLiveUnitTest {
         assertEquals(DavidLiveConnectionState.ENDED, controller.connectionState.value)
         assertFalse(controller.isSessionActive())
         assertTrue("Regular voice input must be allowed again after David Live ends", controller.canStartRegularVoiceInput())
+    }
+
+    @Test
+    fun `ping pong timeout during David speech immediately resets activeSpeaker to NONE performs bounded auto-reconnect and shows Russian error`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L
+        )
+
+        val testKey = "AIzaSyTestUserManualKey987654321"
+        controller.startSession(testKey)
+        assertEquals(1, fakeFactory.entries.size)
+        val firstSocket = fakeFactory.entries[0]
+
+        // 1. Setup complete -> LISTENING
+        firstSocket.simulateOpen()
+        firstSocket.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // 2. David starts speaking (outputTranscription + active audio visualizer frame)
+        firstSocket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Привет! Твой баланс в полном порядке."}}}"""
+        )
+        val davidSpeechSamples = ShortArray(1024) { i ->
+            (sin(2.0 * PI * 440.0 * i / 24_000.0) * 16000).toInt().toShort()
+        }
+        controller.audioEngine.feedTestPcmFrame(
+            samples = davidSpeechSamples,
+            sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+            speaker = DavidLiveSpeaker.DAVID
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertEquals(DavidLiveSpeaker.DAVID, controller.audioEngine.activeSpeaker.value)
+        assertEquals(
+            "Говорит Давид...",
+            resolveDavidLiveStatusLabel(
+                controller.connectionState.value,
+                controller.audioEngine.activeSpeaker.value,
+                controller.isMicMuted.value
+            )
+        )
+
+        // 3. Ping/pong timeout occurs mid-speech:
+        // "sent ping but didn't receive pong within 20000ms (after 0 successful ping/pongs)"
+        val pingTimeout = SocketTimeoutException(
+            "sent ping but didn't receive pong within 20000ms (after 0 successful ping/pongs)"
+        )
+        firstSocket.simulateFailure(pingTimeout)
+
+        // Immediately after failure: activeSpeaker MUST be reset to NONE, transcript preserved,
+        // and bounded auto-reconnect attempt #1 opens socket #2
+        assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
+        assertEquals(1, controller.transcriptTurns.size)
+        assertEquals("Привет! Твой баланс в полном порядке.", controller.transcriptTurns.first().text)
+        assertEquals(2, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.RECONNECTING, controller.connectionState.value)
+        assertEquals(
+            "Переподключение...",
+            resolveDavidLiveStatusLabel(
+                controller.connectionState.value,
+                controller.audioEngine.activeSpeaker.value,
+                controller.isMicMuted.value
+            )
+        )
+
+        // 4. Auto-reconnect #1 also fails with ping timeout -> triggers auto-reconnect #2 (socket #3)
+        fakeFactory.entries[1].simulateFailure(pingTimeout)
+        assertEquals(3, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.RECONNECTING, controller.connectionState.value)
+        assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
+
+        // 5. Auto-reconnect #2 fails (retries exhausted) -> transitions to ERROR with Russian message
+        fakeFactory.entries[2].simulateFailure(pingTimeout)
+        assertEquals(3, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
+        assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
+
+        val errMsg = controller.errorMessage.value
+        assertNotNull(errMsg)
+        assertTrue(errMsg!!.contains("тайм-аут пинга"))
+        assertTrue(errMsg.contains("Повторить подключение"))
+        assertFalse("API key must never appear in error messages", errMsg.contains(testKey))
+
+        // Status label and visualizer capability must NEVER say "Говорит Давид..." in ERROR state,
+        // even if a caller passes a stale DavidLiveSpeaker.DAVID
+        assertEquals(
+            "Ошибка связи",
+            resolveDavidLiveStatusLabel(
+                controller.connectionState.value,
+                controller.audioEngine.activeSpeaker.value,
+                controller.isMicMuted.value
+            )
+        )
+        assertEquals(
+            "Ошибка связи",
+            resolveDavidLiveStatusLabel(
+                DavidLiveConnectionState.ERROR,
+                DavidLiveSpeaker.DAVID,
+                false
+            )
+        )
+        assertFalse(isDavidLiveVoiceCapableState(DavidLiveConnectionState.ERROR))
+        assertFalse(isDavidLiveVoiceCapableState(DavidLiveConnectionState.RECONNECTING))
+        assertFalse(isDavidLiveVoiceCapableState(DavidLiveConnectionState.CONNECTING))
+    }
+
+    @Test
+    fun `auto reconnect after unexpected onClosing restores LISTENING state and manual retry preserves conversation turns`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 1,
+            autoReconnectDelayMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val socket1 = fakeFactory.entries[0]
+        socket1.simulateOpen()
+        socket1.simulateServerText("""{"setupComplete": {}}""")
+        socket1.simulateServerText("""{"serverContent":{"inputTranscription":{"text":"Сколько я потратил за неделю?"}}}""")
+        socket1.simulateServerText("""{"serverContent":{"outputTranscription":{"text":"За неделю расходы составили 12 400 ₽."},"turnComplete":true}}""")
+        assertEquals(2, controller.transcriptTurns.size)
+
+        // 1. Server closes unexpectedly with code 1006 -> auto-reconnects on socket #2
+        socket1.simulateClosing(1006, "Abnormal closure")
+        assertEquals(2, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.RECONNECTING, controller.connectionState.value)
+        assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
+
+        // 2. Socket #2 completes setup -> session resumes in LISTENING with previous turns intact
+        val socket2 = fakeFactory.entries[1]
+        socket2.simulateOpen()
+        socket2.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertTrue(controller.liveSubtitle.value.contains("Связь восстановлена"))
+        assertEquals(2, controller.transcriptTurns.size)
+
+        // 3. Now simulate disconnect that exhausts auto-reconnect (attempt #1 fails on socket #3)
+        socket2.simulateClosing(1011, "Internal server error")
+        assertEquals(3, fakeFactory.entries.size)
+        fakeFactory.entries[2].simulateFailure(SocketTimeoutException("Read timed out"))
+        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
+
+        // 4. User taps "Повторить подключение" (retryConnection) -> opens socket #4 and preserves transcriptTurns!
+        controller.retryConnection()
+        assertEquals(4, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.CONNECTING, controller.connectionState.value)
+        fakeFactory.entries[3].simulateOpen()
+        fakeFactory.entries[3].simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertEquals("Previous conversation turns must be preserved across manual retry", 2, controller.transcriptTurns.size)
+    }
+
+    @Test
+    fun `stale WebSocket callbacks from previous socket are ignored after reconnect or session close`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 1,
+            autoReconnectDelayMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val staleSocket = fakeFactory.entries[0]
+        staleSocket.simulateOpen()
+        staleSocket.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // Fast manual retry replaces staleSocket with activeSocket
+        controller.retryConnection()
+        assertEquals(2, fakeFactory.entries.size)
+        val activeSocket = fakeFactory.entries[1]
+        activeSocket.simulateOpen()
+        activeSocket.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // Stale callbacks arriving late from staleSocket must be completely ignored
+        staleSocket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Устаревшая реплика из закрытого сокета"}}}"""
+        )
+        staleSocket.simulateClosing(1006, "Late close from old socket")
+        staleSocket.simulateFailure(
+            SocketTimeoutException("sent ping but didn't receive pong within 20000ms (after 0 successful ping/pongs)")
+        )
+
+        assertEquals(
+            "Stale socket failure must not overwrite active session state",
+            DavidLiveConnectionState.LISTENING,
+            controller.connectionState.value
+        )
+        assertNull(controller.errorMessage.value)
+        assertTrue(controller.transcriptTurns.none { it.text.contains("Устаревшая") })
+    }
+
+    @Test
+    fun `offline network error skips futile model fallback and background transition resets speaking state`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L
+        )
+
+        // 1. Offline DNS failure -> immediately transitions to ERROR without cycling through 3 models
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        assertEquals(1, fakeFactory.entries.size)
+        fakeFactory.entries[0].simulateFailure(
+            UnknownHostException("Unable to resolve host \"generativelanguage.googleapis.com\": No address associated with hostname")
+        )
+        assertEquals("Offline error must not spin through fallback models", 1, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
+        assertTrue(controller.errorMessage.value!!.contains("Нет соединения с интернетом"))
+
+        // 2. Retry succeeds, David starts speaking, then app goes to background -> speaking state resets immediately
+        controller.retryConnection()
+        val socket2 = fakeFactory.entries[1]
+        socket2.simulateOpen()
+        socket2.simulateServerText("""{"setupComplete": {}}""")
+        socket2.simulateServerText("""{"serverContent":{"outputTranscription":{"text":"Проверяю твои лимиты..."}}}""")
+        controller.audioEngine.feedTestPcmFrame(
+            samples = ShortArray(512) { 4000 },
+            sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+            speaker = DavidLiveSpeaker.DAVID
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertEquals(DavidLiveSpeaker.DAVID, controller.audioEngine.activeSpeaker.value)
+
+        controller.onAppBackgrounded()
+        assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        controller.onAppForegrounded()
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+    }
+
+    @Test
+    fun `live HTTP client keep-alive configuration and regular voice input parser remain intact`() {
+        val client = DavidLiveSessionController.defaultLiveHttpClient()
+        assertEquals(40_000, client.pingIntervalMillis)
+        assertEquals(15_000, client.connectTimeoutMillis)
+        assertEquals(0, client.readTimeoutMillis)
+        assertTrue(client.retryOnConnectionFailure)
+
+        // Regression check for regular voice input heuristic parser used on the main screen
+        val ops = VoiceParserHelper.parseHeuristically(
+            text = "Кофе 350 и такси 600",
+            expenseCategories = listOf("Кафе и рестораны", "Транспорт", "Продукты", "Прочее"),
+            incomeCategories = listOf("Зарплата")
+        )
+        assertEquals(2, ops.size)
+        assertEquals(350.0, ops[0].amount, 0.01)
+        assertEquals(600.0, ops[1].amount, 0.01)
+    }
+
+    private class FakeWebSocketEntry(
+        val request: Request,
+        val listener: WebSocketListener
+    ) : WebSocket {
+        val sentMessages = mutableListOf<String>()
+        var simulatedQueueSize: Long = 0L
+        var isClosedOrCancelled: Boolean = false
+
+        override fun request(): Request = request
+        override fun queueSize(): Long = simulatedQueueSize
+        override fun send(text: String): Boolean {
+            if (isClosedOrCancelled) return false
+            sentMessages.add(text)
+            return true
+        }
+        override fun send(bytes: ByteString): Boolean = !isClosedOrCancelled
+        override fun close(code: Int, reason: String?): Boolean {
+            isClosedOrCancelled = true
+            return true
+        }
+        override fun cancel() {
+            isClosedOrCancelled = true
+        }
+
+        fun simulateOpen() {
+            val response = Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(101)
+                .message("Switching Protocols")
+                .build()
+            listener.onOpen(this, response)
+        }
+
+        fun simulateServerText(json: String) {
+            listener.onMessage(this, json)
+        }
+
+        fun simulateClosing(code: Int, reason: String) {
+            listener.onClosing(this, code, reason)
+        }
+
+        fun simulateFailure(t: Throwable, response: Response? = null) {
+            listener.onFailure(this, t, response)
+        }
+    }
+
+    private class FakeWebSocketFactory : WebSocket.Factory {
+        val entries = mutableListOf<FakeWebSocketEntry>()
+
+        override fun newWebSocket(request: Request, listener: WebSocketListener): WebSocket {
+            val entry = FakeWebSocketEntry(request, listener)
+            entries.add(entry)
+            return entry
+        }
     }
 
     private fun createReadOnlyTransactionDao(items: List<TransactionEntity>) = object : TransactionDao {

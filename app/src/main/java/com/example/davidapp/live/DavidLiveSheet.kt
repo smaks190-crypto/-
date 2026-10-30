@@ -102,6 +102,18 @@ private val IdleWaveSlate = Color(0xFF2A2F3A)
 private val ErrorCrimson = Color(0xFFEF4444)
 
 /**
+ * Returns true only when the David Live session is in an established conversational state
+ * where voice capture or model speech playback is possible.
+ */
+fun isDavidLiveVoiceCapableState(connectionState: DavidLiveConnectionState): Boolean {
+    return connectionState == DavidLiveConnectionState.LISTENING ||
+        connectionState == DavidLiveConnectionState.USER_SPEAKING ||
+        connectionState == DavidLiveConnectionState.DAVID_THINKING ||
+        connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
+        connectionState == DavidLiveConnectionState.MUTED
+}
+
+/**
  * Resolves the human-readable Russian status label for the David Live session,
  * shared between the full-screen interface and the compact minimized capsule.
  */
@@ -115,10 +127,13 @@ fun resolveDavidLiveStatusLabel(
         connectionState == DavidLiveConnectionState.ERROR -> "Ошибка связи"
         connectionState == DavidLiveConnectionState.CONNECTING -> "Подключение..."
         connectionState == DavidLiveConnectionState.RECONNECTING -> "Переподключение..."
+        connectionState == DavidLiveConnectionState.ENDED ||
+            connectionState == DavidLiveConnectionState.IDLE -> "Сессия завершена"
         isMicMuted && activeSpeaker != DavidLiveSpeaker.DAVID &&
             connectionState != DavidLiveConnectionState.DAVID_SPEAKING -> "Микрофон выключен"
         connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
             activeSpeaker == DavidLiveSpeaker.DAVID -> "Говорит Давид..."
+        connectionState == DavidLiveConnectionState.DAVID_THINKING -> "Давид думает..."
         else -> "Слушаю тебя..."
     }
 }
@@ -144,12 +159,13 @@ fun DavidLiveHorizontalWaveVisualizer(
     barCount: Int = 24
 ) {
     val energyClamped = overallEnergy.coerceIn(0f, 1f)
-    val isDavidSpeaking = connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
-        activeSpeaker == DavidLiveSpeaker.DAVID
-    val isUserSpeaking = activeSpeaker == DavidLiveSpeaker.USER || (!isMicMuted && energyClamped > 0.16f)
-    val isVoiceActive = (isDavidSpeaking || isUserSpeaking) &&
-        connectionState != DavidLiveConnectionState.ERROR &&
-        connectionState != DavidLiveConnectionState.NO_API_KEY
+    val voiceCapableState = isDavidLiveVoiceCapableState(connectionState)
+    val isDavidSpeaking = voiceCapableState &&
+        (connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
+            activeSpeaker == DavidLiveSpeaker.DAVID)
+    val isUserSpeaking = voiceCapableState &&
+        (activeSpeaker == DavidLiveSpeaker.USER || (!isMicMuted && energyClamped > 0.16f))
+    val isVoiceActive = voiceCapableState && (isDavidSpeaking || isUserSpeaking)
 
     val waveActivity by animateFloatAsState(
         targetValue = if (isVoiceActive) 1f else 0.12f,
@@ -266,8 +282,9 @@ fun DavidLiveMinimizedCapsule(
     embeddedInBottomBar: Boolean = false
 ) {
     val energyClamped = overallEnergy.coerceIn(0f, 1f)
-    val isDavidSpeaking = connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
-        activeSpeaker == DavidLiveSpeaker.DAVID
+    val isDavidSpeaking = isDavidLiveVoiceCapableState(connectionState) &&
+        (connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
+            activeSpeaker == DavidLiveSpeaker.DAVID)
     val statusText = resolveDavidLiveStatusLabel(
         connectionState = connectionState,
         activeSpeaker = activeSpeaker,
@@ -905,7 +922,9 @@ fun DavidLiveSheet(
                                                         contentColor = EmeraldStatus
                                                     ),
                                                     shape = RoundedCornerShape(12.dp),
-                                                    modifier = Modifier.height(36.dp)
+                                                    modifier = Modifier
+                                                        .height(36.dp)
+                                                        .testTag("david_live_retry_button")
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Default.Refresh,
@@ -913,7 +932,11 @@ fun DavidLiveSheet(
                                                         modifier = Modifier.size(15.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(6.dp))
-                                                    Text("Повторить", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                                    Text(
+                                                        "Повторить подключение",
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
                                                 }
                                             }
                                             if (connectionState == DavidLiveConnectionState.NO_API_KEY) {
@@ -982,10 +1005,15 @@ fun DavidLiveSheet(
 
                                 Text(
                                     text = statusText,
-                                    color = if (isMicMuted) Color(0xFFFCA5A5) else Color(0xFF94A3B8),
+                                    color = if (isMicMuted || connectionState == DavidLiveConnectionState.ERROR) {
+                                        Color(0xFFFCA5A5)
+                                    } else {
+                                        Color(0xFF94A3B8)
+                                    },
                                     fontSize = 13.5.sp,
                                     fontWeight = FontWeight.Medium,
-                                    textAlign = TextAlign.Center
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.testTag("david_live_center_status")
                                 )
                             }
                         }
