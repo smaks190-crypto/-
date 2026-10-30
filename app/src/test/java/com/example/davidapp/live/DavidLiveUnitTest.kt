@@ -1034,21 +1034,6 @@ class DavidLiveUnitTest {
             accountDao = createReadOnlyAccountDao(emptyList())
         )
 
-        // Выполняем tool call до обрыва и проверяем дедупликацию повторного вызова после переподключения
-        val firstToolRes = provider.executeToolCall(
-            DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING,
-            JSONObject().put("categoryQuery", "Продукты")
-        )
-        assertEquals("ok", firstToolRes.getString("status"))
-        assertEquals(1, provider.verifiedFacts.size)
-
-        val duplicateToolRes = provider.executeToolCall(
-            DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING,
-            JSONObject().put("categoryQuery", "Продукты")
-        )
-        assertEquals("ok", duplicateToolRes.getString("status"))
-        assertEquals("Duplicate tool call after reconnect must not duplicate verifiedFacts", 1, provider.verifiedFacts.size)
-
         val fakeFactory = FakeWebSocketFactory()
         val controller = DavidLiveSessionController(
             financialToolsProvider = provider,
@@ -1062,6 +1047,21 @@ class DavidLiveUnitTest {
         val socket1 = fakeFactory.entries[0]
         socket1.simulateOpen()
         socket1.simulateServerText("""{"setupComplete": {}}""")
+
+        // Выполняем tool call во время активной сессии до обрыва и проверяем дедупликацию повторного вызова
+        val firstToolRes = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING,
+            JSONObject().put("categoryQuery", "Продукты")
+        )
+        assertEquals("ok", firstToolRes.getString("status"))
+        assertEquals(1, provider.verifiedFacts.size)
+
+        val duplicateToolRes = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING,
+            JSONObject().put("categoryQuery", "Продукты")
+        )
+        assertEquals("ok", duplicateToolRes.getString("status"))
+        assertEquals("Duplicate tool call after reconnect must not duplicate verifiedFacts", 1, provider.verifiedFacts.size)
 
         // Пользователь задаёт вопрос, Давид начинает длинный ответ (без turnComplete)
         socket1.simulateServerText(
@@ -1110,19 +1110,31 @@ class DavidLiveUnitTest {
         val socket2 = fakeFactory.entries[1]
         socket2.simulateOpen()
         assertEquals(1, socket2.sentMessages.size)
-        val setupPayload = socket2.sentMessages[0]
-        assertTrue("Setup message on reconnect must include conversation context", setupPayload.contains("КОНТЕКСТ ТЕКУЩЕГО РАЗГОВОРА"))
-        assertTrue("Setup message on reconnect must include verified financial facts", setupPayload.contains("15000"))
-        assertTrue("Setup message on reconnect must include interrupted partial thought", setupPayload.contains("а во-вторых"))
+        val setupJson = JSONObject(socket2.sentMessages[0])
+        val systemInstructionText = setupJson
+            .getJSONObject("setup")
+            .getJSONObject("systemInstruction")
+            .getJSONArray("parts")
+            .getJSONObject(0)
+            .getString("text")
+        assertTrue("Setup message on reconnect must include conversation context", systemInstructionText.contains("КОНТЕКСТ ТЕКУЩЕГО РАЗГОВОРА"))
+        assertTrue("Setup message on reconnect must include verified financial facts", systemInstructionText.contains("15000"))
+        assertTrue("Setup message on reconnect must include interrupted partial thought", systemInstructionText.contains("а во-вторых"))
 
         // 4. После setupComplete контроллер автоматически отправляет одно сообщение clientContent для продолжения оборванной мысли
         socket2.simulateServerText("""{"setupComplete": {}}""")
         assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
         assertEquals("After setupComplete on interrupted turn, continuation clientContent must be sent", 2, socket2.sentMessages.size)
-        val continuationPayload = socket2.sentMessages[1]
-        assertTrue(continuationPayload.contains("clientContent"))
-        assertTrue(continuationPayload.contains("Связь прервалась"))
-        assertTrue(continuationPayload.contains("а во-вторых"))
+        val continuationJson = JSONObject(socket2.sentMessages[1])
+        val continuationText = continuationJson
+            .getJSONObject("clientContent")
+            .getJSONArray("turns")
+            .getJSONObject(0)
+            .getJSONArray("parts")
+            .getJSONObject(0)
+            .getString("text")
+        assertTrue(continuationText.contains("Связь прервалась"))
+        assertTrue(continuationText.contains("а во-вторых"))
 
         // 5. Завершение сессии гарантированно снимает сетевую подписку и флаги ожидания
         controller.endSession()
