@@ -219,8 +219,9 @@ class GlobalConsoleLoggerTest {
         assertFalse("Second Gemini key must not remain in logs", masked.contains("${"AI"}zaSyA123456789012345678901234567890"))
         assertFalse("Raw Bearer token must not remain in logs", masked.contains("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"))
         assertFalse("Raw PIN must not remain in logs", masked.contains("\"7391\""))
-        assertTrue("Masked output should contain AIza***REDACTED***", masked.contains("AIza***REDACTED***"))
-        assertTrue("Masked output should contain [REDACTED]", masked.contains("[REDACTED]"))
+        assertTrue("Masked output should contain the Gemini redaction marker", masked.contains("[MASKED_API_KEY]"))
+        assertTrue("Masked output should contain the token redaction marker", masked.contains("[MASKED_TOKEN]"))
+        assertTrue("Masked output should contain the PIN redaction marker", masked.contains("[MASKED_SECRET]"))
     }
 
     @Test
@@ -307,15 +308,17 @@ class GlobalConsoleLoggerTest {
     }
 
     @Test
-    fun `pause mode stops live log collection except FATAL entries`() {
+    fun `pause mode drops informational logs but retains errors and FATAL entries`() {
         GlobalConsoleLogger.i("UI", "Before pause")
         GlobalConsoleLogger.setPaused(true)
         GlobalConsoleLogger.d("UI", "While paused debug")
         GlobalConsoleLogger.e("NETWORK", "While paused error")
 
         val logs = GlobalConsoleLogger.logs.value
-        assertEquals(1, logs.size)
+        assertEquals(2, logs.size)
         assertEquals("Before pause", logs.first().message)
+        assertEquals("While paused error", logs.last().message)
+        assertEquals(LogLevel.ERROR, logs.last().level)
     }
 
     @Test
@@ -344,7 +347,7 @@ class GlobalConsoleLoggerTest {
         assertEquals(LogLevel.FATAL, fatalEntry.level)
         assertEquals("CRASH", fatalEntry.source)
         assertFalse(fatalEntry.message.contains("${"AI"}zaSySecretKey1234567890abcdef"))
-        assertTrue(fatalEntry.message.contains("AIza***REDACTED***"))
+        assertTrue(fatalEntry.message.contains("[MASKED_API_KEY]"))
     }
 
     @Test
@@ -396,8 +399,8 @@ class GlobalConsoleLoggerTest {
         assertFalse(aiPrompt.contains("${"AI"}zaSyTestKey1234567890123456"))
 
         assertTrue(fullReport.contains("OBSIDIAN NEO-BANK (DAVID FINANCE) — DIAGNOSTIC REPORT"))
-        assertTrue(fullReport.contains("NETWORK / GEMINI AI TRACES"))
-        assertTrue(fullReport.contains("RECENT ERRORS"))
+        assertTrue(fullReport.contains("NETWORK & GEMINI AI TRACES"))
+        assertTrue(fullReport.contains("ERRORS & EXCEPTIONS"))
     }
 
     @Test
