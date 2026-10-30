@@ -249,7 +249,7 @@ class GlobalConsoleLoggerTest {
         assertEquals(1, errors.size)
         val entry = errors.first()
         assertEquals(LogLevel.ERROR, entry.level)
-        assertEquals(LogSource.GEMINI, entry.source)
+        assertEquals("GEMINI", entry.source)
         assertEquals("OP-TEST-01", entry.operationId)
         assertNotNull(entry.stackTrace)
         assertTrue(entry.stackTrace!!.contains("IllegalStateException"))
@@ -272,8 +272,8 @@ class GlobalConsoleLoggerTest {
         val errorOnly = GlobalConsoleLogger.filterLogs(
             entries = allEntries,
             query = "",
-            selectedLevel = LogLevel.ERROR,
-            selectedSource = null
+            levelFilter = LogLevel.ERROR,
+            sourceFilter = "ALL"
         )
         assertEquals(1, errorOnly.size)
         assertEquals("HTTP 429 Quota exceeded", errorOnly.first().message)
@@ -282,26 +282,26 @@ class GlobalConsoleLoggerTest {
         val roomOnly = GlobalConsoleLogger.filterLogs(
             entries = allEntries,
             query = "",
-            selectedLevel = null,
-            selectedSource = LogSource.ROOM
+            levelFilter = null,
+            sourceFilter = "ROOM"
         )
         assertEquals(1, roomOnly.size)
-        assertEquals(LogSource.ROOM, roomOnly.first().source)
+        assertEquals("ROOM", roomOnly.first().source)
 
         // Filter by search query matching stackTrace or operationId
         val byStackQuery = GlobalConsoleLogger.filterLogs(
             entries = allEntries,
             query = "RateLimitException",
-            selectedLevel = null,
-            selectedSource = null
+            levelFilter = null,
+            sourceFilter = "ALL"
         )
         assertEquals(1, byStackQuery.size)
 
         val byOpIdQuery = GlobalConsoleLogger.filterLogs(
             entries = allEntries,
             query = "VOICE-0099",
-            selectedLevel = null,
-            selectedSource = null
+            levelFilter = null,
+            sourceFilter = "ALL"
         )
         assertEquals(1, byOpIdQuery.size)
     }
@@ -332,7 +332,7 @@ class GlobalConsoleLoggerTest {
         GlobalConsoleLogger.handleUncaughtException(
             thread = Thread.currentThread(),
             throwable = crash,
-            defaultHandler = fakeDefaultHandler
+            delegateHandler = fakeDefaultHandler
         )
 
         assertTrue("UncaughtExceptionHandler must always delegate to default system handler", delegated.get())
@@ -342,7 +342,7 @@ class GlobalConsoleLoggerTest {
         assertEquals(1, errors.size)
         val fatalEntry = errors.first()
         assertEquals(LogLevel.FATAL, fatalEntry.level)
-        assertEquals(LogSource.CRASH, fatalEntry.source)
+        assertEquals("CRASH", fatalEntry.source)
         assertFalse(fatalEntry.message.contains("${"AI"}zaSySecretKey1234567890abcdef"))
         assertTrue(fatalEntry.message.contains("AIza***REDACTED***"))
     }
@@ -351,8 +351,8 @@ class GlobalConsoleLoggerTest {
     fun `buildAiDiagnosticPrompt and buildDiagnosticReport produce structured sanitized Markdown`() {
         val opId = GlobalConsoleLogger.newOperationId("GEMINI")
         GlobalConsoleLogger.recordDbOperation(
-            operation = "INSERT transaction",
-            table = "transactions",
+            operationName = "INSERT transaction",
+            tableName = "transactions",
             durationMs = 8L,
             details = "amount=1500.0",
             operationId = opId
