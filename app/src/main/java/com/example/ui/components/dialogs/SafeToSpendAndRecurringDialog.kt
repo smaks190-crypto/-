@@ -5,7 +5,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -25,9 +24,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.db.RecurringPaymentEntity
 import com.example.data.safetospend.*
+import com.example.ui.components.formatFullCurrency
+import com.example.ui.components.formatShortCurrency
 import com.example.ui.theme.*
-import com.example.ui.utils.formatFullCurrency
-import com.example.ui.utils.formatShortCurrency
 import java.time.LocalDate
 
 @Composable
@@ -67,7 +66,7 @@ fun SafeToSpendAndRecurringDialog(
                 .fillMaxHeight(0.88f)
                 .clip(RoundedCornerShape(28.dp))
                 .border(1.dp, GlassBorder, RoundedCornerShape(28.dp)),
-            color = ObsidianBackground
+            color = DarkBg
         ) {
             Column(
                 modifier = Modifier
@@ -622,26 +621,34 @@ private fun RecurringPaymentsTab(
 private fun WhatIfSimulatorTab(
     safeToSpendInput: SafeToSpendInput
 ) {
+    var scenarioMode by remember { mutableIntStateOf(0) } // 0 = Покупка, 1 = Задержка дохода, 2 = До зарплаты
     var hypotheticalPurchaseText by remember { mutableStateOf("3000") }
-    var salaryDelayDaysText by remember { mutableStateOf("0") }
-    var extraSubscriptionText by remember { mutableStateOf("0") }
+    var salaryDelayDaysText by remember { mutableStateOf("5") }
+    var plannedDailyText by remember { mutableStateOf("1000") }
 
     val simulationResult = remember(
         safeToSpendInput,
+        scenarioMode,
         hypotheticalPurchaseText,
         salaryDelayDaysText,
-        extraSubscriptionText
+        plannedDailyText
     ) {
-        val purchase = hypotheticalPurchaseText.toDoubleOrNull() ?: 0.0
-        val delay = salaryDelayDaysText.toIntOrNull() ?: 0
-        val sub = extraSubscriptionText.toDoubleOrNull() ?: 0.0
+        val request: WhatIfScenarioRequest = when (scenarioMode) {
+            1 -> WhatIfScenarioRequest.IncomeDelay(
+                delayDays = (salaryDelayDaysText.toIntOrNull() ?: 5).coerceAtLeast(1)
+            )
+            2 -> WhatIfScenarioRequest.RunwayCheck(
+                plannedDailyDiscretionaryRub = (plannedDailyText.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0)
+            )
+            else -> WhatIfScenarioRequest.HypotheticalSpend(
+                amountRub = (hypotheticalPurchaseText.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0),
+                streamType = ExpenseStreamType.DISCRETIONARY,
+                label = "Разовая покупка"
+            )
+        }
         WhatIfSimulator.simulate(
             baseInput = safeToSpendInput,
-            request = WhatIfScenarioRequest(
-                oneTimeExpenseTodayRub = purchase,
-                salaryDelayDays = delay,
-                newMonthlySubscriptionRub = sub
-            )
+            request = request
         )
     }
 
@@ -667,39 +674,56 @@ private fun WhatIfSimulatorTab(
                     fontFamily = ManropeFontFamily,
                     fontWeight = FontWeight.Bold
                 )
-                OutlinedTextField(
-                    value = hypotheticalPurchaseText,
-                    onValueChange = { hypotheticalPurchaseText = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("Разовая покупка сегодня, ₽", fontSize = 11.sp) },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(
+                        selected = scenarioMode == 0,
+                        onClick = { scenarioMode = 0 },
+                        label = { Text("Покупка ₽", fontSize = 11.sp) }
+                    )
+                    FilterChip(
+                        selected = scenarioMode == 1,
+                        onClick = { scenarioMode = 1 },
+                        label = { Text("Задержка ЗП", fontSize = 11.sp) }
+                    )
+                    FilterChip(
+                        selected = scenarioMode == 2,
+                        onClick = { scenarioMode = 2 },
+                        label = { Text("До зарплаты", fontSize = 11.sp) }
+                    )
+                }
+                when (scenarioMode) {
+                    1 -> OutlinedTextField(
                         value = salaryDelayDaysText,
                         onValueChange = { salaryDelayDaysText = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Задержка дохода, дн.", fontSize = 11.sp) },
+                        label = { Text("Задержка дохода, дней", fontSize = 11.sp) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    OutlinedTextField(
-                        value = extraSubscriptionText,
-                        onValueChange = { extraSubscriptionText = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Новая подписка ₽/мес", fontSize = 11.sp) },
+                    2 -> OutlinedTextField(
+                        value = plannedDailyText,
+                        onValueChange = { plannedDailyText = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Планируемый дневной расход, ₽/день", fontSize = 11.sp) },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    else -> OutlinedTextField(
+                        value = hypotheticalPurchaseText,
+                        onValueChange = { hypotheticalPurchaseText = it.filter { ch -> ch.isDigit() } },
+                        label = { Text("Разовая покупка сегодня, ₽", fontSize = 11.sp) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
         }
 
         val verdictColor = when (simulationResult.verdict) {
-            WhatIfVerdict.SAFE -> Emerald400
-            WhatIfVerdict.TIGHTENED_BUDGET -> Amber400
-            WhatIfVerdict.RESERVE_BREACH, WhatIfVerdict.CASH_GAP -> Rose500
+            WhatIfVerdict.SAFE_WITHIN_TODAY_LIMIT -> Emerald400
+            WhatIfVerdict.REDUCES_FUTURE_DAILY_BUDGET -> Amber400
+            WhatIfVerdict.RESERVE_BREACH, WhatIfVerdict.CASH_GAP_RISK -> Rose500
         }
 
         Box(
