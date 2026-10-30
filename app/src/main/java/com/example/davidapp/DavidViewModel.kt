@@ -74,7 +74,8 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         transactionDao = database.transactionDao(),
         categoryDao = database.categoryDao(),
         goalDao = database.goalDao(),
-        accountDao = database.accountDao()
+        accountDao = database.accountDao(),
+        recurringPaymentDao = database.recurringPaymentDao()
     )
 
     val liveSessionController = DavidLiveSessionController(
@@ -786,7 +787,8 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             lower.startsWith("на чем") ||
             lower.startsWith("на чём") ||
             lower.startsWith("мой баланс") ||
-            lower.startsWith("жабий аудит")
+            lower.startsWith("жабий аудит") ||
+            com.example.data.safetospend.WhatIfSimulator.detectWhatIfQuery(text) != null
         ) {
             return null
         }
@@ -903,10 +905,50 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         )
     }
 
+    private suspend fun buildUnifiedIntelligenceSnapshot(): com.example.data.safetospend.UnifiedFinancialIntelligenceSnapshot? {
+        return try {
+            val recentTxs = repository.getTransactionsForBudget(currentBudgetId).first()
+            val debts = repository.getAccountsForBudget(currentBudgetId).first()
+            val goals = repository.getGoalsForBudget(currentBudgetId).first()
+            val cats = repository.getCategoriesForBudget(currentBudgetId).first()
+            val recurring = repository.getRecurringPaymentsForBudget(currentBudgetId).first()
+            val logs = repository.getExecutionLogsForBudget(currentBudgetId).first()
+            val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
+            val safetyFloor = prefs.getFloat("safety_floor_rub_${currentBudgetId}", 0f).toDouble()
+            val lockedReserve = prefs.getFloat("locked_reserve_rub_${currentBudgetId}", 0f).toDouble()
+            val userEssNorm = prefs.getFloat("essential_daily_norm_rub_${currentBudgetId}", -1f)
+                .takeIf { it > 0f }?.toDouble()
+
+            com.example.data.safetospend.DavidFinancialIntelligenceProvider.computeSnapshot(
+                transactions = recentTxs,
+                accounts = debts,
+                goals = goals,
+                categories = cats,
+                recurringPayments = recurring,
+                executionLogs = logs,
+                userSafetyFloorRub = safetyFloor,
+                userLockedReserveRub = lockedReserve,
+                userEssentialDailyNormRub = userEssNorm
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private suspend fun generateGeminiReply(query: String): String {
         return try {
             val goals = repository.getGoalsForBudget(currentBudgetId).first()
             val snapshot = buildConversationFinancialSnapshot(query)
+            val unified = buildUnifiedIntelligenceSnapshot()
+            val whatIfReq = com.example.data.safetospend.WhatIfSimulator.detectWhatIfQuery(query)
+            val whatIfResult = if (whatIfReq != null && unified != null) {
+                com.example.data.safetospend.DavidFinancialIntelligenceProvider.simulateWhatIf(
+                    unified.safeToSpendInput,
+                    whatIfReq
+                )
+            } else {
+                null
+            }
             val historySnippet = sessionMessages
                 .takeLast(8)
                 .mapNotNull { msg ->
@@ -921,20 +963,61 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
                 userMessage = query,
                 snapshot = snapshot,
                 activeGoals = goals,
-                conversationHistory = historySnippet
+                conversationHistory = historySnippet,
+                safeToSpendResult = unified?.safeToSpendResult,
+                whatIfResult = whatIfResult
             )
-            answer.ifBlank { generateSmartDavidReply(query, snapshot) }
+            answer.ifBlank { generateSmartDavidReply(query, snapshot, unified, whatIfResult) }
         } catch (_: Exception) {
             val fallbackSnapshot = try { buildConversationFinancialSnapshot(query) } catch (_: Exception) { null }
-            generateSmartDavidReply(query, fallbackSnapshot)
+            val unified = buildUnifiedIntelligenceSnapshot()
+            val whatIfReq = com.example.data.safetospend.WhatIfSimulator.detectWhatIfQuery(query)
+            val whatIfResult = if (whatIfReq != null && unified != null) {
+                com.example.data.safetospend.DavidFinancialIntelligenceProvider.simulateWhatIf(
+                    unified.safeToSpendInput,
+                    whatIfReq
+                )
+            } else {
+                null
+            }
+            generateSmartDavidReply(query, fallbackSnapshot, unified, whatIfResult)
         }
     }
 
     private suspend fun generateSmartDavidReply(
         query: String,
-        precomputedSnapshot: com.example.data.repository.FinancialSemanticsSnapshot? = null
+        precomputedSnapshot: com.example.data.repository.FinancialSemanticsSnapshot? = null,
+        precomputedUnified: com.example.data.safetospend.UnifiedFinancialIntelligenceSnapshot? = null,
+        precomputedWhatIf: com.example.data.safetospend.WhatIfSimulationResult? = null
     ): String {
         val q = query.lowercase(Locale.getDefault())
+        val unified = precomputedUnified ?: buildUnifiedIntelligenceSnapshot()
+        val whatIfReq = com.example.data.safetospend.WhatIfSimulator.detectWhatIfQuery(query)
+        val whatIfResult = precomputedWhatIf ?: if (whatIfReq != null && unified != null) {
+            com.example.data.safetospend.DavidFinancialIntelligenceProvider.simulateWhatIf(
+                unified.safeToSpendInput,
+                whatIfReq
+            )
+        } else {
+            null
+        }
+
+        if (whatIfResult != null) {
+            return "🐸 Ква-аудит сценария «Что если» для **$currentProfileName**:\n\n${whatIfResult.structuredSummaryForDavid}"
+        }
+
+        val isSafeToSpendQuery =
+            q.contains("можно потратить") ||
+            q.contains("дневной лимит") ||
+            q.contains("лимит на сегодня") ||
+            q.contains("бюджет на сегодня") ||
+            q.contains("safe to spend") ||
+            q.contains("сколько тратить сегодня")
+
+        if (isSafeToSpendQuery && unified != null) {
+            return "🐸 Расчёт **Safe-to-Spend 2.0** для профиля **$currentProfileName**:\n\n${unified.safeToSpendResult.toStructuredDavidSummary()}"
+        }
+
         val isFinancialSemanticsQuery =
             q.contains("баланс") ||
             q.contains("остаток") ||

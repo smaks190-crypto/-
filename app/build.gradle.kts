@@ -162,12 +162,14 @@ dependencies {
   // implementation("com.alphacephei:vosk-android:0.3.47")
 }
 
-// Автоматическая верификация Unit-тестов Developer Console, David Live и компиляции Release/AndroidTest Source Sets при сборке Debug APK
+// Автоматическая верификация Unit-тестов Developer Console, David Live, FinancialSemantics и SafeToSpend 2.0 при сборке Debug APK
 tasks.withType<Test>().configureEach {
   filter {
     includeTestsMatching("com.example.utils.GlobalConsoleLoggerTest")
     includeTestsMatching("com.example.ExampleUnitTest")
     includeTestsMatching("com.example.davidapp.live.DavidLiveUnitTest")
+    includeTestsMatching("com.example.data.FinancialSemanticsCalculatorTest")
+    includeTestsMatching("com.example.data.safetospend.SafeToSpendCalculatorTest")
   }
 }
 

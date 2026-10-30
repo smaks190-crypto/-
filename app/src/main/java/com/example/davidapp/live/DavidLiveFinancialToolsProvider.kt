@@ -32,7 +32,9 @@ class DavidLiveFinancialToolsProvider(
     private val categoryDao: CategoryDao?,
     private val goalDao: GoalDao?,
     private val accountDao: AccountDao?,
-    private val currentTotalBalanceProvider: () -> Double = { 0.0 }
+    private val currentTotalBalanceProvider: () -> Double = { 0.0 },
+    private val recurringPaymentDao: com.example.data.db.RecurringPaymentDao? = null,
+    private val safeToSpendInputOverrideProvider: (() -> com.example.data.safetospend.SafeToSpendInput?)? = null
 ) {
     /** Strictly read-only: David Live never modifies financial records without confirmation. */
     val canMutateRecords: Boolean = false
@@ -63,13 +65,81 @@ class DavidLiveFinancialToolsProvider(
                         "description",
                         "Получить реальную сводку по бюджету пользователя за последние 30 дней со строгим разделением: " +
                             "доступный остаток (текущий баланс), заработанный доход (в т.ч. зарплата), расходы, " +
-                            "мои обязательства («Я должен») и дебиторская задолженность («Мне должны»)."
+                            "мои обязательства («Я должен»), дебиторская задолженность («Мне должны») и безопасный лимит трат на сегодня (Safe-to-Spend 2.0)."
                     )
                     put(
                         "parameters",
                         JSONObject().apply {
                             put("type", "OBJECT")
                             put("properties", JSONObject())
+                        }
+                    )
+                }
+            )
+            put(
+                JSONObject().apply {
+                    put("name", TOOL_SAFE_TO_SPEND_FORECAST)
+                    put(
+                        "description",
+                        "Получить полную математическую расшифровку прогноза ликвидности Safe-to-Spend 2.0: " +
+                            "свободный лимит на сегодня, защищённый резерв на базовые нужды, будущие обязательства, резерв безопасности и риск кассового разрыва."
+                    )
+                    put(
+                        "parameters",
+                        JSONObject().apply {
+                            put("type", "OBJECT")
+                            put("properties", JSONObject())
+                        }
+                    )
+                }
+            )
+            put(
+                JSONObject().apply {
+                    put("name", TOOL_SIMULATE_WHAT_IF)
+                    put(
+                        "description",
+                        "Выполнить детерминированную What-If симуляцию без изменения БД: " +
+                            "'Что будет, если я потрачу X рублей?' (HYPOTHETICAL_SPEND), " +
+                            "'Хватит ли до зарплаты?' (RUNWAY_CHECK), " +
+                            "'Что изменится, если зарплата задержится на N дней?' (INCOME_DELAY)."
+                    )
+                    put(
+                        "parameters",
+                        JSONObject().apply {
+                            put("type", "OBJECT")
+                            put(
+                                "properties",
+                                JSONObject().apply {
+                                    put(
+                                        "scenarioType",
+                                        JSONObject().apply {
+                                            put("type", "STRING")
+                                            put("description", "Тип сценария: HYPOTHETICAL_SPEND, RUNWAY_CHECK или INCOME_DELAY")
+                                        }
+                                    )
+                                    put(
+                                        "amountRub",
+                                        JSONObject().apply {
+                                            put("type", "NUMBER")
+                                            put("description", "Сумма гипотетической покупки в рублях (для HYPOTHETICAL_SPEND)")
+                                        }
+                                    )
+                                    put(
+                                        "delayDays",
+                                        JSONObject().apply {
+                                            put("type", "INTEGER")
+                                            put("description", "На сколько дней задержится доход/зарплата (для INCOME_DELAY)")
+                                        }
+                                    )
+                                    put(
+                                        "plannedDailyDiscretionaryRub",
+                                        JSONObject().apply {
+                                            put("type", "NUMBER")
+                                            put("description", "Планируемые ежедневные необязательные траты в рублях (для RUNWAY_CHECK)")
+                                        }
+                                    )
+                                }
+                            )
                         }
                     )
                 }
@@ -181,6 +251,8 @@ class DavidLiveFinancialToolsProvider(
     suspend fun executeToolCall(toolName: String, args: JSONObject?): JSONObject {
         val result = when (toolName) {
             TOOL_FINANCIAL_OVERVIEW -> queryFinancialOverview()
+            TOOL_SAFE_TO_SPEND_FORECAST -> querySafeToSpendForecast()
+            TOOL_SIMULATE_WHAT_IF -> querySimulateWhatIf(args)
             TOOL_CATEGORY_SPENDING -> {
                 val filter = args?.optString("categoryQuery")?.takeIf { it.isNotBlank() }
                 queryCategorySpending(filter)
@@ -222,6 +294,109 @@ class DavidLiveFinancialToolsProvider(
         }
     }
 
+    private suspend fun resolveSafeToSpendInputAndResult(): Pair<com.example.data.safetospend.SafeToSpendInput, com.example.data.safetospend.SafeToSpendResult> {
+        val overrideInput = safeToSpendInputOverrideProvider?.invoke()
+        if (overrideInput != null) {
+            return overrideInput to com.example.data.safetospend.SafeToSpendCalculator.calculate(overrideInput)
+        }
+        val allTransactions = transactionDao?.getTransactionsByBudgetId(budgetId)?.firstOrNull().orEmpty()
+        val accounts = accountDao?.getAccountsByBudgetId(budgetId)?.firstOrNull().orEmpty()
+        val goals = goalDao?.getGoalsByBudgetId(budgetId)?.firstOrNull().orEmpty()
+        val categories = categoryDao?.getCategoriesByBudgetId(budgetId)?.firstOrNull().orEmpty()
+        val recurring = recurringPaymentDao?.getRecurringPaymentsByBudgetId(budgetId)?.firstOrNull().orEmpty()
+        val logs = recurringPaymentDao?.getExecutionLogsByBudgetId(budgetId)?.firstOrNull().orEmpty()
+
+        val unified = com.example.data.safetospend.DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = allTransactions,
+            accounts = accounts,
+            goals = goals,
+            categories = categories,
+            recurringPayments = recurring,
+            executionLogs = logs
+        )
+        return unified.safeToSpendInput to unified.safeToSpendResult
+    }
+
+    private suspend fun querySafeToSpendForecast(): JSONObject {
+        val (_, sts) = resolveSafeToSpendInputAndResult()
+        return JSONObject().apply {
+            put("status", "ok")
+            put("canSpendTodayDiscRub", sts.canSpendTodayDiscRub)
+            put("canSpendTodayEssRub", sts.canSpendTodayEssRub)
+            put("canSpendTodayTotalRub", sts.canSpendTodayTotalRub)
+            put("dailyDiscretionarySpeedRub", sts.dailyDiscretionarySpeedRub)
+            put("dailyEssentialRateRub", sts.dailyEssentialRateRub)
+            put("essentialEstimationMethod", sts.essentialEstimationMethod.name)
+            put("essentialConfidenceLevel", sts.essentialConfidenceLevel.name)
+            put("requiresEssentialBudgetPrompt", sts.requiresEssentialBudgetPrompt)
+            put("availableBalanceRub", sts.availableBalanceRub)
+            put("mandatorySafetyFloorRub", sts.mandatorySafetyFloorRub)
+            put("isReserveRequirementMet", sts.isReserveRequirementMet)
+            put("reserveDeficitRub", sts.reserveDeficitRub)
+            put("overdueObligationsRub", sts.overdueObligationsRub)
+            put("todayPendingObligationsRub", sts.todayPendingObligationsRub)
+            put("reservedFutureObligationsRub", sts.reservedFutureObligationsRub)
+            put("reservedEssentialLivingHorizonRub", sts.reservedEssentialLivingHorizonRub)
+            put("horizonDays", sts.horizonDays)
+            put("bottleneckDayOffset", sts.bottleneckDayOffset)
+            put("bottleneckReason", sts.bottleneckReason.name)
+            put("hasCashGap", sts.hasCashGap)
+            put("cashGapAmountRub", sts.cashGapAmountRub)
+            put("humanSummary", sts.toStructuredDavidSummary())
+        }
+    }
+
+    private suspend fun querySimulateWhatIf(args: JSONObject?): JSONObject {
+        val (baseInput, _) = resolveSafeToSpendInputAndResult()
+        val rawType = args?.optString("scenarioType", "HYPOTHETICAL_SPEND")?.uppercase(Locale.ROOT)
+            ?: "HYPOTHETICAL_SPEND"
+        val request = when (rawType) {
+            "INCOME_DELAY" -> {
+                val delayDays = args?.optInt("delayDays", 3)?.coerceAtLeast(1) ?: 3
+                com.example.data.safetospend.WhatIfScenarioRequest.IncomeDelay(delayDays = delayDays)
+            }
+            "RUNWAY_CHECK" -> {
+                val plannedDaily = args?.optDouble("plannedDailyDiscretionaryRub", 0.0)?.takeIf { !it.isNaN() } ?: 0.0
+                com.example.data.safetospend.WhatIfScenarioRequest.RunwayCheck(plannedDailyDiscretionaryRub = plannedDaily)
+            }
+            else -> {
+                val amount = args?.optDouble("amountRub", 0.0)?.takeIf { !it.isNaN() } ?: 0.0
+                com.example.data.safetospend.WhatIfScenarioRequest.HypotheticalSpend(amountRub = amount)
+            }
+        }
+
+        val sim = com.example.data.safetospend.DavidFinancialIntelligenceProvider.simulateWhatIf(baseInput, request)
+        val exposedArray = JSONArray()
+        sim.newlyExposedObligations.forEach { item ->
+            exposedArray.put(
+                JSONObject().apply {
+                    put("title", item.title)
+                    put("amountRub", item.amountRub)
+                    put("dueEpochDay", item.dueEpochDay)
+                }
+            )
+        }
+
+        return JSONObject().apply {
+            put("status", "ok")
+            put("scenarioType", rawType)
+            put("baselineCanSpendTodayRub", String.format(Locale.US, "%.2f", sim.baseline.canSpendTodayDiscRub).toDouble())
+            put("simulatedCanSpendTodayRub", String.format(Locale.US, "%.2f", sim.simulated.canSpendTodayDiscRub).toDouble())
+            put("deltaDailyBudgetRub", String.format(Locale.US, "%.2f", sim.deltaCanSpendTodayDiscRub).toDouble())
+            put("simulatedFutureDailyRub", String.format(Locale.US, "%.2f", sim.simulated.dailyDiscretionarySpeedRub).toDouble())
+            put("deltaFutureDailyRub", String.format(Locale.US, "%.2f", sim.deltaDailyDiscretionarySpeedRub).toDouble())
+            put("newlyExposedObligationsCount", sim.newlyExposedObligations.size)
+            put("newlyExposedObligations", exposedArray)
+            put("isCashGap", sim.simulated.hasCashGap)
+            put("isReserveDeficit", !sim.simulated.isReserveRequirementMet)
+            put("projectedBalanceAtSalaryEveRub", sim.projectedBalanceAtSalaryEveRub)
+            put("surplusAboveReserveRub", sim.surplusAboveReserveRub)
+            put("autonomousSurvivalDaysAtZeroDisc", sim.autonomousSurvivalDaysAtZeroDisc)
+            put("verdict", sim.verdict.name)
+            put("humanSummary", sim.structuredSummaryForDavid)
+        }
+    }
+
     private suspend fun queryFinancialOverview(): JSONObject {
         val now = System.currentTimeMillis()
         val thirtyDaysAgo = now - 30L * 24L * 3600L * 1000L
@@ -237,6 +412,7 @@ class DavidLiveFinancialToolsProvider(
             accounts = accounts,
             fallbackBalance = currentTotalBalanceProvider()
         )
+        val (_, sts) = resolveSafeToSpendInputAndResult()
 
         val availableBalance = snapshot.availableBalanceRub
         val earnedIncome = snapshot.earnedIncomeRub
@@ -253,6 +429,7 @@ class DavidLiveFinancialToolsProvider(
 
         val summary = buildString {
             append("Доступный остаток (баланс): ${availableBalance.roundToLong()} ₽ (НЕ суммировать с зарплатой и долгами), ")
+            append("Можно потратить сегодня (свободный лимит Safe-to-Spend 2.0): ${sts.canSpendTodayDiscRub.roundToLong()} ₽ (+ ${sts.canSpendTodayEssRub.roundToLong()} ₽ защищено на базовые нужды), ")
             append("Заработанный доход (30 дн.): ${earnedIncome.roundToLong()} ₽ (в т.ч. зарплата: ${snapshot.salaryIncomeRub.roundToLong()} ₽), ")
             if (snapshot.debtReturnedIncomeRub > 0.0) {
                 append("Возврат долгов мне (30 дн.): ${snapshot.debtReturnedIncomeRub.roundToLong()} ₽ (не является доходом), ")
@@ -269,6 +446,9 @@ class DavidLiveFinancialToolsProvider(
             put("hasData", transactions.isNotEmpty() || accounts.isNotEmpty() || availableBalance != 0.0)
             put("totalBalanceRub", availableBalance.roundToLong())
             put("availableBalanceRub", availableBalance.roundToLong())
+            put("canSpendTodayDiscRub", sts.canSpendTodayDiscRub)
+            put("canSpendTodayEssRub", sts.canSpendTodayEssRub)
+            put("safeToSpendHorizonDays", sts.horizonDays)
             put("income30dRub", earnedIncome.roundToLong())
             put("earnedIncome30dRub", earnedIncome.roundToLong())
             put("salaryIncome30dRub", snapshot.salaryIncomeRub.roundToLong())
@@ -546,6 +726,8 @@ class DavidLiveFinancialToolsProvider(
 
     companion object {
         const val TOOL_FINANCIAL_OVERVIEW = "get_financial_overview"
+        const val TOOL_SAFE_TO_SPEND_FORECAST = "get_safe_to_spend_forecast"
+        const val TOOL_SIMULATE_WHAT_IF = "simulate_what_if"
         const val TOOL_CATEGORY_SPENDING = "get_category_spending"
         const val TOOL_GOALS_AND_DEBTS = "get_goals_and_debts"
         const val TOOL_COMPARE_PERIODS = "compare_spending_periods"

@@ -13,6 +13,8 @@ import com.example.data.db.BudgetProfileEntity
 import com.example.data.db.CategoryEntity
 import com.example.data.db.GoalEntity
 import com.example.data.db.NotificationEntity
+import com.example.data.db.RecurringExecutionLogEntity
+import com.example.data.db.RecurringPaymentEntity
 import com.example.data.db.TransactionEntity
 import com.example.data.repository.BudgetRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -89,6 +91,18 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     val categories: StateFlow<List<CategoryEntity>>
     val accounts: StateFlow<List<AccountEntity>>
     val notifications: StateFlow<List<NotificationEntity>>
+    val recurringPayments: StateFlow<List<RecurringPaymentEntity>>
+    val recurringExecutionLogs: StateFlow<List<RecurringExecutionLogEntity>>
+
+    private val _userSafetyFloorRub = MutableStateFlow(prefs.getFloat("user_safety_floor_rub", 0f).toDouble())
+    val userSafetyFloorRub: StateFlow<Double> = _userSafetyFloorRub.asStateFlow()
+
+    private val _userEssentialDailyNormRub = MutableStateFlow<Double?>(
+        if (prefs.contains("user_essential_daily_norm_rub")) {
+            prefs.getFloat("user_essential_daily_norm_rub", 500f).toDouble()
+        } else null
+    )
+    val userEssentialDailyNormRub: StateFlow<Double?> = _userEssentialDailyNormRub.asStateFlow()
 
     private val _periodType = MutableStateFlow(PeriodType.MONTH)
     val periodType: StateFlow<PeriodType> = _periodType.asStateFlow()
@@ -339,6 +353,24 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             emptyList()
         )
 
+        recurringPayments = _selectedBudgetId.flatMapLatest { id ->
+            if (id == null) kotlinx.coroutines.flow.flowOf(emptyList())
+            else repository.getRecurringPaymentsForBudget(id)
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            emptyList()
+        )
+
+        recurringExecutionLogs = _selectedBudgetId.flatMapLatest { id ->
+            if (id == null) kotlinx.coroutines.flow.flowOf(emptyList())
+            else repository.getExecutionLogsForBudget(id)
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            emptyList()
+        )
+
         stateDelegate = TransactionStateDelegate(
             context = application.applicationContext,
             repository = repository,
@@ -396,7 +428,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 com.example.utils.GlobalConsoleLogger.updateDatabaseSnapshot(
                     isInitialized = true,
                     isOpen = database.isOpen,
-                    schemaVersion = 5,
+                    schemaVersion = 6,
                     activeBudgetId = _selectedBudgetId.value ?: "default",
                     tableCounts = countsMap
                 )
@@ -868,6 +900,102 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         toName: String
     ) {
         stateDelegate.transferBetweenAccounts(fromAccountId, toAccountId, amount, fromName, toName)
+    }
+
+    fun setUserSafetyFloor(amountRub: Double) {
+        val clean = amountRub.coerceAtLeast(0.0)
+        prefs.edit().putFloat("user_safety_floor_rub", clean.toFloat()).apply()
+        _userSafetyFloorRub.value = clean
+        viewModelScope.launch {
+            _toastMessage.emit("Неснижаемый резерв: ${clean.toInt()} ₽")
+        }
+    }
+
+    fun setUserEssentialDailyNorm(amountRub: Double?) {
+        if (amountRub == null || amountRub <= 0.0) {
+            prefs.edit().remove("user_essential_daily_norm_rub").apply()
+            _userEssentialDailyNormRub.value = null
+            viewModelScope.launch {
+                _toastMessage.emit("Ориентир базовых расходов сброшен")
+            }
+        } else {
+            prefs.edit().putFloat("user_essential_daily_norm_rub", amountRub.toFloat()).apply()
+            _userEssentialDailyNormRub.value = amountRub
+            viewModelScope.launch {
+                _toastMessage.emit("Ориентир базовых расходов: ${amountRub.toInt()} ₽/день")
+            }
+        }
+    }
+
+    fun addRecurringPayment(
+        title: String,
+        amount: Double,
+        type: String = "EXPENSE",
+        category: String = "ЖКХ и Аренда",
+        frequency: String = "MONTHLY",
+        nextDueDateIso: String,
+        priority: String = "MANDATORY",
+        incomeTier: String = "GUARANTEED"
+    ) {
+        val currentBudgetId = _selectedBudgetId.value ?: "default"
+        val dueEpochDay = com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(nextDueDateIso)
+            ?: java.time.LocalDate.now().toEpochDay()
+        val anchorDay = try {
+            java.time.LocalDate.ofEpochDay(dueEpochDay).dayOfMonth
+        } catch (_: Exception) {
+            1
+        }
+        viewModelScope.launch {
+            repository.insertRecurringPayment(
+                RecurringPaymentEntity(
+                    budgetId = currentBudgetId,
+                    title = title.trim().ifBlank { category },
+                    amount = amount.coerceAtLeast(0.0),
+                    isIncome = type.equals("INCOME", ignoreCase = true),
+                    incomeCertainty = incomeTier,
+                    categoryName = category,
+                    frequency = frequency,
+                    customIntervalDays = 30,
+                    anchorDayOfMonth = anchorDay,
+                    nextDueDateEpochDay = dueEpochDay,
+                    priority = priority,
+                    status = "ACTIVE"
+                )
+            )
+            _toastMessage.emit("Регулярный платёж «${title.ifBlank { category }}» добавлен!")
+        }
+    }
+
+    fun confirmRecurringPayment(paymentId: Long) {
+        viewModelScope.launch {
+            val tx = repository.confirmRecurringPaymentExecution(paymentId)
+            if (tx != null) {
+                _toastMessage.emit("Платёж «${tx.subcategory.ifBlank { tx.category }}» подтверждён (${tx.amount.toInt()} ₽)")
+            }
+        }
+    }
+
+    fun rescheduleRecurringPayment(paymentId: Long, oldScheduledEpochDay: Long, newDueDateIso: String) {
+        val newEpochDay = com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(newDueDateIso) ?: return
+        viewModelScope.launch {
+            repository.rescheduleRecurringPayment(paymentId, oldScheduledEpochDay, newEpochDay)
+            _toastMessage.emit("Дата платежа перенесена на $newDueDateIso")
+        }
+    }
+
+    fun toggleRecurringPaymentStatus(paymentId: Long, currentStatus: String) {
+        val nextStatus = if (currentStatus == "ACTIVE") "PAUSED" else "ACTIVE"
+        viewModelScope.launch {
+            repository.updateRecurringPaymentStatus(paymentId, nextStatus)
+            _toastMessage.emit(if (nextStatus == "PAUSED") "Регулярный платёж на паузе" else "Регулярный платёж активирован")
+        }
+    }
+
+    fun deleteRecurringPayment(paymentId: Long) {
+        viewModelScope.launch {
+            repository.deleteRecurringPayment(paymentId)
+            _toastMessage.emit("Регулярный платёж удалён")
+        }
     }
 
 }

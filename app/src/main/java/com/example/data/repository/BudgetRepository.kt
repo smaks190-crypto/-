@@ -55,7 +55,8 @@ class BudgetRepository(
     private val accountDao: AccountDao,
     private val notificationDao: NotificationDao,
     private val db: AppDatabase,
-    private val apiService: GeminiApiService = RetrofitClient.service
+    private val apiService: GeminiApiService = RetrofitClient.service,
+    private val recurringPaymentDao: com.example.data.db.RecurringPaymentDao = db.recurringPaymentDao()
 ) {
     private val context: android.content.Context = context.applicationContext
     val allProfiles: Flow<List<BudgetProfileEntity>> = budgetProfileDao.getAllProfiles()
@@ -65,6 +66,12 @@ class BudgetRepository(
 
     fun getNotificationsForBudget(budgetId: String): Flow<List<NotificationEntity>> =
         notificationDao.getNotificationsByBudgetId(budgetId)
+
+    fun getRecurringPaymentsForBudget(budgetId: String): Flow<List<com.example.data.db.RecurringPaymentEntity>> =
+        recurringPaymentDao.getRecurringPaymentsByBudgetId(budgetId)
+
+    fun getExecutionLogsForBudget(budgetId: String): Flow<List<com.example.data.db.RecurringExecutionLogEntity>> =
+        recurringPaymentDao.getExecutionLogsByBudgetId(budgetId)
 
     suspend fun insertAccount(account: AccountEntity) {
         accountDao.insertAccount(account)
@@ -261,7 +268,9 @@ class BudgetRepository(
         userMessage: String,
         snapshot: FinancialSemanticsSnapshot,
         activeGoals: List<GoalEntity> = emptyList(),
-        conversationHistory: List<String> = emptyList()
+        conversationHistory: List<String> = emptyList(),
+        safeToSpendResult: com.example.data.safetospend.SafeToSpendResult? = null,
+        whatIfResult: com.example.data.safetospend.WhatIfSimulationResult? = null
     ): String {
         val cleanKey = GeminiModelConfig.sanitizeApiKey(apiKey)
         if (cleanKey.isBlank()) {
@@ -269,6 +278,8 @@ class BudgetRepository(
         }
 
         val financialContext = FinancialSemanticsCalculator.formatPromptFinancialContext(snapshot)
+        val safeToSpendSection = safeToSpendResult?.let { "\n" + it.toStructuredDavidSummary() + "\n" }.orEmpty()
+        val whatIfSection = whatIfResult?.let { "\n" + it.structuredSummaryForDavid + "\n" }.orEmpty()
         val goalsSection = if (activeGoals.isNotEmpty()) {
             "\nФинансовые цели пользователя:\n" +
                 activeGoals.joinToString("\n") { g ->
@@ -294,18 +305,21 @@ class BudgetRepository(
             2. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
                - прибавлять «Я должен» или «Мне должны» к доходу или к текущему балансу;
                - складывать текущий баланс с зарплатой повторно как будто это два отдельных дохода;
-               - считать возврат выданного ранее долга новым заработанным доходом (это возврат основного долга, уменьшающий «Мне должны» и пополняющий остаток).
-            3. Когда пользователь спрашивает про свои деньги, доход, баланс или долги — называй эти показатели РАЗДЕЛЬНО и чётко указывай, какая сумма чем является.
+               - считать возврат выданного ранее долга новым заработанным доходом (это возврат основного долга, уменьшающий «Мне должны» и пополняющий остаток);
+               - выдумывать цифры прогноза: используй ТОЛЬКО точные расчёты из блока SAFE-TO-SPEND 2.0 и WHAT-IF СИМУЛЯЦИИ.
+            3. Когда пользователь спрашивает про свои деньги, дневной лимит («сколько можно потратить сегодня»), сценарии «Что если» или долги — называй эти показатели РАЗДЕЛЬНО и чётко указывай свободный лимит, защищённый резерв на базовые нужды и влияние обязательств.
             4. Отвечай на русском языке, лаконично (2–5 предложений), с фирменной иронией Давида Жабова, выделяя ключевые суммы жирным шрифтом.
         """.trimIndent()
 
         val userQuery = buildString {
             appendLine("Профиль пользователя: $profileName")
             appendLine(financialContext)
+            if (safeToSpendSection.isNotBlank()) appendLine(safeToSpendSection)
+            if (whatIfSection.isNotBlank()) appendLine(whatIfSection)
             if (goalsSection.isNotBlank()) appendLine(goalsSection)
             if (historySection.isNotBlank()) appendLine(historySection)
             appendLine("Сообщение пользователя: \"$userMessage\"")
-            appendLine("Ответь пользователю по существу его цифр, строго соблюдая разделение между доступным остатком, заработанным доходом (зарплатой), обязательствами «Я должен» и долгами «Мне должны».")
+            appendLine("Ответь пользователю по существу его цифр, строго соблюдая разделение между доступным остатком, заработанным доходом (зарплатой), обязательствами «Я должен», долгами «Мне должны» и расчётами Safe-to-Spend 2.0.")
         }
 
         val request = GeminiRequest(
@@ -667,6 +681,8 @@ class BudgetRepository(
     val allGoals: Flow<List<GoalEntity>> = goalDao.getAllGoals()
     val allCategories: Flow<List<CategoryEntity>> = categoryDao.getAllCategories()
     val allAccounts: Flow<List<AccountEntity>> = accountDao.getAllAccounts()
+    val allRecurringPayments: Flow<List<com.example.data.db.RecurringPaymentEntity>> = recurringPaymentDao.getAllRecurringPayments()
+    val allExecutionLogs: Flow<List<com.example.data.db.RecurringExecutionLogEntity>> = recurringPaymentDao.getAllExecutionLogs()
 
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val backupAdapter = moshi.adapter(BudgetBackup::class.java)
@@ -711,6 +727,8 @@ class BudgetRepository(
         categoryDao.deleteCategoriesByBudgetId(id)
         accountDao.deleteAccountsByBudgetId(id)
         notificationDao.deleteNotificationsByBudgetId(id)
+        recurringPaymentDao.deleteExecutionLogsByBudgetId(id)
+        recurringPaymentDao.deleteRecurringPaymentsByBudgetId(id)
     }
 
     suspend fun clearAllData() {
@@ -721,6 +739,8 @@ class BudgetRepository(
         budgetProfileDao.deleteAllProfiles()
         accountDao.deleteAllAccounts()
         notificationDao.deleteAllNotifications()
+        recurringPaymentDao.deleteAllExecutionLogs()
+        recurringPaymentDao.deleteAllRecurringPayments()
         if (storageFile.exists()) {
             try { storageFile.delete() } catch (_: Exception) {}
         }
@@ -752,7 +772,15 @@ class BudgetRepository(
         val opId = GlobalConsoleLogger.newOperationId("DB")
         val startMs = System.currentTimeMillis()
         try {
-            transactionDao.insertTransaction(transaction)
+            db.withTransaction {
+                transactionDao.insertTransaction(transaction)
+                val linkedLog = recurringPaymentDao.getExecutionLogByTransactionId(transaction.id)
+                val syncedLog = com.example.data.safetospend.RecurringTransactionConsistencyManager
+                    .buildEditTransactionSyncTransition(transaction, linkedLog)
+                if (syncedLog != null) {
+                    recurringPaymentDao.insertExecutionLog(syncedLog)
+                }
+            }
             GlobalConsoleLogger.recordDbOperation(
                 operationName = "INSERT transaction",
                 tableName = "transactions",
@@ -791,7 +819,21 @@ class BudgetRepository(
         val opId = GlobalConsoleLogger.newOperationId("DB")
         val startMs = System.currentTimeMillis()
         try {
-            transactionDao.deleteTransactionById(id)
+            db.withTransaction {
+                val linkedLog = recurringPaymentDao.getExecutionLogByTransactionId(id)
+                if (linkedLog != null) {
+                    val payment = recurringPaymentDao.getRecurringPaymentById(linkedLog.recurringId)
+                    val rollback = com.example.data.safetospend.RecurringTransactionConsistencyManager
+                        .buildDeleteTransactionRollbackTransition(
+                            deletedTransactionId = id,
+                            linkedLog = linkedLog,
+                            payment = payment
+                        )
+                    rollback.revertedLog?.let { recurringPaymentDao.insertExecutionLog(it) }
+                    rollback.updatedPayment?.let { recurringPaymentDao.insertRecurringPayment(it) }
+                }
+                transactionDao.deleteTransactionById(id)
+            }
             GlobalConsoleLogger.recordDbOperation(
                 operationName = "DELETE transaction",
                 tableName = "transactions",
@@ -810,6 +852,59 @@ class BudgetRepository(
                 operationId = opId
             )
             throw e
+        }
+    }
+
+    suspend fun insertRecurringPayment(payment: com.example.data.db.RecurringPaymentEntity): Long {
+        return recurringPaymentDao.insertRecurringPayment(payment)
+    }
+
+    suspend fun deleteRecurringPayment(id: Long) {
+        recurringPaymentDao.deleteRecurringPaymentById(id)
+    }
+
+    suspend fun updateRecurringPaymentStatus(id: Long, status: String) {
+        recurringPaymentDao.updateStatus(id, status)
+    }
+
+    suspend fun rescheduleRecurringPayment(
+        id: Long,
+        oldScheduledEpochDay: Long,
+        newDueDateEpochDay: Long
+    ) {
+        db.withTransaction {
+            val payment = recurringPaymentDao.getRecurringPaymentById(id) ?: return@withTransaction
+            val existingLog = recurringPaymentDao.getExecutionLogBySchedule(id, oldScheduledEpochDay)
+            if (existingLog != null) {
+                recurringPaymentDao.insertExecutionLog(
+                    existingLog.copy(status = com.example.data.safetospend.ExecutionStatus.RESCHEDULED.name)
+                )
+            }
+            recurringPaymentDao.updateNextDueDate(payment.id, newDueDateEpochDay)
+        }
+    }
+
+    suspend fun confirmRecurringPaymentExecution(
+        paymentId: Long,
+        scheduledEpochDay: Long? = null,
+        executedEpochDay: Long = java.time.LocalDate.now().toEpochDay(),
+        actualAmount: Double? = null
+    ): TransactionEntity? {
+        return db.withTransaction {
+            val payment = recurringPaymentDao.getRecurringPaymentById(paymentId) ?: return@withTransaction null
+            val targetScheduled = scheduledEpochDay ?: payment.nextDueDateEpochDay
+            val existingLog = recurringPaymentDao.getExecutionLogBySchedule(paymentId, targetScheduled)
+            val transition = com.example.data.safetospend.RecurringTransactionConsistencyManager.buildConfirmationTransition(
+                payment = payment,
+                scheduledEpochDay = targetScheduled,
+                executedEpochDay = executedEpochDay,
+                actualAmount = actualAmount ?: payment.amount,
+                existingLogId = existingLog?.id ?: 0L
+            )
+            transactionDao.insertTransaction(transition.transaction)
+            recurringPaymentDao.insertRecurringPayment(transition.updatedPayment)
+            recurringPaymentDao.insertExecutionLog(transition.executionLog)
+            transition.transaction
         }
     }
 

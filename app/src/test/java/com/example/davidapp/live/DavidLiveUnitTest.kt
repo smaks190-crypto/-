@@ -463,7 +463,7 @@ class DavidLiveUnitTest {
 
         // Гарантия режима только для чтения
         assertFalse("David Live must never mutate financial records without confirmation", provider.canMutateRecords)
-        assertEquals(5, provider.buildFunctionDeclarationsJson().length())
+        assertEquals(7, provider.buildFunctionDeclarationsJson().length())
 
         // 1. Сводка бюджета
         val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
