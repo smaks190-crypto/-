@@ -468,8 +468,10 @@ class DavidLiveSessionController(
 
         val reasonSummary = classifyDisconnectReason(throwable, httpCode, closingCode, closingReason)
 
-        // 1. If handshake with current model failed before setupComplete, try next fallback model
+        // 1. If initial handshake with current model failed before setupComplete (and not in a mid-session auto-reconnect cycle),
+        // try next fallback model
         if (!wasSetupCompleted &&
+            autoReconnectAttempts == 0 &&
             isModelFallbackEligible(throwable, httpCode, closingCode) &&
             modelAttemptIndex + 1 < LIVE_MODELS.size
         ) {
@@ -482,10 +484,10 @@ class DavidLiveSessionController(
             return
         }
 
-        // 2. If session was already established (or timed out on ping/pong / transient drop),
+        // 2. If session was already established (or is in an active auto-reconnect cycle / timed out on ping/pong),
         // perform bounded automatic reconnect with backoff before surfacing a fatal error.
         if (!isBackgrounded.get() &&
-            isAutoReconnectEligible(wasSetupCompleted, throwable, httpCode, closingCode) &&
+            isAutoReconnectEligible(wasSetupCompleted || autoReconnectAttempts > 0, throwable, httpCode, closingCode) &&
             autoReconnectAttempts < maxAutoReconnectAttempts
         ) {
             val attempt = ++autoReconnectAttempts
