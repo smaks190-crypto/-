@@ -1,7 +1,7 @@
 package com.example.ui.components.dialogs
 
-import com.example.data.db.TransactionEntity
 import androidx.compose.ui.graphics.Color
+import com.example.data.db.TransactionEntity
 import com.example.ui.screens.getCategoryColorAndIcon
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.Indigo500
@@ -12,169 +12,121 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-fun buildCategoryColorMap(categoryTotalsMap: List<Pair<String, Double>>, filterType: String): Map<String, Color> {
-    val palette = if (filterType == "income") listOf(
-        Color(0xFF10B981), Color(0xFF6366F1), Color(0xFF3B82F6),
-        Color(0xFFF59E0B), Color(0xFF8B5CF6), Color(0xFF14B8A6)
-    ) else listOf(
-        Color(0xFFF43F5E), Color(0xFF3B82F6), Color(0xFFF59E0B),
-        Color(0xFF8B5CF6), Color(0xFF10B981), Color(0xFF14B8A6)
-    )
-    return buildMap {
-        categoryTotalsMap.forEachIndexed { index, (name, _) ->
-            val (systemColor, _) = getCategoryColorAndIcon(name, "")
-            put(name, if (systemColor == Slate400) palette[index % palette.size] else systemColor)
-        }
-        put("✨ Смешанные", Indigo500)
-        put("✨ Прочие", Indigo500)
-        put("Смешанные траты", Indigo500)
-    }
-}
-
-fun resolveCategoryColor(name: String, categoryColorMap: Map<String, Color>, filterType: String): Color {
-    val normalized = if (name.startsWith("✨")) {
-        if (name.contains("Прочие")) "✨ Прочие" else "✨ Смешанные"
-    } else name
-    return categoryColorMap[normalized] ?: run {
-        val (color, _) = getCategoryColorAndIcon(normalized, "")
-        if (color == Slate400) {
-            if (filterType == "expense") Rose500 else Emerald400
-        } else color
-    }
-}
-
-private val RussianLocale = Locale("ru", "RU")
-private val NominativeMonths = arrayOf(
-    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
-)
-
-/**
- * Единственные 3 кнопки переключателя периода внутри графика: Нед | Мес | Год.
- */
-internal val PERIOD_SWITCHER_TABS: List<Pair<String, String>> = listOf(
+val PERIOD_SWITCHER_TABS: List<Pair<String, String>> = listOf(
     "week" to "Нед",
     "month" to "Мес",
     "year" to "Год"
 )
 
-/**
- * Централизованное состояние периода в диалоге «Все операции»:
- * - По умолчанию при открытии (`selectedPeriod == null`) ни одна кнопка периода («Нед», «Мес», «Год») НЕ подсвечена,
- *   и чип месяца под поиском НЕ активирован — список транзакций позволяет свободно листать всю историю вниз
- *   (Октябрь -> Сентябрь -> Август и т.д.).
- * - При этом верхние карточки («Траты • Месяц» / «Доходы • Месяц»), круговая/столбчатая диаграмма и сам чип месяца
- *   под поиском динамически синхронизируются с тем месяцем, который сейчас виден в списке при скролле (или выбран свайпом графика).
- * - Нажатие на чип месяца или кнопку «Мес» включает/выключает строгую фиксацию (фильтрацию) списка по этому месяцу.
- * - Нажатие на уже активную кнопку («Нед», «Мес», «Год») снимает фиксацию периода (`selectedPeriod = null`).
- */
-internal data class AllTransactionsPeriodState(
+fun resolveInitialAnchorDate(
+    initialDate: String?,
+    fallbackDate: Date = Date()
+): String {
+    return if (!initialDate.isNullOrBlank()) {
+        initialDate
+    } else {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(fallbackDate)
+    }
+}
+
+fun resolveEffectivePeriod(selectedPeriod: String?): String {
+    return when (selectedPeriod) {
+        "week" -> "week"
+        "month" -> "month"
+        "year" -> "year"
+        "custom" -> "custom"
+        else -> "month"
+    }
+}
+
+fun toggleLockedPeriod(currentSelectedPeriod: String?, clickedPeriod: String): String? {
+    return if (currentSelectedPeriod == clickedPeriod) {
+        null
+    } else {
+        clickedPeriod
+    }
+}
+
+fun resolveSelectedPeriodTabIndex(
+    selectedPeriod: String?,
+    tabs: List<Pair<String, String>> = PERIOD_SWITCHER_TABS
+): Int {
+    if (selectedPeriod.isNullOrBlank()) return -1
+    return tabs.indexOfFirst { it.first == selectedPeriod }
+}
+
+fun shiftDateByMonths(anchorDateStr: String, monthOffset: Int): String {
+    val cleanAnchor = anchorDateStr.ifBlank { "2026-08-01" }
+    if (monthOffset == 0) return cleanAnchor
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    val anchorDate = try { sdf.parse(cleanAnchor) } catch (e: Exception) { null } ?: Date()
+    val cal = Calendar.getInstance().apply {
+        time = anchorDate
+        add(Calendar.MONTH, monthOffset)
+    }
+    return sdf.format(cal.time)
+}
+
+data class AllTransactionsPeriodState(
     val stableAnchorDateStr: String,
-    val selectedPeriod: String? = null, // null (default unlocked), "week", "month", "year", "custom"
-    val swipeWeekOffset: Int = 0,
+    val selectedPeriod: String? = null, // null = без фиксации (просмотр по месяцам); "week", "month", "year", "custom"
     val swipeMonthOffset: Int = 0,
+    val swipeWeekOffset: Int = 0,
     val swipeYearOffset: Int = 0,
     val customStartStr: String? = null,
     val customEndStr: String? = null,
     val customLabelStr: String? = null
 ) {
-    /**
-     * Сдвинутая опорная дата для текущего выбранного/пролистанного месяца (`anchor + swipeMonthOffset`).
-     * Используется как единый источник правды для месяца, даже когда кнопка «Мес» не заблокирована.
-     */
-    val displayedMonthDateStr: String
-        get() = shiftAnchorMonth(stableAnchorDateStr, swipeMonthOffset)
-
     val effectivePeriod: String
-        get() = selectedPeriod ?: "month"
+        get() = resolveEffectivePeriod(selectedPeriod)
+
+    val displayedMonthDateStr: String
+        get() = shiftDateByMonths(stableAnchorDateStr, swipeMonthOffset)
 
     val isPeriodLocked: Boolean
-        get() = selectedPeriod != null || !customStartStr.isNullOrBlank()
+        get() = !selectedPeriod.isNullOrBlank() || !customStartStr.isNullOrBlank()
+
+    val activeTabIndex: Int
+        get() = resolveSelectedPeriodTabIndex(selectedPeriod)
 
     val currentOffsetInt: Int
-        get() = when (selectedPeriod) {
+        get() = when (effectivePeriod) {
             "week" -> swipeWeekOffset
-            "month" -> swipeMonthOffset
             "year" -> swipeYearOffset
-            "custom" -> 0
             else -> swipeMonthOffset
         }
 
-    /**
-     * Индекс подсвеченной вкладки в переключателе `Нед | Мес | Год`, либо `-1`, если фиксация периода отключена.
-     */
-    val activeTabIndex: Int
-        get() = PERIOD_SWITCHER_TABS.indexOfFirst { it.first == selectedPeriod }
-
-    /**
-     * Обработка нажатия на вкладку периода («week», «month», «year»):
-     * - Повторное нажатие на уже выбранный период снимает его (`selectedPeriod = null`), оставляя текущий месяц на экране.
-     * - Первое нажатие на «Мес» фиксирует текущий пролистанный месяц (`swipeMonthOffset` сохраняется).
-     * - Переключение на «Нед» или «Год» сбрасывает смещение недели/года к 0 относительно текущего отображаемого месяца.
-     */
-    fun onTogglePeriodTab(tappedPeriod: String): AllTransactionsPeriodState {
-        return if (selectedPeriod == tappedPeriod) {
-            copy(
-                selectedPeriod = null,
-                customStartStr = null,
-                customEndStr = null,
-                customLabelStr = null
-            )
-        } else {
-            copy(
-                selectedPeriod = tappedPeriod,
-                swipeWeekOffset = if (tappedPeriod == "week") 0 else swipeWeekOffset,
-                swipeYearOffset = if (tappedPeriod == "year") 0 else swipeYearOffset,
-                customStartStr = null,
-                customEndStr = null,
-                customLabelStr = null
-            )
-        }
-    }
-
-    /**
-     * Свайп графика влево/вправо (`delta = -1` — прошлый период, `delta = +1` — следующий период).
-     * В режиме по умолчанию (`selectedPeriod == null`) листает месяцы, НЕ блокируя кнопку «Мес».
-     */
     fun onSwipePeriod(delta: Int): AllTransactionsPeriodState {
-        return when (selectedPeriod) {
+        return when (effectivePeriod) {
             "week" -> copy(swipeWeekOffset = swipeWeekOffset + delta)
-            "month" -> copy(swipeMonthOffset = swipeMonthOffset + delta)
             "year" -> copy(swipeYearOffset = swipeYearOffset + delta)
             "custom" -> this
-            else -> copy(
-                customStartStr = null,
-                customEndStr = null,
-                customLabelStr = null,
-                swipeMonthOffset = swipeMonthOffset + delta
-            )
+            else -> copy(swipeMonthOffset = swipeMonthOffset + delta)
         }
     }
 
-    /**
-     * Вызывается при вертикальном скролле списка транзакций в режиме без фиксации периода (`selectedPeriod == null`),
-     * чтобы заголовок месяца, чип под поиском и графики плавно переключались на тот месяц, до которого долистал пользователь.
-     */
-    fun onScrolledToDate(visibleDateStr: String): AllTransactionsPeriodState {
-        if (isPeriodLocked || visibleDateStr.isBlank()) return this
-        val newMonthOffset = computeMonthDiff(stableAnchorDateStr, visibleDateStr)
-        return if (newMonthOffset != swipeMonthOffset) {
-            copy(swipeMonthOffset = newMonthOffset)
-        } else {
-            this
-        }
+    fun onTogglePeriodTab(clickedPeriod: String): AllTransactionsPeriodState {
+        val nextLocked = toggleLockedPeriod(selectedPeriod, clickedPeriod)
+        return copy(
+            selectedPeriod = nextLocked,
+            swipeWeekOffset = if (nextLocked == "week" && selectedPeriod != "week") 0 else swipeWeekOffset,
+            swipeYearOffset = if (nextLocked == "year" && selectedPeriod != "year") 0 else swipeYearOffset,
+            customStartStr = if (nextLocked != "custom") null else customStartStr,
+            customEndStr = if (nextLocked != "custom") null else customEndStr,
+            customLabelStr = if (nextLocked != "custom") null else customLabelStr
+        )
     }
 
-    fun onCustomRangeSelected(startStr: String, endStr: String, label: String): AllTransactionsPeriodState {
+    fun onApplyCustomDateRange(startStr: String, endStr: String, labelStr: String): AllTransactionsPeriodState {
         return copy(
             selectedPeriod = "custom",
             customStartStr = startStr,
             customEndStr = endStr,
-            customLabelStr = label
+            customLabelStr = labelStr
         )
     }
 
-    fun onClearCustomOrLockedPeriod(): AllTransactionsPeriodState {
+    fun onClearPeriodLock(): AllTransactionsPeriodState {
         return copy(
             selectedPeriod = null,
             customStartStr = null,
@@ -182,47 +134,6 @@ internal data class AllTransactionsPeriodState(
             customLabelStr = null
         )
     }
-}
-
-/**
- * Вычисляет разницу в полных календарных месяцах между [anchorDateStr] и [targetDateStr] (`target - anchor`).
- * Например, если `anchor = 2026-10-15`, а `target = 2026-09-20`, возвращает `-1`.
- */
-internal fun computeMonthDiff(anchorDateStr: String, targetDateStr: String): Int {
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    val anchorDate = try {
-        sdf.parse(anchorDateStr)
-    } catch (_: Exception) {
-        null
-    } ?: return 0
-    val targetDate = try {
-        sdf.parse(targetDateStr)
-    } catch (_: Exception) {
-        null
-    } ?: return 0
-
-    val anchorCal = Calendar.getInstance().apply { time = anchorDate }
-    val targetCal = Calendar.getInstance().apply { time = targetDate }
-
-    val yearDiff = targetCal.get(Calendar.YEAR) - anchorCal.get(Calendar.YEAR)
-    val monthDiff = targetCal.get(Calendar.MONTH) - anchorCal.get(Calendar.MONTH)
-    return yearDiff * 12 + monthDiff
-}
-
-internal fun shiftAnchorMonth(anchorDateStr: String, monthOffset: Int): String {
-    if (monthOffset == 0) return anchorDateStr
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    val baseDate = try {
-        sdf.parse(anchorDateStr) ?: Date()
-    } catch (_: Exception) {
-        Date()
-    }
-    val cal = Calendar.getInstance().apply {
-        time = baseDate
-        set(Calendar.DAY_OF_MONTH, 15)
-        add(Calendar.MONTH, monthOffset)
-    }
-    return sdf.format(cal.time)
 }
 
 fun buildDynamicPeriodLabel(
@@ -233,44 +144,44 @@ fun buildDynamicPeriodLabel(
     swipeWeekOffset: Int,
     swipeYearOffset: Int
 ): String {
-    if (!customLabelStr.isNullOrBlank()) return customLabelStr
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    val displayedMonthAnchorStr = shiftAnchorMonth(stableAnchorDateStr, swipeMonthOffset)
-    val monthBaseDate = try {
-        sdf.parse(displayedMonthAnchorStr) ?: Date()
-    } catch (_: Exception) {
-        Date()
-    }
-    val cal = Calendar.getInstance().apply { time = monthBaseDate }
+    val effectivePeriod = resolveEffectivePeriod(selectedPeriod)
+    return if (effectivePeriod == "custom" && !customLabelStr.isNullOrBlank()) {
+        customLabelStr
+    } else {
+        val baseDateStr = if (effectivePeriod == "week" || effectivePeriod == "year") {
+            shiftDateByMonths(stableAnchorDateStr, swipeMonthOffset)
+        } else {
+            stableAnchorDateStr.ifBlank { "2026-08-01" }
+        }
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val anchorDate = try { sdf.parse(baseDateStr) } catch (e: Exception) { null } ?: Date()
+        val cal = Calendar.getInstance().apply { time = anchorDate }
 
-    return when (selectedPeriod) {
-        null, "month" -> {
-            val mIdx = cal.get(Calendar.MONTH)
-            val yr = cal.get(Calendar.YEAR)
-            val currentYr = Calendar.getInstance().get(Calendar.YEAR)
-            if (yr != currentYr) "${NominativeMonths[mIdx]} $yr" else NominativeMonths[mIdx]
-        }
-        "week" -> {
-            val anchorCal = cal.clone() as Calendar
-            anchorCal.add(Calendar.WEEK_OF_YEAR, swipeWeekOffset)
-            val startCal = anchorCal.clone() as Calendar
-            val dayOfWeek = startCal.get(Calendar.DAY_OF_WEEK)
-            val diffToMonday = if (dayOfWeek == Calendar.SUNDAY) -6 else Calendar.MONDAY - dayOfWeek
-            startCal.add(Calendar.DAY_OF_MONTH, diffToMonday)
-            val endCal = startCal.clone() as Calendar
-            endCal.add(Calendar.DAY_OF_MONTH, 6)
-            val shortFmt = SimpleDateFormat("d MMM", RussianLocale)
-            "${shortFmt.format(startCal.time)} – ${shortFmt.format(endCal.time)}"
-        }
-        "year" -> {
-            cal.add(Calendar.YEAR, swipeYearOffset)
-            "${cal.get(Calendar.YEAR)} год"
-        }
-        else -> {
-            val mIdx = cal.get(Calendar.MONTH)
-            val yr = cal.get(Calendar.YEAR)
-            val currentYr = Calendar.getInstance().get(Calendar.YEAR)
-            if (yr != currentYr) "${NominativeMonths[mIdx]} $yr" else NominativeMonths[mIdx]
+        when (effectivePeriod) {
+            "week" -> {
+                cal.add(Calendar.WEEK_OF_YEAR, swipeWeekOffset)
+                cal.firstDayOfWeek = Calendar.MONDAY
+                val startCal = (cal.clone() as Calendar).apply {
+                    set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                }
+                val endCal = (startCal.clone() as Calendar).apply {
+                    add(Calendar.DAY_OF_YEAR, 6)
+                }
+                val df = SimpleDateFormat("dd.MM", Locale.getDefault())
+                "Неделя ${df.format(startCal.time)} - ${df.format(endCal.time)}"
+            }
+            "year" -> {
+                cal.add(Calendar.YEAR, swipeYearOffset)
+                "${cal.get(Calendar.YEAR)} год"
+            }
+            else -> {
+                cal.add(Calendar.MONTH, swipeMonthOffset)
+                val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+                val monthYear = cal.get(Calendar.YEAR)
+                val formatPattern = if (monthYear != currentYear) "LLLL yyyy" else "LLLL"
+                val rawStr = SimpleDateFormat(formatPattern, Locale("ru", "RU")).format(cal.time)
+                rawStr.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale("ru", "RU")) else it.toString() }
+            }
         }
     }
 }
@@ -285,129 +196,166 @@ fun filterTransactionsForOffset(
     offset: Int,
     swipeMonthOffset: Int = 0
 ): List<TransactionEntity> {
-    if (transactions.isEmpty()) return emptyList()
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-
-    if (selectedPeriod == "custom" && offset == currentOffsetInt && !customStartStr.isNullOrBlank() && !customEndStr.isNullOrBlank()) {
-        return transactions.filter { it.date >= customStartStr && it.date <= customEndStr }
+    val effectivePeriod = resolveEffectivePeriod(selectedPeriod)
+    if (effectivePeriod == "custom" && !customStartStr.isNullOrBlank() && !customEndStr.isNullOrBlank() && offset == currentOffsetInt) {
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val startDate = try { sdf.parse(customStartStr) } catch (e: Exception) { null }
+        val endDate = try { sdf.parse(customEndStr) } catch (e: Exception) { null }
+        return transactions.filter { tx ->
+            val txDate = try { sdf.parse(tx.date) } catch (e: Exception) { null }
+            if (txDate == null) true
+            else if (startDate != null && endDate != null) {
+                !txDate.before(startDate) && !txDate.after(endDate)
+            } else true
+        }
     }
 
-    val effectivePeriod = selectedPeriod ?: "month"
+    val baseAnchorDateStr = if (effectivePeriod == "week" || effectivePeriod == "year") {
+        shiftDateByMonths(stableAnchorDateStr, swipeMonthOffset)
+    } else {
+        stableAnchorDateStr.ifBlank { "2026-08-01" }
+    }
+    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    val anchorDate = try { sdf.parse(baseAnchorDateStr) } catch (e: Exception) { null } ?: Date()
+    val cal = Calendar.getInstance().apply { time = anchorDate }
 
     return when (effectivePeriod) {
-        "month" -> {
-            val baseDate = try {
-                sdf.parse(stableAnchorDateStr) ?: Date()
-            } catch (_: Exception) {
-                Date()
-            }
-            val cal = Calendar.getInstance().apply {
-                time = baseDate
-                set(Calendar.DAY_OF_MONTH, 15)
-                add(Calendar.MONTH, offset)
-            }
-            val targetMonthPrefix = SimpleDateFormat("yyyy-MM", Locale.US).format(cal.time)
-            transactions.filter { it.date.startsWith(targetMonthPrefix) }
-        }
         "week" -> {
-            val displayedMonthStr = shiftAnchorMonth(stableAnchorDateStr, swipeMonthOffset)
-            val baseDate = try {
-                sdf.parse(displayedMonthStr) ?: Date()
-            } catch (_: Exception) {
-                Date()
+            cal.add(Calendar.WEEK_OF_YEAR, offset)
+            cal.firstDayOfWeek = Calendar.MONDAY
+            val startCal = (cal.clone() as Calendar).apply {
+                set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
             }
-            val anchorCal = Calendar.getInstance().apply {
-                time = baseDate
-                add(Calendar.WEEK_OF_YEAR, offset)
+            val endCal = (startCal.clone() as Calendar).apply {
+                add(Calendar.DAY_OF_YEAR, 6)
+                set(Calendar.HOUR_OF_DAY, 23)
+                set(Calendar.MINUTE, 59)
+                set(Calendar.SECOND, 59)
+                set(Calendar.MILLISECOND, 999)
             }
-            val startCal = anchorCal.clone() as Calendar
-            val dayOfWeek = startCal.get(Calendar.DAY_OF_WEEK)
-            val diffToMonday = if (dayOfWeek == Calendar.SUNDAY) -6 else Calendar.MONDAY - dayOfWeek
-            startCal.add(Calendar.DAY_OF_MONTH, diffToMonday)
-
-            val endCal = startCal.clone() as Calendar
-            endCal.add(Calendar.DAY_OF_MONTH, 6)
-
             val startStr = sdf.format(startCal.time)
             val endStr = sdf.format(endCal.time)
-            transactions.filter { it.date in startStr..endStr }
+            transactions.filter { tx ->
+                tx.date >= startStr && tx.date <= endStr
+            }
         }
         "year" -> {
-            val displayedMonthStr = shiftAnchorMonth(stableAnchorDateStr, swipeMonthOffset)
-            val baseDate = try {
-                sdf.parse(displayedMonthStr) ?: Date()
-            } catch (_: Exception) {
-                Date()
+            cal.add(Calendar.YEAR, offset)
+            val currentYear = cal.get(Calendar.YEAR)
+            val yearPrefix = String.format(Locale.US, "%04d-", currentYear)
+            transactions.filter { tx ->
+                tx.date.startsWith(yearPrefix)
             }
-            val cal = Calendar.getInstance().apply {
-                time = baseDate
-                add(Calendar.YEAR, offset)
-            }
-            val targetYearPrefix = SimpleDateFormat("yyyy", Locale.US).format(cal.time)
-            transactions.filter { it.date.startsWith(targetYearPrefix) }
         }
-        else -> transactions
+        else -> {
+            cal.add(Calendar.MONTH, offset)
+            val currentYear = cal.get(Calendar.YEAR)
+            val currentMonth = cal.get(Calendar.MONTH) + 1
+            val monthPrefix = String.format(Locale.US, "%04d-%02d-", currentYear, currentMonth)
+            transactions.filter { tx ->
+                tx.date.startsWith(monthPrefix)
+            }
+        }
     }
 }
 
 fun calculateCategoryTotalsForOffset(
     rawList: List<TransactionEntity>,
     filterType: String,
-    isDrilledDownToMixed: Boolean
+    isDrilledDownToMixed: Boolean,
+    threshold: Int = 3
 ): List<Pair<String, Double>> {
-    val tList = when (filterType) {
+    val typeFiltered = when (filterType) {
         "income" -> rawList.filter { it.type.equals("income", ignoreCase = true) }
         "expense" -> rawList.filter { it.type.equals("expense", ignoreCase = true) }
         else -> rawList
     }
-    val map = tList.groupBy { it.category.ifBlank { "Прочее" } }
-        .mapValues { entry -> entry.value.sumOf { kotlin.math.abs(it.amount) } }
-        .toList()
+    val fullMap = typeFiltered
+        .groupBy { it.category.ifBlank { "Прочее" } }
+        .map { (cat, list) -> cat to list.sumOf { kotlin.math.abs(it.amount) } }
         .sortedByDescending { it.second }
 
-    if (map.isEmpty()) return emptyList()
-    val totSum = map.sumOf { it.second }
-    val thresh = totSum * 0.07
-    val smCats = map.filter { it.second < thresh }
-    val lgCats = map.filter { it.second >= thresh }
-    val canGrp = smCats.size >= 2 && lgCats.isNotEmpty()
-
-    return when {
-        isDrilledDownToMixed && canGrp -> smCats
-        isDrilledDownToMixed && map.size > 3 -> map.drop(2)
-        canGrp -> lgCats + Pair("Смешанные траты", smCats.sumOf { it.second })
-        map.size <= 3 -> map
-        else -> {
-            val top2 = map.take(2)
-            val rem = map.drop(2)
-            top2 + Pair("Смешанные траты", rem.sumOf { it.second })
-        }
-    }
+    return computeActiveCategoryTotals(fullMap, isDrilledDownToMixed, threshold)
 }
 
 fun computeActiveCategoryTotals(
     categoryTotalsMap: List<Pair<String, Double>>,
     isDrilledDownToMixed: Boolean,
-    categoryThreshold: Double
+    categoryThreshold: Int = 3
 ): List<Pair<String, Double>> {
-    if (categoryTotalsMap.isEmpty()) return emptyList()
-    val smallCats = categoryTotalsMap.filter { it.second < categoryThreshold }
-    val largeCats = categoryTotalsMap.filter { it.second >= categoryThreshold }
-    val canGroupByPercent = smallCats.size >= 2 && largeCats.isNotEmpty()
-
-    return when {
-        isDrilledDownToMixed && canGroupByPercent -> smallCats
-        isDrilledDownToMixed && categoryTotalsMap.size > 3 -> categoryTotalsMap.drop(2)
-        canGroupByPercent -> {
-            val mixedSum = smallCats.sumOf { it.second }
-            largeCats + Pair("Смешанные траты", mixedSum)
-        }
-        categoryTotalsMap.size <= 3 -> categoryTotalsMap
-        else -> {
+    return if (categoryTotalsMap.size > categoryThreshold) {
+        if (isDrilledDownToMixed) {
+            categoryTotalsMap.drop(2)
+        } else {
             val top2 = categoryTotalsMap.take(2)
             val remaining = categoryTotalsMap.drop(2)
-            val mixedSum = remaining.sumOf { it.second }
-            top2 + Pair("Смешанные траты", mixedSum)
+            val remainingSum = remaining.sumOf { it.second }
+            val remainingCount = remaining.size
+            val mixedName = if (remainingCount <= 1) "✨ Прочие" else "✨ Смешанные (+$remainingCount)"
+            (top2 + (mixedName to remainingSum)).sortedByDescending { it.second }
+        }
+    } else {
+        categoryTotalsMap
+    }
+}
+
+fun buildCategoryColorMap(
+    categoryTotalsMap: List<Pair<String, Double>>,
+    filterType: String
+): Map<String, Color> {
+    val map = mutableMapOf<String, Color>()
+    categoryTotalsMap.forEachIndexed { index, (catName, _) ->
+        val (systemColor, _) = getCategoryColorAndIcon(catName, "")
+        if (systemColor == Slate400) {
+            val baseColors = if (filterType == "income") {
+                listOf(
+                    Color(0xFF10B981), // Emerald
+                    Color(0xFF6366F1), // Indigo
+                    Color(0xFF3B82F6), // Blue
+                    Color(0xFFF59E0B), // Amber
+                    Color(0xFF8B5CF6), // Purple
+                    Color(0xFF14B8A6)  // Teal
+                )
+            } else {
+                listOf(
+                    Color(0xFFF43F5E), // Rose
+                    Color(0xFF3B82F6), // Blue
+                    Color(0xFFF59E0B), // Amber
+                    Color(0xFF8B5CF6), // Purple
+                    Color(0xFF10B981), // Emerald
+                    Color(0xFF14B8A6)  // Teal
+                )
+            }
+            map[catName] = baseColors.getOrElse(index % baseColors.size) { if (filterType == "expense") Rose500 else Emerald400 }
+        } else {
+            map[catName] = systemColor
+        }
+    }
+    map["✨ Смешанные"] = Indigo500
+    map["✨ Прочие"] = Indigo500
+    return map
+}
+
+fun resolveCategoryColor(
+    name: String,
+    categoryColorMap: Map<String, Color>,
+    filterType: String
+): Color {
+    val cleanName = if (name.startsWith("✨")) {
+        if (name.contains("Прочие")) "✨ Прочие" else "✨ Смешанные"
+    } else {
+        name
+    }
+    return categoryColorMap[cleanName] ?: run {
+        val (systemColor, _) = getCategoryColorAndIcon(cleanName, "")
+        if (systemColor == Slate400) {
+            if (filterType == "expense") Rose500 else Emerald400
+        } else {
+            systemColor
         }
     }
 }
@@ -420,28 +368,31 @@ fun filterAndSortTransactions(
     remainingCategoryNames: List<String>,
     sortOption: String
 ): List<TransactionEntity> {
-    val q = searchQuery.trim().lowercase(Locale.getDefault())
-    val searched = typeFilteredList.filter { tx ->
+    val searchFilteredList = typeFilteredList.filter { tx ->
+        val txCat = tx.category.ifBlank { "Прочее" }
         val matchesCategory = when {
-            selectedCategoryFilter != null -> tx.category.ifBlank { "Прочее" } == selectedCategoryFilter
-            isDrilledDownToMixed -> tx.category.ifBlank { "Прочее" } in remainingCategoryNames
-            else -> true
+            selectedCategoryFilter == "✨ Смешанные" || selectedCategoryFilter == "✨ Прочие" -> {
+                remainingCategoryNames.any { it.equals(txCat, ignoreCase = true) }
+            }
+            isDrilledDownToMixed && selectedCategoryFilter == null -> {
+                remainingCategoryNames.any { it.equals(txCat, ignoreCase = true) }
+            }
+            selectedCategoryFilter.isNullOrBlank() -> true
+            else -> txCat.equals(selectedCategoryFilter, ignoreCase = true)
         }
-        val matchesQuery = if (q.isEmpty()) {
-            true
-        } else {
-            tx.category.lowercase(Locale.getDefault()).contains(q) ||
-                tx.subcategory.lowercase(Locale.getDefault()).contains(q) ||
-                tx.amount.toInt().toString().contains(q)
-        }
-        matchesCategory && matchesQuery
+        val matchesSearch = searchQuery.isBlank() ||
+                tx.category.contains(searchQuery, ignoreCase = true) ||
+                tx.subcategory.contains(searchQuery, ignoreCase = true)
+        matchesCategory && matchesSearch
     }
 
     return when (sortOption) {
-        "desc" -> searched.sortedByDescending { kotlin.math.abs(it.amount) }
-        "asc" -> searched.sortedBy { kotlin.math.abs(it.amount) }
-        "name" -> searched.sortedBy { (if (it.subcategory.isNotBlank()) it.subcategory else it.category).lowercase(Locale.getDefault()) }
-        "name_desc" -> searched.sortedByDescending { (if (it.subcategory.isNotBlank()) it.subcategory else it.category).lowercase(Locale.getDefault()) }
-        else -> searched.sortedWith(compareByDescending<TransactionEntity> { it.date }.thenByDescending { it.createdAt })
+        "desc" -> searchFilteredList.sortedByDescending { kotlin.math.abs(it.amount) }
+        "asc" -> searchFilteredList.sortedBy { kotlin.math.abs(it.amount) }
+        "name" -> searchFilteredList.sortedBy { it.category.ifBlank { it.subcategory } }
+        "name_desc" -> searchFilteredList.sortedByDescending { it.category.ifBlank { it.subcategory } }
+        else -> searchFilteredList.sortedWith(
+            compareByDescending<TransactionEntity> { it.date }.thenByDescending { it.createdAt }
+        )
     }
 }
