@@ -40,13 +40,24 @@ class DavidLiveFinancialToolsProvider(
     val verifiedFacts: List<DavidLiveToolFact>
         get() = synchronized(_verifiedFacts) { _verifiedFacts.toList() }
 
+    private val recentToolResultsCache = mutableMapOf<String, Pair<Long, JSONObject>>()
+
     fun setBudgetId(newBudgetId: String) {
-        budgetId = newBudgetId.ifBlank { "default" }
+        val normalized = newBudgetId.ifBlank { "default" }
+        if (budgetId != normalized) {
+            budgetId = normalized
+            synchronized(recentToolResultsCache) {
+                recentToolResultsCache.clear()
+            }
+        }
     }
 
     fun clearVerifiedFacts() {
         synchronized(_verifiedFacts) {
             _verifiedFacts.clear()
+        }
+        synchronized(recentToolResultsCache) {
+            recentToolResultsCache.clear()
         }
     }
 
@@ -459,6 +470,7 @@ class DavidLiveFinancialToolsProvider(
     }
 
     companion object {
+        const val TOOL_DEDUP_WINDOW_MS = 60_000L
         const val TOOL_FINANCIAL_OVERVIEW = "get_financial_overview"
         const val TOOL_CATEGORY_SPENDING = "get_category_spending"
         const val TOOL_GOALS_AND_DEBTS = "get_goals_and_debts"
