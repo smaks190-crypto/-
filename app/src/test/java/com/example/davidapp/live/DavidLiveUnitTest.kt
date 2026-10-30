@@ -1084,7 +1084,7 @@ class DavidLiveUnitTest {
 
         // 1. Происходит потеря сети (например, отключение Wi-Fi перед переключением на LTE)
         controller.onNetworkLost()
-        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
+        assertEquals(DavidLiveConnectionState.RECONNECTING, controller.connectionState.value)
         assertEquals(DavidLiveVisualPhase.CONNECTION_LOST, controller.visualPhase.value)
         assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
         assertTrue(controller.isWaitingForNetwork.value)
@@ -1138,7 +1138,7 @@ class DavidLiveUnitTest {
             .getJSONArray("parts")
             .getJSONObject(0)
             .getString("text")
-        assertTrue(continuationText.contains("Связь прервалась"))
+        assertTrue(continuationText.contains("восстановлении связи после обрыва сети"))
         assertTrue(continuationText.contains("а во-вторых"))
 
         // 5. Завершение сессии гарантированно снимает сетевую подписку и флаги ожидания
