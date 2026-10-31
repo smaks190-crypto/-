@@ -1,5 +1,6 @@
 package com.example.ui.components.dialogs
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -38,6 +39,9 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.db.RecurringPaymentEntity
 import com.example.data.repository.FinancialSemanticsSnapshot
 import com.example.data.safetospend.*
+import com.example.ui.components.ObsidianBentoDateCard
+import com.example.ui.components.SingleDatePickerDialog
+import com.example.ui.components.SwipeToDismissDialog
 import com.example.ui.components.formatFullCurrency
 import com.example.ui.components.formatShortCurrency
 import com.example.ui.theme.*
@@ -237,6 +241,7 @@ fun SafeToSpendAndRecurringDialog(
     userSafetyFloorRub: Double,
     userEssentialDailyNormRub: Double?,
     initialTab: Int = 0,
+    isEmbeddedInCapsule: Boolean = false,
     onSetUserSafetyFloor: (Double) -> Unit,
     onSetUserEssentialDailyNorm: (Double?) -> Unit,
     onAddRecurringPayment: (
@@ -267,19 +272,84 @@ fun SafeToSpendAndRecurringDialog(
     var whatIfInitialAmount by remember { mutableStateOf("3000") }
     var whatIfInitialDelayDays by remember { mutableStateOf("5") }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
+    BackHandler(enabled = currentPage != SafeToSpendSheetPage.OVERVIEW) {
+        currentPage = SafeToSpendSheetPage.OVERVIEW
+    }
+
+    val sheetContent: @Composable () -> Unit = {
+        // Drag handle pill
         Box(
             modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(42.dp)
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(Slate700)
+            )
+        }
+
+        when (currentPage) {
+            SafeToSpendSheetPage.OVERVIEW -> SafeToSpendOverviewSheetContent(
+                result = safeToSpendResult,
+                safeToSpendInput = safeToSpendInput,
+                recurringPayments = recurringPayments,
+                onSetUserEssentialDailyNorm = onSetUserEssentialDailyNorm,
+                onOpenRecurringManager = { currentPage = SafeToSpendSheetPage.RECURRING_MANAGER },
+                onOpenWhatIf = { mode, amount, delayDays ->
+                    whatIfInitialMode = mode
+                    if (amount != null) whatIfInitialAmount = amount
+                    if (delayDays != null) whatIfInitialDelayDays = delayDays
+                    currentPage = SafeToSpendSheetPage.WHAT_IF_SIMULATOR
+                },
+                onOpenSettings = { currentPage = SafeToSpendSheetPage.FORECAST_SETTINGS },
+                onDismiss = onDismiss
+            )
+            SafeToSpendSheetPage.RECURRING_MANAGER -> RecurringPaymentsManagerSheetContent(
+                recurringPayments = recurringPayments,
+                todayEpochDay = safeToSpendInput.todayEpochDay,
+                onAddRecurringPayment = onAddRecurringPayment,
+                onToggleRecurringStatus = onToggleRecurringStatus,
+                onDeleteRecurringPayment = onDeleteRecurringPayment,
+                onBack = { currentPage = SafeToSpendSheetPage.OVERVIEW },
+                onDismiss = onDismiss
+            )
+            SafeToSpendSheetPage.WHAT_IF_SIMULATOR -> WhatIfSimulatorSheetContent(
+                safeToSpendInput = safeToSpendInput,
+                initialMode = whatIfInitialMode,
+                initialPurchaseAmount = whatIfInitialAmount,
+                initialDelayDays = whatIfInitialDelayDays,
+                onBack = { currentPage = SafeToSpendSheetPage.OVERVIEW },
+                onDismiss = onDismiss
+            )
+            SafeToSpendSheetPage.FORECAST_SETTINGS -> ForecastSettingsSheetContent(
+                result = safeToSpendResult,
+                userSafetyFloorRub = userSafetyFloorRub,
+                userEssentialDailyNormRub = userEssentialDailyNormRub,
+                onSetUserSafetyFloor = onSetUserSafetyFloor,
+                onSetUserEssentialDailyNorm = onSetUserEssentialDailyNorm,
+                onBack = { currentPage = SafeToSpendSheetPage.OVERVIEW },
+                onDismiss = onDismiss
+            )
+        }
+    }
+
+    if (isEmbeddedInCapsule) {
+        Column(
+            modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.55f))
-                .clickable(
-                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                    indication = null
-                ) { onDismiss() },
-            contentAlignment = Alignment.BottomCenter
+                .padding(horizontal = 18.dp, vertical = 12.dp)
+        ) {
+            sheetContent()
+        }
+    } else {
+        SwipeToDismissDialog(
+            onDismissRequest = onDismiss,
+            contentPadding = PaddingValues(start = 0.dp, end = 0.dp, top = 12.dp, bottom = 0.dp)
         ) {
             Surface(
                 modifier = Modifier
@@ -308,65 +378,7 @@ fun SafeToSpendAndRecurringDialog(
                         .fillMaxSize()
                         .padding(horizontal = 18.dp, vertical = 12.dp)
                 ) {
-                    // Drag handle pill
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(42.dp)
-                                .height(4.dp)
-                                .clip(CircleShape)
-                                .background(Slate700)
-                        )
-                    }
-
-                    when (currentPage) {
-                        SafeToSpendSheetPage.OVERVIEW -> SafeToSpendOverviewSheetContent(
-                            result = safeToSpendResult,
-                            safeToSpendInput = safeToSpendInput,
-                            recurringPayments = recurringPayments,
-                            onSetUserEssentialDailyNorm = onSetUserEssentialDailyNorm,
-                            onOpenRecurringManager = { currentPage = SafeToSpendSheetPage.RECURRING_MANAGER },
-                            onOpenWhatIf = { mode, amount, delayDays ->
-                                whatIfInitialMode = mode
-                                if (amount != null) whatIfInitialAmount = amount
-                                if (delayDays != null) whatIfInitialDelayDays = delayDays
-                                currentPage = SafeToSpendSheetPage.WHAT_IF_SIMULATOR
-                            },
-                            onOpenSettings = { currentPage = SafeToSpendSheetPage.FORECAST_SETTINGS },
-                            onDismiss = onDismiss
-                        )
-                        SafeToSpendSheetPage.RECURRING_MANAGER -> RecurringPaymentsManagerSheetContent(
-                            recurringPayments = recurringPayments,
-                            todayEpochDay = safeToSpendInput.todayEpochDay,
-                            onAddRecurringPayment = onAddRecurringPayment,
-                            onToggleRecurringStatus = onToggleRecurringStatus,
-                            onDeleteRecurringPayment = onDeleteRecurringPayment,
-                            onBack = { currentPage = SafeToSpendSheetPage.OVERVIEW },
-                            onDismiss = onDismiss
-                        )
-                        SafeToSpendSheetPage.WHAT_IF_SIMULATOR -> WhatIfSimulatorSheetContent(
-                            safeToSpendInput = safeToSpendInput,
-                            initialMode = whatIfInitialMode,
-                            initialPurchaseAmount = whatIfInitialAmount,
-                            initialDelayDays = whatIfInitialDelayDays,
-                            onBack = { currentPage = SafeToSpendSheetPage.OVERVIEW },
-                            onDismiss = onDismiss
-                        )
-                        SafeToSpendSheetPage.FORECAST_SETTINGS -> ForecastSettingsSheetContent(
-                            result = safeToSpendResult,
-                            userSafetyFloorRub = userSafetyFloorRub,
-                            userEssentialDailyNormRub = userEssentialDailyNormRub,
-                            onSetUserSafetyFloor = onSetUserSafetyFloor,
-                            onSetUserEssentialDailyNorm = onSetUserEssentialDailyNorm,
-                            onBack = { currentPage = SafeToSpendSheetPage.OVERVIEW },
-                            onDismiss = onDismiss
-                        )
-                    }
+                    sheetContent()
                 }
             }
         }
@@ -1475,6 +1487,7 @@ private fun RecurringPaymentsManagerSheetContent(
 ) {
     var selectedFilter by remember { mutableIntStateOf(0) } // 0 = Все, 1 = Платежи, 2 = Подписки, 3 = Прочее (Доходы)
     var showAddForm by remember { mutableStateOf(false) }
+    var showDatePicker by remember { mutableStateOf(false) }
 
     var title by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
@@ -1654,13 +1667,13 @@ private fun RecurringPaymentsManagerSheetContent(
                         }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            OutlinedTextField(
-                                value = nextDueDateIso,
-                                onValueChange = { nextDueDateIso = it },
-                                label = { Text("Следующая дата (ГГГГ-ММ-ДД)", fontSize = 11.sp) },
-                                singleLine = true,
+                            ObsidianBentoDateCard(
+                                dateIso = nextDueDateIso,
+                                accentColor = if (type == "INCOME") Emerald400 else Rose500,
+                                onClick = { showDatePicker = true },
                                 modifier = Modifier.weight(1f)
                             )
                             Button(
@@ -1686,9 +1699,11 @@ private fun RecurringPaymentsManagerSheetContent(
                                     amountText = ""
                                     showAddForm = false
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = Emerald400)
+                                colors = ButtonDefaults.buttonColors(containerColor = Emerald400),
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.height(64.dp)
                             ) {
-                                Text("Сохранить", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Text("Сохранить", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                             }
                         }
                     }
@@ -1857,6 +1872,16 @@ private fun RecurringPaymentsManagerSheetContent(
                 fontWeight = FontWeight.Bold
             )
         }
+    }
+
+    if (showDatePicker) {
+        SingleDatePickerDialog(
+            initialDate = nextDueDateIso,
+            onDismiss = { showDatePicker = false },
+            onConfirm = { selected ->
+                nextDueDateIso = selected
+            }
+        )
     }
 }
 

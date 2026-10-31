@@ -263,6 +263,8 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             is com.example.ui.viewmodel.BottomCapsuleModal.AddDebt,
             is com.example.ui.viewmodel.BottomCapsuleModal.DebtDetails ->
                 com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: Debt dialog opened")
+            is com.example.ui.viewmodel.BottomCapsuleModal.SafeToSpend ->
+                com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: SafeToSpend opened")
             else -> {}
         }
     }
@@ -1162,6 +1164,64 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                             appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
                                             viewModel.markNotificationsAsRead()
                                         }
+                                    )
+                                }
+
+                                is com.example.ui.viewmodel.BottomCapsuleModal.SafeToSpend -> {
+                                    val recurringPayments by viewModel.recurringPayments.collectAsState()
+                                    val recurringLogs by viewModel.recurringExecutionLogs.collectAsState()
+                                    val userSafetyFloorRub by viewModel.userSafetyFloorRub.collectAsState()
+                                    val userEssentialDailyNormRub by viewModel.userEssentialDailyNormRub.collectAsState()
+                                    val todayEpochDay = remember { java.time.LocalDate.now().toEpochDay() }
+                                    val safeToSpendSnapshot = remember(
+                                        transactions,
+                                        accounts,
+                                        goals,
+                                        categories,
+                                        recurringPayments,
+                                        recurringLogs,
+                                        userSafetyFloorRub,
+                                        userEssentialDailyNormRub,
+                                        todayEpochDay
+                                    ) {
+                                        com.example.data.safetospend.DavidFinancialIntelligenceProvider.computeSnapshot(
+                                            transactions = transactions,
+                                            accounts = accounts,
+                                            goals = goals,
+                                            categories = categories,
+                                            recurringPayments = recurringPayments,
+                                            executionLogs = recurringLogs,
+                                            todayEpochDay = todayEpochDay,
+                                            userSafetyFloorRub = userSafetyFloorRub,
+                                            userEssentialDailyNormRub = userEssentialDailyNormRub
+                                        )
+                                    }
+                                    com.example.ui.components.dialogs.SafeToSpendAndRecurringDialog(
+                                        safeToSpendResult = safeToSpendSnapshot.safeToSpendResult,
+                                        safeToSpendInput = safeToSpendSnapshot.safeToSpendInput,
+                                        recurringPayments = recurringPayments,
+                                        userSafetyFloorRub = userSafetyFloorRub,
+                                        userEssentialDailyNormRub = userEssentialDailyNormRub,
+                                        initialTab = modal.initialTab,
+                                        isEmbeddedInCapsule = true,
+                                        onSetUserSafetyFloor = { viewModel.setUserSafetyFloor(it) },
+                                        onSetUserEssentialDailyNorm = { viewModel.setUserEssentialDailyNorm(it) },
+                                        onAddRecurringPayment = { title, amount, type, category, frequency, nextDueDateIso, priority, incomeTier ->
+                                            viewModel.addRecurringPayment(
+                                                title = title,
+                                                amount = amount,
+                                                type = type,
+                                                category = category,
+                                                frequency = frequency,
+                                                nextDueDateIso = nextDueDateIso,
+                                                priority = priority,
+                                                incomeTier = incomeTier
+                                            )
+                                        },
+                                        onConfirmRecurringPayment = { viewModel.confirmRecurringPayment(it) },
+                                        onToggleRecurringStatus = { id, status -> viewModel.toggleRecurringPaymentStatus(id, status) },
+                                        onDeleteRecurringPayment = { viewModel.deleteRecurringPayment(it) },
+                                        onDismiss = { viewModel.closeModal() }
                                     )
                                 }
 

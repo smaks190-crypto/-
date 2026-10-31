@@ -748,8 +748,12 @@ fun PeriodBudgetScreen(
                             .background(warningColor.copy(alpha = 0.12f))
                             .border(1.dp, warningColor.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
                             .clickable {
-                                safeToSpendInitialTab = 0
-                                showSafeToSpendDialog = true
+                                if (viewModel != null) {
+                                    viewModel.openModal(BottomCapsuleModal.SafeToSpend(0))
+                                } else {
+                                    safeToSpendInitialTab = 0
+                                    showSafeToSpendDialog = true
+                                }
                             }
                             .padding(horizontal = 12.dp, vertical = 10.dp)
                     ) {
@@ -810,8 +814,12 @@ fun PeriodBudgetScreen(
                                 shape = RoundedCornerShape(20.dp)
                             )
                             .clickable {
-                                safeToSpendInitialTab = 0
-                                showSafeToSpendDialog = true
+                                if (viewModel != null) {
+                                    viewModel.openModal(BottomCapsuleModal.SafeToSpend(0))
+                                } else {
+                                    safeToSpendInitialTab = 0
+                                    showSafeToSpendDialog = true
+                                }
                             }
                             .padding(horizontal = 16.dp, vertical = 14.dp)
                     ) {

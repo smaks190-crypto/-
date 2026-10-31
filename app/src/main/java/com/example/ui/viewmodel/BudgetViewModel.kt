@@ -59,6 +59,7 @@ sealed interface BottomCapsuleModal {
         val triggerAuditAfterAccept: Boolean = false
     ) : BottomCapsuleModal
     data object DavidChat : BottomCapsuleModal
+    data class SafeToSpend(val initialTab: Int = 0) : BottomCapsuleModal
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -999,4 +1000,3 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
 }
-
