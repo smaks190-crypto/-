@@ -55,7 +55,8 @@ class BudgetRepository(
     private val accountDao: AccountDao,
     private val notificationDao: NotificationDao,
     private val db: AppDatabase,
-    private val apiService: GeminiApiService = RetrofitClient.service
+    private val apiService: GeminiApiService = RetrofitClient.service,
+    private val recurringPaymentDao: com.example.data.db.RecurringPaymentDao = db.recurringPaymentDao()
 ) {
     private val context: android.content.Context = context.applicationContext
     val allProfiles: Flow<List<BudgetProfileEntity>> = budgetProfileDao.getAllProfiles()
@@ -65,6 +66,12 @@ class BudgetRepository(
 
     fun getNotificationsForBudget(budgetId: String): Flow<List<NotificationEntity>> =
         notificationDao.getNotificationsByBudgetId(budgetId)
+
+    fun getRecurringPaymentsForBudget(budgetId: String): Flow<List<com.example.data.db.RecurringPaymentEntity>> =
+        recurringPaymentDao.getRecurringPaymentsByBudgetId(budgetId)
+
+    fun getExecutionLogsForBudget(budgetId: String): Flow<List<com.example.data.db.RecurringExecutionLogEntity>> =
+        recurringPaymentDao.getExecutionLogsByBudgetId(budgetId)
 
     suspend fun insertAccount(account: AccountEntity) {
         accountDao.insertAccount(account)
@@ -164,14 +171,18 @@ class BudgetRepository(
         userMessage: String,
         snapshot: FinancialSemanticsSnapshot,
         activeGoals: List<com.example.data.db.GoalEntity> = emptyList(),
-        conversationHistory: List<String> = emptyList()
+        conversationHistory: List<String> = emptyList(),
+        safeToSpendResult: com.example.data.safetospend.SafeToSpendResult? = null,
+        whatIfResult: com.example.data.safetospend.WhatIfSimulationResult? = null
     ): String = aiAuditService.generateDavidChatAnswer(
         apiKey = apiKey,
         profileName = profileName,
         userMessage = userMessage,
         snapshot = snapshot,
         activeGoals = activeGoals,
-        conversationHistory = conversationHistory
+        conversationHistory = conversationHistory,
+        safeToSpendResult = safeToSpendResult,
+        whatIfResult = whatIfResult
     )
 
     suspend fun generateDavidCommentMulti(
@@ -234,6 +245,8 @@ class BudgetRepository(
     val allGoals: Flow<List<GoalEntity>> = goalDao.getAllGoals()
     val allCategories: Flow<List<CategoryEntity>> = categoryDao.getAllCategories()
     val allAccounts: Flow<List<AccountEntity>> = accountDao.getAllAccounts()
+    val allRecurringPayments: Flow<List<com.example.data.db.RecurringPaymentEntity>> = recurringPaymentDao.getAllRecurringPayments()
+    val allExecutionLogs: Flow<List<com.example.data.db.RecurringExecutionLogEntity>> = recurringPaymentDao.getAllExecutionLogs()
 
 
     private val backupManager = BudgetBackupManager(
@@ -274,6 +287,8 @@ class BudgetRepository(
         categoryDao.deleteCategoriesByBudgetId(id)
         accountDao.deleteAccountsByBudgetId(id)
         notificationDao.deleteNotificationsByBudgetId(id)
+        recurringPaymentDao.deleteExecutionLogsByBudgetId(id)
+        recurringPaymentDao.deleteRecurringPaymentsByBudgetId(id)
     }
 
     suspend fun clearAllData() {
@@ -284,6 +299,8 @@ class BudgetRepository(
         budgetProfileDao.deleteAllProfiles()
         accountDao.deleteAllAccounts()
         notificationDao.deleteAllNotifications()
+        recurringPaymentDao.deleteAllExecutionLogs()
+        recurringPaymentDao.deleteAllRecurringPayments()
         backupManager.deleteStorageFile()
     }
 
@@ -313,7 +330,15 @@ class BudgetRepository(
         val opId = GlobalConsoleLogger.newOperationId("DB")
         val startMs = System.currentTimeMillis()
         try {
-            transactionDao.insertTransaction(transaction)
+            db.withTransaction {
+                transactionDao.insertTransaction(transaction)
+                val linkedLog = recurringPaymentDao.getExecutionLogByTransactionId(transaction.id)
+                val syncedLog = com.example.data.safetospend.RecurringTransactionConsistencyManager
+                    .buildEditTransactionSyncTransition(transaction, linkedLog)
+                if (syncedLog != null) {
+                    recurringPaymentDao.insertExecutionLog(syncedLog)
+                }
+            }
             GlobalConsoleLogger.recordDbOperation(
                 operationName = "INSERT transaction",
                 tableName = "transactions",
@@ -352,7 +377,21 @@ class BudgetRepository(
         val opId = GlobalConsoleLogger.newOperationId("DB")
         val startMs = System.currentTimeMillis()
         try {
-            transactionDao.deleteTransactionById(id)
+            db.withTransaction {
+                val linkedLog = recurringPaymentDao.getExecutionLogByTransactionId(id)
+                if (linkedLog != null) {
+                    val payment = recurringPaymentDao.getRecurringPaymentById(linkedLog.recurringId)
+                    val rollback = com.example.data.safetospend.RecurringTransactionConsistencyManager
+                        .buildDeleteTransactionRollbackTransition(
+                            deletedTransactionId = id,
+                            linkedLog = linkedLog,
+                            payment = payment
+                        )
+                    rollback.revertedLog?.let { recurringPaymentDao.insertExecutionLog(it) }
+                    rollback.updatedPayment?.let { recurringPaymentDao.insertRecurringPayment(it) }
+                }
+                transactionDao.deleteTransactionById(id)
+            }
             GlobalConsoleLogger.recordDbOperation(
                 operationName = "DELETE transaction",
                 tableName = "transactions",
@@ -371,6 +410,59 @@ class BudgetRepository(
                 operationId = opId
             )
             throw e
+        }
+    }
+
+    suspend fun insertRecurringPayment(payment: com.example.data.db.RecurringPaymentEntity): Long {
+        return recurringPaymentDao.insertRecurringPayment(payment)
+    }
+
+    suspend fun deleteRecurringPayment(id: Long) {
+        recurringPaymentDao.deleteRecurringPaymentById(id)
+    }
+
+    suspend fun updateRecurringPaymentStatus(id: Long, status: String) {
+        recurringPaymentDao.updateStatus(id, status)
+    }
+
+    suspend fun rescheduleRecurringPayment(
+        id: Long,
+        oldScheduledEpochDay: Long,
+        newDueDateEpochDay: Long
+    ) {
+        db.withTransaction {
+            val payment = recurringPaymentDao.getRecurringPaymentById(id) ?: return@withTransaction
+            val existingLog = recurringPaymentDao.getExecutionLogBySchedule(id, oldScheduledEpochDay)
+            if (existingLog != null) {
+                recurringPaymentDao.insertExecutionLog(
+                    existingLog.copy(status = com.example.data.safetospend.ExecutionStatus.RESCHEDULED.name)
+                )
+            }
+            recurringPaymentDao.updateNextDueDate(payment.id, newDueDateEpochDay)
+        }
+    }
+
+    suspend fun confirmRecurringPaymentExecution(
+        paymentId: Long,
+        scheduledEpochDay: Long? = null,
+        executedEpochDay: Long = java.time.LocalDate.now().toEpochDay(),
+        actualAmount: Double? = null
+    ): TransactionEntity? {
+        return db.withTransaction {
+            val payment = recurringPaymentDao.getRecurringPaymentById(paymentId) ?: return@withTransaction null
+            val targetScheduled = scheduledEpochDay ?: payment.nextDueDateEpochDay
+            val existingLog = recurringPaymentDao.getExecutionLogBySchedule(paymentId, targetScheduled)
+            val transition = com.example.data.safetospend.RecurringTransactionConsistencyManager.buildConfirmationTransition(
+                payment = payment,
+                scheduledEpochDay = targetScheduled,
+                executedEpochDay = executedEpochDay,
+                actualAmount = actualAmount ?: payment.amount,
+                existingLogId = existingLog?.id ?: 0L
+            )
+            transactionDao.insertTransaction(transition.transaction)
+            recurringPaymentDao.insertRecurringPayment(transition.updatedPayment)
+            recurringPaymentDao.insertExecutionLog(transition.executionLog)
+            transition.transaction
         }
     }
 

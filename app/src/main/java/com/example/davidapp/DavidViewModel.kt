@@ -74,7 +74,8 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         transactionDao = database.transactionDao(),
         categoryDao = database.categoryDao(),
         goalDao = database.goalDao(),
-        accountDao = database.accountDao()
+        accountDao = database.accountDao(),
+        recurringPaymentDao = database.recurringPaymentDao()
     )
 
     val liveSessionController = DavidLiveSessionController(
@@ -646,10 +647,58 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    private suspend fun buildUnifiedIntelligenceSnapshot(
+        currentQuery: String = ""
+    ): com.example.data.safetospend.UnifiedFinancialIntelligenceSnapshot? {
+        return try {
+            val recentTxs = repository.getTransactionsForBudget(currentBudgetId).first()
+            val debts = repository.getAccountsForBudget(currentBudgetId).first()
+            val goals = repository.getGoalsForBudget(currentBudgetId).first()
+            val cats = repository.getCategoriesForBudget(currentBudgetId).first()
+            val recurring = repository.getRecurringPaymentsForBudget(currentBudgetId).first()
+            val logs = repository.getExecutionLogsForBudget(currentBudgetId).first()
+            val appCtx = getApplication<Application>()
+            val safetyFloor = com.example.data.preferences.BudgetPreferencesRepository.getUserSafetyFloorRub(appCtx, currentBudgetId)
+            val lockedReserve = com.example.data.preferences.BudgetPreferencesRepository.getUserLockedReserveRub(appCtx, currentBudgetId)
+            val userEssNorm = com.example.data.preferences.BudgetPreferencesRepository.getUserEssentialDailyNormRub(appCtx, currentBudgetId)
+            val userMessageTexts = sessionMessages
+                .filter { it.isUser }
+                .mapNotNull { msg -> (msg.type as? ChatMessageType.Text)?.content }
+                .let { list: List<String> ->
+                    if (currentQuery.isBlank() || list.lastOrNull() == currentQuery) list else list + currentQuery
+                }
+
+            com.example.data.safetospend.DavidFinancialIntelligenceProvider.computeSnapshot(
+                transactions = recentTxs,
+                accounts = debts,
+                goals = goals,
+                categories = cats,
+                recurringPayments = recurring,
+                executionLogs = logs,
+                userSafetyFloorRub = safetyFloor,
+                userLockedReserveRub = lockedReserve,
+                userEssentialDailyNormRub = userEssNorm,
+                conversationalUserMessages = userMessageTexts
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     private suspend fun generateGeminiReply(query: String): String {
         return try {
             val goals = repository.getGoalsForBudget(currentBudgetId).first()
             val snapshot = buildConversationFinancialSnapshot(query)
+            val unified = buildUnifiedIntelligenceSnapshot(query)
+            val whatIfReq = com.example.data.safetospend.WhatIfSimulator.detectWhatIfQuery(query)
+            val whatIfResult = if (whatIfReq != null && unified != null) {
+                com.example.data.safetospend.DavidFinancialIntelligenceProvider.simulateWhatIf(
+                    unified.safeToSpendInput,
+                    whatIfReq
+                )
+            } else {
+                null
+            }
             val historySnippet = sessionMessages
                 .takeLast(8)
                 .mapNotNull { msg ->
@@ -664,28 +713,45 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                 userMessage = query,
                 snapshot = snapshot,
                 activeGoals = goals,
-                conversationHistory = historySnippet
+                conversationHistory = historySnippet,
+                safeToSpendResult = unified?.safeToSpendResult,
+                whatIfResult = whatIfResult
             )
-            answer.ifBlank { generateSmartDavidReply(query, snapshot) }
+            answer.ifBlank { generateSmartDavidReply(query, snapshot, unified, whatIfResult) }
         } catch (_: Exception) {
             val fallbackSnapshot = try { buildConversationFinancialSnapshot(query) } catch (_: Exception) { null }
-            generateSmartDavidReply(query, fallbackSnapshot)
+            val unified = buildUnifiedIntelligenceSnapshot(query)
+            val whatIfReq = com.example.data.safetospend.WhatIfSimulator.detectWhatIfQuery(query)
+            val whatIfResult = if (whatIfReq != null && unified != null) {
+                com.example.data.safetospend.DavidFinancialIntelligenceProvider.simulateWhatIf(
+                    unified.safeToSpendInput,
+                    whatIfReq
+                )
+            } else {
+                null
+            }
+            generateSmartDavidReply(query, fallbackSnapshot, unified, whatIfResult)
         }
     }
 
     private suspend fun generateSmartDavidReply(
         query: String,
-        precomputedSnapshot: com.example.data.repository.FinancialSemanticsSnapshot? = null
+        precomputedSnapshot: com.example.data.repository.FinancialSemanticsSnapshot? = null,
+        precomputedUnified: com.example.data.safetospend.UnifiedFinancialIntelligenceSnapshot? = null,
+        precomputedWhatIf: com.example.data.safetospend.WhatIfSimulationResult? = null
     ): String {
         val snapshot = precomputedSnapshot ?: try {
             buildConversationFinancialSnapshot(query)
         } catch (_: Exception) {
             null
         }
+        val unified = precomputedUnified ?: buildUnifiedIntelligenceSnapshot(query)
         return DavidChatAuditSupport.generateSmartDavidReply(
             currentProfileName = currentProfileName,
             query = query,
-            precomputedSnapshot = snapshot
+            precomputedSnapshot = snapshot,
+            precomputedUnified = unified,
+            precomputedWhatIf = precomputedWhatIf
         )
     }
 

@@ -177,4 +177,56 @@ interface NotificationDao {
     suspend fun deleteAllNotifications()
 }
 
+@Dao
+interface RecurringPaymentDao {
+    @Query("SELECT * FROM recurring_payments WHERE budgetId = :budgetId ORDER BY nextDueDateEpochDay ASC, id ASC")
+    fun getRecurringPaymentsByBudgetId(budgetId: String): Flow<List<RecurringPaymentEntity>>
 
+    @Query("SELECT * FROM recurring_payments ORDER BY nextDueDateEpochDay ASC, id ASC")
+    fun getAllRecurringPayments(): Flow<List<RecurringPaymentEntity>>
+
+    @Query("SELECT * FROM recurring_payments WHERE id = :id LIMIT 1")
+    suspend fun getRecurringPaymentById(id: Long): RecurringPaymentEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRecurringPayment(payment: RecurringPaymentEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertRecurringPayments(payments: List<RecurringPaymentEntity>)
+
+    @Query("UPDATE recurring_payments SET nextDueDateEpochDay = :nextDueDateEpochDay WHERE id = :id")
+    suspend fun updateNextDueDate(id: Long, nextDueDateEpochDay: Long)
+
+    @Query("UPDATE recurring_payments SET status = :status WHERE id = :id")
+    suspend fun updateStatus(id: Long, status: String)
+
+    @Query("DELETE FROM recurring_payments WHERE id = :id")
+    suspend fun deleteRecurringPaymentById(id: Long)
+
+    @Query("DELETE FROM recurring_payments WHERE budgetId = :budgetId")
+    suspend fun deleteRecurringPaymentsByBudgetId(budgetId: String)
+
+    @Query("DELETE FROM recurring_payments")
+    suspend fun deleteAllRecurringPayments()
+
+    @Query("SELECT * FROM recurring_execution_logs WHERE budgetId = :budgetId ORDER BY scheduledEpochDay DESC, id DESC")
+    fun getExecutionLogsByBudgetId(budgetId: String): Flow<List<RecurringExecutionLogEntity>>
+
+    @Query("SELECT * FROM recurring_execution_logs ORDER BY scheduledEpochDay DESC, id DESC")
+    fun getAllExecutionLogs(): Flow<List<RecurringExecutionLogEntity>>
+
+    @Query("SELECT * FROM recurring_execution_logs WHERE linkedTransactionId = :transactionId LIMIT 1")
+    suspend fun getExecutionLogByTransactionId(transactionId: String): RecurringExecutionLogEntity?
+
+    @Query("SELECT * FROM recurring_execution_logs WHERE recurringId = :recurringId AND scheduledEpochDay = :scheduledEpochDay LIMIT 1")
+    suspend fun getExecutionLogBySchedule(recurringId: Long, scheduledEpochDay: Long): RecurringExecutionLogEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertExecutionLog(log: RecurringExecutionLogEntity): Long
+
+    @Query("DELETE FROM recurring_execution_logs WHERE budgetId = :budgetId")
+    suspend fun deleteExecutionLogsByBudgetId(budgetId: String)
+
+    @Query("DELETE FROM recurring_execution_logs")
+    suspend fun deleteAllExecutionLogs()
+}

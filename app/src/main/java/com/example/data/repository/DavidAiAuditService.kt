@@ -160,7 +160,9 @@ class DavidAiAuditService(
         userMessage: String,
         snapshot: FinancialSemanticsSnapshot,
         activeGoals: List<GoalEntity> = emptyList(),
-        conversationHistory: List<String> = emptyList()
+        conversationHistory: List<String> = emptyList(),
+        safeToSpendResult: com.example.data.safetospend.SafeToSpendResult? = null,
+        whatIfResult: com.example.data.safetospend.WhatIfSimulationResult? = null
     ): String {
         val cleanKey = GeminiModelConfig.sanitizeApiKey(apiKey)
         if (cleanKey.isBlank()) {
@@ -168,6 +170,8 @@ class DavidAiAuditService(
         }
 
         val financialContext = FinancialSemanticsCalculator.formatPromptFinancialContext(snapshot)
+        val safeToSpendSection = safeToSpendResult?.let { "\n" + it.toStructuredDavidSummary() + "\n" }.orEmpty()
+        val whatIfSection = whatIfResult?.let { "\n" + it.structuredSummaryForDavid + "\n" }.orEmpty()
         val goalsSection = if (activeGoals.isNotEmpty()) {
             "\nФинансовые цели пользователя:\n" +
                 activeGoals.joinToString("\n") { g ->
@@ -193,18 +197,21 @@ class DavidAiAuditService(
             2. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО:
                - прибавлять «Я должен» или «Мне должны» к доходу или к текущему балансу;
                - складывать текущий баланс с зарплатой повторно как будто это два отдельных дохода;
-               - считать возврат выданного ранее долга новым заработанным доходом (это возврат основного долга, уменьшающий «Мне должны» и пополняющий остаток).
-            3. Когда пользователь спрашивает про свои деньги, доход, баланс или долги — называй эти показатели РАЗДЕЛЬНО и чётко указывай, какая сумма чем является.
+               - считать возврат выданного ранее долга новым заработанным доходом (это возврат основного долга, уменьшающий «Мне должны» и пополняющий остаток);
+               - выдумывать цифры прогноза: используй ТОЛЬКО точные расчёты из блока SAFE-TO-SPEND 2.0 и WHAT-IF СИМУЛЯЦИИ.
+            3. Когда пользователь спрашивает про свои деньги, дневной лимит («сколько можно потратить сегодня»), сценарии «Что если» или долги — называй эти показатели РАЗДЕЛЬНО и чётко указывай свободный лимит, защищённый резерв на базовые нужды и влияние обязательств.
             4. Отвечай на русском языке, лаконично (2–5 предложений), с фирменной иронией Давида Жабова, выделяя ключевые суммы жирным шрифтом.
         """.trimIndent()
 
         val userQuery = buildString {
             appendLine("Профиль пользователя: $profileName")
             appendLine(financialContext)
+            if (safeToSpendSection.isNotBlank()) appendLine(safeToSpendSection)
+            if (whatIfSection.isNotBlank()) appendLine(whatIfSection)
             if (goalsSection.isNotBlank()) appendLine(goalsSection)
             if (historySection.isNotBlank()) appendLine(historySection)
             appendLine("Сообщение пользователя: \"$userMessage\"")
-            appendLine("Ответь пользователю по существу его цифр, строго соблюдая разделение между доступным остатком, заработанным доходом (зарплатой), обязательствами «Я должен» и долгами «Мне должны».")
+            appendLine("Ответь пользователю по существу его цифр, строго соблюдая разделение между доступным остатком, заработанным доходом (зарплатой), обязательствами «Я должен», долгами «Мне должны» и расчётами Safe-to-Spend 2.0.")
         }
 
         val request = GeminiRequest(

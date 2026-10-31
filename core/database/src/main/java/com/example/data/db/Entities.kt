@@ -1,6 +1,8 @@
 package com.example.data.db
 
 import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
 
@@ -77,5 +79,60 @@ data class AiAuditEntity(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+@Entity(
+    tableName = "recurring_payments",
+    indices = [
+        Index(value = ["budgetId", "status", "nextDueDateEpochDay"]),
+        Index(value = ["isIncome", "status"])
+    ]
+)
+data class RecurringPaymentEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val budgetId: String = "default",
+    val title: String,
+    val amount: Double,
+    val estimatedMaxAmount: Double? = null,
+    val amountType: String = "FIXED",
+    val isIncome: Boolean = false,
+    val incomeCertainty: String = "GUARANTEED",
+    val categoryName: String,
+    val subcategoryName: String = "",
+    val frequency: String = "MONTHLY",
+    val customIntervalDays: Int? = null,
+    val anchorDayOfMonth: Int? = null,
+    val anchorDayOfWeek: Int? = null,
+    val nextDueDateEpochDay: Long,
+    val endDateEpochDay: Long? = null,
+    val priority: String = "MANDATORY",
+    val autoConfirm: Boolean = false,
+    val reminderDaysBefore: Int = 2,
+    val status: String = "ACTIVE",
+    val createdAtMillis: Long = System.currentTimeMillis()
+)
 
-
+@Entity(
+    tableName = "recurring_execution_logs",
+    foreignKeys = [
+        ForeignKey(
+            entity = RecurringPaymentEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["recurringId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(value = ["recurringId", "scheduledEpochDay"], unique = true),
+        Index(value = ["status"]),
+        Index(value = ["linkedTransactionId"])
+    ]
+)
+data class RecurringExecutionLogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val budgetId: String = "default",
+    val recurringId: Long,
+    val scheduledEpochDay: Long,
+    val executedEpochDay: Long? = null,
+    val actualAmount: Double? = null,
+    val status: String = "PENDING",
+    val linkedTransactionId: String? = null
+)

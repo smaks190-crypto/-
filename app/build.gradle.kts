@@ -165,6 +165,8 @@ tasks.withType<Test>().configureEach {
     includeTestsMatching("com.example.utils.GlobalConsoleLoggerTest")
     includeTestsMatching("com.example.ExampleUnitTest")
     includeTestsMatching("com.example.davidapp.live.DavidLiveUnitTest")
+    includeTestsMatching("com.example.data.FinancialSemanticsCalculatorTest")
+    includeTestsMatching("com.example.data.safetospend.SafeToSpendCalculatorTest")
   }
 }
 

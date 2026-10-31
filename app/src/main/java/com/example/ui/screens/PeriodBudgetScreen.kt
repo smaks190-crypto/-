@@ -273,40 +273,69 @@ fun PeriodBudgetScreen(
     var showCategoryLimitsDialog by remember { mutableStateOf(false) }
     var showIncomeExpenseSummaryDialog by remember { mutableStateOf(false) }
     var showAllTransactionsDialog by remember { mutableStateOf(false) }
+    var showSafeToSpendDialog by remember { mutableStateOf(false) }
+    var safeToSpendInitialTab by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var initialAllTransactionsFilter by remember { mutableStateOf("all") }
 
     val categoriesListState = viewModel?.categories?.collectAsStateWithLifecycle()
     val categoriesList = categoriesListState?.value ?: remember { emptyList() }
 
-    // Safe-to-Spend Daily Limit calculation
-    val totalMonthlyLimit = remember(categoriesList, monthTotalIncome) {
-        val sumLimits = categoriesList.filter { it.type == "expense" }.mapNotNull { it.monthlyLimit }.sum()
-        if (sumLimits > 0) sumLimits else if (monthTotalIncome > 0) monthTotalIncome * 0.8 else 0.0
-    }
+    val accountsListState = viewModel?.accounts?.collectAsStateWithLifecycle()
+    val accountsList = accountsListState?.value ?: remember { emptyList() }
+
+    val goalsListState = viewModel?.goals?.collectAsStateWithLifecycle()
+    val goalsList = goalsListState?.value ?: remember { emptyList() }
+
+    val recurringPaymentsState = viewModel?.recurringPayments?.collectAsStateWithLifecycle()
+    val recurringPaymentsList = recurringPaymentsState?.value ?: remember { emptyList() }
+
+    val recurringLogsState = viewModel?.recurringExecutionLogs?.collectAsStateWithLifecycle()
+    val recurringLogsList = recurringLogsState?.value ?: remember { emptyList() }
+
+    val userSafetyFloorState = viewModel?.userSafetyFloorRub?.collectAsStateWithLifecycle()
+    val userSafetyFloorRub = userSafetyFloorState?.value ?: 0.0
+
+    val userEssentialDailyNormState = viewModel?.userEssentialDailyNormRub?.collectAsStateWithLifecycle()
+    val userEssentialDailyNormRub = userEssentialDailyNormState?.value
 
     val todayIso = remember {
         SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Calendar.getInstance().time)
     }
 
-    val todaySpent = remember(monthExpenses, todayIso) {
-        monthExpenses.filter { it.date == todayIso }.sumOf { it.amount }
+    val todayEpochDay = remember(todayIso) {
+        com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(todayIso)
+            ?: java.time.LocalDate.now().toEpochDay()
     }
 
-    val remainingDaysInMonth = remember(selectedMonthIdx, selectedYear, daysInSelectedMonth) {
-        val now = Calendar.getInstance()
-        val isCurrentMonth = now.get(Calendar.YEAR) == selectedYear && now.get(Calendar.MONTH) == selectedMonthIdx
-        if (isCurrentMonth) {
-            (daysInSelectedMonth - now.get(Calendar.DAY_OF_MONTH) + 1).coerceAtLeast(1)
-        } else {
-            daysInSelectedMonth.coerceAtLeast(1)
-        }
+    val safeToSpendSnapshot = remember(
+        allTransactions,
+        filteredTransactions,
+        accountsList,
+        categoriesList,
+        goalsList,
+        recurringPaymentsList,
+        recurringLogsList,
+        userSafetyFloorRub,
+        userEssentialDailyNormRub,
+        todayEpochDay
+    ) {
+        val txSource = if (allTransactions.isNotEmpty()) allTransactions else filteredTransactions
+        com.example.data.safetospend.DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = txSource,
+            accounts = accountsList,
+            goals = goalsList,
+            categories = categoriesList,
+            recurringPayments = recurringPaymentsList,
+            executionLogs = recurringLogsList,
+            todayEpochDay = todayEpochDay,
+            userSafetyFloorRub = userSafetyFloorRub,
+            userEssentialDailyNormRub = userEssentialDailyNormRub
+        )
     }
 
-    val safeDailyBudget = remember(totalMonthlyLimit, monthTotalExpense, todaySpent, remainingDaysInMonth) {
-        val spentBeforeToday = (monthTotalExpense - todaySpent).coerceAtLeast(0.0)
-        val remainingPool = (totalMonthlyLimit - spentBeforeToday).coerceAtLeast(0.0)
-        remainingPool / remainingDaysInMonth
-    }
+    val safeToSpendResult = safeToSpendSnapshot.safeToSpendResult
+    val safeDailyBudget = safeToSpendResult.dailyDiscretionarySpeedRub
+    val todaySpent = safeToSpendResult.spentTodayDiscretionaryRub
 
     val pagerState = rememberPagerState(initialPage = if (activeSubTab == "expense") 0 else 1, pageCount = { 2 })
 
@@ -535,15 +564,20 @@ fun PeriodBudgetScreen(
                     letterSpacing = (-0.5).sp
                 )
 
-                // Safe-to-Spend Daily Limit Bar ("Можно потратить сегодня")
-                if (safeDailyBudget > 0) {
-                    Spacer(modifier = Modifier.height(14.dp))
-                    val safeRemainingToday = (safeDailyBudget - todaySpent).coerceAtLeast(0.0)
-                    val isOverDaily = todaySpent > safeDailyBudget
-                    val dailyProgress = (todaySpent / safeDailyBudget.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+                // Adaptive Safe-to-Spend 2.0 Card ("Можно потратить сегодня")
+                Spacer(modifier = Modifier.height(14.dp))
+                run {
+                    val safeRemainingToday = safeToSpendResult.canSpendTodayDiscRub
+                    val isReserveDeficit = !safeToSpendResult.isReserveRequirementMet
+                    val isOverDaily = safeToSpendResult.todayOverspendRub > 0.0 ||
+                        safeToSpendResult.hasCashGap ||
+                        isReserveDeficit
+                    val dailyProgress = if (safeDailyBudget > 0.0) {
+                        (todaySpent / safeDailyBudget.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
+                    } else if (isOverDaily) 1f else 0.08f
                     val statusColor = when {
-                        isOverDaily -> Rose500
-                        dailyProgress > 0.8f -> Amber400
+                        safeToSpendResult.hasCashGap || isReserveDeficit || safeToSpendResult.todayOverspendRub > 0.0 -> Rose500
+                        dailyProgress > 0.8f || safeToSpendResult.requiresEssentialBudgetPrompt -> Amber400
                         else -> Emerald400
                     }
 
@@ -553,6 +587,10 @@ fun PeriodBudgetScreen(
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color.White.copy(alpha = 0.04f))
                             .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                            .clickable {
+                                safeToSpendInitialTab = 0
+                                showSafeToSpendDialog = true
+                            }
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -562,17 +600,23 @@ fun PeriodBudgetScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = if (isOverDaily) "Дневной лимит превышен" else "Можно потратить сегодня",
+                                    text = when {
+                                        safeToSpendResult.hasCashGap -> "Риск кассового разрыва"
+                                        isReserveDeficit -> "Дефицит резерва безопасности"
+                                        safeToSpendResult.todayOverspendRub > 0.0 -> "Дневной лимит превышен"
+                                        else -> "Можно потратить сегодня"
+                                    },
                                     color = Slate300,
                                     fontSize = 11.sp,
                                     fontFamily = ManropeFontFamily,
                                     fontWeight = FontWeight.Medium
                                 )
                                 Text(
-                                    text = if (isOverDaily) {
-                                        "Перерасход ${formatShortCurrency(todaySpent - safeDailyBudget)}"
-                                    } else {
-                                        "${formatShortCurrency(safeRemainingToday)} из ${formatShortCurrency(safeDailyBudget)}"
+                                    text = when {
+                                        safeToSpendResult.todayOverspendRub > 0.0 ->
+                                            "Перерасход ${formatShortCurrency(safeToSpendResult.todayOverspendRub)}"
+                                        else ->
+                                            "${formatShortCurrency(safeRemainingToday)} (+${formatShortCurrency(safeToSpendResult.canSpendTodayEssRub)} база)"
                                     },
                                     color = statusColor,
                                     fontSize = 12.sp,
@@ -594,6 +638,37 @@ fun PeriodBudgetScreen(
                                         .height(4.dp)
                                         .clip(CircleShape)
                                         .background(statusColor)
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = when {
+                                        safeToSpendResult.requiresEssentialBudgetPrompt ->
+                                            "⚠️ Ориентир ${safeToSpendResult.dailyEssentialRateRub.toInt()} ₽/дн. (нажмите, чтобы уточнить)"
+                                        safeToSpendResult.overdueObligationsRub > 0.0 ->
+                                            "Бронь просрочки: ${formatShortCurrency(safeToSpendResult.overdueObligationsRub)}"
+                                        else ->
+                                            "Горизонт: ${safeToSpendResult.bottleneckDayOffset} дн. • Регулярных: ${recurringPaymentsList.size}"
+                                    },
+                                    color = if (safeToSpendResult.requiresEssentialBudgetPrompt) Amber400 else Slate400,
+                                    fontSize = 10.sp,
+                                    fontFamily = ManropeFontFamily
+                                )
+                                Text(
+                                    text = "What-if / Платежи ›",
+                                    color = Emerald400,
+                                    fontSize = 10.sp,
+                                    fontFamily = ManropeFontFamily,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.clickable {
+                                        safeToSpendInitialTab = 1
+                                        showSafeToSpendDialog = true
+                                    }
                                 )
                             }
                         }
@@ -761,6 +836,35 @@ fun PeriodBudgetScreen(
                     viewModel?.updateCategoryLimit(catName, "expense", limit)
                 },
                 onDismiss = { showCategoryLimitsDialog = false }
+            )
+        }
+
+        if (showSafeToSpendDialog && !isAppLocked) {
+            SafeToSpendAndRecurringDialog(
+                safeToSpendResult = safeToSpendResult,
+                safeToSpendInput = safeToSpendSnapshot.safeToSpendInput,
+                recurringPayments = recurringPaymentsList,
+                userSafetyFloorRub = userSafetyFloorRub,
+                userEssentialDailyNormRub = userEssentialDailyNormRub,
+                initialTab = safeToSpendInitialTab,
+                onSetUserSafetyFloor = { viewModel?.setUserSafetyFloor(it) },
+                onSetUserEssentialDailyNorm = { viewModel?.setUserEssentialDailyNorm(it) },
+                onAddRecurringPayment = { title, amount, type, category, frequency, nextDueDateIso, priority, incomeTier ->
+                    viewModel?.addRecurringPayment(
+                        title = title,
+                        amount = amount,
+                        type = type,
+                        category = category,
+                        frequency = frequency,
+                        nextDueDateIso = nextDueDateIso,
+                        priority = priority,
+                        incomeTier = incomeTier
+                    )
+                },
+                onConfirmRecurringPayment = { viewModel?.confirmRecurringPayment(it) },
+                onToggleRecurringStatus = { id, status -> viewModel?.toggleRecurringPaymentStatus(id, status) },
+                onDeleteRecurringPayment = { viewModel?.deleteRecurringPayment(it) },
+                onDismiss = { showSafeToSpendDialog = false }
             )
         }
 
