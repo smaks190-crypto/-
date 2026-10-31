@@ -15,7 +15,7 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v11.09 (сборка 281)
+### Версия v11.10 (сборка 283)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
@@ -23,10 +23,14 @@
 
 ## Что изменилось
 
-### Документация и сборка
-- Split BudgetRepository into DavidAiAuditService, VoiceOperationParserService, and BudgetBackupManager (Issue #69 Stage 3) ([096a017](https://github.com/smaks190-crypto/-/commit/096a017c4e6ba3868d050b17b3dfd6d02b2e8448))
+### Изменено
+- Update build.yml ([f5d3d5a](https://github.com/smaks190-crypto/-/commit/f5d3d5ab0582db9159fefd3805d55aac138fea10))
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.08-build.277...v11.09-build.281
+### Документация и сборка
+- Consolidate Gradle cache and allow manual feature builds to save it ([19c43c0](https://github.com/smaks190-crypto/-/commit/19c43c05fb172615388e6e407bb86c9278d6e773))
+- Decouple assembleDebug from redundant Release and AndroidTest compilations ([11294d9](https://github.com/smaks190-crypto/-/commit/11294d94f279aa0659e8f277b9433d337b5e1145))
+
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.09-build.281...v11.10-build.283
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
