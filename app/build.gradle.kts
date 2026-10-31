@@ -189,7 +189,17 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
   }
 }
 
-tasks.matching { it.name == "assembleDebug" }.configureEach {
+// В Fast CI при сборке Debug APK запускаем только Debug Unit-тесты (без дублирующей компиляции Release и AndroidTest)
+if (System.getenv("GITHUB_ACTIONS") == "true") {
+  tasks.matching { it.name == "assembleDebug" }.configureEach {
+    dependsOn("testDebugUnitTest")
+  }
+}
+
+// Полная проверка всех Source Sets (Release + AndroidTest + UnitTest) доступна через отдельную задачу
+tasks.register("verifyAllSourceSets") {
+  group = "verification"
+  description = "Compiles Release and AndroidTest source sets and runs Debug unit tests."
   dependsOn("compileReleaseKotlin", "compileDebugAndroidTestKotlin", "testDebugUnitTest")
 }
 
