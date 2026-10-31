@@ -604,9 +604,10 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     // --- OBSIDIAN GLASS DAVID AI CHAT PILL ---
                                     val context = androidx.compose.ui.platform.LocalContext.current
                                     val pName = currentProfile?.name ?: "default"
-                                    val prefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
                                     val isDavidChatOpen = activeModal is com.example.ui.viewmodel.BottomCapsuleModal.DavidChat
-                                    val hasOpenedChatBefore = remember(isDavidChatOpen, pName) { prefs.getBoolean("has_opened_david_chat_before_$pName", false) }
+                                    val hasOpenedChatBefore = remember(isDavidChatOpen, pName) {
+                                        com.example.data.preferences.BudgetPreferencesRepository.hasOpenedDavidChatBefore(context, pName)
+                                    }
                                     val hasUnread = unreadNotificationsCount > 0 || !hasOpenedChatBefore
                                     val shouldShowMessage = (splashStage == "done") && (showWelcomeBubble || (hasUnread && unreadNotificationsCount > 0))
                                     val iconNeonColor = Emerald400
@@ -722,9 +723,8 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                     modifier = Modifier.padding(start = 4.dp, end = 2.dp)
                                                 ) {
                                                     val welcomeGreeting = remember(currentProfile?.id, currentProfile?.name) {
-                                                        val prefs = context.getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
                                                         val profileKey = currentProfile?.id ?: currentProfile?.name ?: "default"
-                                                        val hasOpened = prefs.getBoolean("has_opened_profile_$profileKey", false)
+                                                        val hasOpened = com.example.data.preferences.BudgetPreferencesRepository.hasOpenedProfileBefore(context, profileKey)
                                                         val hourNow = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
                                                         val timeOfDayGreeting = when (hourNow) {
                                                             in 5..11 -> "Доброе утро"
@@ -733,7 +733,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                                             else -> "Доброй ночи"
                                                         }
                                                         if (!hasOpened) {
-                                                            prefs.edit().putBoolean("has_opened_profile_$profileKey", true).apply()
+                                                            com.example.data.preferences.BudgetPreferencesRepository.markProfileOpened(context, profileKey)
                                                             "Добро пожаловать"
                                                         } else {
                                                             timeOfDayGreeting
@@ -1143,7 +1143,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
 
                                 is com.example.ui.viewmodel.BottomCapsuleModal.DavidChat -> {
                                     val profileKey = currentProfile?.name ?: "default"
-                                    val appPrefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
                                     com.example.davidapp.DavidChatScreen(
                                         budgetId = currentProfile?.id ?: "default",
                                         profileName = currentProfile?.name ?: "Максим",
@@ -1154,12 +1153,12 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                         onMinimizeToBottomBar = {
                                             davidViewModel.minimizeDavidLive()
                                             viewModel.closeModal()
-                                            appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
+                                            com.example.data.preferences.BudgetPreferencesRepository.markDavidChatOpened(context, profileKey)
                                             viewModel.markNotificationsAsRead()
                                         },
                                         onBack = {
                                             viewModel.closeModal()
-                                            appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
+                                            com.example.data.preferences.BudgetPreferencesRepository.markDavidChatOpened(context, profileKey)
                                             viewModel.markNotificationsAsRead()
                                         }
                                     )

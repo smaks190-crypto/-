@@ -710,4 +710,70 @@ class DavidLiveUnitTest {
         override suspend fun deleteAccountsByBudgetId(budgetId: String) =
             throw UnsupportedOperationException("Read-only in David Live")
     }
+
+    @Test
+    fun `ApiKeyStorage migrates legacy key atomically and refuses plaintext fallback when securePrefs is null`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val legacyPrefs = context.getSharedPreferences("test_legacy_budget_prefs", android.content.Context.MODE_PRIVATE)
+        val securePrefs = context.getSharedPreferences("test_secure_prefs_mock", android.content.Context.MODE_PRIVATE)
+        legacyPrefs.edit().clear().commit()
+        securePrefs.edit().clear().commit()
+
+        val validKey = "AIzaSyD-TestKeyForCentralizedStorage12345"
+        legacyPrefs.edit().putString(com.example.data.preferences.ApiKeyStorage.KEY_GEMINI_API_KEY, "  $validKey  ").commit()
+
+        // 1. При недоступности защищённого хранилища (securePrefs == null) ключ в legacy не теряется, а запись нового отклоняется
+        val resolvedWhenNull = com.example.data.preferences.ApiKeyStorage.resolveAndMigrateApiKey(
+            securePrefs = null,
+            legacyPrefs = legacyPrefs
+        )
+        assertEquals(validKey, resolvedWhenNull)
+        assertTrue(legacyPrefs.contains(com.example.data.preferences.ApiKeyStorage.KEY_GEMINI_API_KEY))
+        assertFalse(
+            com.example.data.preferences.ApiKeyStorage.saveApiKeyWithPrefs(
+                rawKey = "AIzaSyD-NewSecretKey999999999999",
+                securePrefs = null,
+                legacyPrefs = legacyPrefs
+            )
+        )
+
+        // 2. Когда защищённое хранилище доступно, миграция переносит ключ и удаляет его из legacyPrefs
+        val migrated = com.example.data.preferences.ApiKeyStorage.resolveAndMigrateApiKey(
+            securePrefs = securePrefs,
+            legacyPrefs = legacyPrefs
+        )
+        assertEquals(validKey, migrated)
+        assertEquals(validKey, securePrefs.getString(com.example.data.preferences.ApiKeyStorage.KEY_GEMINI_API_KEY, ""))
+        assertFalse(legacyPrefs.contains(com.example.data.preferences.ApiKeyStorage.KEY_GEMINI_API_KEY))
+    }
+
+    @Test
+    fun `BudgetPreferencesRepository centralizes consent, budget selection, chat flags and sound settings`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        com.example.data.preferences.BudgetPreferencesRepository.budgetPrefs(context).edit().clear().commit()
+        com.example.data.preferences.BudgetPreferencesRepository.appPrefs(context).edit().clear().commit()
+
+        assertFalse(com.example.data.preferences.BudgetPreferencesRepository.isGeminiConsentGiven(context))
+        com.example.data.preferences.BudgetPreferencesRepository.setGeminiConsentGiven(context, true)
+        assertTrue(com.example.data.preferences.BudgetPreferencesRepository.isGeminiConsentGiven(context))
+
+        assertTrue(com.example.data.preferences.BudgetPreferencesRepository.isFirstLaunchSelection(context))
+        assertNull(com.example.data.preferences.BudgetPreferencesRepository.getLastSelectedBudgetId(context))
+
+        com.example.data.preferences.BudgetPreferencesRepository.setSelectedBudget(context, "budget_main")
+        assertFalse(com.example.data.preferences.BudgetPreferencesRepository.isFirstLaunchSelection(context))
+        assertEquals("budget_main", com.example.data.preferences.BudgetPreferencesRepository.getLastSelectedBudgetId(context))
+
+        com.example.data.preferences.BudgetPreferencesRepository.resetBudgetSelectionOnClear(context)
+        assertTrue(com.example.data.preferences.BudgetPreferencesRepository.isFirstLaunchSelection(context))
+        assertNull(com.example.data.preferences.BudgetPreferencesRepository.getLastSelectedBudgetId(context))
+
+        assertFalse(com.example.data.preferences.BudgetPreferencesRepository.hasOpenedDavidChatBefore(context, "Максим"))
+        com.example.data.preferences.BudgetPreferencesRepository.markDavidChatOpened(context, "Максим")
+        assertTrue(com.example.data.preferences.BudgetPreferencesRepository.hasOpenedDavidChatBefore(context, "Максим"))
+
+        assertTrue(com.example.data.preferences.BudgetPreferencesRepository.isSoundEnabled(context))
+        com.example.data.preferences.BudgetPreferencesRepository.appPrefs(context).edit().putBoolean("sound_enabled", false).commit()
+        assertFalse(com.example.data.preferences.BudgetPreferencesRepository.isSoundEnabled(context))
+    }
 }
