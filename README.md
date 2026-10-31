@@ -15,7 +15,7 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v11.10 (сборка 283)
+### Версия v11.11 (сборка 285)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
@@ -23,14 +23,10 @@
 
 ## Что изменилось
 
-### Изменено
-- Update build.yml ([f5d3d5a](https://github.com/smaks190-crypto/-/commit/f5d3d5ab0582db9159fefd3805d55aac138fea10))
-
 ### Документация и сборка
-- Consolidate Gradle cache and allow manual feature builds to save it ([19c43c0](https://github.com/smaks190-crypto/-/commit/19c43c05fb172615388e6e407bb86c9278d6e773))
-- Decouple assembleDebug from redundant Release and AndroidTest compilations ([11294d9](https://github.com/smaks190-crypto/-/commit/11294d94f279aa0659e8f277b9433d337b5e1145))
+- Extract Room into :core:database module to isolate KSP ([PR #69](#69)))
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.09-build.281...v11.10-build.283
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.10-build.283...v11.11-build.285
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
