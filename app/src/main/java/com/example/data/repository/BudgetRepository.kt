@@ -158,6 +158,22 @@ class BudgetRepository(
         allTransactions = allTransactions
     )
 
+    suspend fun generateDavidChatAnswer(
+        apiKey: String,
+        profileName: String,
+        userMessage: String,
+        snapshot: FinancialSemanticsSnapshot,
+        activeGoals: List<com.example.data.db.GoalEntity> = emptyList(),
+        conversationHistory: List<String> = emptyList()
+    ): String = aiAuditService.generateDavidChatAnswer(
+        apiKey = apiKey,
+        profileName = profileName,
+        userMessage = userMessage,
+        snapshot = snapshot,
+        activeGoals = activeGoals,
+        conversationHistory = conversationHistory
+    )
+
     suspend fun generateDavidCommentMulti(
         apiKey: String,
         operations: List<ParsedVoiceOperation>,

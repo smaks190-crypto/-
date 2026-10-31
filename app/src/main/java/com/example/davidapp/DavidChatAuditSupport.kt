@@ -2,6 +2,8 @@ package com.example.davidapp
 
 import com.example.data.db.TransactionEntity
 import com.example.data.repository.BudgetRepository
+import com.example.data.repository.FinancialSemanticsCalculator
+import com.example.data.repository.FinancialSemanticsSnapshot
 import com.example.data.repository.ParsedVoiceOperation
 import com.example.ui.components.detectCategoryAndTypeByTitle
 import com.example.utils.VoiceParserHelper
@@ -83,12 +85,26 @@ internal object DavidChatAuditSupport {
             else -> Triple(allTxs, emptyList(), "за все время")
         }
 
-        val totalIncome = currentTxs.filter { it.type == "income" }.sumOf { it.amount }
-        val totalExpense = currentTxs.filter { it.type == "expense" }.sumOf { it.amount }
+        val debts = try { repository.getAccountsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
+        val goals = try { repository.getGoalsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
+
+        val semantics = FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = allTxs,
+            periodTransactions = currentTxs,
+            accounts = debts
+        )
+        val prevSemantics = FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = allTxs,
+            periodTransactions = prevTxs,
+            accounts = debts
+        )
+
+        val totalIncome = semantics.earnedIncomeRub
+        val totalExpense = semantics.totalExpenseRub
         val net = totalIncome - totalExpense
 
-        val prevIncome = prevTxs.filter { it.type == "income" }.sumOf { it.amount }
-        val prevExpense = prevTxs.filter { it.type == "expense" }.sumOf { it.amount }
+        val prevIncome = prevSemantics.earnedIncomeRub
+        val prevExpense = prevSemantics.totalExpenseRub
         val prevNet = prevIncome - prevExpense
 
         val deltaPercent = if (prevIncome + prevExpense > 0) {
@@ -99,9 +115,6 @@ internal object DavidChatAuditSupport {
         }
 
         val dataPoints = generateRealDataPoints(period, currentTxs, totalIncome, totalExpense)
-
-        val debts = try { repository.getAccountsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
-        val goals = try { repository.getGoalsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
 
         val reportResult = repository.requestAiAudit(
             apiKey = currentApiKey,
@@ -120,12 +133,15 @@ internal object DavidChatAuditSupport {
             income = totalIncome,
             expense = totalExpense,
             net = net,
+            availableBalance = semantics.availableBalanceRub,
+            weOweTotal = semantics.totalWeOweRub,
+            owesUsTotal = semantics.totalOwesUsRub,
             transactions = currentTxs
         )
 
         val chartSummary = when {
-            net >= 0 -> "Профицит периода ($period): +${net.toInt()} ₽. Доходы превышают расходы на ${if (totalIncome > 0) ((net / totalIncome) * 100).toInt() else 100}%."
-            else -> "Дефицит периода ($period): ${net.toInt()} ₽. Превышение расходов над доходами!"
+            net >= 0 -> "Профицит периода ($period): +${net.toInt()} ₽. Заработанный доход: +${totalIncome.toInt()} ₽, доступный баланс: ${semantics.availableBalanceRub.toInt()} ₽."
+            else -> "Дефицит периода ($period): ${net.toInt()} ₽. Превышение расходов над заработанным доходом!"
         }
 
         return AuditPeriodData(
@@ -175,6 +191,9 @@ internal object DavidChatAuditSupport {
         income: Double,
         expense: Double,
         net: Double,
+        availableBalance: Double = net,
+        weOweTotal: Double = 0.0,
+        owesUsTotal: Double = 0.0,
         transactions: List<TransactionEntity>
     ): String {
         val expenses = transactions.filter { it.type == "expense" }
@@ -189,12 +208,15 @@ internal object DavidChatAuditSupport {
 
         return """
 # Главный Вердикт: $verdictTitle
-$currentProfileName, финансовый аудит за период **$period** сформирован! Доходы составили **+${income.toInt()} ₽**, расходы — **-${expense.toInt()} ₽**. Чистый итог: **${if (net >= 0) "+" else ""}${net.toInt()} ₽**.
+$currentProfileName, финансовый аудит за период **$period** сформирован! Заработанный доход составил **+${income.toInt()} ₽**, расходы — **-${expense.toInt()} ₽**. Доступный остаток (текущий баланс): **${availableBalance.toInt()} ₽**.
 
-## Цифры и Динамика
-- Совокупный доход: **+${income.toInt()} ₽**
-- Совокупный расход: **-${expense.toInt()} ₽**
-- Чистый остаток: **${if (net >= 0) "+" else ""}${net.toInt()} ₽**
+## Цифры и Динамика (раздельный учёт)
+- Доступный остаток (текущий баланс на руках): **${availableBalance.toInt()} ₽**
+- Заработанный доход за период: **+${income.toInt()} ₽**
+- Совокупный расход за период: **-${expense.toInt()} ₽**
+- Чистый денежный поток периода: **${if (net >= 0) "+" else ""}${net.toInt()} ₽**
+- Мои долги (я должен — обязательства, не входят в доход и баланс): **${weOweTotal.toInt()} ₽**
+- Мне должны (дебиторская задолженность — не входит в доход и баланс до возврата): **${owesUsTotal.toInt()} ₽**
 - Главная статья трат: **$topCatName** ($topCatAmount ₽)
 
 ## Прожарка Транжиры 🔥
@@ -252,6 +274,22 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             return null
         }
 
+        // Не превращаем упоминания долгов, обязательств, текущего баланса или сводных перечней в одиночную транзакцию
+        val mention = FinancialSemanticsCalculator.extractConversationalFinancialMention(text)
+        val mentionedCount = listOfNotNull(
+            mention.salaryAmount,
+            mention.currentBalanceAmount,
+            mention.weOweAmount,
+            mention.owesUsAmount
+        ).size
+        if (mentionedCount > 1 ||
+            mention.currentBalanceAmount != null ||
+            mention.weOweAmount != null ||
+            mention.owesUsAmount != null
+        ) {
+            return null
+        }
+
         val cats = try {
             repository.getCategoriesForBudget(currentBudgetId).first()
         } catch (_: Exception) {
@@ -265,6 +303,7 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         }
 
         val parsedList = VoiceParserHelper.parseHeuristically(text, expNames, incNames)
+        if (parsedList.size != 1) return null
         val firstOp = parsedList.firstOrNull { it.amount > 0.0 } ?: return null
 
         val semanticMatch = detectCategoryAndTypeByTitle(text, cats, firstOp.type)
@@ -281,8 +320,33 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         }
     }
 
-    fun generateSmartDavidReply(currentProfileName: String, query: String): String {
+    fun generateSmartDavidReply(
+        currentProfileName: String,
+        query: String,
+        precomputedSnapshot: FinancialSemanticsSnapshot? = null
+    ): String {
         val q = query.lowercase(Locale.getDefault())
+        val isFinancialSemanticsQuery =
+            q.contains("баланс") ||
+            q.contains("остаток") ||
+            q.contains("доход") ||
+            q.contains("зарплат") ||
+            q.contains("зп") ||
+            q.contains("долг") ||
+            q.contains("должен") ||
+            q.contains("должна") ||
+            q.contains("должны") ||
+            q.contains("кредит") ||
+            q.contains("займ") ||
+            q.contains("сколько у меня") ||
+            q.contains("сколько денег") ||
+            q.contains("итог")
+
+        if (isFinancialSemanticsQuery && precomputedSnapshot != null) {
+            val breakdown = FinancialSemanticsCalculator.formatChatFinancialBreakdown(precomputedSnapshot)
+            return "$currentProfileName, мухи отдельно, котлеты отдельно! Я никогда не складываю зарплату, текущий баланс и чужие долги в один «общий доход»:\n\n$breakdown"
+        }
+
         return when {
             q.contains("привет") || q.contains("салют") || q.contains("здравствуй") ->
                 "Салют, $currentProfileName! Хватит любезностей, давай проверим твои расходы. Нажми **«🐸 Давид, сделай отчет»**!"
@@ -292,9 +356,6 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
 
             q.contains("цел") || q.contains("накоп") || q.contains("копилк") ->
                 "Финансовые цели любят дисциплину. Нажми кнопку **«🎯 Цели»** для статуса накоплений!"
-
-            q.contains("долг") || q.contains("кредит") || q.contains("займ") ->
-                "Долги — это аренда чужой свободы. Закрывай их в первую очередь, пока проценты не сожрали твой бюджет!"
 
             q.contains("кофе") || q.contains("шаурм") || q.contains("еда") || q.contains("ресторан") ->
                 "Ага, опять гастрономические слабости! Каждая третья чашка навынос отдаляет тебя от финансовой независимости."

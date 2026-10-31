@@ -45,8 +45,8 @@ object VoiceParserHelper {
             "зарплата" to "Доходы", "доход" to "Доходы", "аванс" to "Доходы", "перевод" to "Доходы", "кешбэк" to "Доходы", "пришло" to "Доходы"
         )
 
-        // Find numbers/amounts and compile matches
-        val numberRegex = "(\\d+(?:\\.\\d+)?)\\s*(?:руб|р|\\s|$)".toRegex()
+        // Find numbers/amounts and compile matches (supporting 'к', 'k', 'тыс' and punctuation boundaries)
+        val numberRegex = "(\\d+(?:\\.\\d+)?)\\s*(тыс(?:яч[аи]?)?|к|k)?\\s*(?:руб(?:л(?:ей|я|ь)?)?|р|₽)?(?=[,;\\s]|$)".toRegex()
         val matches = numberRegex.findAll(cleanText).toList()
 
         val operations = mutableListOf<ParsedVoiceOperation>()
@@ -73,24 +73,62 @@ object VoiceParserHelper {
             return operations
         }
 
-        for (match in matches) {
-            val amount = match.groupValues[1].toDoubleOrNull() ?: 0.0
+        for ((idx, match) in matches.withIndex()) {
+            val baseAmount = match.groupValues[1].toDoubleOrNull() ?: 0.0
+            val multiplierGroup = match.groupValues.getOrNull(2).orEmpty()
+            val amount = if (multiplierGroup.isNotEmpty() && baseAmount < 1000.0) {
+                baseAmount * 1000.0
+            } else {
+                baseAmount
+            }
             val matchIndex = match.range.first
 
-            val beforeMatch = cleanText.substring(0, matchIndex).trim()
-            val afterMatch = cleanText.substring(match.range.last + 1).trim()
+            val prevMatchEnd = if (idx > 0) matches[idx - 1].range.last + 1 else 0
+            val nextMatchStart = if (idx + 1 < matches.size) matches[idx + 1].range.first else cleanText.length
+
+            val rawBefore = cleanText.substring(prevMatchEnd, matchIndex)
+            val rawAfter = cleanText.substring(match.range.last + 1, nextMatchStart)
+
+            // Ограничиваем контекст текущей клаузой (по разделителям `,`, `;`, ` и `, `\n`),
+            // чтобы ключевое слово «зарплата» в одной части фразы не превращало остальные суммы
+            // (баланс, долги, расходы) в доходы.
+            val beforeClause = rawBefore.split(Regex("(?:[,;\\n]+|\\s+и\\s+|\\s+а\\s+)")).lastOrNull()?.trim().orEmpty()
+            val afterClause = rawAfter.split(Regex("(?:[,;\\n]+|\\s+и\\s+|\\s+а\\s+)")).firstOrNull()?.trim().orEmpty()
+
+            val localClauseContext = "$beforeClause $afterClause".trim()
+
+            // Пропускаем чистые упоминания долгов («я должен», «мне должны») и констатации текущего баланса,
+            // чтобы они не превращались в ложные операции дохода/расхода при разборе чата.
+            val isDebtStatement = localClauseContext.contains("я долж") ||
+                localClauseContext.contains("мне должн") ||
+                localClauseContext.contains("должны мне") ||
+                localClauseContext.contains("мой долг") ||
+                localClauseContext.contains("взял в долг") ||
+                localClauseContext.contains("дал в долг")
+            val isBalanceStatement = localClauseContext.contains("текущий баланс") ||
+                localClauseContext.contains("мой баланс") ||
+                localClauseContext.contains("начальный баланс") ||
+                localClauseContext.contains("остаток на счете") ||
+                localClauseContext.contains("остаток на карте")
+            if (isDebtStatement || isBalanceStatement) {
+                continue
+            }
 
             var title = ""
             var matchedCategory = ""
             var type = "expense"
 
-            val fullTextContext = "$beforeMatch $afterMatch"
-            
             var foundIncomeKeyword = false
             for ((key, cat) in incomeKeywords) {
-                if (fullTextContext.contains(key)) {
+                if (localClauseContext.contains(key)) {
                     title = key.capitalizeFirstLetter()
-                    matchedCategory = incomeCategories.firstOrNull { it.contains(cat, true) } ?: cat
+                    matchedCategory = if (key == "зарплата" || key == "аванс") {
+                        incomeCategories.firstOrNull { it.contains("Зарплата", true) }
+                            ?: incomeCategories.firstOrNull { it.contains(cat, true) }
+                            ?: "Зарплата"
+                    } else {
+                        incomeCategories.firstOrNull { it.contains(cat, true) } ?: cat
+                    }
                     type = "income"
                     foundIncomeKeyword = true
                     break
@@ -99,7 +137,7 @@ object VoiceParserHelper {
 
             if (!foundIncomeKeyword) {
                 for ((key, cat) in expenseKeywords) {
-                    if (fullTextContext.contains(key)) {
+                    if (localClauseContext.contains(key)) {
                         title = key.capitalizeFirstLetter()
                         matchedCategory = expenseCategories.firstOrNull { it.contains(cat, true) } ?: cat
                         type = "expense"
@@ -109,13 +147,13 @@ object VoiceParserHelper {
             }
 
             if (title.isEmpty()) {
-                val words = beforeMatch.split("\\s+".toRegex()).filter { 
+                val words = beforeClause.split("\\s+".toRegex()).filter {
                     it.length > 2 && it != "потратил" && it != "купил" && it != "вчера" && it != "позавчера" && it != "сегодня"
                 }
                 title = if (words.isNotEmpty()) {
                     words.joinToString(" ").capitalizeFirstLetter()
                 } else {
-                    val afterWords = afterMatch.split("\\s+".toRegex()).filter { 
+                    val afterWords = afterClause.split("\\s+".toRegex()).filter {
                         it.length > 2 && it != "рублей" && it != "руб" && it != "вчера" && it != "позавчера" && it != "сегодня"
                     }
                     if (afterWords.isNotEmpty()) {

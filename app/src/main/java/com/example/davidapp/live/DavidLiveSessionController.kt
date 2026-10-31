@@ -29,7 +29,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 class DavidLiveSessionController(
     private val financialToolsProvider: DavidLiveFinancialToolsProvider,
     val audioEngine: DavidLiveAudioEngine = DavidLiveAudioEngine(),
-    private val okHttpClient: OkHttpClient = defaultLiveHttpClient()
+    private val okHttpClient: OkHttpClient = defaultLiveHttpClient(),
+    private val systemPromptExtrasProvider: () -> String = { "" },
+    private val externalUserMessagesProvider: () -> List<String> = { emptyList() }
 ) {
     private val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -60,6 +62,23 @@ class DavidLiveSessionController(
 
     private val pendingUserTranscript = StringBuilder()
     private val pendingDavidTranscript = StringBuilder()
+
+    init {
+        financialToolsProvider.setConversationalUserMessagesProvider {
+            buildList {
+                addAll(externalUserMessagesProvider())
+                addAll(
+                    transcriptTurns
+                        .filter { it.speaker == DavidLiveSpeaker.USER }
+                        .map { it.text }
+                )
+                val pending = pendingUserTranscript.toString().trim()
+                if (pending.isNotBlank()) {
+                    add(pending)
+                }
+            }
+        }
+    }
 
     private var _startSessionCount = 0
     val startSessionCount: Int
@@ -294,14 +313,22 @@ class DavidLiveSessionController(
     }
 
     private fun buildSetupMessageJson(modelName: String): JSONObject {
+        val extras = systemPromptExtrasProvider().trim()
+        val extrasBlock = if (extras.isNotBlank()) "\n$extras" else ""
         val systemPrompt = """
-            Ты — Давид Жабов 🐸, харизматичный, ироничный и острый на ум ИИ-аудитор личных финансов в приложении David Finance AI.
+            Ты — Давид Жабов 🐸, харизматичный, ироничный и острый на ум ИИ-аудитор личных финансов в приложении David Finance AI.$extrasBlock
             Сейчас ты работаешь в голосовом режиме реального времени David Live.
             Правила общения в David Live:
             1. Всегда говори и отвечай ТОЛЬКО на русском языке. Отвечай живо, естественно и лаконично (2–4 предложения за реплику).
-            2. Для любых вопросов про баланс, расходы, доходы, категории, бюджеты, цели, сравнение периодов или прогноз остатка бюджета ОБЯЗАТЕЛЬНО вызывай предоставленные инструменты (tools).
+            2. Для любых вопросов про баланс, расходы, доходы, категории, бюджеты, цели, долги, сравнение периодов или прогноз остатка бюджета ОБЯЗАТЕЛЬНО вызывай предоставленные инструменты (tools).
             3. НИКОГДА не выдумывай суммы, категории, проценты или операции, которых нет в ответах инструментов. Если данных недостаточно — честно скажи об этом.
             4. Ты работаешь строго в режиме чтения: никогда не утверждай, что ты сам создал, изменил или удалил финансовую операцию без подтверждения пользователя.
+            5. СТРОГОЕ РАЗДЕЛЕНИЕ ФИНАНСОВЫХ СУЩНОСТЕЙ (ЗАПРЕТ СМЕШИВАНИЯ):
+               - Доступный остаток (текущий баланс `availableBalanceRub` / `totalBalanceRub`) — это фактические деньги на руках с учётом уже полученных доходов и совершённых расходов. НИКОГДА не складывай текущий баланс с зарплатой или доходом повторно!
+               - Заработанный доход за период (`earnedIncome30dRub` / `income30dRub`, включая зарплату `salaryIncome30dRub`) — это только поступления дохода за период.
+               - Мои долги («Я должен», `totalWeOweRub`) — это обязательства (пассив) пользователя. НИКОГДА не прибавляй их к доходу или к балансу!
+               - Должны мне («Мне должны», `totalOwesUsRub`) — это дебиторская задолженность (ожидаемый возврат). НИКОГДА не прибавляй её к текущему заработанному доходу или к доступному остатку!
+               - При ответе всегда называй эти статьи раздельно и своими именами: «Доступный остаток», «Доход за период (зарплата)», «Я должен» и «Мне должны».
         """.trimIndent()
 
         return JSONObject().apply {
