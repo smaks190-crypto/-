@@ -1675,4 +1675,191 @@ class DavidLiveUnitTest {
             db.close()
         }
     }
+
+    @Test
+    fun `high speaker volume loudspeaker echo during long David speech does not trigger false barge-in while genuine user interruption succeeds`() {
+        val engine = DavidLiveAudioEngine()
+        engine.setExternalHeadsetConnectedForTest(false)
+        engine.setHardwareAecEnabledForTest(false)
+        engine.setSpeakerVolumeRatioForTest(0.95f) // 95% громкость динамика
+
+        var nowMs = 100_000L
+        var bargeInTriggeredCount = 0
+
+        // 0. Пользователь только что громко задал вопрос перед ответом Давида (проверка сброса счётчика кадров при старте речи Давида)
+        val userQuestionFrame = createTonePcmFrame(rmsTarget = 0.22f)
+        repeat(4) {
+            engine.evaluateCaptureFrame(
+                pcmSamples = userQuestionFrame,
+                nowMs = nowMs,
+                onUserBargeIn = { bargeInTriggeredCount++ }
+            )
+            nowMs += 64L
+        }
+        assertEquals(0, bargeInTriggeredCount)
+
+        // 1. Давид начинает длинный голосовой ответ на высокой громкости динамика (digital RMS ~0.28f..0.34f).
+        // Микрофон захватывает сильное эхо динамика (RMS ~0.12f..0.19f, что значительно выше старого порога 0.08f).
+        val davidLoudFrame = createTonePcmFrame(rmsTarget = 0.30f, sampleCount = 1024)
+        val speakerEchoFrame = createTonePcmFrame(rmsTarget = 0.16f, sampleCount = 1024)
+
+        repeat(20) { step ->
+            engine.feedTestPcmFrame(
+                samples = davidLoudFrame,
+                sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+                speaker = DavidLiveSpeaker.DAVID,
+                nowMs = nowMs
+            )
+            val decision = engine.evaluateCaptureFrame(
+                pcmSamples = speakerEchoFrame,
+                nowMs = nowMs + 10L,
+                onUserBargeIn = { bargeInTriggeredCount++ }
+            )
+            assertFalse(
+                "High-volume loudspeaker echo (step=$step, micRms=${decision.micRms}, threshold=${decision.adaptiveBargeInThresholdRms}) must NOT trigger false barge-in",
+                decision.triggeredBargeIn
+            )
+            assertFalse(
+                "Speaker echo must be gated and never forwarded to Gemini Live server",
+                decision.shouldForwardMicChunkToServer
+            )
+            assertTrue(decision.suppressedAsEcho)
+            nowMs += 64L
+        }
+        assertEquals("David must finish speaking without self-interruption", 0, bargeInTriggeredCount)
+        assertEquals(DavidLiveSpeaker.DAVID, engine.activeSpeaker.value)
+
+        // 2. Теперь во время ответа Давида пользователь действительно начинает говорить в микрофон (ближнее поле + межслоговые паузы Давида)
+        val davidSyllableDipFrame = createTonePcmFrame(rmsTarget = 0.04f, sampleCount = 1024)
+        val userBargeInFrame = createTonePcmFrame(rmsTarget = 0.34f, sampleCount = 1024)
+
+        var lastDecision: DavidLiveAudioEngine.CaptureFrameDecision? = null
+        repeat(5) { idx ->
+            val currentDavidOut = if (idx % 2 == 1) davidSyllableDipFrame else davidLoudFrame
+            if (bargeInTriggeredCount == 0) {
+                engine.feedTestPcmFrame(
+                    samples = currentDavidOut,
+                    sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+                    speaker = DavidLiveSpeaker.DAVID,
+                    nowMs = nowMs
+                )
+            }
+            lastDecision = engine.evaluateCaptureFrame(
+                pcmSamples = userBargeInFrame,
+                nowMs = nowMs + 10L,
+                onUserBargeIn = { bargeInTriggeredCount++ }
+            )
+            nowMs += 64L
+        }
+
+        assertEquals("Genuine user speech must reliably interrupt David even at high volume", 1, bargeInTriggeredCount)
+        assertNotNull(lastDecision)
+        assertTrue(lastDecision!!.shouldForwardMicChunkToServer)
+        assertEquals(DavidLiveSpeaker.NONE, engine.activeSpeaker.value)
+    }
+
+    @Test
+    fun `normal speaker volume and after reconnect allow responsive user barge-in and suppress spurious server echo interrupted signal`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L,
+            readyFlashDurationMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val socket1 = fakeFactory.entries[0]
+        socket1.simulateOpen()
+        socket1.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // Симулируем переподключение после сетевого сбоя и проверяем работу защиты от эха и barge-in на новом сокете
+        socket1.simulateFailure(SocketTimeoutException("sent ping but didn't receive pong within 20000ms"))
+        val socket2 = fakeFactory.entries[1]
+        socket2.simulateOpen()
+        socket2.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // Давид начинает отвечать на обычной громкости (40%)
+        controller.audioEngine.setExternalHeadsetConnectedForTest(false)
+        controller.audioEngine.setSpeakerVolumeRatioForTest(0.40f)
+        val nowMs = System.currentTimeMillis()
+        socket2.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Разбираю твои регулярные платежи и доступный остаток."}}}"""
+        )
+        val davidAudio = createTonePcmFrame(rmsTarget = 0.20f, sampleCount = 2400)
+        controller.audioEngine.feedTestPcmFrame(
+            samples = davidAudio,
+            sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+            speaker = DavidLiveSpeaker.DAVID,
+            nowMs = nowMs
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertTrue(controller.audioEngine.hasPendingOrActiveModelPlayback(nowMs))
+
+        // 1. Ложный серверный interrupted=true (без подтверждённой речи пользователя при активном воспроизведении) игнорируется
+        socket2.simulateServerText("""{"serverContent":{"interrupted": true}}""")
+        assertEquals(
+            "Spurious server interrupted=true without user speech must not cut off active playback",
+            DavidLiveConnectionState.DAVID_SPEAKING,
+            controller.connectionState.value
+        )
+
+        // 2. Реальное перебивание пользователем на обычной громкости (4 кадра речи RMS 0.14f)
+        val userNormalVoice = createTonePcmFrame(rmsTarget = 0.14f, sampleCount = 1024)
+        var t = nowMs + 250L
+        repeat(4) {
+            controller.audioEngine.evaluateCaptureFrame(
+                pcmSamples = userNormalVoice,
+                nowMs = t,
+                onUserBargeIn = { controller.handleConfirmedUserBargeIn() }
+            )
+            t += 64L
+        }
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertEquals("Слушаю вас...", controller.liveSubtitle.value)
+
+        // 3. Запоздавшие транзитные пакеты прерванной реплики Давида игнорируются до начала нового хода
+        socket2.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Хвост старой прерванной реплики"}}}"""
+        )
+        assertEquals(
+            "In-flight chunks of an already-interrupted model turn must not flip state back to DAVID_SPEAKING",
+            DavidLiveConnectionState.LISTENING,
+            controller.connectionState.value
+        )
+
+        // 4. Новый вопрос пользователя сбрасывает флаг перебивания и позволяет Давиду ответить на новый вопрос
+        socket2.simulateServerText(
+            """{"serverContent":{"inputTranscription":{"text":"А сколько осталось на кафе?"}}}"""
+        )
+        socket2.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"На кафе осталось 1 500 рублей."}}}"""
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertEquals("На кафе осталось 1 500 рублей.", controller.liveSubtitle.value)
+
+        controller.endSession()
+    }
+
+    private fun createTonePcmFrame(
+        rmsTarget: Float,
+        sampleCount: Int = 1024,
+        frequencyHz: Double = 440.0,
+        sampleRateHz: Int = 16_000
+    ): ShortArray {
+        val amplitude = (rmsTarget * kotlin.math.sqrt(2.0) * 32767.0).coerceIn(0.0, 32760.0)
+        return ShortArray(sampleCount) { i ->
+            (sin(2.0 * PI * frequencyHz * i / sampleRateHz) * amplitude).toInt().toShort()
+        }
+    }
 }

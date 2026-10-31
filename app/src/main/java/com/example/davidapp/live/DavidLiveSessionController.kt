@@ -109,6 +109,7 @@ class DavidLiveSessionController(
     @Volatile
     private var lastResumedTurnSignature: String = ""
     private val executedToolCallIds = ConcurrentHashMap.newKeySet<String>()
+    private val userInterruptedCurrentModelTurn = AtomicBoolean(false)
 
     private val _displayMode = MutableStateFlow(DavidLiveDisplayMode.HIDDEN)
     val displayMode: StateFlow<DavidLiveDisplayMode> = _displayMode.asStateFlow()
@@ -171,6 +172,7 @@ class DavidLiveSessionController(
      * [ConnectivityManager.NetworkCallback] strictly while a David Live session is active.
      */
     fun bindNetworkContext(context: Context) {
+        audioEngine.bindAudioContext(context)
         if (connectivityManager == null) {
             connectivityManager = context.applicationContext
                 .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
@@ -251,6 +253,7 @@ class DavidLiveSessionController(
         interruptedDavidPartialText = null
         lastResumedTurnSignature = ""
         executedToolCallIds.clear()
+        userInterruptedCurrentModelTurn.set(false)
         synchronized(_transcriptTurns) {
             _transcriptTurns.clear()
         }
@@ -664,6 +667,8 @@ class DavidLiveSessionController(
         }
 
         setupCompleted.set(false)
+        userInterruptedCurrentModelTurn.set(false)
+        audioEngine.setServerTurnSpeakingActive(false)
         readyFlashJob?.cancel()
         readyFlashJob = null
         _isReadyFlashActive.value = false
@@ -1183,6 +1188,18 @@ class DavidLiveSessionController(
         val serverContent = root.optJSONObject("serverContent") ?: return
 
         if (serverContent.optBoolean("interrupted", false)) {
+            audioEngine.setServerTurnSpeakingActive(false)
+            val isFalseEchoInterrupt = audioEngine.hasPendingOrActiveModelPlayback() &&
+                !userInterruptedCurrentModelTurn.get() &&
+                !audioEngine.hasRecentConfirmedUserSpeech()
+            if (isFalseEchoInterrupt) {
+                GlobalConsoleLogger.w(
+                    "LIVE",
+                    "Подавлено ложное серверное прерывание (interrupted=true) от эха динамика без подтверждённой речи пользователя"
+                )
+                return
+            }
+            userInterruptedCurrentModelTurn.set(false)
             audioEngine.clearModelPlaybackQueue()
             flushPendingTranscripts(markDavidInterrupted = false)
             _isReadyFlashActive.value = false
@@ -1201,6 +1218,7 @@ class DavidLiveSessionController(
             ?.optString("text")
             ?.takeIf { it.isNotBlank() }
         if (inputTranscription != null) {
+            userInterruptedCurrentModelTurn.set(false)
             _isReadyFlashActive.value = false
             _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
             if (pendingDavidTranscript.isNotEmpty()) {
@@ -1219,7 +1237,8 @@ class DavidLiveSessionController(
         val outputTranscription = serverContent.optJSONObject("outputTranscription")
             ?.optString("text")
             ?.takeIf { it.isNotBlank() }
-        if (outputTranscription != null) {
+        if (outputTranscription != null && !userInterruptedCurrentModelTurn.get()) {
+            audioEngine.setServerTurnSpeakingActive(true)
             _isReadyFlashActive.value = false
             _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
             if (pendingUserTranscript.isNotEmpty()) {
@@ -1236,7 +1255,7 @@ class DavidLiveSessionController(
 
         val modelTurn = serverContent.optJSONObject("modelTurn")
         val parts = modelTurn?.optJSONArray("parts")
-        if (parts != null) {
+        if (parts != null && !userInterruptedCurrentModelTurn.get()) {
             for (i in 0 until parts.length()) {
                 val part = parts.optJSONObject(i) ?: continue
 
@@ -1245,6 +1264,7 @@ class DavidLiveSessionController(
                 if (!isThoughtPart && textPart != null && outputTranscription == null && !part.has("inlineData")) {
                     val cleanedPart = sanitizeSpokenSubtitle(textPart)
                     if (cleanedPart.isNotBlank()) {
+                        audioEngine.setServerTurnSpeakingActive(true)
                         _isReadyFlashActive.value = false
                         _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
                         pendingDavidTranscript.append(cleanedPart)
@@ -1263,6 +1283,7 @@ class DavidLiveSessionController(
                             null
                         }
                         if (pcmBytes != null && pcmBytes.isNotEmpty()) {
+                            audioEngine.setServerTurnSpeakingActive(true)
                             _isReadyFlashActive.value = false
                             _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
                             if (pendingUserTranscript.isNotEmpty()) {
@@ -1281,6 +1302,8 @@ class DavidLiveSessionController(
         }
 
         if (serverContent.optBoolean("turnComplete", false)) {
+            audioEngine.setServerTurnSpeakingActive(false)
+            userInterruptedCurrentModelTurn.set(false)
             flushPendingTranscripts(markDavidInterrupted = false)
             needsContinuationOnResume = false
             interruptedDavidPartialText = null
@@ -1395,20 +1418,26 @@ class DavidLiveSessionController(
             },
             onUserBargeIn = {
                 if (isStaleCallback(ws, connectionGen)) return@start
-                flushPendingTranscripts(markDavidInterrupted = false)
-                _isReadyFlashActive.value = false
-                _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
-                _connectionState.value = if (_isMicMuted.value) {
-                    DavidLiveConnectionState.MUTED
-                } else {
-                    DavidLiveConnectionState.LISTENING
-                }
-                _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Слушаю вас..."
+                handleConfirmedUserBargeIn()
             },
             onModelPlaybackDrained = {
                 handleModelPlaybackDrained(connectionGen)
             }
         )
+    }
+
+    internal fun handleConfirmedUserBargeIn() {
+        userInterruptedCurrentModelTurn.set(true)
+        audioEngine.setServerTurnSpeakingActive(false)
+        flushPendingTranscripts(markDavidInterrupted = false)
+        _isReadyFlashActive.value = false
+        _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
+        _connectionState.value = if (_isMicMuted.value) {
+            DavidLiveConnectionState.MUTED
+        } else {
+            DavidLiveConnectionState.LISTENING
+        }
+        _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Слушаю вас..."
     }
 
     private fun flushPendingTranscripts(markDavidInterrupted: Boolean = false) {
