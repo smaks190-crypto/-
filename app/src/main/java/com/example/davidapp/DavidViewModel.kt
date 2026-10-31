@@ -74,7 +74,8 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         transactionDao = database.transactionDao(),
         categoryDao = database.categoryDao(),
         goalDao = database.goalDao(),
-        accountDao = database.accountDao()
+        accountDao = database.accountDao(),
+        recurringPaymentDao = database.recurringPaymentDao()
     )
 
     val liveSessionController = DavidLiveSessionController(
@@ -139,9 +140,9 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         currentBudgetId = budgetId
         currentProfileName = if (profileName.isNotBlank()) profileName else "Пользователь"
         liveFinancialToolsProvider.setBudgetId(currentBudgetId)
-        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-        val effectiveKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            apiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        val effectiveKey = com.example.data.preferences.ApiKeyStorage.getSavedApiKey(
+            getApplication(),
+            explicitKey = apiKey
         )
         currentApiKey = effectiveKey
         _hasApiKey.value = effectiveKey.isNotBlank()
@@ -155,10 +156,12 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveApiKeyFromChat(newKey: String, soundManager: SoundManager? = null) {
         val clean = com.example.data.api.GeminiModelConfig.sanitizeApiKey(newKey)
-        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-        prefs.edit().putString("gemini_api_key", clean).putBoolean("gemini_consent_given", true).apply()
-        currentApiKey = clean
-        _hasApiKey.value = clean.isNotBlank()
+        val saved = com.example.data.preferences.ApiKeyStorage.saveApiKey(getApplication(), clean)
+        if (saved) {
+            com.example.data.preferences.BudgetPreferencesRepository.setGeminiConsentGiven(getApplication(), true)
+            currentApiKey = clean
+            _hasApiKey.value = clean.isNotBlank()
+        }
         soundManager?.playReceive()
         addSessionMessage(
             ChatMessage(
@@ -477,221 +480,20 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Расчет реальных показателей транзакций для выбранного периода
-     */
     private suspend fun calculateRealAuditData(
         period: String,
         allTxs: List<TransactionEntity>
-    ): AuditPeriodData {
-        val cal = Calendar.getInstance()
-        val todayStr = isoFormat.format(cal.time)
+    ): AuditPeriodData = DavidChatAuditSupport.calculateRealAuditData(
+        period = period,
+        allTxs = allTxs,
+        repository = repository,
+        currentBudgetId = currentBudgetId,
+        currentProfileName = currentProfileName,
+        currentApiKey = currentApiKey
+    )
 
-        val (currentTxs, prevTxs, periodTitle) = when (period) {
-            "День" -> {
-                cal.add(Calendar.DAY_OF_YEAR, -1)
-                val yesterdayStr = isoFormat.format(cal.time)
-                Triple(
-                    allTxs.filter { it.date == todayStr },
-                    allTxs.filter { it.date == yesterdayStr },
-                    "за сегодня ($todayStr)"
-                )
-            }
-            "Неделя" -> {
-                val weekDates = (0..6).map { offset ->
-                    val c = Calendar.getInstance()
-                    c.add(Calendar.DAY_OF_YEAR, -offset)
-                    isoFormat.format(c.time)
-                }.toSet()
-                val prevWeekDates = (7..13).map { offset ->
-                    val c = Calendar.getInstance()
-                    c.add(Calendar.DAY_OF_YEAR, -offset)
-                    isoFormat.format(c.time)
-                }.toSet()
-                Triple(
-                    allTxs.filter { it.date in weekDates },
-                    allTxs.filter { it.date in prevWeekDates },
-                    "за последние 7 дней"
-                )
-            }
-            "Месяц" -> {
-                val curMonthPrefix = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(Date())
-                cal.add(Calendar.MONTH, -1)
-                val prevMonthPrefix = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(cal.time)
-                Triple(
-                    allTxs.filter { it.date.startsWith(curMonthPrefix) },
-                    allTxs.filter { it.date.startsWith(prevMonthPrefix) },
-                    "за текущий месяц"
-                )
-            }
-            "Год" -> {
-                val curYearPrefix = SimpleDateFormat("yyyy", Locale.getDefault()).format(Date())
-                val prevYearPrefix = (Calendar.getInstance().get(Calendar.YEAR) - 1).toString()
-                Triple(
-                    allTxs.filter { it.date.startsWith(curYearPrefix) },
-                    allTxs.filter { it.date.startsWith(prevYearPrefix) },
-                    "за текущий год"
-                )
-            }
-            else -> Triple(allTxs, emptyList(), "за все время")
-        }
-
-        val totalIncome = currentTxs.filter { it.type == "income" }.sumOf { it.amount }
-        val totalExpense = currentTxs.filter { it.type == "expense" }.sumOf { it.amount }
-        val net = totalIncome - totalExpense
-
-        val prevIncome = prevTxs.filter { it.type == "income" }.sumOf { it.amount }
-        val prevExpense = prevTxs.filter { it.type == "expense" }.sumOf { it.amount }
-        val prevNet = prevIncome - prevExpense
-
-        val deltaPercent = if (prevIncome + prevExpense > 0) {
-            val rawDelta = ((net - prevNet) / (prevIncome + prevExpense).coerceAtLeast(1.0)) * 100.0
-            String.format(Locale.US, "%.1f", rawDelta).toDoubleOrNull() ?: 0.0
-        } else {
-            if (net >= 0) 15.0 else -15.0
-        }
-
-        // Построение точек диаграммы на основе фактических транзакций
-        val dataPoints = generateRealDataPoints(period, currentTxs, totalIncome, totalExpense)
-
-        // Генерация отчета через репозиторий с учетом реальных данных и имени профиля
-        val debts = try { repository.getAccountsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
-        val goals = try { repository.getGoalsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
-
-        val reportResult = repository.requestAiAudit(
-            apiKey = currentApiKey,
-            periodName = periodTitle,
-            year = cal.get(Calendar.YEAR),
-            filteredTransactions = currentTxs,
-            previousTransactions = prevTxs,
-            activeDebts = debts,
-            activeGoals = goals,
-            allTransactions = allTxs
-        )
-
-        val reportText = reportResult.getOrNull() ?: buildDefaultSarcasticReport(
-            period = period,
-            income = totalIncome,
-            expense = totalExpense,
-            net = net,
-            transactions = currentTxs
-        )
-
-        val chartSummary = when {
-            net >= 0 -> "Профицит периода ($period): +${net.toInt()} ₽. Доходы превышают расходы на ${if (totalIncome > 0) ((net / totalIncome) * 100).toInt() else 100}%."
-            else -> "Дефицит периода ($period): ${net.toInt()} ₽. Превышение расходов над доходами!"
-        }
-
-        return AuditPeriodData(
-            income = totalIncome,
-            expense = totalExpense,
-            deltaPercent = deltaPercent,
-            dataPoints = dataPoints,
-            chartSummary = chartSummary,
-            sarcasticReport = reportText
-        )
-    }
-
-    /**
-     * Построение точек для диаграммы Безье на основе фактических транзакций
-     */
-    private fun generateRealDataPoints(
-        period: String,
-        txs: List<TransactionEntity>,
-        income: Double,
-        expense: Double
-    ): List<Float> {
-        if (txs.isEmpty()) {
-            return listOf(20f, 25f, 30f, 40f, 50f, 65f, 75f)
-        }
-
-        val sorted = txs.sortedBy { it.date }
-        val expenses = sorted.filter { it.type == "expense" }
-
-        val points = mutableListOf<Float>()
-        var runningExpense = 0.0
-        val maxTarget = (income + expense).coerceAtLeast(1000.0)
-
-        points.add(20f)
-        for (tx in expenses.take(8)) {
-            runningExpense += tx.amount
-            val norm = (20f + (runningExpense / maxTarget * 75f).toFloat()).coerceIn(10f, 95f)
-            points.add(norm)
-        }
-
-        while (points.size < 6) {
-            points.add(points.last() + 5f)
-        }
-
-        return points.take(10)
-    }
-
-    /**
-     * Генератор саркастического отчета по умолчанию на основе фактических цифр профиля
-     */
-    private fun buildDefaultSarcasticReport(
-        period: String,
-        income: Double,
-        expense: Double,
-        net: Double,
-        transactions: List<TransactionEntity>
-    ): String {
-        val expenses = transactions.filter { it.type == "expense" }
-        val topCategory = expenses.groupBy { it.category }
-            .mapValues { entry -> entry.value.sumOf { it.amount } }
-            .maxByOrNull { it.value }
-
-        val topCatName = topCategory?.key ?: "Спонтанные покупки"
-        val topCatAmount = topCategory?.value?.toInt() ?: 0
-
-        val verdictTitle = if (net >= 0) "📈 УМЕРЕННЫЙ ПРОФИЦИТ" else "🚨 КАССОВЫЙ РАЗРЫВ"
-
-        return """
-# Главный Вердикт: $verdictTitle
-$currentProfileName, финансовый аудит за период **$period** сформирован! Доходы составили **+${income.toInt()} ₽**, расходы — **-${expense.toInt()} ₽**. Чистый итог: **${if (net >= 0) "+" else ""}${net.toInt()} ₽**.
-
-## Цифры и Динамика
-- Совокупный доход: **+${income.toInt()} ₽**
-- Совокупный расход: **-${expense.toInt()} ₽**
-- Чистый остаток: **${if (net >= 0) "+" else ""}${net.toInt()} ₽**
-- Главная статья трат: **$topCatName** ($topCatAmount ₽)
-
-## Прожарка Транжиры 🔥
-${if (expenses.isNotEmpty()) "Твоя главная финансовая слабость — это категория «$topCatName», куда улетело аж $topCatAmount ₽! Даже Скупой рыцарь Пушкина прослезился бы от такой щедрости к торговцам. Если продолжить в том же духе, инвестиционный портфель придется собирать из скидочных купонов." else "В этом периоде подозрительно мало расходов. Либо режим жесткой аскезы, либо ты забыл внести чек за вчерашний пир!"}
-
-## Ачивки и Достижения 🏆
-🏆 **Спонсор категории «$topCatName»** — инвестировал $topCatAmount ₽ в чужой бизнес
-🥇 **${if (net >= 0) "Мастер финансового баланса" else "Герой кредитного лимита"}** — ${if (net >= 0) "удержал бюджет в зеленой зоне!" else "умудрился выйти за рамки доходов!"}
-
-## Рекомендации Жабова 💡
-Поставь строгий лимит на категорию «$topCatName» и направь как минимум 20% свободного остатка на пополнение финансовой подушки безопасности!
-""".trimIndent()
-    }
-
-    /**
-     * Разделение отчета по смысловым блокам/заголовкам Markdown для раздельных баблов
-     */
-    private fun splitReportIntoSections(report: String): List<String> {
-        if (report.isBlank()) return emptyList()
-        val lines = report.lines()
-        val sections = mutableListOf<String>()
-        val currentSection = StringBuilder()
-
-        for (line in lines) {
-            val trimmed = line.trimStart()
-            if (trimmed.startsWith("# ") || trimmed.startsWith("## ")) {
-                if (currentSection.isNotBlank()) {
-                    sections.add(currentSection.toString().trim())
-                    currentSection.clear()
-                }
-            }
-            currentSection.appendLine(line)
-        }
-        if (currentSection.isNotBlank()) {
-            sections.add(currentSection.toString().trim())
-        }
-        return if (sections.isNotEmpty()) sections else listOf(report.trim())
-    }
+    private fun splitReportIntoSections(report: String): List<String> =
+        DavidChatAuditSupport.splitReportIntoSections(report)
 
     /**
      * Отправка произвольного сообщения от пользователя
@@ -776,47 +578,12 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         }
     }
 
-    private suspend fun tryParseOperationFromChat(text: String): com.example.data.repository.ParsedVoiceOperation? {
-        val lower = text.lowercase(Locale.getDefault())
-        if (lower.contains("?") ||
-            lower.startsWith("покажи") ||
-            lower.startsWith("сделай") ||
-            lower.startsWith("на чем") ||
-            lower.startsWith("на чём") ||
-            lower.startsWith("мой баланс") ||
-            lower.startsWith("жабий аудит")
-        ) {
-            return null
-        }
-
-        val cats = try {
-            repository.getCategoriesForBudget(currentBudgetId).first()
-        } catch (_: Exception) {
-            emptyList()
-        }
-        val expNames = cats.filter { it.type == "expense" }.map { it.name }.ifEmpty {
-            listOf("Продукты", "Кафе и рестораны", "Транспорт", "ЖКХ", "Развлечения", "Покупки", "Здоровье", "Прочее")
-        }
-        val incNames = cats.filter { it.type == "income" }.map { it.name }.ifEmpty {
-            listOf("Зарплата", "Фриланс", "Кэшбэк", "Подарки")
-        }
-
-        val parsedList = com.example.utils.VoiceParserHelper.parseHeuristically(text, expNames, incNames)
-        val firstOp = parsedList.firstOrNull { it.amount > 0.0 } ?: return null
-
-        val semanticMatch = com.example.ui.components.detectCategoryAndTypeByTitle(text, cats, firstOp.type)
-        return if (semanticMatch != null) {
-            firstOp.copy(
-                type = semanticMatch.first,
-                category = semanticMatch.second,
-                subcategory = firstOp.title.ifBlank { semanticMatch.second }
-            )
-        } else {
-            firstOp.copy(
-                subcategory = firstOp.title.ifBlank { firstOp.category }
-            )
-        }
-    }
+    private suspend fun tryParseOperationFromChat(text: String): com.example.data.repository.ParsedVoiceOperation? =
+        DavidChatAuditSupport.tryParseOperationFromChat(
+            text = text,
+            repository = repository,
+            currentBudgetId = currentBudgetId
+        )
 
     fun confirmChatProposedOperation(messageId: String, soundManager: SoundManager? = null) {
         viewModelScope.launch {
@@ -828,7 +595,7 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
 
             val op = proposal.operation
             soundManager?.playClick()
-            database.transactionDao().insertTransaction(
+            repository.insertTransaction(
                 TransactionEntity(
                     budgetId = currentBudgetId,
                     type = op.type,
@@ -865,54 +632,132 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
     }
 
 
-    private suspend fun generateGeminiReply(query: String): String {
+    private suspend fun buildConversationFinancialSnapshot(currentQuery: String): com.example.data.repository.FinancialSemanticsSnapshot {
+        val recentTxs = try { repository.getTransactionsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
+        val debts = try { repository.getAccountsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
+        val baseSnapshot = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = recentTxs,
+            periodTransactions = recentTxs,
+            accounts = debts
+        )
+        val userMessageTexts = sessionMessages
+            .filter { it.isUser }
+            .mapNotNull { msg -> (msg.type as? ChatMessageType.Text)?.content }
+            .let { list: List<String> ->
+                if (list.lastOrNull() == currentQuery) list else list + currentQuery
+            }
+        return com.example.data.repository.FinancialSemanticsCalculator.mergeSnapshotWithConversationalMentions(
+            baseSnapshot = baseSnapshot,
+            userMessages = userMessageTexts
+        )
+    }
+
+    private suspend fun buildUnifiedIntelligenceSnapshot(
+        currentQuery: String = ""
+    ): com.example.data.safetospend.UnifiedFinancialIntelligenceSnapshot? {
         return try {
             val recentTxs = repository.getTransactionsForBudget(currentBudgetId).first()
             val debts = repository.getAccountsForBudget(currentBudgetId).first()
             val goals = repository.getGoalsForBudget(currentBudgetId).first()
+            val cats = repository.getCategoriesForBudget(currentBudgetId).first()
+            val recurring = repository.getRecurringPaymentsForBudget(currentBudgetId).first()
+            val logs = repository.getExecutionLogsForBudget(currentBudgetId).first()
+            val appCtx = getApplication<Application>()
+            val safetyFloor = com.example.data.preferences.BudgetPreferencesRepository.getUserSafetyFloorRub(appCtx, currentBudgetId)
+            val lockedReserve = com.example.data.preferences.BudgetPreferencesRepository.getUserLockedReserveRub(appCtx, currentBudgetId)
+            val userEssNorm = com.example.data.preferences.BudgetPreferencesRepository.getUserEssentialDailyNormRub(appCtx, currentBudgetId)
+            val userMessageTexts = sessionMessages
+                .filter { it.isUser }
+                .mapNotNull { msg -> (msg.type as? ChatMessageType.Text)?.content }
+                .let { list: List<String> ->
+                    if (currentQuery.isBlank() || list.lastOrNull() == currentQuery) list else list + currentQuery
+                }
 
-            val comment = repository.generateDavidComment(
-                apiKey = currentApiKey,
-                type = "expense",
-                category = "Вопрос аудитору",
-                subcategory = query,
-                amount = 0.0,
-                recentTransactions = recentTxs.take(5),
-                activeDebts = debts,
-                activeGoals = goals,
-                extraContext = "Пользователь $currentProfileName задает вопрос в чате: \"$query\". Ответь остроумно и по существу его финансов.",
-                allTransactions = recentTxs
+            com.example.data.safetospend.DavidFinancialIntelligenceProvider.computeSnapshot(
+                transactions = recentTxs,
+                accounts = debts,
+                goals = goals,
+                categories = cats,
+                recurringPayments = recurring,
+                executionLogs = logs,
+                userSafetyFloorRub = safetyFloor,
+                userLockedReserveRub = lockedReserve,
+                userEssentialDailyNormRub = userEssNorm,
+                conversationalUserMessages = userMessageTexts
             )
-            comment.ifBlank { generateSmartDavidReply(query) }
         } catch (_: Exception) {
-            generateSmartDavidReply(query)
+            null
         }
     }
 
-    private fun generateSmartDavidReply(query: String): String {
-        val q = query.lowercase(Locale.getDefault())
-        return when {
-            q.contains("привет") || q.contains("салют") || q.contains("здравствуй") ->
-                "Салют, $currentProfileName! Хватит любезностей, давай проверим твои расходы. Нажми **«🐸 Давид, сделай отчет»**!"
+    private suspend fun generateGeminiReply(query: String): String {
+        return try {
+            val goals = repository.getGoalsForBudget(currentBudgetId).first()
+            val snapshot = buildConversationFinancialSnapshot(query)
+            val unified = buildUnifiedIntelligenceSnapshot(query)
+            val whatIfReq = com.example.data.safetospend.WhatIfSimulator.detectWhatIfQuery(query)
+            val whatIfResult = if (whatIfReq != null && unified != null) {
+                com.example.data.safetospend.DavidFinancialIntelligenceProvider.simulateWhatIf(
+                    unified.safeToSpendInput,
+                    whatIfReq
+                )
+            } else {
+                null
+            }
+            val historySnippet = sessionMessages
+                .takeLast(8)
+                .mapNotNull { msg ->
+                    val txt = (msg.type as? ChatMessageType.Text)?.content ?: return@mapNotNull null
+                    val role = if (msg.isUser) currentProfileName else "Давид"
+                    "$role: $txt"
+                }
 
-            q.contains("отчет") || q.contains("выписк") || q.contains("аудит") || q.contains("трат") ->
-                "Готов провести жесткий разбор трат для профиля **$currentProfileName**. Выбери интервал: **День**, **Неделя**, **Месяц** или **Год**!"
-
-            q.contains("цел") || q.contains("накоп") || q.contains("копилк") ->
-                "Финансовые цели любят дисциплину. Нажми кнопку **«🎯 Цели»** для статуса накоплений!"
-
-            q.contains("долг") || q.contains("кредит") || q.contains("займ") ->
-                "Долги — это аренда чужой свободы. Закрывай их в первую очередь, пока проценты не сожрали твой бюджет!"
-
-            q.contains("кофе") || q.contains("шаурм") || q.contains("еда") || q.contains("ресторан") ->
-                "Ага, опять гастрономические слабости! Каждая третья чашка навынос отдаляет тебя от финансовой независимости."
-
-            q.contains("совет") || q.contains("как сэконом") || q.contains("что делать") ->
-                "Золотое правило Жабова: сначала отложи 20% дохода на накопительный счет, а уже потом распределяй остаток по категориям."
-
-            else ->
-                "Запрос принят к сведению, $currentProfileName! Но лучший способ навести порядок в кошельке — сформировать полный PDF-аудит. Выбирай период выше!"
+            val answer = repository.generateDavidChatAnswer(
+                apiKey = currentApiKey,
+                profileName = currentProfileName,
+                userMessage = query,
+                snapshot = snapshot,
+                activeGoals = goals,
+                conversationHistory = historySnippet,
+                safeToSpendResult = unified?.safeToSpendResult,
+                whatIfResult = whatIfResult
+            )
+            answer.ifBlank { generateSmartDavidReply(query, snapshot, unified, whatIfResult) }
+        } catch (_: Exception) {
+            val fallbackSnapshot = try { buildConversationFinancialSnapshot(query) } catch (_: Exception) { null }
+            val unified = buildUnifiedIntelligenceSnapshot(query)
+            val whatIfReq = com.example.data.safetospend.WhatIfSimulator.detectWhatIfQuery(query)
+            val whatIfResult = if (whatIfReq != null && unified != null) {
+                com.example.data.safetospend.DavidFinancialIntelligenceProvider.simulateWhatIf(
+                    unified.safeToSpendInput,
+                    whatIfReq
+                )
+            } else {
+                null
+            }
+            generateSmartDavidReply(query, fallbackSnapshot, unified, whatIfResult)
         }
+    }
+
+    private suspend fun generateSmartDavidReply(
+        query: String,
+        precomputedSnapshot: com.example.data.repository.FinancialSemanticsSnapshot? = null,
+        precomputedUnified: com.example.data.safetospend.UnifiedFinancialIntelligenceSnapshot? = null,
+        precomputedWhatIf: com.example.data.safetospend.WhatIfSimulationResult? = null
+    ): String {
+        val snapshot = precomputedSnapshot ?: try {
+            buildConversationFinancialSnapshot(query)
+        } catch (_: Exception) {
+            null
+        }
+        val unified = precomputedUnified ?: buildUnifiedIntelligenceSnapshot(query)
+        return DavidChatAuditSupport.generateSmartDavidReply(
+            currentProfileName = currentProfileName,
+            query = query,
+            precomputedSnapshot = snapshot,
+            precomputedUnified = unified,
+            precomputedWhatIf = precomputedWhatIf
+        )
     }
 
     fun sendTextMessage(text: String, soundManager: SoundManager? = null) {
@@ -987,8 +832,10 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             activeAssistantAudioFocusRequest =
                 DavidLiveAudioEngine.requestAssistantAudioFocus(getApplication())
         }
-        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-        val userKey = currentApiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        val userKey = com.example.data.preferences.ApiKeyStorage.getSavedApiKey(
+            getApplication(),
+            explicitKey = currentApiKey
+        )
         liveSessionController.startSession(userKey)
         _isLiveOverlayVisible.value = true
         _isLiveSessionActive.value = true
@@ -1105,8 +952,10 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         soundManager: SoundManager?
     ) {
         viewModelScope.launch {
-            val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-            val userKey = currentApiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+            val userKey = com.example.data.preferences.ApiKeyStorage.getSavedApiKey(
+                getApplication(),
+                explicitKey = currentApiKey
+            )
 
             val outcome = liveSummaryGenerator.generateSummary(
                 userApiKey = userKey,
@@ -1165,12 +1014,3 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         }
     }
 }
-
-private data class AuditPeriodData(
-    val income: Double,
-    val expense: Double,
-    val deltaPercent: Double,
-    val dataPoints: List<Float>,
-    val chartSummary: String,
-    val sarcasticReport: String
-)

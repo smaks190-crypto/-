@@ -141,6 +141,23 @@ class DavidLiveSessionController(
     private val pendingUserTranscript = StringBuilder()
     private val pendingDavidTranscript = StringBuilder()
 
+    init {
+        financialToolsProvider.setConversationalUserMessagesProvider {
+            buildList {
+                addAll(externalUserMessagesProvider())
+                addAll(
+                    transcriptTurns
+                        .filter { it.speaker == DavidLiveSpeaker.USER }
+                        .map { it.text }
+                )
+                val pending = pendingUserTranscript.toString().trim()
+                if (pending.isNotBlank()) {
+                    add(pending)
+                }
+            }
+        }
+    }
+
     private var _startSessionCount = 0
     val startSessionCount: Int
         get() = _startSessionCount
