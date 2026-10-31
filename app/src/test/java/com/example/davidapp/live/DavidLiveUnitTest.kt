@@ -827,4 +827,38 @@ class DavidLiveUnitTest {
         )
         assertTrue(userPhrase.isNotBlank())
     }
+
+    @Test
+    fun `core database module provides Room DAOs migrations and atomic CRUD operations`() = runBlocking {
+        assertEquals(3, com.example.data.db.MIGRATION_3_4.startVersion)
+        assertEquals(4, com.example.data.db.MIGRATION_3_4.endVersion)
+        assertEquals(4, com.example.data.db.MIGRATION_4_5.startVersion)
+        assertEquals(5, com.example.data.db.MIGRATION_4_5.endVersion)
+
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val db = androidx.room.Room.inMemoryDatabaseBuilder(
+            context,
+            com.example.data.db.AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+
+        try {
+            val profile = com.example.data.db.BudgetProfileEntity(id = "test_b1", name = "Основной")
+            db.budgetProfileDao().insertProfile(profile)
+            assertEquals("Основной", db.budgetProfileDao().getProfileById("test_b1")?.name)
+
+            val acc = com.example.data.db.AccountEntity(
+                id = "acc_1",
+                budgetId = "test_b1",
+                name = "Карта",
+                balance = 10000.0,
+                type = "card",
+                accountNumber = "**** 1234"
+            )
+            db.accountDao().insertAccount(acc)
+            db.accountDao().updateBalance("acc_1", -1500.0)
+            assertEquals(8500.0, db.accountDao().getAccountById("acc_1")?.balance ?: 0.0, 0.001)
+        } finally {
+            db.close()
+        }
+    }
 }
