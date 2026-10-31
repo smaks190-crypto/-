@@ -78,7 +78,18 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     val liveSessionController = DavidLiveSessionController(
-        financialToolsProvider = liveFinancialToolsProvider
+        financialToolsProvider = liveFinancialToolsProvider,
+        systemPromptExtrasProvider = {
+            val appCtx = getApplication<Application>()
+            val strictness = com.example.notifications.ReminderManager.getAuditorStrictness(appCtx)
+            val croakThreshold = com.example.notifications.ReminderManager.getCroakThresholdAmount(appCtx)
+            "${strictness.systemPromptDirective}\nПорог крупной разовой траты («Порог кваканья» пользователя): $croakThreshold ₽."
+        },
+        externalUserMessagesProvider = {
+            sessionMessages
+                .filter { it.isUser }
+                .mapNotNull { msg -> (msg.type as? ChatMessageType.Text)?.content }
+        }
     )
 
     private val liveSummaryGenerator = DavidLiveSummaryGenerator(
@@ -615,32 +626,68 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     }
 
 
+    private suspend fun buildConversationFinancialSnapshot(currentQuery: String): com.example.data.repository.FinancialSemanticsSnapshot {
+        val recentTxs = try { repository.getTransactionsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
+        val debts = try { repository.getAccountsForBudget(currentBudgetId).first() } catch (_: Exception) { emptyList() }
+        val baseSnapshot = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = recentTxs,
+            periodTransactions = recentTxs,
+            accounts = debts
+        )
+        val userMessageTexts = sessionMessages
+            .filter { it.isUser }
+            .mapNotNull { msg -> (msg.type as? ChatMessageType.Text)?.content }
+            .let { list: List<String> ->
+                if (list.lastOrNull() == currentQuery) list else list + currentQuery
+            }
+        return com.example.data.repository.FinancialSemanticsCalculator.mergeSnapshotWithConversationalMentions(
+            baseSnapshot = baseSnapshot,
+            userMessages = userMessageTexts
+        )
+    }
+
     private suspend fun generateGeminiReply(query: String): String {
         return try {
-            val recentTxs = repository.getTransactionsForBudget(currentBudgetId).first()
-            val debts = repository.getAccountsForBudget(currentBudgetId).first()
             val goals = repository.getGoalsForBudget(currentBudgetId).first()
+            val snapshot = buildConversationFinancialSnapshot(query)
+            val historySnippet = sessionMessages
+                .takeLast(8)
+                .mapNotNull { msg ->
+                    val txt = (msg.type as? ChatMessageType.Text)?.content ?: return@mapNotNull null
+                    val role = if (msg.isUser) currentProfileName else "Давид"
+                    "$role: $txt"
+                }
 
-            val comment = repository.generateDavidComment(
+            val answer = repository.generateDavidChatAnswer(
                 apiKey = currentApiKey,
-                type = "expense",
-                category = "Вопрос аудитору",
-                subcategory = query,
-                amount = 0.0,
-                recentTransactions = recentTxs.take(5),
-                activeDebts = debts,
+                profileName = currentProfileName,
+                userMessage = query,
+                snapshot = snapshot,
                 activeGoals = goals,
-                extraContext = "Пользователь $currentProfileName задает вопрос в чате: \"$query\". Ответь остроумно и по существу его финансов.",
-                allTransactions = recentTxs
+                conversationHistory = historySnippet
             )
-            comment.ifBlank { generateSmartDavidReply(query) }
+            answer.ifBlank { generateSmartDavidReply(query, snapshot) }
         } catch (_: Exception) {
-            generateSmartDavidReply(query)
+            val fallbackSnapshot = try { buildConversationFinancialSnapshot(query) } catch (_: Exception) { null }
+            generateSmartDavidReply(query, fallbackSnapshot)
         }
     }
 
-    private fun generateSmartDavidReply(query: String): String =
-        DavidChatAuditSupport.generateSmartDavidReply(currentProfileName, query)
+    private suspend fun generateSmartDavidReply(
+        query: String,
+        precomputedSnapshot: com.example.data.repository.FinancialSemanticsSnapshot? = null
+    ): String {
+        val snapshot = precomputedSnapshot ?: try {
+            buildConversationFinancialSnapshot(query)
+        } catch (_: Exception) {
+            null
+        }
+        return DavidChatAuditSupport.generateSmartDavidReply(
+            currentProfileName = currentProfileName,
+            query = query,
+            precomputedSnapshot = snapshot
+        )
+    }
 
     fun sendTextMessage(text: String, soundManager: SoundManager? = null) {
         sendUserMessage(text, soundManager)
