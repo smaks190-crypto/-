@@ -463,7 +463,7 @@ class DavidLiveUnitTest {
 
         // Гарантия режима только для чтения
         assertFalse("David Live must never mutate financial records without confirmation", provider.canMutateRecords)
-        assertEquals(5, provider.buildFunctionDeclarationsJson().length())
+        assertEquals(7, provider.buildFunctionDeclarationsJson().length())
 
         // 1. Сводка бюджета
         val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
@@ -1059,6 +1059,8 @@ class DavidLiveUnitTest {
         assertEquals(4, com.example.data.db.MIGRATION_3_4.endVersion)
         assertEquals(4, com.example.data.db.MIGRATION_4_5.startVersion)
         assertEquals(5, com.example.data.db.MIGRATION_4_5.endVersion)
+        assertEquals(5, com.example.data.db.MIGRATION_5_6.startVersion)
+        assertEquals(6, com.example.data.db.MIGRATION_5_6.endVersion)
 
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val db = androidx.room.Room.inMemoryDatabaseBuilder(

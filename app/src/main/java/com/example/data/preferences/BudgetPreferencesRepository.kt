@@ -102,4 +102,61 @@ object BudgetPreferencesRepository {
             bPrefs.getBoolean("sound_enabled", true) &&
             bPrefs.getBoolean("is_sound_enabled", true)
     }
+
+    fun getUserSafetyFloorRub(context: Context, budgetId: String? = null): Double {
+        val prefs = budgetPrefs(context)
+        if (!budgetId.isNullOrBlank() && prefs.contains("safety_floor_rub_$budgetId")) {
+            return prefs.getFloat("safety_floor_rub_$budgetId", 0f).toDouble()
+        }
+        return prefs.getFloat("user_safety_floor_rub", 0f).toDouble()
+    }
+
+    fun setUserSafetyFloorRub(context: Context, amountRub: Double, budgetId: String? = null) {
+        val clean = amountRub.coerceAtLeast(0.0).toFloat()
+        val editor = budgetPrefs(context).edit().putFloat("user_safety_floor_rub", clean)
+        if (!budgetId.isNullOrBlank()) {
+            editor.putFloat("safety_floor_rub_$budgetId", clean)
+        }
+        editor.apply()
+    }
+
+    fun getUserEssentialDailyNormRub(context: Context, budgetId: String? = null): Double? {
+        val prefs = budgetPrefs(context)
+        if (!budgetId.isNullOrBlank() && prefs.contains("essential_daily_norm_rub_$budgetId")) {
+            val v = prefs.getFloat("essential_daily_norm_rub_$budgetId", -1f)
+            if (v > 0f) return v.toDouble()
+        }
+        return if (prefs.contains("user_essential_daily_norm_rub")) {
+            prefs.getFloat("user_essential_daily_norm_rub", 500f).toDouble().takeIf { it > 0.0 }
+        } else {
+            null
+        }
+    }
+
+    fun setUserEssentialDailyNormRub(context: Context, amountRub: Double?, budgetId: String? = null) {
+        val editor = budgetPrefs(context).edit()
+        if (amountRub == null || amountRub <= 0.0) {
+            editor.remove("user_essential_daily_norm_rub")
+            if (!budgetId.isNullOrBlank()) {
+                editor.remove("essential_daily_norm_rub_$budgetId")
+            }
+        } else {
+            val clean = amountRub.toFloat()
+            editor.putFloat("user_safety_daily_norm_last", clean)
+            editor.putFloat("user_essential_daily_norm_rub", clean)
+            if (!budgetId.isNullOrBlank()) {
+                editor.putFloat("essential_daily_norm_rub_$budgetId", clean)
+            }
+        }
+        editor.apply()
+    }
+
+    fun getUserLockedReserveRub(context: Context, budgetId: String? = null): Double {
+        val prefs = budgetPrefs(context)
+        if (!budgetId.isNullOrBlank() && prefs.contains("locked_reserve_rub_$budgetId")) {
+            return prefs.getFloat("locked_reserve_rub_$budgetId", 0f).toDouble()
+        }
+        return prefs.getFloat("user_locked_reserve_rub", 0f).toDouble()
+    }
 }
+

@@ -269,7 +269,8 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             lower.startsWith("на чем") ||
             lower.startsWith("на чём") ||
             lower.startsWith("мой баланс") ||
-            lower.startsWith("жабий аудит")
+            lower.startsWith("жабий аудит") ||
+            com.example.data.safetospend.WhatIfSimulator.detectWhatIfQuery(text) != null
         ) {
             return null
         }
@@ -323,9 +324,37 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
     fun generateSmartDavidReply(
         currentProfileName: String,
         query: String,
-        precomputedSnapshot: FinancialSemanticsSnapshot? = null
+        precomputedSnapshot: FinancialSemanticsSnapshot? = null,
+        precomputedUnified: com.example.data.safetospend.UnifiedFinancialIntelligenceSnapshot? = null,
+        precomputedWhatIf: com.example.data.safetospend.WhatIfSimulationResult? = null
     ): String {
         val q = query.lowercase(Locale.getDefault())
+        val whatIfReq = com.example.data.safetospend.WhatIfSimulator.detectWhatIfQuery(query)
+        val whatIfResult = precomputedWhatIf ?: if (whatIfReq != null && precomputedUnified != null) {
+            com.example.data.safetospend.DavidFinancialIntelligenceProvider.simulateWhatIf(
+                precomputedUnified.safeToSpendInput,
+                whatIfReq
+            )
+        } else {
+            null
+        }
+
+        if (whatIfResult != null) {
+            return "🐸 Ква-аудит сценария «Что если» для **$currentProfileName**:\n\n${whatIfResult.structuredSummaryForDavid}"
+        }
+
+        val isSafeToSpendQuery =
+            q.contains("можно потратить") ||
+            q.contains("дневной лимит") ||
+            q.contains("лимит на сегодня") ||
+            q.contains("бюджет на сегодня") ||
+            q.contains("safe to spend") ||
+            q.contains("сколько тратить сегодня")
+
+        if (isSafeToSpendQuery && precomputedUnified != null) {
+            return "🐸 Расчёт **Safe-to-Spend 2.0** для профиля **$currentProfileName**:\n\n${precomputedUnified.safeToSpendResult.toStructuredDavidSummary()}"
+        }
+
         val isFinancialSemanticsQuery =
             q.contains("баланс") ||
             q.contains("остаток") ||
