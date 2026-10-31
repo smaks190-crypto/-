@@ -232,6 +232,8 @@ data class SafeToSpendResult(
     val reservedFutureObligationsRub: Double,
     val reservedEssentialLivingHorizonRub: Double,
     val expectedUnconfirmedIncomeHorizonRub: Double,
+    val todayPendingGuaranteedIncomeRub: Double = 0.0,
+    val upcomingGuaranteedIncomeRub: Double = 0.0,
     val hypotheticalDebtReceivablesRub: Double,
     val horizonDays: Int,
     val nextIncomeEpochDay: Long?,
@@ -273,6 +275,9 @@ data class SafeToSpendResult(
             appendLine("• РИСК КАССОВОГО РАЗРЫВА: дефицит ${cashGapAmountRub.toLong()} ₽ на дату $gapDate")
         } else {
             appendLine("• Кассовый разрыв: отсутствует (0 ₽)")
+        }
+        if (todayPendingGuaranteedIncomeRub + upcomingGuaranteedIncomeRub > 0.0) {
+            appendLine("• Плановые гарантированные доходы на горизонте: ${(todayPendingGuaranteedIncomeRub + upcomingGuaranteedIncomeRub).toLong()} ₽")
         }
         if (expectedUnconfirmedIncomeHorizonRub > 0.0) {
             appendLine("• Справочно (при приходе ожидаемого неподтверждённого дохода ${expectedUnconfirmedIncomeHorizonRub.toLong()} ₽): дневной бюджет вырастет до ${expectedScenarioDailyBudgetRub.toLong()} ₽/день")

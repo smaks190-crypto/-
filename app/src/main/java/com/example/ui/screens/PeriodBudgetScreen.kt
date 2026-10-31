@@ -163,6 +163,7 @@ import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.LocalBar
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Shield
 
 val MonthsRu = listOf(
     "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -336,6 +337,48 @@ fun PeriodBudgetScreen(
     val safeToSpendResult = safeToSpendSnapshot.safeToSpendResult
     val safeDailyBudget = safeToSpendResult.dailyDiscretionarySpeedRub
     val todaySpent = safeToSpendResult.spentTodayDiscretionaryRub
+    val financialStateUi = remember(safeToSpendSnapshot.semantics, safeToSpendResult) {
+        buildFinancialStateUiModel(
+            semantics = safeToSpendSnapshot.semantics,
+            result = safeToSpendResult
+        )
+    }
+
+    val monthPeriodSemantics = remember(allTransactions, filteredTransactions, monthTransactions, accountsList) {
+        val txSource = if (allTransactions.isNotEmpty()) allTransactions else filteredTransactions
+        com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = txSource,
+            periodTransactions = monthTransactions,
+            accounts = accountsList
+        )
+    }
+    val prevMonthPeriodSemantics = remember(allTransactions, filteredTransactions, selectedMonthIdx, selectedYear, accountsList) {
+        val txSource = if (allTransactions.isNotEmpty()) allTransactions else filteredTransactions
+        val prevIdx = if (selectedMonthIdx > 0) selectedMonthIdx - 1 else 11
+        val prevYear = if (selectedMonthIdx > 0) selectedYear else selectedYear - 1
+        val prevPrefix = String.format(Locale.US, "%04d-%02d", prevYear, prevIdx + 1)
+        val prevTxs = allTransactions.filter { it.date.startsWith(prevPrefix) }
+        com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = txSource,
+            periodTransactions = prevTxs,
+            accounts = accountsList
+        )
+    }
+    val semanticMonthIncome = monthPeriodSemantics.earnedIncomeRub
+    val semanticMonthExpense = monthPeriodSemantics.totalExpenseRub
+    val incomeMoMPercent = remember(semanticMonthIncome, prevMonthPeriodSemantics.earnedIncomeRub) {
+        val prevInc = prevMonthPeriodSemantics.earnedIncomeRub
+        if (prevInc > 0.0) {
+            Math.round(((semanticMonthIncome - prevInc) / prevInc) * 100).toInt()
+        } else null
+    }
+    val semanticExpenseMoMPercent = remember(semanticMonthExpense, prevMonthPeriodSemantics.totalExpenseRub) {
+        val prevExp = prevMonthPeriodSemantics.totalExpenseRub
+        if (prevExp > 0.0) {
+            Math.round(((semanticMonthExpense - prevExp) / prevExp) * 100).toInt()
+        } else expenseMoMPercent
+    }
+    var showFinancialStateInfo by remember { mutableStateOf(false) }
 
     val pagerState = rememberPagerState(initialPage = if (activeSubTab == "expense") 0 else 1, pageCount = { 2 })
 
@@ -465,7 +508,7 @@ fun PeriodBudgetScreen(
             }
         }
 
-        // --- HERO OBSIDIAN NEO-BANK BALANCE CARD ---
+        // --- UNIFIED "ФИНАНСОВОЕ СОСТОЯНИЕ" CARD (Issue #64) ---
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -479,7 +522,6 @@ fun PeriodBudgetScreen(
                     )
                 )
                 .drawBehind {
-                    // Ambient Obsidian-Emerald Radial Aura in top-right
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(
@@ -505,302 +547,488 @@ fun PeriodBudgetScreen(
                     ),
                     shape = RoundedCornerShape(28.dp)
                 )
-                .padding(22.dp)
+                .padding(20.dp)
         ) {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                // Card header: icon + ФИНАНСОВОЕ СОСТОЯНИЕ + (i)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "ЧИСТЫЙ КАПИТАЛ",
-                        color = Slate400,
-                        fontSize = 11.sp,
-                        fontFamily = ManropeFontFamily,
-                        letterSpacing = 1.2.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Surface(
-                        shape = CircleShape,
-                        color = if (monthSavingsRate >= 15) Emerald400.copy(alpha = 0.12f) else Indigo500.copy(alpha = 0.12f),
-                        border = androidx.compose.foundation.BorderStroke(
-                            1.dp,
-                            if (monthSavingsRate >= 15) Emerald400.copy(alpha = 0.3f) else Indigo500.copy(alpha = 0.3f)
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Emerald400.copy(alpha = 0.14f)),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                Icons.Default.TrendingUp,
+                                imageVector = Icons.Default.TrendingUp,
                                 contentDescription = null,
-                                tint = if (monthSavingsRate >= 15) Emerald400 else Indigo400,
-                                modifier = Modifier.size(12.dp)
+                                tint = Emerald400,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Text(
+                            text = "ФИНАНСОВОЕ СОСТОЯНИЕ",
+                            color = Slate300,
+                            fontSize = 11.sp,
+                            fontFamily = ManropeFontFamily,
+                            letterSpacing = 1.1.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { showFinancialStateInfo = !showFinancialStateInfo },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "О показателях",
+                            tint = if (showFinancialStateInfo) Emerald400 else Slate400,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                AnimatedVisibility(visible = showFinancialStateInfo) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.White.copy(alpha = 0.04f))
+                            .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                            .padding(12.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "• Доступный остаток — фактические ликвидные средства на счетах.",
+                                color = Slate200,
+                                fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily
                             )
                             Text(
-                                text = "Сбережения ${monthSavingsRate}%",
-                                color = if (monthSavingsRate >= 15) Emerald400 else Indigo400,
+                                text = "• Чистый капитал — доступный остаток с учётом ваших долговых обязательств.",
+                                color = Slate200,
                                 fontSize = 11.sp,
-                                fontFamily = ManropeFontFamily,
-                                fontWeight = FontWeight.Bold
+                                fontFamily = ManropeFontFamily
+                            )
+                            Text(
+                                text = "• Свободные деньги — остаток после резервирования обязательных платежей, защитного резерва и базовых расходов на горизонте.",
+                                color = Slate200,
+                                fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                // 1. Доступный остаток (фактические ликвидные средства)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Доступный остаток",
+                        color = Slate200,
+                        fontSize = 13.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = formatSignedFullCurrency(financialStateUi.availableBalanceRub),
+                        color = if (financialStateUi.availableBalanceRub < 0.0) Rose500 else Color.White,
+                        fontSize = 34.sp,
+                        fontFamily = SpaceGroteskFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    )
+                    Text(
+                        text = "Фактические деньги на счетах",
+                        color = Slate400,
+                        fontSize = 12.sp,
+                        fontFamily = ManropeFontFamily
+                    )
+                }
 
-                // Total Balance Amount in Space Grotesk (modern geometric fintech typography)
-                Text(
-                    text = formatFullCurrency(monthTotalAccumulatedBalance),
-                    color = Color.White,
-                    fontSize = 34.sp,
-                    fontFamily = SpaceGroteskFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.5).sp
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(GlassBorder)
                 )
 
-                // Adaptive Safe-to-Spend 2.0 Card ("Можно потратить сегодня")
-                Spacer(modifier = Modifier.height(14.dp))
+                // 2. Чистый капитал (с учётом долгов) | Свободные деньги (после резервирования)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = "Чистый капитал",
+                            color = Slate300,
+                            fontSize = 12.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = formatSignedFullCurrency(financialStateUi.netWorthRub),
+                            color = if (financialStateUi.netWorthRub < 0.0) Rose500 else Color.White,
+                            fontSize = 20.sp,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "С учётом долгов",
+                            color = Slate400,
+                            fontSize = 11.sp,
+                            fontFamily = ManropeFontFamily
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(50.dp)
+                            .background(GlassBorder)
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 14.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Text(
+                            text = "Свободные деньги",
+                            color = Slate300,
+                            fontSize = 12.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = formatFullCurrency(financialStateUi.freeMoneyAfterReservationRub),
+                            color = when {
+                                safeToSpendResult.hasCashGap -> Rose500
+                                financialStateUi.hasExplicitDeficitWarning -> Amber400
+                                else -> Emerald400
+                            },
+                            fontSize = 20.sp,
+                            fontFamily = SpaceGroteskFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "После резервирования",
+                            color = Slate400,
+                            fontSize = 11.sp,
+                            fontFamily = ManropeFontFamily
+                        )
+                    }
+                }
+
+                // Explicit Deficit Warning when calculated free pool is negative or reserve is breached
+                if (financialStateUi.hasExplicitDeficitWarning && financialStateUi.deficitWarningTitle != null) {
+                    val warningColor = if (safeToSpendResult.hasCashGap) Rose500 else Amber400
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(warningColor.copy(alpha = 0.12f))
+                            .border(1.dp, warningColor.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                            .clickable {
+                                if (viewModel != null) {
+                                    viewModel.openModal(BottomCapsuleModal.SafeToSpend(0))
+                                } else {
+                                    safeToSpendInitialTab = 0
+                                    showSafeToSpendDialog = true
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = financialStateUi.deficitWarningTitle,
+                                color = warningColor,
+                                fontSize = 12.sp,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.Bold
+                            )
+                            financialStateUi.deficitWarningSubtitle?.let { sub ->
+                                Text(
+                                    text = sub,
+                                    color = Slate200,
+                                    fontSize = 11.sp,
+                                    fontFamily = ManropeFontFamily
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 3. Выделенная интерактивная зона «Можно потратить сегодня» (открывает Bottom Sheet)
                 run {
-                    val safeRemainingToday = safeToSpendResult.canSpendTodayDiscRub
                     val isReserveDeficit = !safeToSpendResult.isReserveRequirementMet
-                    val isOverDaily = safeToSpendResult.todayOverspendRub > 0.0 ||
-                        safeToSpendResult.hasCashGap ||
-                        isReserveDeficit
-                    val dailyProgress = if (safeDailyBudget > 0.0) {
-                        (todaySpent / safeDailyBudget.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 1f)
-                    } else if (isOverDaily) 1f else 0.08f
+                    val isWarningState = safeToSpendResult.hasCashGap ||
+                        isReserveDeficit ||
+                        safeToSpendResult.todayOverspendRub > 0.0
                     val statusColor = when {
                         safeToSpendResult.hasCashGap || isReserveDeficit || safeToSpendResult.todayOverspendRub > 0.0 -> Rose500
-                        dailyProgress > 0.8f || safeToSpendResult.requiresEssentialBudgetPrompt -> Amber400
+                        safeToSpendResult.requiresEssentialBudgetPrompt -> Amber400
                         else -> Emerald400
                     }
 
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White.copy(alpha = 0.04f))
-                            .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = if (isWarningState) {
+                                        listOf(
+                                            Rose500.copy(alpha = 0.18f),
+                                            Color(0xFF2A121D)
+                                        )
+                                    } else {
+                                        listOf(
+                                            Color(0xFF0D3B2E),
+                                            Color(0xFF092622)
+                                        )
+                                    }
+                                )
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = statusColor.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(20.dp)
+                            )
                             .clickable {
-                                safeToSpendInitialTab = 0
-                                showSafeToSpendDialog = true
+                                if (viewModel != null) {
+                                    viewModel.openModal(BottomCapsuleModal.SafeToSpend(0))
+                                } else {
+                                    safeToSpendInitialTab = 0
+                                    showSafeToSpendDialog = true
+                                }
                             }
-                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                            .padding(horizontal = 16.dp, vertical = 14.dp)
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = when {
-                                        safeToSpendResult.hasCashGap -> "Риск кассового разрыва"
-                                        isReserveDeficit -> "Дефицит резерва безопасности"
-                                        safeToSpendResult.todayOverspendRub > 0.0 -> "Дневной лимит превышен"
-                                        else -> "Можно потратить сегодня"
-                                    },
-                                    color = Slate300,
-                                    fontSize = 11.sp,
-                                    fontFamily = ManropeFontFamily,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Text(
-                                    text = when {
-                                        safeToSpendResult.todayOverspendRub > 0.0 ->
-                                            "Перерасход ${formatShortCurrency(safeToSpendResult.todayOverspendRub)}"
-                                        else ->
-                                            "${formatShortCurrency(safeRemainingToday)} (+${formatShortCurrency(safeToSpendResult.canSpendTodayEssRub)} база)"
-                                    },
-                                    color = statusColor,
-                                    fontSize = 12.sp,
-                                    fontFamily = SpaceGroteskFontFamily,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(4.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.08f))
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                modifier = Modifier.weight(1f)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth(fraction = dailyProgress.coerceAtLeast(0.04f))
-                                        .height(4.dp)
-                                        .clip(CircleShape)
-                                        .background(statusColor)
-                                )
-                            }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = when {
-                                        safeToSpendResult.requiresEssentialBudgetPrompt ->
-                                            "⚠️ Ориентир ${safeToSpendResult.dailyEssentialRateRub.toInt()} ₽/дн. (нажмите, чтобы уточнить)"
-                                        safeToSpendResult.overdueObligationsRub > 0.0 ->
-                                            "Бронь просрочки: ${formatShortCurrency(safeToSpendResult.overdueObligationsRub)}"
-                                        else ->
-                                            "Горизонт: ${safeToSpendResult.bottleneckDayOffset} дн. • Регулярных: ${recurringPaymentsList.size}"
-                                    },
-                                    color = if (safeToSpendResult.requiresEssentialBudgetPrompt) Amber400 else Slate400,
-                                    fontSize = 10.sp,
-                                    fontFamily = ManropeFontFamily
-                                )
-                                Text(
-                                    text = "What-if / Платежи ›",
-                                    color = Emerald400,
-                                    fontSize = 10.sp,
-                                    fontFamily = ManropeFontFamily,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.clickable {
-                                        safeToSpendInitialTab = 1
-                                        showSafeToSpendDialog = true
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Income & Expense Bento Sub-Cards
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Income Glass Card
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(18.dp))
-                            .clickable {
-                                if (viewModel != null) {
-                                    viewModel.openModal(BottomCapsuleModal.AllTransactions("income", monthStart))
-                                } else {
-                                    initialAllTransactionsFilter = "income"
-                                    showAllTransactionsDialog = true
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(statusColor.copy(alpha = 0.18f))
+                                        .border(1.dp, statusColor.copy(alpha = 0.4f), RoundedCornerShape(14.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Shield,
+                                        contentDescription = null,
+                                        tint = statusColor,
+                                        modifier = Modifier.size(22.dp)
+                                    )
                                 }
-                            }
-                            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(18.dp))
-                            .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Emerald400.copy(alpha = 0.14f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SouthWest,
-                                contentDescription = null,
-                                tint = Emerald400,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Доходы",
-                                color = Slate400,
-                                fontSize = 11.sp,
-                                fontFamily = ManropeFontFamily,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "+${formatShortCurrency(monthTotalIncome)}",
-                                color = Emerald400,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = SpaceGroteskFontFamily,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
 
-                    // Expense Glass Card with MoM % Delta
-                    Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(18.dp))
-                            .clickable {
-                                if (viewModel != null) {
-                                    viewModel.openModal(BottomCapsuleModal.AllTransactions("expense", monthStart))
-                                } else {
-                                    initialAllTransactionsFilter = "expense"
-                                    showAllTransactionsDialog = true
-                                }
-                            }
-                            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(18.dp))
-                            .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Rose500.copy(alpha = 0.14f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.NorthEast,
-                                contentDescription = null,
-                                tint = Rose500,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = "Расходы",
-                                    color = Slate400,
-                                    fontSize = 11.sp,
-                                    fontFamily = ManropeFontFamily,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                if (expenseMoMPercent != null && expenseMoMPercent != 0) {
-                                    val sign = if (expenseMoMPercent > 0) "+" else ""
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
                                     Text(
-                                        text = "$sign$expenseMoMPercent%",
-                                        color = if (expenseMoMPercent <= 0) Emerald400 else Rose500,
-                                        fontSize = 9.sp,
+                                        text = "Можно потратить сегодня",
+                                        color = Slate100,
+                                        fontSize = 13.sp,
+                                        fontFamily = ManropeFontFamily,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = formatFullCurrency(financialStateUi.canSpendTodayRub),
+                                        color = statusColor,
+                                        fontSize = 24.sp,
                                         fontFamily = SpaceGroteskFontFamily,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.ExtraBold
+                                    )
+                                    Text(
+                                        text = financialStateUi.canSpendTodaySubtitle,
+                                        color = Slate300,
+                                        fontSize = 11.sp,
+                                        fontFamily = ManropeFontFamily,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
+
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = "Открыть подробности",
+                                tint = Slate200,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- STANDALONE INCOME & EXPENSE CARDS ROW (Matching Mockup Layout) ---
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Income Card
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(ObsidianSurface)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(22.dp))
+                    .clickable {
+                        if (viewModel != null) {
+                            viewModel.openModal(BottomCapsuleModal.AllTransactions("income", monthStart))
+                        } else {
+                            initialAllTransactionsFilter = "income"
+                            showAllTransactionsDialog = true
+                        }
+                    }
+                    .padding(14.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Emerald400.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SouthWest,
+                            contentDescription = null,
+                            tint = Emerald400,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "Доходы",
+                            color = Slate400,
+                            fontSize = 11.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "+${formatFullCurrency(semanticMonthIncome)}",
+                            color = Emerald400,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = SpaceGroteskFontFamily,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (incomeMoMPercent != null && incomeMoMPercent != 0) {
+                            val arrow = if (incomeMoMPercent > 0) "↑" else "↓"
                             Text(
-                                text = "-${formatShortCurrency(monthTotalExpense)}",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
+                                text = "$arrow ${kotlin.math.abs(incomeMoMPercent)}%",
+                                color = if (incomeMoMPercent >= 0) Emerald400 else Amber400,
+                                fontSize = 10.sp,
                                 fontFamily = SpaceGroteskFontFamily,
-                                maxLines = 1,
-                                softWrap = false,
-                                overflow = TextOverflow.Ellipsis
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Expense Card
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(ObsidianSurface)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(22.dp))
+                    .clickable {
+                        if (viewModel != null) {
+                            viewModel.openModal(BottomCapsuleModal.AllTransactions("expense", monthStart))
+                        } else {
+                            initialAllTransactionsFilter = "expense"
+                            showAllTransactionsDialog = true
+                        }
+                    }
+                    .padding(14.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Rose500.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.NorthEast,
+                            contentDescription = null,
+                            tint = Rose500,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "Расходы",
+                            color = Slate400,
+                            fontSize = 11.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "−${formatFullCurrency(semanticMonthExpense)}",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = SpaceGroteskFontFamily,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (semanticExpenseMoMPercent != null && semanticExpenseMoMPercent != 0) {
+                            val arrow = if (semanticExpenseMoMPercent > 0) "↑" else "↓"
+                            Text(
+                                text = "$arrow ${kotlin.math.abs(semanticExpenseMoMPercent)}%",
+                                color = if (semanticExpenseMoMPercent <= 0) Emerald400 else Rose500,
+                                fontSize = 10.sp,
+                                fontFamily = SpaceGroteskFontFamily,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
@@ -1519,4 +1747,3 @@ fun TransactionRowItem(
         cardContent(modifier)
     }
 }
-
