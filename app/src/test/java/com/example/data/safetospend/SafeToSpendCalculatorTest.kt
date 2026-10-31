@@ -1,6 +1,7 @@
 package com.example.data.safetospend
 
 import com.example.data.db.AccountEntity
+import com.example.data.db.CategoryEntity
 import com.example.data.db.GoalEntity
 import com.example.data.db.RecurringExecutionLogEntity
 import com.example.data.db.RecurringPaymentEntity
@@ -1148,5 +1149,221 @@ class SafeToSpendCalculatorTest {
                 assertFalse("Localized reason '$localized' must not contain '$token'", localized.contains(token))
             }
         }
+    }
+
+    @Test
+    fun test_pr67_createEditDeleteRecurringExpenseAndIncome_immediatelyUpdatesAllMetricsWithoutDoubleCounting() {
+        // Сценарий из видео в PR #67: конец месяца (31 октября 2026, daysRemainingInMonth = 1),
+        // профиль с крупным балансом (1 068 110 ₽) и лимитом только по одной необязательной категории.
+        val oct31EpochDay = LocalDate.of(2026, 10, 31).toEpochDay()
+        val nov11EpochDay = LocalDate.of(2026, 11, 11).toEpochDay() // через 11 дней
+
+        val baseTransactions = listOf(
+            TransactionEntity(
+                id = "tx_init_balance",
+                budgetId = "b1",
+                type = "income",
+                date = "2026-10-01",
+                category = "Зарплата",
+                subcategory = "Основной остаток",
+                amount = 1_068_110.0
+            )
+        )
+        // Частичный лимит только на одну категорию не должен замораживать глобальный Safe-to-Spend
+        val partialCategories = listOf(
+            CategoryEntity(id = "c1", budgetId = "b1", name = "Развлечения", type = "expense", monthlyLimit = 25_160.0),
+            CategoryEntity(id = "c2", budgetId = "b1", name = "Покупки", type = "expense", monthlyLimit = null),
+            CategoryEntity(id = "c3", budgetId = "b1", name = "Кафе и рестораны", type = "expense", monthlyLimit = null)
+        )
+
+        // 0. Исходное состояние (без регулярных операций) на 31 октября:
+        //    Горизонт не схлопывается в 1 день, а равен 30 дням скользящего окна.
+        val snap0 = DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = baseTransactions,
+            accounts = emptyList(),
+            goals = emptyList(),
+            categories = partialCategories,
+            recurringPayments = emptyList(),
+            executionLogs = emptyList(),
+            todayEpochDay = oct31EpochDay,
+            userEssentialDailyNormRub = 500.0
+        )
+        val ui0 = buildFinancialStateUiModel(snap0.semantics, snap0.safeToSpendResult)
+        val br0 = buildSafeToSpendBreakdownUiModel(snap0.safeToSpendResult)
+
+        assertEquals(30, snap0.safeToSpendResult.horizonDays)
+        assertEquals(0.0, br0.upcomingObligationsRub, 0.01)
+        assertEquals(1_053_110.0, ui0.freeMoneyAfterReservationRub, 0.01) // 1 068 110 - 30 * 500
+
+        // 1. Создание регулярного расхода (Аренда 13 500 ₽ 11 ноября):
+        //    Сразу резервируется в «Предстоящие платежи», уменьшает «Свободные деньги» и «Можно потратить сегодня».
+        val rentEntity = RecurringPaymentEntity(
+            id = 101L,
+            budgetId = "b1",
+            title = "Аренда",
+            amount = 13_500.0,
+            isIncome = false,
+            categoryName = "ЖКХ и Аренда",
+            frequency = "MONTHLY",
+            anchorDayOfMonth = 11,
+            nextDueDateEpochDay = nov11EpochDay,
+            priority = "MANDATORY",
+            status = "ACTIVE"
+        )
+        val snapAfterAddExpense = DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = baseTransactions,
+            accounts = emptyList(),
+            goals = emptyList(),
+            categories = partialCategories,
+            recurringPayments = listOf(rentEntity),
+            executionLogs = emptyList(),
+            todayEpochDay = oct31EpochDay,
+            userEssentialDailyNormRub = 500.0
+        )
+        val uiAfterAddExpense = buildFinancialStateUiModel(snapAfterAddExpense.semantics, snapAfterAddExpense.safeToSpendResult)
+        val brAfterAddExpense = buildSafeToSpendBreakdownUiModel(snapAfterAddExpense.safeToSpendResult)
+
+        assertEquals(13_500.0, brAfterAddExpense.upcomingObligationsRub, 0.01)
+        assertEquals(ui0.freeMoneyAfterReservationRub - 13_500.0, uiAfterAddExpense.freeMoneyAfterReservationRub, 0.01)
+        assertTrue(uiAfterAddExpense.canSpendTodayRub < ui0.canSpendTodayRub - 100.0)
+
+        // 2. Изменение (редактирование) регулярного расхода (Аренда 13 500 ₽ -> 23 500 ₽):
+        val editedRentEntity = rentEntity.copy(amount = 23_500.0)
+        val snapAfterEditExpense = DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = baseTransactions,
+            accounts = emptyList(),
+            goals = emptyList(),
+            categories = partialCategories,
+            recurringPayments = listOf(editedRentEntity),
+            executionLogs = emptyList(),
+            todayEpochDay = oct31EpochDay,
+            userEssentialDailyNormRub = 500.0
+        )
+        val uiAfterEditExpense = buildFinancialStateUiModel(snapAfterEditExpense.semantics, snapAfterEditExpense.safeToSpendResult)
+        val brAfterEditExpense = buildSafeToSpendBreakdownUiModel(snapAfterEditExpense.safeToSpendResult)
+
+        assertEquals(23_500.0, brAfterEditExpense.upcomingObligationsRub, 0.01)
+        assertEquals(uiAfterAddExpense.freeMoneyAfterReservationRub - 10_000.0, uiAfterEditExpense.freeMoneyAfterReservationRub, 0.01)
+        assertTrue(uiAfterEditExpense.canSpendTodayRub < uiAfterAddExpense.canSpendTodayRub - 100.0)
+
+        // 3. Добавление регулярного дохода на сегодня (d0 = 31 октября, ЗП 200 000 ₽) и его редактирование (200 000 ₽ -> 500 000 ₽):
+        val salaryToday200k = RecurringPaymentEntity(
+            id = 202L,
+            budgetId = "b1",
+            title = "ЗП",
+            amount = 200_000.0,
+            isIncome = true,
+            incomeCertainty = "GUARANTEED",
+            categoryName = "Зарплата",
+            frequency = "MONTHLY",
+            anchorDayOfMonth = 31,
+            nextDueDateEpochDay = oct31EpochDay,
+            priority = "MANDATORY",
+            status = "ACTIVE"
+        )
+        val snapWithSalary200k = DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = baseTransactions,
+            accounts = emptyList(),
+            goals = emptyList(),
+            categories = partialCategories,
+            recurringPayments = listOf(editedRentEntity, salaryToday200k),
+            executionLogs = emptyList(),
+            todayEpochDay = oct31EpochDay,
+            userEssentialDailyNormRub = 500.0
+        )
+        val uiWithSalary200k = buildFinancialStateUiModel(snapWithSalary200k.semantics, snapWithSalary200k.safeToSpendResult)
+        val brWithSalary200k = buildSafeToSpendBreakdownUiModel(snapWithSalary200k.safeToSpendResult)
+
+        assertEquals(200_000.0, snapWithSalary200k.safeToSpendResult.todayPendingGuaranteedIncomeRub, 0.01)
+        assertEquals(200_000.0, brWithSalary200k.plannedIncomeRub, 0.01)
+        assertEquals(uiAfterEditExpense.freeMoneyAfterReservationRub + 200_000.0, uiWithSalary200k.freeMoneyAfterReservationRub, 0.01)
+        assertTrue(uiWithSalary200k.canSpendTodayRub > uiAfterEditExpense.canSpendTodayRub + 1_000.0)
+
+        // Редактирование регулярного дохода (200 000 ₽ -> 500 000 ₽):
+        val salaryToday500k = salaryToday200k.copy(amount = 500_000.0)
+        val snapWithSalary500k = DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = baseTransactions,
+            accounts = emptyList(),
+            goals = emptyList(),
+            categories = partialCategories,
+            recurringPayments = listOf(editedRentEntity, salaryToday500k),
+            executionLogs = emptyList(),
+            todayEpochDay = oct31EpochDay,
+            userEssentialDailyNormRub = 500.0
+        )
+        val uiWithSalary500k = buildFinancialStateUiModel(snapWithSalary500k.semantics, snapWithSalary500k.safeToSpendResult)
+        val brWithSalary500k = buildSafeToSpendBreakdownUiModel(snapWithSalary500k.safeToSpendResult)
+
+        assertEquals(500_000.0, brWithSalary500k.plannedIncomeRub, 0.01)
+        assertEquals(uiWithSalary200k.freeMoneyAfterReservationRub + 300_000.0, uiWithSalary500k.freeMoneyAfterReservationRub, 0.01)
+        assertTrue(uiWithSalary500k.canSpendTodayRub > uiWithSalary200k.canSpendTodayRub + 5_000.0)
+
+        // 4. Подтверждение фактического исполнения (PAID) не приводит к двойному учёту:
+        val confirmedRentTx = TransactionEntity(
+            id = "tx_paid_rent",
+            budgetId = "b1",
+            type = "expense",
+            date = "2026-10-31",
+            category = "ЖКХ и Аренда",
+            subcategory = "Аренда",
+            amount = 23_500.0
+        )
+        val paidRentLog = com.example.data.db.RecurringExecutionLogEntity(
+            id = 501L,
+            budgetId = "b1",
+            recurringId = editedRentEntity.id,
+            scheduledEpochDay = oct31EpochDay,
+            executedEpochDay = oct31EpochDay,
+            actualAmount = 23_500.0,
+            status = "PAID",
+            linkedTransactionId = "tx_paid_rent"
+        )
+        val rentDueToday = editedRentEntity.copy(nextDueDateEpochDay = oct31EpochDay)
+        val snapBeforePaid = DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = baseTransactions,
+            accounts = emptyList(),
+            goals = emptyList(),
+            categories = partialCategories,
+            recurringPayments = listOf(rentDueToday),
+            executionLogs = emptyList(),
+            todayEpochDay = oct31EpochDay,
+            userEssentialDailyNormRub = 500.0
+        )
+        val snapAfterPaid = DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = baseTransactions + confirmedRentTx,
+            accounts = emptyList(),
+            goals = emptyList(),
+            categories = partialCategories,
+            recurringPayments = listOf(rentDueToday),
+            executionLogs = listOf(paidRentLog),
+            todayEpochDay = oct31EpochDay,
+            userEssentialDailyNormRub = 500.0
+        )
+        // После фактической оплаты на ту же сумму 23 500 ₽ плановая бронь снимается (0 ₽),
+        // а свободный пул и дневной лимит остаются такими же (без двойного вычитания 2 * 23 500 ₽)
+        assertEquals(0.0, snapAfterPaid.safeToSpendResult.obligationsReservedTotalRub, 0.01)
+        assertEquals(
+            snapBeforePaid.safeToSpendResult.canSpendTodayDiscRub,
+            snapAfterPaid.safeToSpendResult.canSpendTodayDiscRub,
+            0.01
+        )
+
+        // 5. Удаление обеих регулярных операций возвращает расчёт к исходному состоянию snap0:
+        val snapAfterDeleteAll = DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = baseTransactions,
+            accounts = emptyList(),
+            goals = emptyList(),
+            categories = partialCategories,
+            recurringPayments = emptyList(),
+            executionLogs = emptyList(),
+            todayEpochDay = oct31EpochDay,
+            userEssentialDailyNormRub = 500.0
+        )
+        assertEquals(
+            snap0.safeToSpendResult.canSpendTodayDiscRub,
+            snapAfterDeleteAll.safeToSpendResult.canSpendTodayDiscRub,
+            0.01
+        )
+        assertEquals(0.0, snapAfterDeleteAll.safeToSpendResult.obligationsReservedTotalRub, 0.01)
     }
 }
