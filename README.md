@@ -15,7 +15,7 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v11.11 (сборка 285)
+### Версия v11.12 (сборка 290)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
@@ -24,9 +24,9 @@
 ## Что изменилось
 
 ### Документация и сборка
-- Extract Room into :core:database module to isolate KSP ([PR #69](#69)))
+- Decompose MainActivity and BudgetViewModel into focused components ([PR #69](#69)))
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.10-build.283...v11.11-build.285
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.11-build.285...v11.12-build.290
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
