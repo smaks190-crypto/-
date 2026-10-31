@@ -2,11 +2,8 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
-import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.example.data.db.AccountEntity
 import com.example.data.db.AppDatabase
 import com.example.data.db.BudgetProfileEntity
@@ -32,32 +29,6 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
-
-enum class PeriodType { DAY, WEEK, MONTH, ALL }
-
-sealed interface BottomCapsuleModal {
-    data object None : BottomCapsuleModal
-    data class ManualAddTransaction(val initialType: String = "expense") : BottomCapsuleModal
-    data class EditTransaction(val transaction: TransactionEntity) : BottomCapsuleModal
-    data object VoiceInput : BottomCapsuleModal
-    data class AllTransactions(
-        val initialFilterType: String = "all",
-        val initialDate: String? = null
-    ) : BottomCapsuleModal
-    data class SettingsHub(
-        val initialScreen: SettingsScreen = SettingsScreen.HUB
-    ) : BottomCapsuleModal
-    data object CategoryLimits : BottomCapsuleModal
-    data object Categories : BottomCapsuleModal
-    data object AddGoal : BottomCapsuleModal
-    data object AddDebt : BottomCapsuleModal
-    data class DebtDetails(val debt: AccountEntity) : BottomCapsuleModal
-    data class GeminiConsent(
-        val messageOverride: String? = null,
-        val triggerAuditAfterAccept: Boolean = false
-    ) : BottomCapsuleModal
-    data object DavidChat : BottomCapsuleModal
-}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class BudgetViewModel(application: Application) : AndroidViewModel(application) {
@@ -591,69 +562,13 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addWelcomeNotification(profileName: String, overrideBudgetId: String? = null) {
         val currentBudgetId = overrideBudgetId ?: _selectedBudgetId.value ?: "default"
-        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        val timeGreeting = when (hour) {
-            in 5..11 -> "Доброе утро"
-            in 12..16 -> "Добрый день"
-            in 17..22 -> "Добрый вечер"
-            else -> "Доброй ночи"
-        }
-        val nameStr = if (profileName.isNotBlank() && profileName != "Вы") ", $profileName" else ""
-
-        val todayDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
-        val currentProfileKey = currentBudgetId
-        val lastGreetingDate = com.example.data.preferences.BudgetPreferencesRepository.getLastGreetingDate(getApplication(), currentProfileKey)
-        val isFirstLaunch = !com.example.data.preferences.BudgetPreferencesRepository.hasWelcomedFirstTime(getApplication(), currentProfileKey)
-        val now = System.currentTimeMillis()
-
         viewModelScope.launch {
-            val currentNotifs = try {
-                repository.getNotificationsForBudget(currentBudgetId).first()
-            } catch (e: Exception) {
-                emptyList()
-            }
-            
-            // Проверяем, не было ли уже создано приветствие сегодня в базе данных
-            val alreadyHasGreetingToday = currentNotifs.any {
-                it.title == "Жабов Давид" && 
-                (it.description.startsWith("Добр") || it.description.startsWith("Салют")) &&
-                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(it.timestamp)) == todayDate
-            }
-            if (alreadyHasGreetingToday) {
-                return@launch
-            }
-
-            val hasUnread = currentNotifs.any { !it.isRead }
-
-            if (isFirstLaunch) {
-                com.example.data.preferences.BudgetPreferencesRepository.markFirstTimeWelcomed(getApplication(), currentProfileKey, todayDate)
-                val greetingMsg = "$timeGreeting$nameStr!"
-                repository.insertNotification(
-                    com.example.data.db.NotificationEntity(
-                        budgetId = currentBudgetId,
-                        title = "Жабов Давид",
-                        description = greetingMsg,
-                        icon = "david",
-                        color = "emerald400",
-                        timestamp = now,
-                        isRead = false
-                    )
-                )
-            } else if (!hasUnread && lastGreetingDate != todayDate) {
-                com.example.data.preferences.BudgetPreferencesRepository.setLastGreetingDate(getApplication(), currentProfileKey, todayDate)
-                val greetingMsg = "$timeGreeting$nameStr!"
-                repository.insertNotification(
-                    com.example.data.db.NotificationEntity(
-                        budgetId = currentBudgetId,
-                        title = "Жабов Давид",
-                        description = greetingMsg,
-                        icon = "david",
-                        color = "emerald400",
-                        timestamp = now,
-                        isRead = false
-                    )
-                )
-            }
+            BudgetWelcomeNotificationHelper.ensureWelcomeNotification(
+                context = getApplication(),
+                repository = repository,
+                currentBudgetId = currentBudgetId,
+                profileName = profileName
+            )
         }
     }
 
@@ -793,14 +708,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    private fun splitAuditIntoSections(auditText: String): List<String> {
-        if (auditText.isBlank() || auditText == "ERROR_NO_CONNECTION") return emptyList()
-        val headerRegex = Regex("(?m)^(?=#{1,6}\\s+|(?i)(?:Главный Вердикт|Цифры и Динамика|Прожарка|Ачивки|Выводы))")
-        val rawBlocks = auditText.split(headerRegex)
-        return rawBlocks
-            .map { it.trim() }
-            .filter { it.isNotBlank() && it != "ERROR_NO_CONNECTION" }
-    }
+    private fun splitAuditIntoSections(auditText: String): List<String> =
+        BudgetWelcomeNotificationHelper.splitAuditIntoSections(auditText)
 
     suspend fun suggestCategory(
         transactionName: String,
