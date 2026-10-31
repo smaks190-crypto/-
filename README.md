@@ -15,7 +15,7 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v11.12 (сборка 290)
+### Версия v11.13 (сборка 293)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
@@ -23,10 +23,10 @@
 
 ## Что изменилось
 
-### Документация и сборка
-- Decompose MainActivity and BudgetViewModel into focused components ([PR #69](#69)))
+### Добавлено
+- Enrich existing demo budget with multi-month realistic transaction coverage ([eb348a1](https://github.com/smaks190-crypto/-/commit/eb348a1f6e6ad0c1c2c42755a7b5f7145762dd71))
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.11-build.285...v11.12-build.290
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.12-build.290...v11.13-build.293
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
