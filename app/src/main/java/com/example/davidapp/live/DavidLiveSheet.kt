@@ -102,23 +102,83 @@ private val IdleWaveSlate = Color(0xFF2A2F3A)
 private val ErrorCrimson = Color(0xFFEF4444)
 
 /**
+ * Returns true only when the David Live session is in an established conversational state
+ * where voice capture or model speech playback is possible.
+ */
+fun isDavidLiveVoiceCapableState(connectionState: DavidLiveConnectionState): Boolean {
+    return connectionState == DavidLiveConnectionState.LISTENING ||
+        connectionState == DavidLiveConnectionState.USER_SPEAKING ||
+        connectionState == DavidLiveConnectionState.DAVID_THINKING ||
+        connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
+        connectionState == DavidLiveConnectionState.MUTED
+}
+
+/**
+ * Resolves the visual animation phase for David Live based on the actual session state.
+ */
+fun resolveDavidLiveVisualPhase(
+    connectionState: DavidLiveConnectionState,
+    explicitVisualPhase: DavidLiveVisualPhase? = null,
+    isWaitingForNetwork: Boolean = false,
+    isReadyFlashActive: Boolean = false
+): DavidLiveVisualPhase {
+    if (explicitVisualPhase != null && explicitVisualPhase != DavidLiveVisualPhase.IDLE) {
+        return explicitVisualPhase
+    }
+    return when (connectionState) {
+        DavidLiveConnectionState.CONNECTING -> DavidLiveVisualPhase.INITIAL_CONNECTING
+        DavidLiveConnectionState.ERROR -> DavidLiveVisualPhase.CONNECTION_LOST
+        DavidLiveConnectionState.RECONNECTING ->
+            if (isWaitingForNetwork) DavidLiveVisualPhase.CONNECTION_LOST else DavidLiveVisualPhase.RECONNECTING
+        DavidLiveConnectionState.LISTENING,
+        DavidLiveConnectionState.USER_SPEAKING,
+        DavidLiveConnectionState.DAVID_THINKING,
+        DavidLiveConnectionState.DAVID_SPEAKING,
+        DavidLiveConnectionState.MUTED ->
+            if (isReadyFlashActive) DavidLiveVisualPhase.READY_FLASH else DavidLiveVisualPhase.CONVERSATION_ACTIVE
+        DavidLiveConnectionState.IDLE,
+        DavidLiveConnectionState.ENDED,
+        DavidLiveConnectionState.NO_API_KEY -> DavidLiveVisualPhase.IDLE
+    }
+}
+
+/**
  * Resolves the human-readable Russian status label for the David Live session,
  * shared between the full-screen interface and the compact minimized capsule.
+ *
+ * Strictly reflects the 5 owner-agreed connection phases:
+ * - Первое подключение: «Пробуждаем Давида...»
+ * - Потеря соединения / ошибка: «Связь с Давидом прервана»
+ * - Автоматическое/ручное переподключение: «Восстанавливаем связь...»
+ * - Сессия действительно готова (после setupComplete): «Давид на связи»
+ * - Штатный диалог: «Слушаю тебя...» / «Говорит Давид...» / «Давид думает...» / «Микрофон выключен»
  */
 fun resolveDavidLiveStatusLabel(
     connectionState: DavidLiveConnectionState,
     activeSpeaker: DavidLiveSpeaker,
-    isMicMuted: Boolean
+    isMicMuted: Boolean,
+    visualPhase: DavidLiveVisualPhase? = null
 ): String {
+    val effectivePhase = resolveDavidLiveVisualPhase(
+        connectionState = connectionState,
+        explicitVisualPhase = visualPhase
+    )
     return when {
         connectionState == DavidLiveConnectionState.NO_API_KEY -> "Требуется API-ключ"
-        connectionState == DavidLiveConnectionState.ERROR -> "Ошибка связи"
-        connectionState == DavidLiveConnectionState.CONNECTING -> "Подключение..."
-        connectionState == DavidLiveConnectionState.RECONNECTING -> "Переподключение..."
+        connectionState == DavidLiveConnectionState.ERROR ||
+            effectivePhase == DavidLiveVisualPhase.CONNECTION_LOST -> "Связь с Давидом прервана"
+        connectionState == DavidLiveConnectionState.RECONNECTING ||
+            effectivePhase == DavidLiveVisualPhase.RECONNECTING -> "Восстанавливаем связь..."
+        connectionState == DavidLiveConnectionState.CONNECTING ||
+            effectivePhase == DavidLiveVisualPhase.INITIAL_CONNECTING -> "Пробуждаем Давида..."
+        connectionState == DavidLiveConnectionState.ENDED ||
+            connectionState == DavidLiveConnectionState.IDLE -> "Сессия завершена"
         isMicMuted && activeSpeaker != DavidLiveSpeaker.DAVID &&
             connectionState != DavidLiveConnectionState.DAVID_SPEAKING -> "Микрофон выключен"
         connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
             activeSpeaker == DavidLiveSpeaker.DAVID -> "Говорит Давид..."
+        connectionState == DavidLiveConnectionState.DAVID_THINKING -> "Давид думает..."
+        effectivePhase == DavidLiveVisualPhase.READY_FLASH -> "Давид на связи"
         else -> "Слушаю тебя..."
     }
 }
@@ -144,12 +204,13 @@ fun DavidLiveHorizontalWaveVisualizer(
     barCount: Int = 24
 ) {
     val energyClamped = overallEnergy.coerceIn(0f, 1f)
-    val isDavidSpeaking = connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
-        activeSpeaker == DavidLiveSpeaker.DAVID
-    val isUserSpeaking = activeSpeaker == DavidLiveSpeaker.USER || (!isMicMuted && energyClamped > 0.16f)
-    val isVoiceActive = (isDavidSpeaking || isUserSpeaking) &&
-        connectionState != DavidLiveConnectionState.ERROR &&
-        connectionState != DavidLiveConnectionState.NO_API_KEY
+    val voiceCapableState = isDavidLiveVoiceCapableState(connectionState)
+    val isDavidSpeaking = voiceCapableState &&
+        (connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
+            activeSpeaker == DavidLiveSpeaker.DAVID)
+    val isUserSpeaking = voiceCapableState &&
+        (activeSpeaker == DavidLiveSpeaker.USER || (!isMicMuted && energyClamped > 0.16f))
+    val isVoiceActive = voiceCapableState && (isDavidSpeaking || isUserSpeaking)
 
     val waveActivity by animateFloatAsState(
         targetValue = if (isVoiceActive) 1f else 0.12f,
@@ -263,15 +324,18 @@ fun DavidLiveMinimizedCapsule(
     onToggleMicMute: () -> Unit,
     onEndSession: () -> Unit,
     modifier: Modifier = Modifier,
-    embeddedInBottomBar: Boolean = false
+    embeddedInBottomBar: Boolean = false,
+    visualPhase: DavidLiveVisualPhase? = null
 ) {
     val energyClamped = overallEnergy.coerceIn(0f, 1f)
-    val isDavidSpeaking = connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
-        activeSpeaker == DavidLiveSpeaker.DAVID
+    val isDavidSpeaking = isDavidLiveVoiceCapableState(connectionState) &&
+        (connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
+            activeSpeaker == DavidLiveSpeaker.DAVID)
     val statusText = resolveDavidLiveStatusLabel(
         connectionState = connectionState,
         activeSpeaker = activeSpeaker,
-        isMicMuted = isMicMuted
+        isMicMuted = isMicMuted,
+        visualPhase = visualPhase
     )
 
     val capsuleCornerRadius = if (embeddedInBottomBar) 22.dp else 26.dp
@@ -578,7 +642,8 @@ fun DavidLiveSheet(
     onExpand: () -> Unit = {},
     isEmbeddedInModalCard: Boolean = false,
     renderEmbeddedMinimizedCapsule: Boolean = true,
-    minimizedBottomOffsetDp: Dp = 14.dp
+    minimizedBottomOffsetDp: Dp = 14.dp,
+    visualPhase: DavidLiveVisualPhase? = null
 ) {
     val context = LocalContext.current
 
@@ -662,7 +727,8 @@ fun DavidLiveSheet(
     val statusText = resolveDavidLiveStatusLabel(
         connectionState = connectionState,
         activeSpeaker = activeSpeaker,
-        isMicMuted = isMicMuted
+        isMicMuted = isMicMuted,
+        visualPhase = visualPhase
     )
 
     Box(
@@ -905,7 +971,9 @@ fun DavidLiveSheet(
                                                         contentColor = EmeraldStatus
                                                     ),
                                                     shape = RoundedCornerShape(12.dp),
-                                                    modifier = Modifier.height(36.dp)
+                                                    modifier = Modifier
+                                                        .height(36.dp)
+                                                        .testTag("david_live_retry_button")
                                                 ) {
                                                     Icon(
                                                         imageVector = Icons.Default.Refresh,
@@ -913,7 +981,11 @@ fun DavidLiveSheet(
                                                         modifier = Modifier.size(15.dp)
                                                     )
                                                     Spacer(modifier = Modifier.width(6.dp))
-                                                    Text("Повторить", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                                    Text(
+                                                        "Повторить подключение",
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
                                                 }
                                             }
                                             if (connectionState == DavidLiveConnectionState.NO_API_KEY) {
@@ -975,17 +1047,28 @@ fun DavidLiveSheet(
                                     activeSpeaker = activeSpeaker,
                                     isMicMuted = isMicMuted,
                                     onToggleMicMute = onToggleMicMute,
-                                    visualizerSize = if (isEmbeddedInModalCard) 244.dp else 278.dp
+                                    visualizerSize = if (isEmbeddedInModalCard) 244.dp else 278.dp,
+                                    visualPhase = visualPhase
                                 )
 
                                 Spacer(modifier = Modifier.height(8.dp))
 
                                 Text(
                                     text = statusText,
-                                    color = if (isMicMuted) Color(0xFFFCA5A5) else Color(0xFF94A3B8),
+                                    color = when {
+                                        isMicMuted ||
+                                            connectionState == DavidLiveConnectionState.ERROR ||
+                                            visualPhase == DavidLiveVisualPhase.CONNECTION_LOST ->
+                                            Color(0xFFFCA5A5)
+                                        visualPhase == DavidLiveVisualPhase.READY_FLASH ->
+                                            EmeraldStatus
+                                        else ->
+                                            Color(0xFF94A3B8)
+                                    },
                                     fontSize = 13.5.sp,
                                     fontWeight = FontWeight.Medium,
-                                    textAlign = TextAlign.Center
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.testTag("david_live_center_status")
                                 )
                             }
                         }
@@ -1199,7 +1282,8 @@ fun DavidLiveSheet(
                     isMicMuted = isMicMuted,
                     onExpand = onExpand,
                     onToggleMicMute = onToggleMicMute,
-                    onEndSession = onEndSession
+                    onEndSession = onEndSession,
+                    visualPhase = visualPhase
                 )
             }
         }

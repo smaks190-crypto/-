@@ -48,13 +48,24 @@ class DavidLiveFinancialToolsProvider(
     val verifiedFacts: List<DavidLiveToolFact>
         get() = synchronized(_verifiedFacts) { _verifiedFacts.toList() }
 
+    private val recentToolResultsCache = mutableMapOf<String, Pair<Long, JSONObject>>()
+
     fun setBudgetId(newBudgetId: String) {
-        budgetId = newBudgetId.ifBlank { "default" }
+        val normalized = newBudgetId.ifBlank { "default" }
+        if (budgetId != normalized) {
+            budgetId = normalized
+            synchronized(recentToolResultsCache) {
+                recentToolResultsCache.clear()
+            }
+        }
     }
 
     fun clearVerifiedFacts() {
         synchronized(_verifiedFacts) {
             _verifiedFacts.clear()
+        }
+        synchronized(recentToolResultsCache) {
+            recentToolResultsCache.clear()
         }
     }
 
@@ -252,8 +263,19 @@ class DavidLiveFinancialToolsProvider(
 
     /**
      * Executes a read-only tool call requested by Gemini Live and records verified facts.
+     * Deduplicates identical tool queries within the active session window so a reconnected
+     * session never repeats completed actions or duplicates verified facts.
      */
     suspend fun executeToolCall(toolName: String, args: JSONObject?): JSONObject {
+        val cacheKey = "$toolName:${args?.toString().orEmpty()}"
+        val nowMs = System.currentTimeMillis()
+        synchronized(recentToolResultsCache) {
+            val cached = recentToolResultsCache[cacheKey]
+            if (cached != null && nowMs - cached.first <= 60_000L) {
+                return JSONObject(cached.second.toString())
+            }
+        }
+
         val result = when (toolName) {
             TOOL_FINANCIAL_OVERVIEW -> queryFinancialOverview()
             TOOL_SAFE_TO_SPEND_FORECAST -> querySafeToSpendForecast()
@@ -277,15 +299,21 @@ class DavidLiveFinancialToolsProvider(
             }
         }
 
+        synchronized(recentToolResultsCache) {
+            recentToolResultsCache[cacheKey] = nowMs to JSONObject(result.toString())
+        }
+
         val summaryText = result.optString("humanSummary").takeIf { it.isNotBlank() }
             ?: result.toString().take(240)
         synchronized(_verifiedFacts) {
-            _verifiedFacts.add(
-                DavidLiveToolFact(
-                    toolName = toolName,
-                    summary = summaryText
+            if (_verifiedFacts.none { it.toolName == toolName && it.summary == summaryText }) {
+                _verifiedFacts.add(
+                    DavidLiveToolFact(
+                        toolName = toolName,
+                        summary = summaryText
+                    )
                 )
-            )
+            }
         }
         return result
     }
@@ -740,6 +768,7 @@ class DavidLiveFinancialToolsProvider(
     }
 
     companion object {
+        const val TOOL_DEDUP_WINDOW_MS = 60_000L
         const val TOOL_FINANCIAL_OVERVIEW = "get_financial_overview"
         const val TOOL_SAFE_TO_SPEND_FORECAST = "get_safe_to_spend_forecast"
         const val TOOL_SIMULATE_WHAT_IF = "simulate_what_if"

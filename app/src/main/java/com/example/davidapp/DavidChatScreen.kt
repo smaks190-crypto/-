@@ -104,6 +104,7 @@ fun DavidChatScreen(
     // David Live states (shared single session)
     val liveDisplayMode by viewModel.liveDisplayMode.collectAsState()
     val liveConnectionState by viewModel.liveConnectionState.collectAsState()
+    val liveVisualPhase by viewModel.liveVisualPhase.collectAsState()
     val liveSubtitle by viewModel.liveSubtitle.collectAsState()
     val liveRayMagnitudes by viewModel.liveRayMagnitudes.collectAsState()
     val liveOverallEnergy by viewModel.liveOverallEnergy.collectAsState()
@@ -155,6 +156,21 @@ fun DavidChatScreen(
 
     LaunchedEffect(budgetId, profileName, apiKey) {
         viewModel.bindProfile(budgetId, profileName, apiKey)
+    }
+
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> viewModel.onDavidLiveAppBackgrounded()
+                androidx.lifecycle.Lifecycle.Event.ON_START -> viewModel.onDavidLiveAppForegrounded()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     DisposableEffect(effectiveSoundManager) {
@@ -220,7 +236,8 @@ fun DavidChatScreen(
                             onExpand = { viewModel.expandDavidLive(effectiveSoundManager) },
                             onToggleMicMute = { viewModel.toggleLiveMicMute() },
                             onEndSession = { viewModel.endDavidLiveSession(effectiveSoundManager) },
-                            embeddedInBottomBar = true
+                            embeddedInBottomBar = true,
+                            visualPhase = liveVisualPhase
                         )
                         } else {
                             Column(
@@ -344,7 +361,8 @@ fun DavidChatScreen(
                 },
                 onExpand = { viewModel.expandDavidLive(effectiveSoundManager) },
                 isEmbeddedInModalCard = isEmbeddedInCapsule,
-                renderEmbeddedMinimizedCapsule = false
+                renderEmbeddedMinimizedCapsule = false,
+                visualPhase = liveVisualPhase
             )
         }
     }

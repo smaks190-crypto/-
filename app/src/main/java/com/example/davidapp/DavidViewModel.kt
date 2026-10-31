@@ -97,6 +97,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         geminiApiService = RetrofitClient.service
     )
 
+    init {
+        liveSessionController.bindNetworkContext(application)
+    }
+
     private val _isLiveOverlayVisible = MutableStateFlow(false)
     val isLiveOverlayVisible: StateFlow<Boolean> = _isLiveOverlayVisible.asStateFlow()
 
@@ -112,6 +116,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     private var lastDisplayModeTransitionMs: Long = 0L
 
     val liveConnectionState: StateFlow<DavidLiveConnectionState> = liveSessionController.connectionState
+    val liveVisualPhase: StateFlow<com.example.davidapp.live.DavidLiveVisualPhase> = liveSessionController.visualPhase
     val liveSubtitle: StateFlow<String> = liveSessionController.liveSubtitle
     val liveRayMagnitudes: StateFlow<List<Float>> = liveSessionController.audioEngine.rayMagnitudes
     val liveOverallEnergy: StateFlow<Float> = liveSessionController.audioEngine.overallEnergy
@@ -864,6 +869,14 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
     fun retryLiveConnection() {
         liveSessionController.retryConnection()
+    }
+
+    fun onDavidLiveAppBackgrounded() {
+        liveSessionController.onAppBackgrounded()
+    }
+
+    fun onDavidLiveAppForegrounded() {
+        liveSessionController.onAppForegrounded()
     }
 
     fun endDavidLiveSession(soundManager: SoundManager? = null) {
