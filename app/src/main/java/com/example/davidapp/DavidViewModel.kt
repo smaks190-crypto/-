@@ -814,7 +814,7 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
 
             val op = proposal.operation
             soundManager?.playClick()
-            database.transactionDao().insertTransaction(
+            repository.insertTransaction(
                 TransactionEntity(
                     budgetId = currentBudgetId,
                     type = op.type,

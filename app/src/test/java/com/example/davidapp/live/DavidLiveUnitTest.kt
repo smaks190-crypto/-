@@ -776,4 +776,55 @@ class DavidLiveUnitTest {
         com.example.data.preferences.BudgetPreferencesRepository.appPrefs(context).edit().putBoolean("sound_enabled", false).commit()
         assertFalse(com.example.data.preferences.BudgetPreferencesRepository.isSoundEnabled(context))
     }
+
+    @Test
+    fun `VoiceOperationParserService and BudgetRepository companion parse and sanitize voice JSON identically`() {
+        val rawMarkdownJson = """
+            ```json
+            [
+              {"title": "Пятёрочка", "type": "expense", "amount": 1250.5, "category": "Продукты", "subcategory": "Супермаркет", "date": "2026-10-31"},
+              {"title": "null", "type": "income", "amount": 50000, "category": "Зарплата", "subcategory": "undefined", "date": "invalid-date"}
+            ]
+            ```
+        """.trimIndent()
+
+        val extracted = com.example.data.repository.VoiceOperationParserService.extractJsonArray(rawMarkdownJson)
+        assertEquals(com.example.data.repository.BudgetRepository.extractJsonArray(rawMarkdownJson), extracted)
+
+        val parsed = com.example.data.repository.VoiceOperationParserService.parseJsonOperations(extracted, "2026-10-30")
+        assertEquals(2, parsed.size)
+        assertEquals("Пятёрочка", parsed[0].title)
+        assertEquals("expense", parsed[0].type)
+        assertEquals(1250.5, parsed[0].amount, 0.001)
+        assertEquals("2026-10-31", parsed[0].date)
+
+        assertEquals("Зарплата", parsed[1].title)
+        assertEquals("income", parsed[1].type)
+        assertEquals("", parsed[1].subcategory)
+        assertEquals("2026-10-30", parsed[1].date)
+    }
+
+    @Test
+    fun `DavidAiAuditService provides deterministic offline comments and user phrases when API key is blank`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val service = com.example.data.repository.DavidAiAuditService(context)
+        val comment = service.generateDavidComment(
+            apiKey = "",
+            type = "expense",
+            category = "Фастфуд",
+            subcategory = "Бургеры",
+            amount = 850.0
+        )
+        assertTrue(comment.isNotBlank())
+
+        val userPhrase = service.generateUserPhrase(
+            apiKey = "",
+            type = "expense",
+            category = "Продукты",
+            subcategory = "Молоко",
+            amount = 120.0,
+            isFirstToday = true
+        )
+        assertTrue(userPhrase.isNotBlank())
+    }
 }
