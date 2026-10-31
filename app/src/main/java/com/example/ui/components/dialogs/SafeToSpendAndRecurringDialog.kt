@@ -405,7 +405,7 @@ private fun SafeToSpendOverviewSheetContent(
     }
 
     var showHeaderInfo by remember { mutableStateOf(false) }
-    var isHowCalculatedExpanded by remember { mutableStateOf(true) }
+    var isHowCalculatedExpanded by remember { mutableStateOf(false) }
     var isDetailedMathExpanded by remember { mutableStateOf(false) }
     var isTrajectoryExpanded by remember { mutableStateOf(false) }
     var isUpcomingRecurringExpanded by remember { mutableStateOf(false) }
@@ -1149,13 +1149,16 @@ private fun SafeToSpendOverviewSheetContent(
 
         // Two side-by-side What-if action cards
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Max),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Card 1: Сделать покупку
             Box(
                 modifier = Modifier
                     .weight(1f)
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(18.dp))
                     .background(Color(0xFF121A2B))
                     .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
@@ -1164,40 +1167,46 @@ private fun SafeToSpendOverviewSheetContent(
                     }
                     .padding(14.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Indigo500.copy(alpha = 0.16f)),
-                            contentAlignment = Alignment.Center
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Indigo500.copy(alpha = 0.16f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ShoppingCart,
+                                    contentDescription = null,
+                                    tint = Indigo400,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                             Icon(
-                                imageVector = Icons.Default.ShoppingCart,
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                 contentDescription = null,
-                                tint = Indigo400,
+                                tint = Slate400,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = Slate400,
-                            modifier = Modifier.size(18.dp)
+                        Text(
+                            text = "Сделать покупку",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                    Text(
-                        text = "Сделать покупку",
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontFamily = ManropeFontFamily,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Смоделировать расход и увидеть последствия",
                         color = Slate400,
@@ -1212,6 +1221,7 @@ private fun SafeToSpendOverviewSheetContent(
             Box(
                 modifier = Modifier
                     .weight(1f)
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(18.dp))
                     .background(Color(0xFF121A2B))
                     .border(1.dp, GlassBorder, RoundedCornerShape(18.dp))
@@ -1220,40 +1230,46 @@ private fun SafeToSpendOverviewSheetContent(
                     }
                     .padding(14.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Emerald400.copy(alpha = 0.16f)),
-                            contentAlignment = Alignment.Center
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Emerald400.copy(alpha = 0.16f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    tint = Emerald400,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                             Icon(
-                                imageVector = Icons.Default.Schedule,
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                 contentDescription = null,
-                                tint = Emerald400,
+                                tint = Slate400,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = Slate400,
-                            modifier = Modifier.size(18.dp)
+                        Text(
+                            text = "Что, если зарплата задержится?",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontFamily = ManropeFontFamily,
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                    Text(
-                        text = "Что, если зарплата задержится?",
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontFamily = ManropeFontFamily,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Проверить сдвиг дохода и запас до зарплаты",
                         color = Slate400,
