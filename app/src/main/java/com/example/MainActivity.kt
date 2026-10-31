@@ -240,6 +240,10 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     val isGeneratingReaction by viewModel.isGeneratingReaction.collectAsState()
     val savedAiAudit by viewModel.savedAiAudit.collectAsState()
     val activeModal by viewModel.activeModal.collectAsState()
+    val recurringPayments by viewModel.recurringPayments.collectAsState()
+    val recurringLogs by viewModel.recurringExecutionLogs.collectAsState()
+    val userSafetyFloorRub by viewModel.userSafetyFloorRub.collectAsState()
+    val userEssentialDailyNormRub by viewModel.userEssentialDailyNormRub.collectAsState()
 
     var triggerAuditAfterKeySave by remember { mutableStateOf(false) }
 
@@ -1168,11 +1172,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                 }
 
                                 is com.example.ui.viewmodel.BottomCapsuleModal.SafeToSpend -> {
-                                    val recurringPayments by viewModel.recurringPayments.collectAsState()
-                                    val recurringLogs by viewModel.recurringExecutionLogs.collectAsState()
-                                    val userSafetyFloorRub by viewModel.userSafetyFloorRub.collectAsState()
-                                    val userEssentialDailyNormRub by viewModel.userEssentialDailyNormRub.collectAsState()
-                                    val todayEpochDay = remember { java.time.LocalDate.now().toEpochDay() }
+                                    val todayEpochDay = remember(selectedDateDay) {
+                                        java.time.LocalDate.now().toEpochDay()
+                                    }
                                     val safeToSpendSnapshot = remember(
                                         transactions,
                                         accounts,
@@ -1208,6 +1210,19 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                         onSetUserEssentialDailyNorm = { viewModel.setUserEssentialDailyNorm(it) },
                                         onAddRecurringPayment = { title, amount, type, category, frequency, nextDueDateIso, priority, incomeTier ->
                                             viewModel.addRecurringPayment(
+                                                title = title,
+                                                amount = amount,
+                                                type = type,
+                                                category = category,
+                                                frequency = frequency,
+                                                nextDueDateIso = nextDueDateIso,
+                                                priority = priority,
+                                                incomeTier = incomeTier
+                                            )
+                                        },
+                                        onUpdateRecurringPayment = { id, title, amount, type, category, frequency, nextDueDateIso, priority, incomeTier ->
+                                            viewModel.updateRecurringPayment(
+                                                paymentId = id,
                                                 title = title,
                                                 amount = amount,
                                                 type = type,
