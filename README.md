@@ -15,7 +15,7 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v11.08 (сборка 277)
+### Версия v11.09 (сборка 281)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
@@ -24,9 +24,9 @@
 ## Что изменилось
 
 ### Документация и сборка
-- Centralize EncryptedSharedPreferences and app preferences access (Issue #69 Stage 2) ([fab5b13](https://github.com/smaks190-crypto/-/commit/fab5b13330bcc152f727dd8b73a6fff0821fe95c))
+- Split BudgetRepository into DavidAiAuditService, VoiceOperationParserService, and BudgetBackupManager (Issue #69 Stage 3) ([096a017](https://github.com/smaks190-crypto/-/commit/096a017c4e6ba3868d050b17b3dfd6d02b2e8448))
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.06-build.247...v11.08-build.277
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.08-build.277...v11.09-build.281
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
