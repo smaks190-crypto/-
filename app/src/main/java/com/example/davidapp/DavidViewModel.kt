@@ -123,9 +123,9 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         currentBudgetId = budgetId
         currentProfileName = if (profileName.isNotBlank()) profileName else "Пользователь"
         liveFinancialToolsProvider.setBudgetId(currentBudgetId)
-        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-        val effectiveKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            apiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        val effectiveKey = com.example.data.preferences.ApiKeyStorage.getSavedApiKey(
+            getApplication(),
+            explicitKey = apiKey
         )
         currentApiKey = effectiveKey
         _hasApiKey.value = effectiveKey.isNotBlank()
@@ -139,10 +139,12 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveApiKeyFromChat(newKey: String, soundManager: SoundManager? = null) {
         val clean = com.example.data.api.GeminiModelConfig.sanitizeApiKey(newKey)
-        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-        prefs.edit().putString("gemini_api_key", clean).putBoolean("gemini_consent_given", true).apply()
-        currentApiKey = clean
-        _hasApiKey.value = clean.isNotBlank()
+        val saved = com.example.data.preferences.ApiKeyStorage.saveApiKey(getApplication(), clean)
+        if (saved) {
+            com.example.data.preferences.BudgetPreferencesRepository.setGeminiConsentGiven(getApplication(), true)
+            currentApiKey = clean
+            _hasApiKey.value = clean.isNotBlank()
+        }
         soundManager?.playReceive()
         addSessionMessage(
             ChatMessage(
@@ -971,8 +973,10 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             activeAssistantAudioFocusRequest =
                 DavidLiveAudioEngine.requestAssistantAudioFocus(getApplication())
         }
-        val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-        val userKey = currentApiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+        val userKey = com.example.data.preferences.ApiKeyStorage.getSavedApiKey(
+            getApplication(),
+            explicitKey = currentApiKey
+        )
         liveSessionController.startSession(userKey)
         _isLiveOverlayVisible.value = true
         _isLiveSessionActive.value = true
@@ -1081,8 +1085,10 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
         soundManager: SoundManager?
     ) {
         viewModelScope.launch {
-            val prefs = getApplication<Application>().getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-            val userKey = currentApiKey.ifBlank { prefs.getString("gemini_api_key", "") ?: "" }
+            val userKey = com.example.data.preferences.ApiKeyStorage.getSavedApiKey(
+                getApplication(),
+                explicitKey = currentApiKey
+            )
 
             val outcome = liveSummaryGenerator.generateSummary(
                 userApiKey = userKey,

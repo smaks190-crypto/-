@@ -63,21 +63,6 @@ sealed interface BottomCapsuleModal {
 class BudgetViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: BudgetRepository
-    private val prefs = application.getSharedPreferences("budget_prefs", Context.MODE_PRIVATE)
-    private val securePrefs: SharedPreferences = try {
-        val masterKey = MasterKey.Builder(application)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            application,
-            "secure_prefs",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    } catch (_: Exception) {
-        application.getSharedPreferences("secure_prefs", Context.MODE_PRIVATE)
-    }
 
     val budgetProfiles: StateFlow<List<BudgetProfileEntity>>
 
@@ -135,11 +120,13 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     private val _expandedIncome = MutableStateFlow(false)
     val expandedIncome: StateFlow<Boolean> = _expandedIncome.asStateFlow()
 
-    private val _isGeminiConsentGiven = MutableStateFlow(prefs.getBoolean("gemini_consent_given", false))
+    private val _isGeminiConsentGiven = MutableStateFlow(
+        com.example.data.preferences.BudgetPreferencesRepository.isGeminiConsentGiven(application)
+    )
     val isGeminiConsentGiven: StateFlow<Boolean> = _isGeminiConsentGiven.asStateFlow()
 
     fun setGeminiConsentGiven(given: Boolean) {
-        prefs.edit().putBoolean("gemini_consent_given", given).apply()
+        com.example.data.preferences.BudgetPreferencesRepository.setGeminiConsentGiven(getApplication(), given)
         _isGeminiConsentGiven.value = given
     }
 
@@ -258,12 +245,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     val showSetupModal: StateFlow<Boolean> = _showSetupModal.asStateFlow()
 
     init {
-        // One-time migration of legacy API key to EncryptedSharedPreferences
-        val oldKey = prefs.getString("gemini_api_key", null)
-        if (!oldKey.isNullOrEmpty()) {
-            securePrefs.edit().putString("gemini_api_key", oldKey).apply()
-            prefs.edit().remove("gemini_api_key").apply()
-        }
+        // One-time atomic migration of legacy API key to EncryptedSharedPreferences via ApiKeyStorage
+        com.example.data.preferences.ApiKeyStorage.getSavedApiKey(application)
 
         val database = AppDatabase.getDatabase(application)
         repository = BudgetRepository(
@@ -425,8 +408,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             repository.ensureDefaultProfileExists()
             val profilesList = repository.allProfiles.first()
-            val isFirstLaunch = prefs.getBoolean("is_first_launch_selection", true)
-            val lastId = prefs.getString("last_selected_budget_id", null)
+            val isFirstLaunch = com.example.data.preferences.BudgetPreferencesRepository.isFirstLaunchSelection(application)
+            val lastId = com.example.data.preferences.BudgetPreferencesRepository.getLastSelectedBudgetId(application)
 
             val targetId = if (!isFirstLaunch) {
                 if (lastId != null && profilesList.any { it.id == lastId }) lastId
@@ -437,39 +420,23 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun getSavedApiKey(): String {
-        val legacyKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            prefs.getString("gemini_api_key", null)
-        )
-        if (legacyKey.isNotEmpty()) {
-            securePrefs.edit().putString("gemini_api_key", legacyKey).apply()
-            prefs.edit().remove("gemini_api_key").apply()
-            return legacyKey
-        }
-
-        val saved = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            securePrefs.getString("gemini_api_key", "")
-        )
-        if (saved.isNotBlank()) {
-            return saved
-        }
-
-        val defaultKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            com.example.BuildConfig.GEMINI_API_KEY
-        )
-        if (com.example.data.api.GeminiModelConfig.isValidGeminiApiKey(defaultKey)) {
-            return defaultKey
-        }
-        return ""
-    }
+    private fun getSavedApiKey(): String =
+        com.example.data.preferences.ApiKeyStorage.getSavedApiKey(getApplication())
 
     fun saveApiKey(key: String) {
         val trimmed = com.example.data.api.GeminiModelConfig.sanitizeApiKey(key)
-        securePrefs.edit().putString("gemini_api_key", trimmed).apply()
-        prefs.edit().remove("gemini_api_key").apply()
-        _apiKey.value = trimmed
+        val saved = com.example.data.preferences.ApiKeyStorage.saveApiKey(getApplication(), trimmed)
+        if (saved) {
+            _apiKey.value = trimmed
+        }
         viewModelScope.launch {
-            _toastMessage.emit(if (trimmed.isEmpty()) "API ключ удален" else "API ключ сохранен!")
+            _toastMessage.emit(
+                when {
+                    !saved -> "Ошибка защищённого хранилища: не удалось сохранить ключ"
+                    trimmed.isEmpty() -> "API ключ удален"
+                    else -> "API ключ сохранен!"
+                }
+            )
         }
     }
 
@@ -478,10 +445,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             securityManager.removePin()
             repository.clearAllData()
-            prefs.edit()
-                .remove("last_selected_budget_id")
-                .putBoolean("is_first_launch_selection", true)
-                .apply()
+            com.example.data.preferences.BudgetPreferencesRepository.resetBudgetSelectionOnClear(getApplication())
             _selectedBudgetId.value = null
             repository.ensureDefaultProfileExists()
             _toastMessage.emit("Защита сброшена, данные операций удалены!")
@@ -491,10 +455,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     fun selectBudget(id: String?) {
         com.example.utils.GlobalConsoleLogger.i("STATE", "Selected Budget ID changed to: $id")
         if (id != null) {
-            prefs.edit()
-                .putString("last_selected_budget_id", id)
-                .putBoolean("is_first_launch_selection", false)
-                .apply()
+            com.example.data.preferences.BudgetPreferencesRepository.setSelectedBudget(getApplication(), id)
         }
         _selectedBudgetId.value = id
     }
@@ -600,7 +561,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun confirmSetupMode(mode: String) {
-        prefs.edit().putBoolean("is_first_run", false).apply()
+        com.example.data.preferences.BudgetPreferencesRepository.markSetupModeConfirmed(getApplication())
         _showSetupModal.value = false
         val budgetId = _selectedBudgetId.value ?: "default"
         viewModelScope.launch {
@@ -641,8 +602,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
         val todayDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
         val currentProfileKey = currentBudgetId
-        val lastGreetingDate = prefs.getString("last_greeting_date_$currentProfileKey", "")
-        val isFirstLaunch = !prefs.getBoolean("has_welcomed_first_time_$currentProfileKey", false)
+        val lastGreetingDate = com.example.data.preferences.BudgetPreferencesRepository.getLastGreetingDate(getApplication(), currentProfileKey)
+        val isFirstLaunch = !com.example.data.preferences.BudgetPreferencesRepository.hasWelcomedFirstTime(getApplication(), currentProfileKey)
         val now = System.currentTimeMillis()
 
         viewModelScope.launch {
@@ -665,8 +626,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             val hasUnread = currentNotifs.any { !it.isRead }
 
             if (isFirstLaunch) {
-                prefs.edit().putBoolean("has_welcomed_first_time_$currentProfileKey", true).apply()
-                prefs.edit().putString("last_greeting_date_$currentProfileKey", todayDate).apply()
+                com.example.data.preferences.BudgetPreferencesRepository.markFirstTimeWelcomed(getApplication(), currentProfileKey, todayDate)
                 val greetingMsg = "$timeGreeting$nameStr!"
                 repository.insertNotification(
                     com.example.data.db.NotificationEntity(
@@ -680,7 +640,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 )
             } else if (!hasUnread && lastGreetingDate != todayDate) {
-                prefs.edit().putString("last_greeting_date_$currentProfileKey", todayDate).apply()
+                com.example.data.preferences.BudgetPreferencesRepository.setLastGreetingDate(getApplication(), currentProfileKey, todayDate)
                 val greetingMsg = "$timeGreeting$nameStr!"
                 repository.insertNotification(
                     com.example.data.db.NotificationEntity(

@@ -482,43 +482,8 @@ class VoiceInputManager(context: Context) {
     }
 
     private fun resolveUserApiKey(callerContext: Context, explicitKey: String = ""): String {
-        val fromExplicit = com.example.data.api.GeminiModelConfig.sanitizeApiKey(explicitKey)
-        if (fromExplicit.isNotBlank()) return fromExplicit
-
         return try {
-            val secureKey = try {
-                val masterKey = androidx.security.crypto.MasterKey.Builder(callerContext)
-                    .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
-                    .build()
-                val securePrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
-                    callerContext,
-                    "secure_prefs",
-                    masterKey,
-                    androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                )
-                com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-                    securePrefs.getString("gemini_api_key", "")
-                )
-            } catch (_: Throwable) {
-                ""
-            }
-            if (secureKey.isNotBlank()) return secureKey
-
-            val prefs = callerContext.getSharedPreferences("budget_prefs", Context.MODE_PRIVATE)
-            val legacyKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-                prefs.getString("gemini_api_key", "")
-            )
-            if (legacyKey.isNotBlank()) return legacyKey
-
-            val defaultKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-                com.example.BuildConfig.GEMINI_API_KEY
-            )
-            if (com.example.data.api.GeminiModelConfig.isValidGeminiApiKey(defaultKey)) {
-                defaultKey
-            } else {
-                ""
-            }
+            com.example.data.preferences.ApiKeyStorage.getSavedApiKey(callerContext, explicitKey)
         } catch (_: Throwable) {
             ""
         }
