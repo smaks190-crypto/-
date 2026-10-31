@@ -54,14 +54,13 @@ object SafeToSpendCalculator {
 
         // 3. Determine dynamic horizon H
         //    When horizonDaysOverride is null:
-        //    - If a future guaranteed income exists, horizon is the window up to that income
-        //      (extended if active obligations exist within the 30-day window so future bills are never dropped).
+        //    - If a future guaranteed income exists, horizon is the window up to that income.
         //    - Otherwise use the 30-day rolling fallback window so month-end dates (e.g. Oct 31) never collapse to 1 day.
         val horizonDays = when {
             input.horizonDaysOverride != null -> input.horizonDaysOverride.coerceIn(1, 60)
             earliestGuaranteedIncomeDay != null -> {
                 val delta = (earliestGuaranteedIncomeDay - d0).toInt()
-                max(delta, obligationHorizonDays).coerceIn(1, MAX_DYNAMIC_HORIZON_WITH_INCOME_DAYS)
+                delta.coerceIn(1, MAX_DYNAMIC_HORIZON_WITH_INCOME_DAYS)
             }
             else -> max(MAX_FALLBACK_HORIZON_DAYS, obligationHorizonDays).coerceIn(1, MAX_FALLBACK_HORIZON_DAYS)
         }
@@ -72,12 +71,16 @@ object SafeToSpendCalculator {
             schedule.dueItemsByOffset[t]?.sumOf { it.amountRub } ?: 0.0
         }
         val todayPendingGuaranteedIncomeRub = schedule.guaranteedInflowByOffset[0] ?: 0.0
-        val incomeWindowEndOffset = max(
-            horizonDays,
-            earliestGuaranteedIncomeDay?.let { (it - d0).toInt() } ?: 0
-        ).coerceIn(0, 60)
-        val upcomingGuaranteedIncomeRub = (1..incomeWindowEndOffset).sumOf { t ->
+        val inHorizonFutureGuaranteedIncomeRub = (1 until horizonDays).sumOf { t ->
             schedule.guaranteedInflowByOffset[t] ?: 0.0
+        }
+        val anchorPaydayOffset = earliestGuaranteedIncomeDay?.let { (it - d0).toInt() }
+        val upcomingGuaranteedIncomeRub = if (todayPendingGuaranteedIncomeRub > 0.0 || inHorizonFutureGuaranteedIncomeRub > 0.0) {
+            inHorizonFutureGuaranteedIncomeRub
+        } else if (anchorPaydayOffset != null && anchorPaydayOffset in 1..60) {
+            schedule.guaranteedInflowByOffset[anchorPaydayOffset] ?: 0.0
+        } else {
+            0.0
         }
 
         // 4. Safety floor R_floor (never shrunk to 10% when balance is low!)

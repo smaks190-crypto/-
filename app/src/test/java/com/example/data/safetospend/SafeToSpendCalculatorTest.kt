@@ -1318,7 +1318,7 @@ class SafeToSpendCalculatorTest {
             status = "PAID",
             linkedTransactionId = "tx_paid_rent"
         )
-        val rentDueToday = editedRentEntity.copy(nextDueDateEpochDay = oct31EpochDay)
+        val rentDueToday = editedRentEntity.copy(nextDueDateEpochDay = oct31EpochDay, anchorDayOfMonth = 31)
         val snapBeforePaid = DavidFinancialIntelligenceProvider.computeSnapshot(
             transactions = baseTransactions,
             accounts = emptyList(),
