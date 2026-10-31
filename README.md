@@ -15,18 +15,22 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v11.13 (сборка 293)
+### Версия v11.14 (сборка 297)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
 **Что изменилось:**
 
-## Что изменилось
+### Исправлено
+- Русскоязычные заметки релиза без английских коммитов и ссылок (Refs
+- Не добавлять дублирующийся заголовок «Что изменилось» в заметки (Refs
 
-### Добавлено
-- Enrich existing demo budget with multi-month realistic transaction coverage ([eb348a1](https://github.com/smaks190-crypto/-/commit/eb348a1f6e6ad0c1c2c42755a7b5f7145762dd71))
+### Документация и сборка
+- Русскоязычные заметки релиза в README
+- Тесты и шаблон PR для русскоязычных заметок релиза (Refs
+- Обновить тест под заметки без дублирующегося заголовка (Refs
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.12-build.290...v11.13-build.293
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.13-build.293...v11.14-build.297
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
