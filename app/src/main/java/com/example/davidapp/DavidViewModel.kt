@@ -78,14 +78,27 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     val liveSessionController = DavidLiveSessionController(
-        financialToolsProvider = liveFinancialToolsProvider
-    ).apply {
-        bindNetworkContext(application)
-    }
+        financialToolsProvider = liveFinancialToolsProvider,
+        systemPromptExtrasProvider = {
+            val appCtx = getApplication<Application>()
+            val strictness = com.example.notifications.ReminderManager.getAuditorStrictness(appCtx)
+            val croakThreshold = com.example.notifications.ReminderManager.getCroakThresholdAmount(appCtx)
+            "${strictness.systemPromptDirective}\nПорог крупной разовой траты («Порог кваканья» пользователя): $croakThreshold ₽."
+        },
+        externalUserMessagesProvider = {
+            sessionMessages
+                .filter { it.isUser }
+                .mapNotNull { msg -> (msg.type as? ChatMessageType.Text)?.content }
+        }
+    )
 
     private val liveSummaryGenerator = DavidLiveSummaryGenerator(
         geminiApiService = RetrofitClient.service
     )
+
+    init {
+        liveSessionController.bindNetworkContext(application)
+    }
 
     private val _isLiveOverlayVisible = MutableStateFlow(false)
     val isLiveOverlayVisible: StateFlow<Boolean> = _isLiveOverlayVisible.asStateFlow()
