@@ -110,15 +110,21 @@ object DavidFinancialIntelligenceProvider {
         // 3. Extract essential & discretionary category monthly limits
         val essentialCategoryLimits = mutableMapOf<String, Double>()
         var totalDiscretionaryBudgetLimit = 0.0
+        var totalDiscretionaryCategoriesCount = 0
         val discretionaryLimitedCategories = mutableSetOf<String>()
 
         for (cat in categories) {
             if (!cat.type.equals("expense", ignoreCase = true)) continue
+            val isEss = EssentialSpendingEstimator.isEssentialCategory(cat.name)
+            val isMand = EssentialSpendingEstimator.isMandatoryCategory(cat.name)
+            if (!isEss && !isMand) {
+                totalDiscretionaryCategoriesCount++
+            }
             val limit = cat.monthlyLimit ?: 0.0
             if (limit <= 0.0) continue
-            if (EssentialSpendingEstimator.isEssentialCategory(cat.name)) {
+            if (isEss) {
                 essentialCategoryLimits[cat.name] = limit
-            } else if (!EssentialSpendingEstimator.isMandatoryCategory(cat.name)) {
+            } else if (!isMand) {
                 totalDiscretionaryBudgetLimit += limit
                 discretionaryLimitedCategories.add(cat.name.lowercase(Locale("ru", "RU")))
             }
@@ -134,8 +140,12 @@ object DavidFinancialIntelligenceProvider {
             essentialCategoryMonthlyLimitsRub = essentialCategoryLimits
         )
 
-        // 5. Compute discretionary category remaining budget if discretionary category limits exist
-        val discretionaryCategoryRemainingRub: Double? = if (totalDiscretionaryBudgetLimit > 0.0) {
+        // 5. Compute discretionary category remaining budget ONLY when all discretionary expense categories
+        //    have an explicit monthly limit configured (a partial limit on 1-2 categories is a category cap,
+        //    not a global cap on the user's entire discretionary liquidity pool).
+        val hasComprehensiveDiscretionaryBudget = totalDiscretionaryCategoriesCount > 0 &&
+            discretionaryLimitedCategories.size == totalDiscretionaryCategoriesCount
+        val discretionaryCategoryRemainingRub: Double? = if (hasComprehensiveDiscretionaryBudget && totalDiscretionaryBudgetLimit > 0.0) {
             val spentBeforeTodayInDiscCats = transactions
                 .filter { tx ->
                     tx.type.equals("expense", ignoreCase = true) &&

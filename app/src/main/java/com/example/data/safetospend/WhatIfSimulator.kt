@@ -39,19 +39,34 @@ object WhatIfSimulator {
             }
             is WhatIfScenarioRequest.IncomeDelay -> {
                 val delay = max(0, request.delayDays).toLong()
+                var anyIncomeDelayed = false
                 val delayedPayments = baseInput.activeRecurringPayments.map { payment ->
                     val shouldDelay = payment.isIncome &&
                         payment.status == RecurringStatus.ACTIVE &&
                         (request.targetIncomeId == null || payment.id == request.targetIncomeId)
                     if (shouldDelay) {
-                        payment.copy(nextDueDateEpochDay = payment.nextDueDateEpochDay + delay)
+                        anyIncomeDelayed = true
+                        val shiftedEpochDay = payment.nextDueDateEpochDay + delay
+                        val shiftedAnchorDay = try {
+                            java.time.LocalDate.ofEpochDay(shiftedEpochDay).dayOfMonth
+                        } catch (_: Exception) {
+                            payment.anchorDayOfMonth
+                        }
+                        payment.copy(
+                            nextDueDateEpochDay = shiftedEpochDay,
+                            anchorDayOfMonth = shiftedAnchorDay
+                        )
                     } else {
                         payment
                     }
                 }
                 baseInput.copy(
                     activeRecurringPayments = delayedPayments,
-                    horizonDaysOverride = null
+                    horizonDaysOverride = if (anyIncomeDelayed) {
+                        null
+                    } else {
+                        (baseline.horizonDays + request.delayDays.coerceAtLeast(0)).coerceIn(1, 60)
+                    }
                 )
             }
         }
@@ -85,9 +100,12 @@ object WhatIfSimulator {
         val runwaySufficientUntilPayday = isEnoughKeepingSafetyReserve && !simulated.hasCashGap
         val deficitUntilPaydayRub = max(0.0, -surplusAboveReserveRub)
 
-        // Autonomous survival days at zero discretionary spend
+        // Autonomous survival days at zero discretionary spend (including today/upcoming guaranteed income)
         val lNet = simulated.availableBalanceRub - simulated.lockedGoalsAndReserveRub
-        val cumGuarInflows = lastPoint?.cumulativeGuaranteedInflowsRub ?: 0.0
+        val cumGuarInflows = max(
+            lastPoint?.cumulativeGuaranteedInflowsRub ?: 0.0,
+            simulated.todayPendingGuaranteedIncomeRub + simulated.upcomingGuaranteedIncomeRub
+        )
         val cumMandOutflows = lastPoint?.cumulativeMandatoryOutflowsRub ?: 0.0
         val netPoolForEssentials = max(0.0, lNet + cumGuarInflows - cumMandOutflows)
         val autonomousSurvivalDaysAtZeroDisc = if (simulated.dailyEssentialRateRub > 0.0) {
