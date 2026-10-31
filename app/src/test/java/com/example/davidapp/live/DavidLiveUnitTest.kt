@@ -463,13 +463,15 @@ class DavidLiveUnitTest {
 
         // Гарантия режима только для чтения
         assertFalse("David Live must never mutate financial records without confirmation", provider.canMutateRecords)
-        assertEquals(5, provider.buildFunctionDeclarationsJson().length())
+        assertEquals(7, provider.buildFunctionDeclarationsJson().length())
 
         // 1. Сводка бюджета
         val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
         assertEquals("ok", overview.getString("status"))
         assertEquals(101500L, overview.getLong("totalBalanceRub"))
+        assertEquals(101500L, overview.getLong("availableBalanceRub"))
         assertEquals(120000L, overview.getLong("income30dRub"))
+        assertEquals(120000L, overview.getLong("earnedIncome30dRub"))
         assertEquals(18500L, overview.getLong("expense30dRub"))
 
         // 2. Категории и лимиты
@@ -489,6 +491,229 @@ class DavidLiveUnitTest {
         // Все проверенные факты сохранены для пост-резюме
         assertEquals(3, provider.verifiedFacts.size)
         assertTrue(provider.verifiedFacts.any { it.summary.contains("101500") })
+    }
+
+    @Test
+    fun `issue 43 - financial semantics calculator and live tools strictly separate salary, balance, we_owe and owes_us`() = runBlocking {
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        val now = System.currentTimeMillis()
+
+        // Сценарий 1: Отдельно только зарплата
+        val salaryOnlySnap = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = listOf(
+                TransactionEntity(id = "s1", budgetId = "b1", type = "income", date = today, category = "Зарплата", subcategory = "Основная работа", amount = 100_000.0, createdAt = now)
+            ),
+            periodTransactions = listOf(
+                TransactionEntity(id = "s1", budgetId = "b1", type = "income", date = today, category = "Зарплата", subcategory = "Основная работа", amount = 100_000.0, createdAt = now)
+            ),
+            accounts = emptyList()
+        )
+        assertEquals(100_000.0, salaryOnlySnap.availableBalanceRub, 0.01)
+        assertEquals(100_000.0, salaryOnlySnap.earnedIncomeRub, 0.01)
+        assertEquals(100_000.0, salaryOnlySnap.salaryIncomeRub, 0.01)
+        assertEquals(0.0, salaryOnlySnap.totalWeOweRub, 0.01)
+        assertEquals(0.0, salaryOnlySnap.totalOwesUsRub, 0.01)
+
+        // Сценарий 2: Отдельно только корректировка начального/текущего баланса (не должна раздувать заработанный доход)
+        val balanceOnlyTxs = listOf(
+            TransactionEntity(id = "b_init", budgetId = "b1", type = "income", date = today, category = "Начальный баланс", subcategory = "Остаток на карте", amount = 50_000.0, createdAt = now)
+        )
+        val balanceOnlySnap = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = balanceOnlyTxs,
+            periodTransactions = balanceOnlyTxs,
+            accounts = emptyList()
+        )
+        assertEquals(50_000.0, balanceOnlySnap.availableBalanceRub, 0.01)
+        assertEquals("Starting balance must NOT be counted as earned period income", 0.0, balanceOnlySnap.earnedIncomeRub, 0.01)
+        assertEquals(50_000.0, balanceOnlySnap.balanceAdjustmentRub, 0.01)
+
+        // Сценарий 3: Отдельно только мой долг (we_owe) и отдельно только долг мне (owes_us)
+        val weOweAcc = AccountEntity(id = "d_we", budgetId = "b1", name = "Кредитка Альфа", balance = 30_000.0, type = "we_owe")
+        val owesUsAcc = AccountEntity(id = "d_they", budgetId = "b1", name = "Иван (займ)", balance = 15_000.0, type = "owes_us")
+
+        val weOweOnlySnap = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = emptyList(),
+            periodTransactions = emptyList(),
+            accounts = listOf(weOweAcc)
+        )
+        assertEquals(0.0, weOweOnlySnap.availableBalanceRub, 0.01)
+        assertEquals(0.0, weOweOnlySnap.earnedIncomeRub, 0.01)
+        assertEquals(30_000.0, weOweOnlySnap.totalWeOweRub, 0.01)
+        assertEquals(0.0, weOweOnlySnap.totalOwesUsRub, 0.01)
+
+        val owesUsOnlySnap = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = emptyList(),
+            periodTransactions = emptyList(),
+            accounts = listOf(owesUsAcc)
+        )
+        assertEquals(0.0, owesUsOnlySnap.availableBalanceRub, 0.01)
+        assertEquals(0.0, owesUsOnlySnap.earnedIncomeRub, 0.01)
+        assertEquals(0.0, owesUsOnlySnap.totalWeOweRub, 0.01)
+        assertEquals(15_000.0, owesUsOnlySnap.totalOwesUsRub, 0.01)
+
+        // Сценарий 4: Все 4 сущности одновременно в БД и через инструменты David Live
+        // Доступный баланс НЕ суммируется с AccountEntity.balance (где хранятся долги),
+        // а доход НЕ включает ни начальный баланс, ни долги.
+        val combinedTxs = listOf(
+            TransactionEntity(id = "t_init", budgetId = "b1", type = "income", date = today, category = "Начальный баланс", subcategory = "Ввод остатка", amount = 50_000.0, createdAt = now - 40_000L),
+            TransactionEntity(id = "t_sal", budgetId = "b1", type = "income", date = today, category = "Зарплата", subcategory = "Аванс и оклад", amount = 100_000.0, createdAt = now - 30_000L),
+            TransactionEntity(id = "t_exp", budgetId = "b1", type = "expense", date = today, category = "Продукты", subcategory = "Супермаркет", amount = 10_000.0, createdAt = now - 20_000L)
+        )
+        val combinedDebts = listOf(weOweAcc, owesUsAcc)
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(combinedTxs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(combinedDebts)
+        )
+
+        val overview1 = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        // Повторный запрос должен вернуть идентичные цифры без дублирования или мутации
+        val overview2 = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+
+        // Доступный остаток = 50 000 + 100 000 - 10 000 = 140 000 ₽ (НЕ +30 000 и НЕ +15 000!)
+        assertEquals(140_000L, overview1.getLong("availableBalanceRub"))
+        assertEquals(140_000L, overview1.getLong("totalBalanceRub"))
+        assertEquals(overview1.getLong("availableBalanceRub"), overview2.getLong("availableBalanceRub"))
+
+        // Заработанный доход = 100 000 ₽ (только зарплата, без начального баланса 50 000 ₽ и без долгов 30 000 / 15 000 ₽)
+        assertEquals(100_000L, overview1.getLong("earnedIncome30dRub"))
+        assertEquals(100_000L, overview1.getLong("income30dRub"))
+        assertEquals(100_000L, overview1.getLong("salaryIncome30dRub"))
+
+        // Долги строго в отдельных полях
+        assertEquals(30_000L, overview1.getLong("totalWeOweRub"))
+        assertEquals(15_000L, overview1.getLong("totalOwesUsRub"))
+
+        val debtsToolResult = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_GOALS_AND_DEBTS, null)
+        assertEquals(2, debtsToolResult.getInt("debtsCount"))
+        assertEquals(30_000L, debtsToolResult.getLong("totalWeOweRub"))
+        assertEquals(15_000L, debtsToolResult.getLong("totalOwesUsRub"))
+        assertEquals(1, debtsToolResult.getJSONArray("weOweDebts").length())
+        assertEquals(1, debtsToolResult.getJSONArray("owesUsDebts").length())
+    }
+
+    @Test
+    fun `issue 43 - partial and full debt repayments update remaining debt and available balance without inflating earned income`() {
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        val weOweAcc = AccountEntity(id = "d_we", budgetId = "b1", name = "Кредитка", balance = 30_000.0, type = "we_owe")
+        val owesUsAcc = AccountEntity(id = "d_they", budgetId = "b1", name = "Иван", balance = 15_000.0, type = "owes_us")
+
+        // Частичное погашение нашего долга (10 000 ₽) и частичный возврат долга нам от Ивана (5 000 ₽)
+        val txsPartial = listOf(
+            TransactionEntity(id = "t1", budgetId = "b1", type = "income", date = today, category = "Зарплата", subcategory = "Оклад", amount = 100_000.0),
+            TransactionEntity(id = "t2", budgetId = "b1", type = "expense", date = today, category = "Долги", subcategory = "Выплата по долгу: Кредитка", amount = 10_000.0, accountId = "d_we"),
+            TransactionEntity(id = "t3", budgetId = "b1", type = "income", date = today, category = "Долги", subcategory = "Возврат долга: Иван", amount = 5_000.0, accountId = "d_they")
+        )
+
+        val partialSnap = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = txsPartial,
+            periodTransactions = txsPartial,
+            accounts = listOf(weOweAcc, owesUsAcc)
+        )
+
+        // Заработанный доход остаётся ровно 100 000 ₽ (возврат долга 5 000 ₽ — это debtReturnedIncomeRub, а не заработанный доход!)
+        assertEquals(100_000.0, partialSnap.earnedIncomeRub, 0.01)
+        assertEquals(5_000.0, partialSnap.debtReturnedIncomeRub, 0.01)
+        assertEquals(10_000.0, partialSnap.debtRepaymentExpenseRub, 0.01)
+        // Доступный баланс на руках: 100 000 - 10 000 + 5 000 = 95 000 ₽
+        assertEquals(95_000.0, partialSnap.availableBalanceRub, 0.01)
+        // Остаток нашего долга: 30 000 - 10 000 = 20 000 ₽; остаток долга Ивана нам: 15 000 - 5 000 = 10 000 ₽
+        assertEquals(20_000.0, partialSnap.totalWeOweRub, 0.01)
+        assertEquals(10_000.0, partialSnap.totalOwesUsRub, 0.01)
+
+        // Полное погашение обоих долгов
+        val txsFull = txsPartial + listOf(
+            TransactionEntity(id = "t4", budgetId = "b1", type = "expense", date = today, category = "Долги", subcategory = "Кредитка закрытие", amount = 20_000.0, accountId = "d_we"),
+            TransactionEntity(id = "t5", budgetId = "b1", type = "income", date = today, category = "Долги", subcategory = "Иван вернул остаток", amount = 10_000.0, accountId = "d_they")
+        )
+        val fullSnap = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = txsFull,
+            periodTransactions = txsFull,
+            accounts = listOf(weOweAcc, owesUsAcc)
+        )
+        assertEquals(100_000.0, fullSnap.earnedIncomeRub, 0.01)
+        assertEquals(15_000.0, fullSnap.debtReturnedIncomeRub, 0.01)
+        assertEquals(30_000.0, fullSnap.debtRepaymentExpenseRub, 0.01)
+        assertEquals(85_000.0, fullSnap.availableBalanceRub, 0.01)
+        assertEquals(0.0, fullSnap.totalWeOweRub, 0.01)
+        assertEquals(0.0, fullSnap.totalOwesUsRub, 0.01)
+    }
+
+    @Test
+    fun `issue 43 - conversational mentions and heuristic voice parser do not mix salary, balance and debts`() {
+        val text = "Зарплата 100к, текущий баланс 50к, я должен 30к, мне должны 15к"
+
+        // 1. Проверка извлечения сущностей из реплики диалога
+        val mention = com.example.data.repository.FinancialSemanticsCalculator.extractConversationalFinancialMention(text)
+        assertEquals(100_000.0, mention.salaryAmount ?: 0.0, 0.01)
+        assertEquals(50_000.0, mention.currentBalanceAmount ?: 0.0, 0.01)
+        assertEquals(30_000.0, mention.weOweAmount ?: 0.0, 0.01)
+        assertEquals(15_000.0, mention.owesUsAmount ?: 0.0, 0.01)
+
+        // 2. Слияние с пустым снимком БД не складывает эти 4 числа в один доход или баланс
+        val emptySnap = com.example.data.repository.FinancialSemanticsCalculator.calculateSnapshot(
+            allTransactions = emptyList(),
+            periodTransactions = emptyList(),
+            accounts = emptyList()
+        )
+        val merged = com.example.data.repository.FinancialSemanticsCalculator.mergeSnapshotWithConversationalMentions(
+            baseSnapshot = emptySnap,
+            userMessages = listOf(text)
+        )
+        assertEquals(50_000.0, merged.availableBalanceRub, 0.01)
+        assertEquals(100_000.0, merged.earnedIncomeRub, 0.01)
+        assertEquals(100_000.0, merged.salaryIncomeRub, 0.01)
+        assertEquals(30_000.0, merged.totalWeOweRub, 0.01)
+        assertEquals(15_000.0, merged.totalOwesUsRub, 0.01)
+
+        val formatted = com.example.data.repository.FinancialSemanticsCalculator.formatChatFinancialBreakdown(merged)
+        assertTrue(formatted.contains("50000 ₽"))
+        assertTrue(formatted.contains("100000 ₽"))
+        assertTrue(formatted.contains("30000 ₽"))
+        assertTrue(formatted.contains("15000 ₽"))
+        assertFalse("Must never sum 100k+50k+30k+15k into 195000", formatted.contains("195000"))
+
+        // 3. Эвристический парсер голоса/чата извлекает только реальную операцию зарплаты (100 000 ₽)
+        // и НЕ превращает баланс (50к) или долги (30к, 15к) в доходы/расходы
+        val parsedOps = com.example.utils.VoiceParserHelper.parseHeuristically(
+            text = text,
+            expenseCategories = listOf("Продукты", "Прочее"),
+            incomeCategories = listOf("Зарплата", "Фриланс")
+        )
+        assertEquals(1, parsedOps.size)
+        assertEquals("income", parsedOps.first().type)
+        assertEquals("Зарплата", parsedOps.first().category)
+        assertEquals(100_000.0, parsedOps.first().amount, 0.01)
+    }
+
+    @Test
+    fun `issue 43 - david live session controller merges spoken user turns into financial tools snapshot`() = runBlocking {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b_live",
+            transactionDao = createReadOnlyTransactionDao(emptyList()),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList())
+        )
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            externalUserMessagesProvider = { listOf("Мой текущий баланс 45к") }
+        )
+        // Пользователь произнёс в ходе голосового звонка David Live:
+        controller.recordTranscriptTurn(
+            DavidLiveSpeaker.USER,
+            "У меня зарплата 120к, я должен 25к, а мне должны 10к"
+        )
+
+        val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        assertEquals(45_000L, overview.getLong("availableBalanceRub"))
+        assertEquals(120_000L, overview.getLong("earnedIncome30dRub"))
+        assertEquals(120_000L, overview.getLong("salaryIncome30dRub"))
+        assertEquals(25_000L, overview.getLong("totalWeOweRub"))
+        assertEquals(10_000L, overview.getLong("totalOwesUsRub"))
     }
 
     @Test
@@ -973,5 +1198,158 @@ class DavidLiveUnitTest {
             throw UnsupportedOperationException("Read-only in David Live")
         override suspend fun deleteAccountsByBudgetId(budgetId: String) =
             throw UnsupportedOperationException("Read-only in David Live")
+    }
+
+    @Test
+    fun `ApiKeyStorage migrates legacy key atomically and refuses plaintext fallback when securePrefs is null`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val legacyPrefs = context.getSharedPreferences("test_legacy_budget_prefs", android.content.Context.MODE_PRIVATE)
+        val securePrefs = context.getSharedPreferences("test_secure_prefs_mock", android.content.Context.MODE_PRIVATE)
+        legacyPrefs.edit().clear().commit()
+        securePrefs.edit().clear().commit()
+
+        val validKey = "AIzaSyD-TestKeyForCentralizedStorage12345"
+        legacyPrefs.edit().putString(com.example.data.preferences.ApiKeyStorage.KEY_GEMINI_API_KEY, "  $validKey  ").commit()
+
+        // 1. При недоступности защищённого хранилища (securePrefs == null) ключ в legacy не теряется, а запись нового отклоняется
+        val resolvedWhenNull = com.example.data.preferences.ApiKeyStorage.resolveAndMigrateApiKey(
+            securePrefs = null,
+            legacyPrefs = legacyPrefs
+        )
+        assertEquals(validKey, resolvedWhenNull)
+        assertTrue(legacyPrefs.contains(com.example.data.preferences.ApiKeyStorage.KEY_GEMINI_API_KEY))
+        assertFalse(
+            com.example.data.preferences.ApiKeyStorage.saveApiKeyWithPrefs(
+                rawKey = "AIzaSyD-NewSecretKey999999999999",
+                securePrefs = null,
+                legacyPrefs = legacyPrefs
+            )
+        )
+
+        // 2. Когда защищённое хранилище доступно, миграция переносит ключ и удаляет его из legacyPrefs
+        val migrated = com.example.data.preferences.ApiKeyStorage.resolveAndMigrateApiKey(
+            securePrefs = securePrefs,
+            legacyPrefs = legacyPrefs
+        )
+        assertEquals(validKey, migrated)
+        assertEquals(validKey, securePrefs.getString(com.example.data.preferences.ApiKeyStorage.KEY_GEMINI_API_KEY, ""))
+        assertFalse(legacyPrefs.contains(com.example.data.preferences.ApiKeyStorage.KEY_GEMINI_API_KEY))
+    }
+
+    @Test
+    fun `BudgetPreferencesRepository centralizes consent, budget selection, chat flags and sound settings`() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        com.example.data.preferences.BudgetPreferencesRepository.budgetPrefs(context).edit().clear().commit()
+        com.example.data.preferences.BudgetPreferencesRepository.appPrefs(context).edit().clear().commit()
+
+        assertFalse(com.example.data.preferences.BudgetPreferencesRepository.isGeminiConsentGiven(context))
+        com.example.data.preferences.BudgetPreferencesRepository.setGeminiConsentGiven(context, true)
+        assertTrue(com.example.data.preferences.BudgetPreferencesRepository.isGeminiConsentGiven(context))
+
+        assertTrue(com.example.data.preferences.BudgetPreferencesRepository.isFirstLaunchSelection(context))
+        assertNull(com.example.data.preferences.BudgetPreferencesRepository.getLastSelectedBudgetId(context))
+
+        com.example.data.preferences.BudgetPreferencesRepository.setSelectedBudget(context, "budget_main")
+        assertFalse(com.example.data.preferences.BudgetPreferencesRepository.isFirstLaunchSelection(context))
+        assertEquals("budget_main", com.example.data.preferences.BudgetPreferencesRepository.getLastSelectedBudgetId(context))
+
+        com.example.data.preferences.BudgetPreferencesRepository.resetBudgetSelectionOnClear(context)
+        assertTrue(com.example.data.preferences.BudgetPreferencesRepository.isFirstLaunchSelection(context))
+        assertNull(com.example.data.preferences.BudgetPreferencesRepository.getLastSelectedBudgetId(context))
+
+        assertFalse(com.example.data.preferences.BudgetPreferencesRepository.hasOpenedDavidChatBefore(context, "Максим"))
+        com.example.data.preferences.BudgetPreferencesRepository.markDavidChatOpened(context, "Максим")
+        assertTrue(com.example.data.preferences.BudgetPreferencesRepository.hasOpenedDavidChatBefore(context, "Максим"))
+
+        assertTrue(com.example.data.preferences.BudgetPreferencesRepository.isSoundEnabled(context))
+        com.example.data.preferences.BudgetPreferencesRepository.appPrefs(context).edit().putBoolean("sound_enabled", false).commit()
+        assertFalse(com.example.data.preferences.BudgetPreferencesRepository.isSoundEnabled(context))
+    }
+
+    @Test
+    fun `VoiceOperationParserService and BudgetRepository companion parse and sanitize voice JSON identically`() {
+        val rawMarkdownJson = """
+            ```json
+            [
+              {"title": "Пятёрочка", "type": "expense", "amount": 1250.5, "category": "Продукты", "subcategory": "Супермаркет", "date": "2026-10-31"},
+              {"title": "null", "type": "income", "amount": 50000, "category": "Зарплата", "subcategory": "undefined", "date": "invalid-date"}
+            ]
+            ```
+        """.trimIndent()
+
+        val extracted = com.example.data.repository.VoiceOperationParserService.extractJsonArray(rawMarkdownJson)
+        assertEquals(com.example.data.repository.BudgetRepository.extractJsonArray(rawMarkdownJson), extracted)
+
+        val parsed = com.example.data.repository.VoiceOperationParserService.parseJsonOperations(extracted, "2026-10-30")
+        assertEquals(2, parsed.size)
+        assertEquals("Пятёрочка", parsed[0].title)
+        assertEquals("expense", parsed[0].type)
+        assertEquals(1250.5, parsed[0].amount, 0.001)
+        assertEquals("2026-10-31", parsed[0].date)
+
+        assertEquals("Зарплата", parsed[1].title)
+        assertEquals("income", parsed[1].type)
+        assertEquals("", parsed[1].subcategory)
+        assertEquals("2026-10-30", parsed[1].date)
+    }
+
+    @Test
+    fun `DavidAiAuditService provides deterministic offline comments and user phrases when API key is blank`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val service = com.example.data.repository.DavidAiAuditService(context)
+        val comment = service.generateDavidComment(
+            apiKey = "",
+            type = "expense",
+            category = "Фастфуд",
+            subcategory = "Бургеры",
+            amount = 850.0
+        )
+        assertTrue(comment.isNotBlank())
+
+        val userPhrase = service.generateUserPhrase(
+            apiKey = "",
+            type = "expense",
+            category = "Продукты",
+            subcategory = "Молоко",
+            amount = 120.0,
+            isFirstToday = true
+        )
+        assertTrue(userPhrase.isNotBlank())
+    }
+
+    @Test
+    fun `core database module provides Room DAOs migrations and atomic CRUD operations`() = runBlocking {
+        assertEquals(3, com.example.data.db.MIGRATION_3_4.startVersion)
+        assertEquals(4, com.example.data.db.MIGRATION_3_4.endVersion)
+        assertEquals(4, com.example.data.db.MIGRATION_4_5.startVersion)
+        assertEquals(5, com.example.data.db.MIGRATION_4_5.endVersion)
+        assertEquals(5, com.example.data.db.MIGRATION_5_6.startVersion)
+        assertEquals(6, com.example.data.db.MIGRATION_5_6.endVersion)
+
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val db = androidx.room.Room.inMemoryDatabaseBuilder(
+            context,
+            com.example.data.db.AppDatabase::class.java
+        ).allowMainThreadQueries().build()
+
+        try {
+            val profile = com.example.data.db.BudgetProfileEntity(id = "test_b1", name = "Основной")
+            db.budgetProfileDao().insertProfile(profile)
+            assertEquals("Основной", db.budgetProfileDao().getProfileById("test_b1")?.name)
+
+            val acc = com.example.data.db.AccountEntity(
+                id = "acc_1",
+                budgetId = "test_b1",
+                name = "Карта",
+                balance = 10000.0,
+                type = "card",
+                accountNumber = "**** 1234"
+            )
+            db.accountDao().insertAccount(acc)
+            db.accountDao().updateBalance("acc_1", -1500.0)
+            assertEquals(8500.0, db.accountDao().getAccountById("acc_1")?.balance ?: 0.0, 0.001)
+        } finally {
+            db.close()
+        }
     }
 }

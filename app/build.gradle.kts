@@ -1,7 +1,6 @@
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.google.devtools.ksp)
   // alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
 }
@@ -119,8 +118,7 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
-  implementation(libs.androidx.room.ktx)
-  implementation(libs.androidx.room.runtime)
+  implementation(project(":core:database"))
   implementation(libs.androidx.security.crypto)
   implementation(libs.androidx.biometric)
   implementation(libs.androidx.fragment.ktx)
@@ -149,7 +147,6 @@ dependencies {
   androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
-  "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen) // Не используется (применяется рефлексивный KotlinJsonAdapterFactory)
 
   // Автоматический парсинг Markdown для Jetpack Compose
@@ -168,6 +165,8 @@ tasks.withType<Test>().configureEach {
     includeTestsMatching("com.example.utils.GlobalConsoleLoggerTest")
     includeTestsMatching("com.example.ExampleUnitTest")
     includeTestsMatching("com.example.davidapp.live.DavidLiveUnitTest")
+    includeTestsMatching("com.example.data.FinancialSemanticsCalculatorTest")
+    includeTestsMatching("com.example.data.safetospend.SafeToSpendCalculatorTest")
   }
 }
 
@@ -189,7 +188,17 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
   }
 }
 
-tasks.matching { it.name == "assembleDebug" }.configureEach {
+// В Fast CI при сборке Debug APK запускаем только Debug Unit-тесты (без дублирующей компиляции Release и AndroidTest)
+if (System.getenv("GITHUB_ACTIONS") == "true") {
+  tasks.matching { it.name == "assembleDebug" }.configureEach {
+    dependsOn("testDebugUnitTest")
+  }
+}
+
+// Полная проверка всех Source Sets (Release + AndroidTest + UnitTest) доступна через отдельную задачу
+tasks.register("verifyAllSourceSets") {
+  group = "verification"
+  description = "Compiles Release and AndroidTest source sets and runs Debug unit tests."
   dependsOn("compileReleaseKotlin", "compileDebugAndroidTestKotlin", "testDebugUnitTest")
 }
 
