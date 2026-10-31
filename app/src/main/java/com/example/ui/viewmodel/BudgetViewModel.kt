@@ -92,8 +92,11 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     val categories: StateFlow<List<CategoryEntity>>
     val accounts: StateFlow<List<AccountEntity>>
     val notifications: StateFlow<List<NotificationEntity>>
-    val recurringPayments: StateFlow<List<RecurringPaymentEntity>>
-    val recurringExecutionLogs: StateFlow<List<RecurringExecutionLogEntity>>
+    private val _recurringPayments = MutableStateFlow<List<RecurringPaymentEntity>>(emptyList())
+    val recurringPayments: StateFlow<List<RecurringPaymentEntity>> = _recurringPayments.asStateFlow()
+
+    private val _recurringExecutionLogs = MutableStateFlow<List<RecurringExecutionLogEntity>>(emptyList())
+    val recurringExecutionLogs: StateFlow<List<RecurringExecutionLogEntity>> = _recurringExecutionLogs.asStateFlow()
 
     private val _userSafetyFloorRub = MutableStateFlow(prefs.getFloat("user_safety_floor_rub", 0f).toDouble())
     val userSafetyFloorRub: StateFlow<Double> = _userSafetyFloorRub.asStateFlow()
@@ -354,23 +357,21 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             emptyList()
         )
 
-        recurringPayments = _selectedBudgetId.flatMapLatest { id ->
-            if (id == null) kotlinx.coroutines.flow.flowOf(emptyList())
-            else repository.getRecurringPaymentsForBudget(id)
-        }.stateIn(
-            viewModelScope,
-            SharingStarted.WhileSubscribed(5000),
-            emptyList()
-        )
+        viewModelScope.launch {
+            _selectedBudgetId.flatMapLatest { id ->
+                repository.getRecurringPaymentsForBudget(id ?: "default")
+            }.collect { list ->
+                _recurringPayments.value = list
+            }
+        }
 
-        recurringExecutionLogs = _selectedBudgetId.flatMapLatest { id ->
-            if (id == null) kotlinx.coroutines.flow.flowOf(emptyList())
-            else repository.getExecutionLogsForBudget(id)
-        }.stateIn(
-            viewModelScope,
-            SharingStarted.WhileSubscribed(5000),
-            emptyList()
-        )
+        viewModelScope.launch {
+            _selectedBudgetId.flatMapLatest { id ->
+                repository.getExecutionLogsForBudget(id ?: "default")
+            }.collect { list ->
+                _recurringExecutionLogs.value = list
+            }
+        }
 
         stateDelegate = TransactionStateDelegate(
             context = application.applicationContext,
@@ -928,6 +929,13 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private suspend fun refreshRecurringStateNow(budgetId: String = _selectedBudgetId.value ?: "default") {
+        runCatching {
+            _recurringPayments.value = repository.getRecurringPaymentsForBudget(budgetId).first()
+            _recurringExecutionLogs.value = repository.getExecutionLogsForBudget(budgetId).first()
+        }
+    }
+
     fun addRecurringPayment(
         title: String,
         amount: Double,
@@ -963,13 +971,68 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                     status = "ACTIVE"
                 )
             )
+            refreshRecurringStateNow(currentBudgetId)
             _toastMessage.emit("Регулярный платёж «${title.ifBlank { category }}» добавлен!")
         }
     }
 
+    fun updateRecurringPayment(
+        paymentId: Long,
+        title: String,
+        amount: Double,
+        type: String = "EXPENSE",
+        category: String = "ЖКХ и Аренда",
+        frequency: String = "MONTHLY",
+        nextDueDateIso: String,
+        priority: String = "MANDATORY",
+        incomeTier: String = "GUARANTEED"
+    ) {
+        val currentBudgetId = _selectedBudgetId.value ?: "default"
+        val existing = _recurringPayments.value.find { it.id == paymentId }
+        val dueEpochDay = com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(nextDueDateIso)
+            ?: existing?.nextDueDateEpochDay
+            ?: java.time.LocalDate.now().toEpochDay()
+        val anchorDay = try {
+            java.time.LocalDate.ofEpochDay(dueEpochDay).dayOfMonth
+        } catch (_: Exception) {
+            existing?.anchorDayOfMonth ?: 1
+        }
+        viewModelScope.launch {
+            val existingLogs = _recurringExecutionLogs.value.filter { it.recurringId == paymentId }
+            val updatedEntity = (existing ?: RecurringPaymentEntity(
+                id = paymentId,
+                budgetId = currentBudgetId,
+                title = title.trim().ifBlank { category },
+                amount = amount.coerceAtLeast(0.0),
+                categoryName = category,
+                nextDueDateEpochDay = dueEpochDay
+            )).copy(
+                budgetId = existing?.budgetId ?: currentBudgetId,
+                title = title.trim().ifBlank { category },
+                amount = amount.coerceAtLeast(0.0),
+                isIncome = type.equals("INCOME", ignoreCase = true),
+                incomeCertainty = incomeTier,
+                categoryName = category,
+                frequency = frequency,
+                anchorDayOfMonth = anchorDay,
+                nextDueDateEpochDay = dueEpochDay,
+                priority = priority
+            )
+            repository.insertRecurringPayment(updatedEntity)
+            // Restore execution logs if ON DELETE CASCADE cleared them during REPLACE
+            for (log in existingLogs) {
+                AppDatabase.getDatabase(getApplication()).recurringPaymentDao().insertExecutionLog(log)
+            }
+            refreshRecurringStateNow(currentBudgetId)
+            _toastMessage.emit("Регулярная операция «${title.ifBlank { category }}» обновлена!")
+        }
+    }
+
     fun confirmRecurringPayment(paymentId: Long) {
+        val currentBudgetId = _selectedBudgetId.value ?: "default"
         viewModelScope.launch {
             val tx = repository.confirmRecurringPaymentExecution(paymentId)
+            refreshRecurringStateNow(currentBudgetId)
             if (tx != null) {
                 _toastMessage.emit("Платёж «${tx.subcategory.ifBlank { tx.category }}» подтверждён (${tx.amount.toInt()} ₽)")
             }
@@ -977,24 +1040,30 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun rescheduleRecurringPayment(paymentId: Long, oldScheduledEpochDay: Long, newDueDateIso: String) {
+        val currentBudgetId = _selectedBudgetId.value ?: "default"
         val newEpochDay = com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(newDueDateIso) ?: return
         viewModelScope.launch {
             repository.rescheduleRecurringPayment(paymentId, oldScheduledEpochDay, newEpochDay)
+            refreshRecurringStateNow(currentBudgetId)
             _toastMessage.emit("Дата платежа перенесена на $newDueDateIso")
         }
     }
 
     fun toggleRecurringPaymentStatus(paymentId: Long, currentStatus: String) {
+        val currentBudgetId = _selectedBudgetId.value ?: "default"
         val nextStatus = if (currentStatus == "ACTIVE") "PAUSED" else "ACTIVE"
         viewModelScope.launch {
             repository.updateRecurringPaymentStatus(paymentId, nextStatus)
+            refreshRecurringStateNow(currentBudgetId)
             _toastMessage.emit(if (nextStatus == "PAUSED") "Регулярный платёж на паузе" else "Регулярный платёж активирован")
         }
     }
 
     fun deleteRecurringPayment(paymentId: Long) {
+        val currentBudgetId = _selectedBudgetId.value ?: "default"
         viewModelScope.launch {
             repository.deleteRecurringPayment(paymentId)
+            refreshRecurringStateNow(currentBudgetId)
             _toastMessage.emit("Регулярный платёж удалён")
         }
     }
