@@ -608,6 +608,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             val davidViewModel: com.example.davidapp.DavidViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
             val liveDisplayMode by davidViewModel.liveDisplayMode.collectAsState()
             val liveConnectionState by davidViewModel.liveConnectionState.collectAsState()
+            val liveVisualPhase by davidViewModel.liveVisualPhase.collectAsState()
             val liveSubtitle by davidViewModel.liveSubtitle.collectAsState()
             val liveRayMagnitudes by davidViewModel.liveRayMagnitudes.collectAsState()
             val liveOverallEnergy by davidViewModel.liveOverallEnergy.collectAsState()
@@ -695,7 +696,8 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     },
                                     onToggleMicMute = { davidViewModel.toggleLiveMicMute() },
                                     onEndSession = { davidViewModel.endDavidLiveSession() },
-                                    embeddedInBottomBar = true
+                                    embeddedInBottomBar = true,
+                                    visualPhase = liveVisualPhase
                                 )
                             }
                         } else {

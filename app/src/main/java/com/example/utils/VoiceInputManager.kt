@@ -481,9 +481,27 @@ class VoiceInputManager(context: Context) {
         }
     }
 
-    private fun resolveUserApiKey(callerContext: Context, explicitKey: String = ""): String {
+    internal fun resolveUserApiKey(
+        callerContext: Context,
+        explicitKey: String = "",
+        securePrefsProvider: (Context) -> android.content.SharedPreferences? =
+            com.example.davidapp.DavidViewModel::createSecurePrefsOrNull
+    ): String {
+        val fromExplicit = com.example.data.api.GeminiModelConfig.sanitizeApiKey(explicitKey)
+        if (fromExplicit.isNotBlank()) return fromExplicit
+
         return try {
-            com.example.data.preferences.ApiKeyStorage.getSavedApiKey(callerContext, explicitKey)
+            val prefs = callerContext.getSharedPreferences(
+                com.example.davidapp.DavidViewModel.LEGACY_PREFS_NAME,
+                Context.MODE_PRIVATE
+            )
+            val securePrefs = securePrefsProvider(callerContext)
+            com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+                legacyPrefs = prefs,
+                securePrefs = securePrefs,
+                explicitKey = explicitKey,
+                allowBuildConfigFallback = true
+            )
         } catch (_: Throwable) {
             ""
         }

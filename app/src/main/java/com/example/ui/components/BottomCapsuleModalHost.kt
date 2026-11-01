@@ -99,8 +99,8 @@ fun BottomCapsuleModalHost(
                     onSetTriggerAuditAfterKeySave(false)
                 },
                 onSaveApiKey = { newKey ->
-                    viewModel.saveApiKey(newKey)
-                    if (triggerAuditAfterKeySave && newKey.isNotBlank()) {
+                    val saved = viewModel.saveApiKey(newKey)
+                    if (saved && triggerAuditAfterKeySave && newKey.isNotBlank()) {
                         onSetTriggerAuditAfterKeySave(false)
                         viewModel.requestAiAudit(filteredTransactions)
                     }

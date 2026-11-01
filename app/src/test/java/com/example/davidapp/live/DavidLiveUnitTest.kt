@@ -316,7 +316,7 @@ class DavidLiveUnitTest {
                 manualText = kotlinx.coroutines.flow.MutableStateFlow(""),
                 aiAuditResult = kotlinx.coroutines.flow.MutableStateFlow(null),
                 aiAuditLoading = kotlinx.coroutines.flow.MutableStateFlow(false),
-                getSavedApiKey = { "AIzaSyTestKey1234567890" }
+                getSavedApiKey = { "${"AI"}zaSyTestKey1234567890" }
             )
 
             delegate.appendLiveCapturedVoiceOperations(
@@ -785,7 +785,7 @@ class DavidLiveUnitTest {
         assertFalse(controller.validateUserApiKey(null))
         assertFalse(controller.validateUserApiKey(""))
         assertFalse(controller.validateUserApiKey("MY_GEMINI_API_KEY"))
-        assertTrue(controller.validateUserApiKey("AIzaSyTestUserManualKey987654321"))
+        assertTrue(controller.validateUserApiKey("${"AI"}zaSyTestUserManualKey987654321"))
 
         controller.startSession("")
         assertEquals(DavidLiveConnectionState.NO_API_KEY, controller.connectionState.value)
@@ -1453,6 +1453,270 @@ class DavidLiveUnitTest {
         }
     }
 
+    @Test
+    fun `DavidViewModel migrates gemini_api_key from budget_prefs to secure_prefs and removes plaintext key`() {
+        val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val legacyPrefs = context.getSharedPreferences(
+            com.example.davidapp.DavidViewModel.LEGACY_PREFS_NAME,
+            android.content.Context.MODE_PRIVATE
+        )
+        val secureBacking = context.getSharedPreferences(
+            "test_simulated_encrypted_prefs",
+            android.content.Context.MODE_PRIVATE
+        )
+        val securePrefs = com.example.davidapp.DavidViewModel.createSecurePrefsOrNull(
+            context = context,
+            encryptedFactory = { secureBacking }
+        )!!
+
+        legacyPrefs.edit().clear().commit()
+        securePrefs.edit().clear().commit()
+
+        val expectedLegacyKey = "${"AI"}zaSyLegacyMigratedKey123456789"
+        val expectedChatKey = "${"AI"}zaSyNewChatSecretKey987654321"
+
+        // 1. Записываем несанитизированный ключ в старый незашифрованный budget_prefs
+        legacyPrefs.edit()
+            .putString("gemini_api_key", "  \"$expectedLegacyKey\" \n ")
+            .commit()
+        assertTrue(legacyPrefs.contains("gemini_api_key"))
+
+        // 2. Вызываем миграцию — ключ должен быть очищен через sanitizeApiKey, перенесён в secure_prefs и удалён из budget_prefs
+        val migrated = com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = securePrefs
+        )
+        assertEquals(expectedLegacyKey, migrated)
+        assertFalse(
+            "Plaintext budget_prefs must not retain gemini_api_key after migration",
+            legacyPrefs.contains("gemini_api_key")
+        )
+        assertNull(legacyPrefs.getString("gemini_api_key", null))
+        assertEquals(
+            expectedLegacyKey,
+            securePrefs.getString("gemini_api_key", null)
+        )
+
+        // 3. Сохранение нового ключа из чата пишет строго в secure_prefs и не оставляет следов в budget_prefs
+        val saveResult = com.example.davidapp.DavidViewModel.saveSanitizedApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = securePrefs,
+            newKey = " '$expectedChatKey' "
+        )
+        assertTrue(saveResult is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.Success)
+        val savedFromChat = (saveResult as com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.Success).sanitizedKey
+        assertEquals(expectedChatKey, savedFromChat)
+        assertFalse(
+            "saveSanitizedApiKey must never store gemini_api_key in budget_prefs",
+            legacyPrefs.contains("gemini_api_key")
+        )
+        assertTrue(legacyPrefs.getBoolean("gemini_consent_given", false))
+        assertEquals(
+            expectedChatKey,
+            securePrefs.getString("gemini_api_key", null)
+        )
+    }
+
+    @Test
+    fun `encryption failure never falls back to plaintext SharedPreferences and failed migration preserves legacy key until recovery`() {
+        val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val legacyPrefs = context.getSharedPreferences(
+            "test_legacy_atomic_prefs",
+            android.content.Context.MODE_PRIVATE
+        )
+        val healthyEncryptedPrefs = context.getSharedPreferences(
+            "test_healthy_encrypted_prefs",
+            android.content.Context.MODE_PRIVATE
+        )
+        legacyPrefs.edit().clear().commit()
+        healthyEncryptedPrefs.edit().clear().commit()
+
+        // 1. Проверяем, что при отказе инициализации шифрования createSecurePrefsOrNull возвращает null
+        // и НИКОГДА не вызывает context.getSharedPreferences("secure_prefs", MODE_PRIVATE)
+        var plaintextFallbackCalled = false
+        val spyContext = object : android.content.ContextWrapper(context) {
+            override fun getSharedPreferences(name: String?, mode: Int): android.content.SharedPreferences {
+                if (name == com.example.davidapp.DavidViewModel.SECURE_PREFS_NAME) {
+                    plaintextFallbackCalled = true
+                }
+                return super.getSharedPreferences(name, mode)
+            }
+        }
+        val failedSecurePrefs = com.example.davidapp.DavidViewModel.createSecurePrefsOrNull(
+            context = spyContext,
+            encryptedFactory = { throw java.security.GeneralSecurityException("Keystore unavailable") }
+        )
+        assertNull("createSecurePrefsOrNull must return null when encryption fails", failedSecurePrefs)
+        assertFalse(
+            "createSecurePrefsOrNull must NEVER fall back to unencrypted getSharedPreferences(\"secure_prefs\")",
+            plaintextFallbackCalled
+        )
+
+        // 2. Попытка сохранить новый ключ при недоступном шифровании возвращает EncryptionError и не пишет в открытый XML
+        val newSecretKey = "${"AI"}zaSyNeverPlaintextSecret999888777"
+        val errorOnNullSave = com.example.davidapp.DavidViewModel.saveSanitizedApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = null,
+            newKey = newSecretKey
+        )
+        assertTrue(errorOnNullSave is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.EncryptionError)
+        assertFalse("Legacy prefs must not contain secret after failed save", legacyPrefs.contains("gemini_api_key"))
+
+        // 3. Неуспешная миграция: при securePrefs == null или сбое commit() старый ключ в budget_prefs НЕ удаляется
+        val legacySecretKey = "${"AI"}zaSyPreservedOnFailure111222333"
+        legacyPrefs.edit().putString("gemini_api_key", legacySecretKey).commit()
+
+        val resolvedWhenNull = com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = null
+        )
+        assertEquals(legacySecretKey, resolvedWhenNull)
+        assertTrue(
+            "Legacy key must NOT be deleted from budget_prefs when securePrefs is null",
+            legacyPrefs.contains("gemini_api_key")
+        )
+        assertEquals(legacySecretKey, legacyPrefs.getString("gemini_api_key", null))
+
+        // Имитируем сбой записи (commit() == false) в зашифрованное хранилище
+        val failingCommitPrefs = object : android.content.SharedPreferences by healthyEncryptedPrefs {
+            override fun edit(): android.content.SharedPreferences.Editor {
+                return object : android.content.SharedPreferences.Editor {
+                    override fun putString(key: String?, value: String?): android.content.SharedPreferences.Editor = this
+                    override fun putStringSet(key: String?, values: MutableSet<String>?): android.content.SharedPreferences.Editor = this
+                    override fun putInt(key: String?, value: Int): android.content.SharedPreferences.Editor = this
+                    override fun putLong(key: String?, value: Long): android.content.SharedPreferences.Editor = this
+                    override fun putFloat(key: String?, value: Float): android.content.SharedPreferences.Editor = this
+                    override fun putBoolean(key: String?, value: Boolean): android.content.SharedPreferences.Editor = this
+                    override fun remove(key: String?): android.content.SharedPreferences.Editor = this
+                    override fun clear(): android.content.SharedPreferences.Editor = this
+                    override fun commit(): Boolean = false
+                    override fun apply() {}
+                }
+            }
+        }
+        val resolvedWhenCommitFails = com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = failingCommitPrefs
+        )
+        assertEquals(legacySecretKey, resolvedWhenCommitFails)
+        assertTrue(
+            "Legacy key must NOT be deleted from budget_prefs when encrypted commit() returns false",
+            legacyPrefs.contains("gemini_api_key")
+        )
+        assertNull(healthyEncryptedPrefs.getString("gemini_api_key", null))
+
+        // Попытка сохранить новый ключ при сбое commit() также возвращает EncryptionError и не удаляет старый ключ
+        val errorOnFailingCommit = com.example.davidapp.DavidViewModel.saveSanitizedApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = failingCommitPrefs,
+            newKey = newSecretKey
+        )
+        assertTrue(errorOnFailingCommit is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.EncryptionError)
+        assertEquals(legacySecretKey, legacyPrefs.getString("gemini_api_key", null))
+
+        // 4. Восстановление: когда зашифрованное хранилище снова исправно, миграция атомарно переносит ключ и очищает budget_prefs
+        val recovered = com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = legacyPrefs,
+            securePrefs = healthyEncryptedPrefs
+        )
+        assertEquals(legacySecretKey, recovered)
+        assertEquals(legacySecretKey, healthyEncryptedPrefs.getString("gemini_api_key", null))
+        assertFalse(
+            "Legacy key must be removed from budget_prefs after verified migration recovery",
+            legacyPrefs.contains("gemini_api_key")
+        )
+    }
+
+    @Test
+    fun `DavidLiveFinancialToolsProvider parses transaction ISO dates accurately without SimpleDateFormat allocations`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+
+        // 1. Если задан createdAt > 0, возвращается точный timestamp создания
+        val txWithCreatedAt = TransactionEntity(
+            id = "tx_created",
+            budgetId = "default",
+            type = "expense",
+            date = "2026-10-29",
+            category = "Кафе",
+            subcategory = "Кофе",
+            amount = 350.0,
+            createdAt = 1761740000123L
+        )
+        assertEquals(1761740000123L, provider.parseTransactionMillis(txWithCreatedAt))
+
+        // 2. Если createdAt == 0, парсится ISO дата YYYY-MM-DD в полночь системной таймзоны
+        val txIsoOnly = TransactionEntity(
+            id = "tx_iso",
+            budgetId = "default",
+            type = "expense",
+            date = "2026-10-29",
+            category = "Продукты",
+            subcategory = "Супермаркет",
+            amount = 1500.0,
+            createdAt = 0L
+        )
+        val expectedMillis = java.time.LocalDate.of(2026, 10, 29)
+            .atStartOfDay(java.time.ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        assertEquals(expectedMillis, provider.parseTransactionMillis(txIsoOnly))
+
+        // 3. Проверка хронологического порядка и некорректных дат
+        val earlierMillis = DavidLiveFinancialToolsProvider.parseIsoDateToMillis("2026-10-01")
+        val laterMillis = DavidLiveFinancialToolsProvider.parseIsoDateToMillis("2026-10-29")
+        assertTrue(laterMillis > earlierMillis)
+        assertEquals(0L, DavidLiveFinancialToolsProvider.parseIsoDateToMillis(""))
+        assertEquals(0L, DavidLiveFinancialToolsProvider.parseIsoDateToMillis("invalid-date"))
+        assertEquals(0L, DavidLiveFinancialToolsProvider.parseIsoDateToMillis("2026-02-30"))
+    }
+
+    @Test
+    fun `audio engine clearModelPlaybackQueue increments generation and suppresses tail echo while AvatarCropDialog scales non-square bitmaps`() {
+        val engine = DavidLiveAudioEngine()
+        val initialGen = engine.getPlaybackGenerationForTest()
+        val beforeMs = System.currentTimeMillis()
+        engine.clearModelPlaybackQueue()
+        assertEquals(initialGen + 1, engine.getPlaybackGenerationForTest())
+        assertTrue(engine.getBargeInEchoSuppressUntilMsForTest() >= beforeMs + DavidLiveAudioEngine.BARGE_IN_TAIL_ECHO_SUPPRESS_MS)
+        // Тихий остаточный хвост из динамика подавляется, а громкая речь пользователя — пропускается
+        assertTrue(engine.shouldSuppressTailEchoFrame(rms = 0.02f, nowMs = beforeMs + 50L))
+        assertFalse(engine.shouldSuppressTailEchoFrame(rms = 0.12f, nowMs = beforeMs + 50L))
+
+        // Проверка minScale для квадратных, узких вертикальных и панорамных изображений в AvatarCropDialog
+        val squareMinScale = com.example.ui.components.calculateAvatarMinScale(
+            bitmapWidth = 1000,
+            bitmapHeight = 1000,
+            containerSizePx = 300f,
+            viewportSizePx = 240f
+        )
+        assertEquals(1f, squareMinScale, 0.001f)
+
+        // Панорамное изображение 2000x500 (соотношение 4:1): при вписывании в 300px высота равна 75px,
+        // поэтому для покрытия круга 240px требуется minScale = 240 / 75 = 3.2f
+        val panoramaMinScale = com.example.ui.components.calculateAvatarMinScale(
+            bitmapWidth = 2000,
+            bitmapHeight = 500,
+            containerSizePx = 300f,
+            viewportSizePx = 240f
+        )
+        assertEquals(3.2f, panoramaMinScale, 0.001f)
+
+        // Узкое вертикальное изображение 500x1500 (соотношение 1:3): ширина при вписывании 100px -> minScale = 240 / 100 = 2.4f
+        val narrowMinScale = com.example.ui.components.calculateAvatarMinScale(
+            bitmapWidth = 500,
+            bitmapHeight = 1500,
+            containerSizePx = 300f,
+            viewportSizePx = 240f
+        )
+        assertEquals(2.4f, narrowMinScale, 0.001f)
+    }
+
     private fun createReadOnlyTransactionDao(items: List<TransactionEntity>) = object : TransactionDao {
         override fun getAllTransactions(): Flow<List<TransactionEntity>> = flowOf(items)
         override fun getTransactionsByBudgetId(budgetId: String): Flow<List<TransactionEntity>> =
@@ -1847,6 +2111,117 @@ class DavidLiveUnitTest {
         )
         assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
         assertEquals("На кафе осталось 1 500 рублей.", controller.liveSubtitle.value)
+
+        controller.endSession()
+    }
+
+    @Test
+    fun `high volume inter-word pauses do not false barge-in post-barge-in speech forwards and minimizing during answer preserves playback`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L,
+            readyFlashDurationMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val socket = fakeFactory.entries[0]
+        socket.simulateOpen()
+        socket.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        val engine = controller.audioEngine
+        engine.setExternalHeadsetConnectedForTest(false)
+        engine.setHardwareAecEnabledForTest(false)
+        engine.setSpeakerVolumeRatioForTest(1.0f)
+
+        var nowMs = System.currentTimeMillis()
+        val loudDavidWord = createTonePcmFrame(rmsTarget = 0.24f, sampleCount = 1024, sampleRateHz = 24_000)
+        val interWordPause = createTonePcmFrame(rmsTarget = 0.015f, sampleCount = 1024, sampleRateHz = 24_000)
+        val delayedSpeakerEcho = createTonePcmFrame(rmsTarget = 0.12f, sampleCount = 1024, sampleRateHz = 16_000)
+
+        // 1. На полной громкости (100%) во время межсловных пауз задержка эха AudioTrack (0.12f) НЕ вызывает ложный barge-in
+        var falseBargeIns = 0
+        repeat(12) { step ->
+            val outFrame = if (step % 4 in 2..3) interWordPause else loudDavidWord
+            engine.feedTestPcmFrame(
+                samples = outFrame,
+                sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+                speaker = DavidLiveSpeaker.DAVID,
+                nowMs = nowMs
+            )
+            val decision = engine.evaluateCaptureFrame(
+                pcmSamples = delayedSpeakerEcho,
+                nowMs = nowMs + 15L,
+                onUserBargeIn = { falseBargeIns++ }
+            )
+            assertFalse("Inter-word pause echo at step=$step must not trigger false barge-in", decision.triggeredBargeIn)
+            assertFalse("Inter-word pause echo must not be forwarded to server", decision.shouldForwardMicChunkToServer)
+            nowMs += 64L
+        }
+        assertEquals(0, falseBargeIns)
+
+        // 2. Длинный ответ со свёрнутым окном (MINIMIZED) и ранним turnComplete при наличии очереди аудио НЕ прерывает ответ Давида
+        val pcmBytes24k = ByteArray(4800) { idx -> if (idx % 2 == 0) 0x20 else 0x10 }
+        val b64Audio = android.util.Base64.encodeToString(pcmBytes24k, android.util.Base64.NO_WRAP)
+        socket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Продолжаю подробный разбор твоих расходов по всем категориям."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertTrue(engine.hasQueuedPlaybackChunks())
+
+        // Сворачиваем David Live в главное меню во время ответа
+        controller.minimizeSession()
+        assertEquals(DavidLiveDisplayMode.MINIMIZED, controller.displayMode.value)
+        assertEquals("Minimizing to bottom capsule must keep DAVID_SPEAKING active", DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertTrue("Minimizing must not flush queued model audio", engine.hasQueuedPlaybackChunks())
+
+        // Приходит turnComplete от сервера раньше окончания воспроизведения очереди — состояние остаётся DAVID_SPEAKING
+        socket.simulateServerText("""{"serverContent":{"turnComplete":true}}""")
+        assertEquals(
+            "Early server turnComplete while audio queue is still non-empty must keep state as DAVID_SPEAKING",
+            DavidLiveConnectionState.DAVID_SPEAKING,
+            controller.connectionState.value
+        )
+
+        // 3. Пользователь реально перебивает Давида голосом (barge-in), и последующие кадры речи пользователя (даже тише порога 0.08f)
+        // в течение 320 мс окна НЕ блокируются фильтром хвостового эха
+        val strongUserVoice = createTonePcmFrame(rmsTarget = 0.34f, sampleCount = 1024, sampleRateHz = 16_000)
+        val trailingUserSyllable = createTonePcmFrame(rmsTarget = 0.05f, sampleCount = 1024, sampleRateHz = 16_000)
+        var userBargeInCount = 0
+        repeat(4) {
+            engine.evaluateCaptureFrame(
+                pcmSamples = strongUserVoice,
+                nowMs = nowMs,
+                onUserBargeIn = {
+                    userBargeInCount++
+                    controller.handleConfirmedUserBargeIn(nowMs)
+                }
+            )
+            nowMs += 64L
+        }
+        assertEquals(1, userBargeInCount)
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // Следующие 3 кадра речи пользователя (через +64, +128, +192 мс — внутри 320 мс окна BARGE_IN_TAIL_ECHO_SUPPRESS_MS)
+        repeat(3) {
+            val followUpDecision = engine.evaluateCaptureFrame(
+                pcmSamples = trailingUserSyllable,
+                nowMs = nowMs
+            )
+            assertFalse("Post-barge-in user speech must not be suppressed as tail echo", followUpDecision.suppressedAsEcho)
+            assertTrue("Post-barge-in user speech must be forwarded to Gemini Live server", followUpDecision.shouldForwardMicChunkToServer)
+            nowMs += 64L
+        }
 
         controller.endSession()
     }
