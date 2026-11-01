@@ -15,17 +15,16 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v11.17 (сборка 302)
+### Версия v11.18 (сборка 308)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
 **Что изменилось:**
 
-### Добавлено
-- Восстановить реализацию Issue после закрытия PR
+### Документация и сборка
 - Технические изменения без отдельного описания: 1
 
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.16-build.300...v11.17-build.302
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.17-build.302...v11.18-build.308
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
