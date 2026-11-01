@@ -86,12 +86,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -405,43 +407,57 @@ fun MorphingBottomBar(
         label = "morph_bar_corner"
     )
 
-    // Неоновое переливающееся свечение рамки
-    val glowTransition = rememberInfiniteTransition(label = "capsule_neon_glow")
-    val glowPhase by glowTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2600, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "capsule_neon_phase"
-    )
+    // Неоновое переливающееся свечение рамки: фаза читается строго в фазе отрисовки (drawWithContent),
+    // чтобы покадровое изменение градиента не вызывало рекомпозиций дочерних вкладок и текста.
+    val needsAnimatedNeonBorder =
+        activeModal != BottomCapsuleModal.None && activeModal !is BottomCapsuleModal.VoiceInput
+    val glowPhaseState = if (needsAnimatedNeonBorder) {
+        val glowTransition = rememberInfiniteTransition(label = "capsule_neon_glow")
+        glowTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 2600, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "capsule_neon_phase"
+        )
+    } else {
+        null
+    }
 
-    val borderBrush = when {
-        activeModal == BottomCapsuleModal.None && davidLiveMinimizedCapsule != null -> Brush.horizontalGradient(
+    val staticLiveMinBrush = remember {
+        Brush.horizontalGradient(
             colors = listOf(
                 Emerald400.copy(alpha = 0.58f),
                 NeonCyan.copy(alpha = 0.48f),
                 Emerald400.copy(alpha = 0.58f)
             )
         )
-        activeModal == BottomCapsuleModal.None -> Brush.horizontalGradient(listOf(GlassHighlight, GlassHighlight))
-        activeModal is BottomCapsuleModal.VoiceInput -> Brush.horizontalGradient(
+    }
+    val staticDefaultBrush = remember {
+        Brush.horizontalGradient(listOf(GlassHighlight, GlassHighlight))
+    }
+    val staticVoiceBrush = remember {
+        Brush.horizontalGradient(
             colors = listOf(
                 Emerald400.copy(alpha = 0.45f),
                 Color(0xFF10B981).copy(alpha = 0.38f),
                 Color(0xFF06B6D4).copy(alpha = 0.45f)
             )
         )
-        else -> Brush.linearGradient(
-            colors = listOf(
-                Emerald400.copy(alpha = 0.65f),
-                NeonCyan.copy(alpha = 0.45f),
-                Indigo500.copy(alpha = 0.55f)
-            ),
-            start = Offset(0f, 0f),
-            end = Offset(800f * (0.35f + glowPhase * 0.65f), 800f)
+    }
+    val animatedGlowColors = remember {
+        listOf(
+            Emerald400.copy(alpha = 0.65f),
+            NeonCyan.copy(alpha = 0.45f),
+            Indigo500.copy(alpha = 0.55f)
         )
+    }
+    val borderWidth = when {
+        activeModal == BottomCapsuleModal.None -> 1.dp
+        activeModal is BottomCapsuleModal.VoiceInput -> 1.dp
+        else -> 1.4.dp
     }
 
     // Плавное затемнение фонового экрана (Color.Black.copy(alpha = 0.65f) с animateFloatAsState)
@@ -508,15 +524,33 @@ fun MorphingBottomBar(
                         else -> DarkCard.copy(alpha = 0.99f)
                     }
                 )
-                .border(
-                    width = when {
-                        activeModal == BottomCapsuleModal.None -> 1.dp
-                        activeModal is BottomCapsuleModal.VoiceInput -> 1.dp
-                        else -> 1.4.dp
-                    },
-                    brush = borderBrush,
-                    shape = RoundedCornerShape(cornerRadius)
-                )
+                .drawWithContent {
+                    drawContent()
+                    val strokeWidthPx = borderWidth.toPx()
+                    val halfStroke = strokeWidthPx / 2f
+                    val cornerPx = (cornerRadius.toPx() - halfStroke).coerceAtLeast(0f)
+                    val phase = glowPhaseState?.value ?: 0f
+                    val activeBrush = when {
+                        activeModal == BottomCapsuleModal.None && davidLiveMinimizedCapsule != null -> staticLiveMinBrush
+                        activeModal == BottomCapsuleModal.None -> staticDefaultBrush
+                        activeModal is BottomCapsuleModal.VoiceInput -> staticVoiceBrush
+                        else -> Brush.linearGradient(
+                            colors = animatedGlowColors,
+                            start = Offset.Zero,
+                            end = Offset(800f * (0.35f + phase * 0.65f), 800f)
+                        )
+                    }
+                    drawRoundRect(
+                        brush = activeBrush,
+                        topLeft = Offset(halfStroke, halfStroke),
+                        size = Size(
+                            width = (size.width - strokeWidthPx).coerceAtLeast(0f),
+                            height = (size.height - strokeWidthPx).coerceAtLeast(0f)
+                        ),
+                        cornerRadius = CornerRadius(cornerPx, cornerPx),
+                        style = Stroke(width = strokeWidthPx)
+                    )
+                }
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -895,12 +929,14 @@ fun MorphingBottomBar(
                                                                 Toast.LENGTH_SHORT
                                                             ).show()
                                                         } else {
-                                                            viewModel.saveApiKey(sanitized)
-                                                            showInlineApiKey = false
-                                                            triggerVoiceMode(
-                                                                overrideConsentGiven = true,
-                                                                overrideApiKey = sanitized
-                                                            )
+                                                            val saved = viewModel.saveApiKey(sanitized)
+                                                            if (saved) {
+                                                                showInlineApiKey = false
+                                                                triggerVoiceMode(
+                                                                    overrideConsentGiven = true,
+                                                                    overrideApiKey = sanitized
+                                                                )
+                                                            }
                                                         }
                                                     },
                                                     onCancel = {

@@ -54,6 +54,7 @@ class DavidLiveAudioEngine(
 
     private var audioRecord: AudioRecord? = null
     private var audioTrack: AudioTrack? = null
+    private val audioTrackLock = Any()
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
     private var autoGainControl: AutomaticGainControl? = null
@@ -62,6 +63,7 @@ class DavidLiveAudioEngine(
     private val isRunning = AtomicBoolean(false)
     private val isMicMuted = AtomicBoolean(false)
     private val lastOutputChunkTimestamp = AtomicLong(0L)
+    private val bargeInEchoSuppressUntilMs = AtomicLong(0L)
     // Invalidate a chunk already taken by the playback worker after a queue flush.
     private val playbackGeneration = AtomicInteger(0)
 
@@ -100,6 +102,7 @@ class DavidLiveAudioEngine(
         if (isRunning.getAndSet(true)) return
         spectrumAnalyzer.reset()
         playbackQueue.clear()
+        bargeInEchoSuppressUntilMs.set(0L)
 
         startPlaybackWorker()
         startCaptureWorker(onMicPcmChunk, onUserBargeIn)
@@ -135,20 +138,43 @@ class DavidLiveAudioEngine(
 
     /**
      * Immediately flushes any queued or playing model audio (used on barge-in interruption).
+     * Synchronizes AudioTrack reset (`pause()` -> `flush()` -> `play()`), increments [playbackGeneration],
+     * and activates a short protective tail-echo suppression window so residual speaker audio
+     * does not get captured by the microphone as a new user utterance.
      */
     fun clearModelPlaybackQueue() {
+        val now = System.currentTimeMillis()
         playbackGeneration.incrementAndGet()
         playbackQueue.clear()
         lastOutputChunkTimestamp.set(0L)
-        try {
-            audioTrack?.pause()
-            audioTrack?.flush()
-            audioTrack?.play()
-        } catch (_: Exception) {
+        bargeInEchoSuppressUntilMs.set(now + BARGE_IN_TAIL_ECHO_SUPPRESS_MS)
+        synchronized(audioTrackLock) {
+            val track = audioTrack
+            if (track != null) {
+                try {
+                    track.pause()
+                    track.flush()
+                    if (isRunning.get()) {
+                        track.play()
+                    }
+                } catch (_: Exception) {
+                }
+            }
         }
         if (_activeSpeaker.value == DavidLiveSpeaker.DAVID) {
             _activeSpeaker.value = DavidLiveSpeaker.NONE
         }
+    }
+
+    internal fun getPlaybackGenerationForTest(): Int = playbackGeneration.get()
+
+    internal fun getBargeInEchoSuppressUntilMsForTest(): Long = bargeInEchoSuppressUntilMs.get()
+
+    internal fun shouldSuppressTailEchoFrame(
+        rms: Float,
+        nowMs: Long = System.currentTimeMillis()
+    ): Boolean {
+        return nowMs < bargeInEchoSuppressUntilMs.get() && rms < BARGE_IN_RMS_THRESHOLD
     }
 
     /**
@@ -170,6 +196,7 @@ class DavidLiveAudioEngine(
         playbackJob?.cancel()
         engineScope.coroutineContext.cancelChildren()
         playbackQueue.clear()
+        bargeInEchoSuppressUntilMs.set(0L)
 
         releaseAudioEffects()
 
@@ -183,15 +210,17 @@ class DavidLiveAudioEngine(
         }
         audioRecord = null
 
-        try {
-            audioTrack?.stop()
-        } catch (_: Exception) {
+        synchronized(audioTrackLock) {
+            try {
+                audioTrack?.stop()
+            } catch (_: Exception) {
+            }
+            try {
+                audioTrack?.release()
+            } catch (_: Exception) {
+            }
+            audioTrack = null
         }
-        try {
-            audioTrack?.release()
-        } catch (_: Exception) {
-        }
-        audioTrack = null
 
         spectrumAnalyzer.reset()
         _activeSpeaker.value = DavidLiveSpeaker.NONE
@@ -236,85 +265,110 @@ class DavidLiveAudioEngine(
 
             try {
                 record.startRecording()
-            } catch (_: Exception) {
-                return@launch
-            }
 
-            // 1024 samples @ 16 kHz = 64 ms chunk
-            val shortBuffer = ShortArray(1024)
-            var consecutiveVoiceFrames = 0
-            var userBargedIn = false
+                // 1024 samples @ 16 kHz = 64 ms chunk
+                val shortBuffer = ShortArray(1024)
+                var consecutiveVoiceFrames = 0
+                var userBargedIn = false
 
-            while (isActive && isRunning.get()) {
-                val readCount = record.read(shortBuffer, 0, shortBuffer.size)
-                if (readCount <= 0) {
-                    delay(15L)
-                    continue
-                }
+                while (isActive && isRunning.get()) {
+                    val readCount = record.read(shortBuffer, 0, shortBuffer.size)
+                    if (readCount <= 0) {
+                        delay(15L)
+                        continue
+                    }
 
-                if (isMicMuted.get()) {
-                    val davidSpeaking = System.currentTimeMillis() - lastOutputChunkTimestamp.get() <= 160L
-                    if (!davidSpeaking) {
+                    if (isMicMuted.get()) {
+                        val davidSpeaking = System.currentTimeMillis() - lastOutputChunkTimestamp.get() <= 160L
+                        if (!davidSpeaking) {
+                            _rayMagnitudes.value = spectrumAnalyzer.decayFrame()
+                            _overallEnergy.value = spectrumAnalyzer.overallEnergy
+                            _activeSpeaker.value = DavidLiveSpeaker.NONE
+                        }
+                        continue
+                    }
+
+                    // Compute RMS for voice activity & barge-in detection
+                    var sumSq = 0.0
+                    for (i in 0 until readCount) {
+                        val norm = shortBuffer[i] / 32768.0
+                        sumSq += norm * norm
+                    }
+                    val rms = sqrt(sumSq / readCount).toFloat()
+
+                    val nowMs = System.currentTimeMillis()
+                    val davidCurrentlyPlaying =
+                        nowMs - lastOutputChunkTimestamp.get() <= PLAYBACK_ECHO_TAIL_MS ||
+                            playbackQueue.isNotEmpty()
+                    if (!davidCurrentlyPlaying) userBargedIn = false
+
+                    if (rms > BARGE_IN_RMS_THRESHOLD) {
+                        consecutiveVoiceFrames++
+                        if (davidCurrentlyPlaying && !userBargedIn && consecutiveVoiceFrames >= BARGE_IN_MIN_FRAMES) {
+                            userBargedIn = true
+                            clearModelPlaybackQueue()
+                            onUserBargeIn()
+                            consecutiveVoiceFrames = 0
+                        }
+                    } else {
+                        consecutiveVoiceFrames = 0
+                    }
+
+                    // Protective tail-echo suppression window right after AudioTrack flush:
+                    // ignore residual acoustic speaker tail unless user is actively speaking above barge-in threshold.
+                    if (shouldSuppressTailEchoFrame(rms, nowMs)) {
                         _rayMagnitudes.value = spectrumAnalyzer.decayFrame()
                         _overallEnergy.value = spectrumAnalyzer.overallEnergy
                         _activeSpeaker.value = DavidLiveSpeaker.NONE
+                        continue
                     }
-                    continue
-                }
 
-                // Compute RMS for voice activity & barge-in detection
-                var sumSq = 0.0
-                for (i in 0 until readCount) {
-                    val norm = shortBuffer[i] / 32768.0
-                    sumSq += norm * norm
-                }
-                val rms = sqrt(sumSq / readCount).toFloat()
-
-                val davidCurrentlyPlaying =
-                    System.currentTimeMillis() - lastOutputChunkTimestamp.get() <= PLAYBACK_ECHO_TAIL_MS ||
-                        playbackQueue.isNotEmpty()
-                if (!davidCurrentlyPlaying) userBargedIn = false
-
-                if (rms > BARGE_IN_RMS_THRESHOLD) {
-                    consecutiveVoiceFrames++
-                    if (davidCurrentlyPlaying && !userBargedIn && consecutiveVoiceFrames >= BARGE_IN_MIN_FRAMES) {
-                        userBargedIn = true
-                        clearModelPlaybackQueue()
-                        onUserBargeIn()
-                        consecutiveVoiceFrames = 0
+                    // Update visualizer from user's microphone when David is not currently speaking
+                    if (!davidCurrentlyPlaying) {
+                        _rayMagnitudes.value = spectrumAnalyzer.analyzePcmFrame(
+                            pcmSamples = shortBuffer,
+                            sampleCount = readCount,
+                            sampleRateHz = INPUT_SAMPLE_RATE_HZ
+                        )
+                        _overallEnergy.value = spectrumAnalyzer.overallEnergy
+                        _activeSpeaker.value = if (rms > USER_SPEECH_RMS_THRESHOLD) {
+                            DavidLiveSpeaker.USER
+                        } else {
+                            DavidLiveSpeaker.NONE
+                        }
                     }
-                } else {
-                    consecutiveVoiceFrames = 0
-                }
 
-                // Update visualizer from user's microphone when David is not currently speaking
-                if (!davidCurrentlyPlaying) {
-                    _rayMagnitudes.value = spectrumAnalyzer.analyzePcmFrame(
-                        pcmSamples = shortBuffer,
-                        sampleCount = readCount,
-                        sampleRateHz = INPUT_SAMPLE_RATE_HZ
-                    )
-                    _overallEnergy.value = spectrumAnalyzer.overallEnergy
-                    _activeSpeaker.value = if (rms > USER_SPEECH_RMS_THRESHOLD) {
-                        DavidLiveSpeaker.USER
-                    } else {
-                        DavidLiveSpeaker.NONE
+                    // Suppress speaker echo while David is playing, except after confirmed user barge-in.
+                    if (davidCurrentlyPlaying && !userBargedIn) continue
+
+                    // Convert ShortArray to little-endian PCM16 ByteArray and stream to Gemini Live
+                    val pcmBytes = ByteArray(readCount * 2)
+                    var bIdx = 0
+                    for (i in 0 until readCount) {
+                        val s = shortBuffer[i].toInt()
+                        pcmBytes[bIdx] = (s and 0xFF).toByte()
+                        pcmBytes[bIdx + 1] = ((s shr 8) and 0xFF).toByte()
+                        bIdx += 2
                     }
+                    onMicPcmChunk(pcmBytes)
                 }
-
-                // Suppress speaker echo while David is playing, except after confirmed user barge-in.
-                if (davidCurrentlyPlaying && !userBargedIn) continue
-
-                // Convert ShortArray to little-endian PCM16 ByteArray and stream to Gemini Live
-                val pcmBytes = ByteArray(readCount * 2)
-                var bIdx = 0
-                for (i in 0 until readCount) {
-                    val s = shortBuffer[i].toInt()
-                    pcmBytes[bIdx] = (s and 0xFF).toByte()
-                    pcmBytes[bIdx + 1] = ((s shr 8) and 0xFF).toByte()
-                    bIdx += 2
+            } catch (_: Exception) {
+                // Capture loop interrupted or startRecording failed
+            } finally {
+                releaseAudioEffects()
+                try {
+                    if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                        record.stop()
+                    }
+                } catch (_: Exception) {
                 }
-                onMicPcmChunk(pcmBytes)
+                try {
+                    record.release()
+                } catch (_: Exception) {
+                }
+                if (audioRecord === record) {
+                    audioRecord = null
+                }
             }
         }
     }
@@ -404,45 +458,65 @@ class DavidLiveAudioEngine(
                 null
             }
 
-            audioTrack = track
-            try {
-                track?.play()
-            } catch (_: Exception) {
+            synchronized(audioTrackLock) {
+                audioTrack = track
+                try {
+                    track?.play()
+                } catch (_: Exception) {
+                }
             }
 
-            while (isActive && isRunning.get()) {
-                val generation = playbackGeneration.get()
-                val samples = playbackQueue.poll()
-                if (samples == null) {
-                    if (System.currentTimeMillis() - lastOutputChunkTimestamp.get() > 220L &&
-                        _activeSpeaker.value == DavidLiveSpeaker.DAVID
-                    ) {
-                        _activeSpeaker.value = DavidLiveSpeaker.NONE
+            try {
+                while (isActive && isRunning.get()) {
+                    val generation = playbackGeneration.get()
+                    val samples = playbackQueue.poll()
+                    if (samples == null) {
+                        if (System.currentTimeMillis() - lastOutputChunkTimestamp.get() > 220L &&
+                            _activeSpeaker.value == DavidLiveSpeaker.DAVID
+                        ) {
+                            _activeSpeaker.value = DavidLiveSpeaker.NONE
+                        }
+                        delay(12L)
+                        continue
                     }
-                    delay(12L)
-                    continue
+
+                    // Slice into ~1024-sample windows so the circular visualizer animates smoothly at ~23 fps
+                    var offset = 0
+                    val step = 1024
+                    while (offset < samples.size && isRunning.get() && generation == playbackGeneration.get()) {
+                        val len = (samples.size - offset).coerceAtMost(step)
+                        val window = samples.copyOfRange(offset, offset + len)
+                        lastOutputChunkTimestamp.set(System.currentTimeMillis())
+                        _activeSpeaker.value = DavidLiveSpeaker.DAVID
+                        _rayMagnitudes.value = spectrumAnalyzer.analyzePcmFrame(
+                            pcmSamples = window,
+                            sampleCount = window.size,
+                            sampleRateHz = OUTPUT_SAMPLE_RATE_HZ
+                        )
+                        _overallEnergy.value = spectrumAnalyzer.overallEnergy
+
+                        try {
+                            if (generation == playbackGeneration.get() && isRunning.get()) {
+                                track?.write(window, 0, window.size)
+                            }
+                        } catch (_: Exception) {
+                        }
+                        offset += len
+                    }
                 }
-
-                // Slice into ~1024-sample windows so the circular visualizer animates smoothly at ~23 fps
-                var offset = 0
-                val step = 1024
-                while (offset < samples.size && isRunning.get() && generation == playbackGeneration.get()) {
-                    val len = (samples.size - offset).coerceAtMost(step)
-                    val window = samples.copyOfRange(offset, offset + len)
-                    lastOutputChunkTimestamp.set(System.currentTimeMillis())
-                    _activeSpeaker.value = DavidLiveSpeaker.DAVID
-                    _rayMagnitudes.value = spectrumAnalyzer.analyzePcmFrame(
-                        pcmSamples = window,
-                        sampleCount = window.size,
-                        sampleRateHz = OUTPUT_SAMPLE_RATE_HZ
-                    )
-                    _overallEnergy.value = spectrumAnalyzer.overallEnergy
-
-                    try {
-                        track?.write(window, 0, window.size)
-                    } catch (_: Exception) {
+            } finally {
+                synchronized(audioTrackLock) {
+                    if (audioTrack === track) {
+                        try {
+                            track?.stop()
+                        } catch (_: Exception) {
+                        }
+                        try {
+                            track?.release()
+                        } catch (_: Exception) {
+                        }
+                        audioTrack = null
                     }
-                    offset += len
                 }
             }
         }
@@ -457,6 +531,7 @@ class DavidLiveAudioEngine(
         private const val BARGE_IN_RMS_THRESHOLD = 0.08f
         private const val BARGE_IN_MIN_FRAMES = 4
         private const val PLAYBACK_ECHO_TAIL_MS = 320L
+        internal const val BARGE_IN_TAIL_ECHO_SUPPRESS_MS = 220L
 
         /**
          * Builds the [AudioAttributes] tied to the AI Assistant / Neural Network volume channel

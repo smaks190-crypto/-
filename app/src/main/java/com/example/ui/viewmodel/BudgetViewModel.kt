@@ -2,6 +2,7 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.AccountEntity
@@ -36,6 +37,15 @@ import java.util.Locale
 class BudgetViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: BudgetRepository
+    private val prefs = application.getSharedPreferences("budget_prefs", Context.MODE_PRIVATE)
+    private var securePrefs: SharedPreferences? =
+        com.example.davidapp.DavidViewModel.createSecurePrefsOrNull(application)
+
+    private fun obtainSecurePrefs(): SharedPreferences? {
+        securePrefs?.let { return it }
+        return com.example.davidapp.DavidViewModel.createSecurePrefsOrNull(getApplication())
+            .also { securePrefs = it }
+    }
 
     val budgetProfiles: StateFlow<List<BudgetProfileEntity>>
 
@@ -230,8 +240,12 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     val showSetupModal: StateFlow<Boolean> = _showSetupModal.asStateFlow()
 
     init {
-        // One-time atomic migration of legacy API key to EncryptedSharedPreferences via ApiKeyStorage
-        com.example.data.preferences.ApiKeyStorage.getSavedApiKey(application)
+        // One-time atomic migration of legacy API key to EncryptedSharedPreferences
+        com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = prefs,
+            securePrefs = obtainSecurePrefs(),
+            allowBuildConfigFallback = true
+        )
 
         val database = AppDatabase.getDatabase(application)
         repository = BudgetRepository(
@@ -423,23 +437,40 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun getSavedApiKey(): String =
-        com.example.data.preferences.ApiKeyStorage.getSavedApiKey(getApplication())
+    private fun getSavedApiKey(): String {
+        return com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = prefs,
+            securePrefs = obtainSecurePrefs(),
+            allowBuildConfigFallback = true
+        )
+    }
 
-    fun saveApiKey(key: String) {
-        val trimmed = com.example.data.api.GeminiModelConfig.sanitizeApiKey(key)
-        val saved = com.example.data.preferences.ApiKeyStorage.saveApiKey(getApplication(), trimmed)
-        if (saved) {
-            _apiKey.value = trimmed
-        }
-        viewModelScope.launch {
-            _toastMessage.emit(
-                when {
-                    !saved -> "Ошибка защищённого хранилища: не удалось сохранить ключ"
-                    trimmed.isEmpty() -> "API ключ удален"
-                    else -> "API ключ сохранен!"
-                }
+    fun saveApiKey(key: String): Boolean {
+        return when (
+            val result = com.example.davidapp.DavidViewModel.saveSanitizedApiKey(
+                legacyPrefs = prefs,
+                securePrefs = obtainSecurePrefs(),
+                newKey = key
             )
+        ) {
+            is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.Success -> {
+                val trimmed = result.sanitizedKey
+                _apiKey.value = trimmed
+                if (trimmed.isNotBlank()) {
+                    com.example.data.preferences.BudgetPreferencesRepository.setGeminiConsentGiven(getApplication(), true)
+                    _isGeminiConsentGiven.value = true
+                }
+                viewModelScope.launch {
+                    _toastMessage.emit(if (trimmed.isEmpty()) "API ключ удален" else "API ключ сохранен!")
+                }
+                true
+            }
+            is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.EncryptionError -> {
+                viewModelScope.launch {
+                    _toastMessage.emit(result.message)
+                }
+                false
+            }
         }
     }
 
