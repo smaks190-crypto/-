@@ -2073,7 +2073,7 @@ class DavidLiveUnitTest {
 
         // 4. После отпускания пальца сгустки мягко расходятся обратно в обычный режим
         var dispersed = attraction
-        repeat(25) {
+        repeat(60) {
             dispersed = advanceTouchAttractionStrength(
                 currentStrength = dispersed,
                 isTouchActive = false,
