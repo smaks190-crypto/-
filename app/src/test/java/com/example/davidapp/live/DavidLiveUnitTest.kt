@@ -2321,7 +2321,7 @@ class DavidLiveUnitTest {
         }
 
         // 1. Пользователь произносит фразу по частям (streaming inputTranscription)
-        controller.handleIncomingServerJson(
+        controller.processServerMessageForTest(
             """{"serverContent":{"inputTranscription":{"text":"Давид, запиши кофе "}}}"""
         )
         assertTrue("Streaming user turn must be emitted immediately", controller.liveTranscriptTurns.value.isNotEmpty())
@@ -2331,7 +2331,7 @@ class DavidLiveUnitTest {
         assertFalse("Streaming user turn is not final yet", controller.liveTranscriptTurns.value[0].isFinal)
         val firstUserTurnId = controller.liveTranscriptTurns.value[0].id
 
-        controller.handleIncomingServerJson(
+        controller.processServerMessageForTest(
             """{"serverContent":{"inputTranscription":{"text":"за 350 рублей"}}}"""
         )
         assertEquals(1, controller.liveTranscriptTurns.value.size)
@@ -2343,7 +2343,7 @@ class DavidLiveUnitTest {
         assertEquals("Давид, запиши кофе за 350 рублей", controller.liveTranscriptTurns.value[0].text)
 
         // 2. Давид начинает отвечать — реплика пользователя фиксируется (isFinal = true), а реплика Давида стримится с единым ID
-        controller.handleIncomingServerJson(
+        controller.processServerMessageForTest(
             """{"serverContent":{"outputTranscription":{"text":"Записал 350 рублей "}}}"""
         )
         assertEquals(2, controller.liveTranscriptTurns.value.size)
@@ -2354,7 +2354,7 @@ class DavidLiveUnitTest {
         assertFalse(controller.liveTranscriptTurns.value[1].isFinal)
         val firstDavidTurnId = controller.liveTranscriptTurns.value[1].id
 
-        controller.handleIncomingServerJson(
+        controller.processServerMessageForTest(
             """{"serverContent":{"outputTranscription":{"text":"в категорию Кафе!"},"turnComplete":true}}"""
         )
         assertEquals(2, controller.liveTranscriptTurns.value.size)
