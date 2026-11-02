@@ -56,6 +56,37 @@ class DavidLiveSessionController(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    // --- Детализированные реальные сигналы для единой системы визуальных состояний (Issue #56) ---
+    private val _isSessionReady = MutableStateFlow(false)
+    val isSessionReady: StateFlow<Boolean> = _isSessionReady.asStateFlow()
+
+    private val _isToolLookupActive = MutableStateFlow(false)
+    val isToolLookupActive: StateFlow<Boolean> = _isToolLookupActive.asStateFlow()
+
+    private val _activeToolName = MutableStateFlow<String?>(null)
+    val activeToolName: StateFlow<String?> = _activeToolName.asStateFlow()
+
+    private val _isAnalyzingToolData = MutableStateFlow(false)
+    val isAnalyzingToolData: StateFlow<Boolean> = _isAnalyzingToolData.asStateFlow()
+
+    private val _isPreparingResponse = MutableStateFlow(false)
+    val isPreparingResponse: StateFlow<Boolean> = _isPreparingResponse.asStateFlow()
+
+    private val _isModelThinking = MutableStateFlow(false)
+    val isModelThinking: StateFlow<Boolean> = _isModelThinking.asStateFlow()
+
+    private val _isSuccessPulseActive = MutableStateFlow(false)
+    val isSuccessPulseActive: StateFlow<Boolean> = _isSuccessPulseActive.asStateFlow()
+
+    private val _failureKind = MutableStateFlow(DavidLiveConnectionFailureKind.NONE)
+    val failureKind: StateFlow<DavidLiveConnectionFailureKind> = _failureKind.asStateFlow()
+
+    private val _debugOverrideVisualState = MutableStateFlow<DavidLiveVisualState?>(null)
+    val debugOverrideVisualState: StateFlow<DavidLiveVisualState?> = _debugOverrideVisualState.asStateFlow()
+
+    private val _visualState = MutableStateFlow(DavidLiveVisualState.IDLE_LISTENING)
+    val visualState: StateFlow<DavidLiveVisualState> = _visualState.asStateFlow()
+
     private val _transcriptTurns = mutableListOf<DavidLiveTranscriptTurn>()
     val transcriptTurns: List<DavidLiveTranscriptTurn>
         get() = synchronized(_transcriptTurns) { _transcriptTurns.toList() }
@@ -78,6 +109,72 @@ class DavidLiveSessionController(
                 }
             }
         }
+        controllerScope.launch {
+            audioEngine.activeSpeaker.collect { recomputeVisualState() }
+        }
+        controllerScope.launch {
+            audioEngine.isPlaybackDrained.collect { recomputeVisualState() }
+        }
+        controllerScope.launch {
+            audioEngine.isWithinUserSpeechHold.collect { recomputeVisualState() }
+        }
+        controllerScope.launch {
+            audioEngine.isWithinDavidSpeechHold.collect { recomputeVisualState() }
+        }
+    }
+
+    /**
+     * Устанавливает или сбрасывает принудительное визуальное состояние для debug-режима и UI-тестов.
+     * В Release-сборках (`!BuildConfig.DEBUG`) принудительный override игнорируется, чтобы не подменять реальные состояния.
+     */
+    fun setDebugVisualStateOverride(overrideState: DavidLiveVisualState?) {
+        _debugOverrideVisualState.value = if (com.example.BuildConfig.DEBUG) overrideState else null
+        recomputeVisualState()
+    }
+
+    /**
+     * Запускает кратковременный визуальный импульс успешного завершения (`SUCCESS`),
+     * после чего автоматически возвращает сферу в актуальное состояние.
+     */
+    fun triggerSuccessPulse(durationMs: Long = DavidLiveVisualStateResolver.SUCCESS_PULSE_DURATION_MS) {
+        resetProcessingFlags()
+        _isSuccessPulseActive.value = true
+        recomputeVisualState()
+        controllerScope.launch {
+            kotlinx.coroutines.delay(durationMs.coerceAtLeast(300L))
+            _isSuccessPulseActive.value = false
+            recomputeVisualState()
+        }
+    }
+
+    internal fun resetProcessingFlags() {
+        _isToolLookupActive.value = false
+        _activeToolName.value = null
+        _isAnalyzingToolData.value = false
+        _isPreparingResponse.value = false
+        _isModelThinking.value = false
+        _isSuccessPulseActive.value = false
+    }
+
+    internal fun recomputeVisualState() {
+        _visualState.value = DavidLiveVisualStateResolver.resolve(
+            connectionState = _connectionState.value,
+            activeSpeaker = audioEngine.activeSpeaker.value,
+            overallEnergy = audioEngine.overallEnergy.value,
+            isMicMuted = _isMicMuted.value,
+            isSessionReady = _isSessionReady.value,
+            isToolLookupActive = _isToolLookupActive.value,
+            activeToolName = _activeToolName.value,
+            isAnalyzingToolData = _isAnalyzingToolData.value,
+            isPreparingResponse = _isPreparingResponse.value,
+            isModelThinking = _isModelThinking.value,
+            isPlaybackDrained = audioEngine.isPlaybackCurrentlyDrained(),
+            isWithinUserSpeechHold = audioEngine.isWithinUserSpeechHold.value,
+            isWithinDavidSpeechHold = audioEngine.isWithinDavidSpeechHold.value,
+            isSuccessPulseActive = _isSuccessPulseActive.value,
+            failureKind = _failureKind.value,
+            debugOverrideState = if (com.example.BuildConfig.DEBUG) _debugOverrideVisualState.value else null
+        )
     }
 
     private var _startSessionCount = 0
@@ -121,18 +218,24 @@ class DavidLiveSessionController(
     fun startSession(userApiKey: String?) {
         if (isSessionActive() &&
             _connectionState.value != DavidLiveConnectionState.ERROR &&
+            _connectionState.value != DavidLiveConnectionState.OFFLINE &&
             _connectionState.value != DavidLiveConnectionState.NO_API_KEY
         ) {
             _displayMode.value = DavidLiveDisplayMode.EXPANDED
+            recomputeVisualState()
             return
         }
 
         _displayMode.value = DavidLiveDisplayMode.EXPANDED
 
         if (!validateUserApiKey(userApiKey)) {
+            resetProcessingFlags()
+            _isSessionReady.value = false
+            _failureKind.value = DavidLiveConnectionFailureKind.MISSING_API_KEY
             _connectionState.value = DavidLiveConnectionState.NO_API_KEY
             _errorMessage.value = "Для запуска David Live укажите ваш Gemini API ключ в настройках чата (иконка ключа вверху)."
             _liveSubtitle.value = "Требуется пользовательский Gemini API ключ"
+            recomputeVisualState()
             return
         }
 
@@ -145,6 +248,8 @@ class DavidLiveSessionController(
         pendingUserTranscript.clear()
         pendingDavidTranscript.clear()
         financialToolsProvider.clearVerifiedFacts()
+        resetProcessingFlags()
+        _failureKind.value = DavidLiveConnectionFailureKind.NONE
         _isMicMuted.value = false
         audioEngine.setMicMuted(false)
 
@@ -158,6 +263,7 @@ class DavidLiveSessionController(
     fun minimizeSession() {
         if (_displayMode.value == DavidLiveDisplayMode.EXPANDED) {
             _displayMode.value = DavidLiveDisplayMode.MINIMIZED
+            recomputeVisualState()
         }
     }
 
@@ -168,6 +274,7 @@ class DavidLiveSessionController(
     fun expandSession() {
         if (_displayMode.value == DavidLiveDisplayMode.MINIMIZED) {
             _displayMode.value = DavidLiveDisplayMode.EXPANDED
+            recomputeVisualState()
         }
     }
 
@@ -176,10 +283,16 @@ class DavidLiveSessionController(
      */
     fun retryConnection() {
         if (!validateUserApiKey(currentApiKey)) {
+            resetProcessingFlags()
+            _isSessionReady.value = false
+            _failureKind.value = DavidLiveConnectionFailureKind.MISSING_API_KEY
             _connectionState.value = DavidLiveConnectionState.NO_API_KEY
+            recomputeVisualState()
             return
         }
-        connectWebSocket(modelIndex = 0)
+        resetProcessingFlags()
+        _failureKind.value = DavidLiveConnectionFailureKind.NONE
+        connectWebSocket(modelIndex = 0, isExplicitReconnect = true)
     }
 
     /**
@@ -195,6 +308,7 @@ class DavidLiveSessionController(
         } else if (_connectionState.value == DavidLiveConnectionState.LISTENING) {
             _liveSubtitle.value = "Говорите, я слушаю..."
         }
+        recomputeVisualState()
     }
 
     /**
@@ -210,9 +324,13 @@ class DavidLiveSessionController(
         }
         webSocket = null
         audioEngine.stop()
+        resetProcessingFlags()
+        _isSessionReady.value = false
+        _failureKind.value = DavidLiveConnectionFailureKind.NONE
         _displayMode.value = DavidLiveDisplayMode.HIDDEN
         _connectionState.value = DavidLiveConnectionState.ENDED
         _errorMessage.value = null
+        recomputeVisualState()
         return transcriptTurns to financialToolsProvider.verifiedFacts
     }
 
@@ -243,19 +361,105 @@ class DavidLiveSessionController(
      * Processes a raw JSON message from the Gemini Live server (exposed as `internal` for unit testing).
      */
     internal fun processServerMessageForTest(rawJson: String) {
+        setupCompleted.set(true)
+        _isSessionReady.value = true
         handleServerJsonMessage(ws = null, rawJson = rawJson)
     }
 
-    private fun connectWebSocket(modelIndex: Int) {
+    /**
+     * Классифицирует причину разрыва или сбоя соединения для визуального разделения Offline и Error.
+     */
+    internal fun classifyConnectionFailure(
+        throwable: Throwable? = null,
+        httpOrWsCode: Int? = null,
+        reason: String? = null
+    ): DavidLiveConnectionFailureKind {
+        val msg = buildString {
+            if (!reason.isNullOrBlank()) append(reason).append(' ')
+            if (throwable != null) {
+                append(throwable.javaClass.simpleName).append(' ')
+                append(throwable.localizedMessage ?: throwable.message ?: "")
+            }
+        }.lowercase()
+
+        if (httpOrWsCode == 401 || httpOrWsCode == 403 ||
+            msg.contains("api_key_invalid") ||
+            msg.contains("api key not valid") ||
+            msg.contains("permission_denied") ||
+            msg.contains("unauthenticated") ||
+            msg.contains("invalid api key")
+        ) {
+            return DavidLiveConnectionFailureKind.INVALID_API_KEY
+        }
+
+        if (throwable is java.net.UnknownHostException ||
+            throwable is java.net.ConnectException ||
+            throwable is java.net.SocketTimeoutException ||
+            throwable is java.net.NoRouteToHostException ||
+            throwable is java.io.EOFException ||
+            (httpOrWsCode != null && httpOrWsCode in listOf(1001, 1006, 1011, 1012, 1013)) ||
+            msg.contains("unable to resolve host") ||
+            msg.contains("network is unreachable") ||
+            msg.contains("software caused connection abort") ||
+            msg.contains("connection reset") ||
+            msg.contains("broken pipe") ||
+            msg.contains("failed to connect") ||
+            msg.contains("timed out")
+        ) {
+            return DavidLiveConnectionFailureKind.NETWORK_OFFLINE
+        }
+
+        return DavidLiveConnectionFailureKind.PROTOCOL_OR_SERVER_ERROR
+    }
+
+    /**
+     * Позволяет в тестах и при сетевых событиях переводить контроллер в состояние потери соединения или ошибки.
+     */
+    internal fun simulateFailureForTest(
+        failureKind: DavidLiveConnectionFailureKind,
+        customMessage: String? = null
+    ) {
+        audioEngine.stop()
+        resetProcessingFlags()
+        _isSessionReady.value = false
+        _failureKind.value = failureKind
+        _connectionState.value = DavidLiveConnectionState.ERROR
+        _errorMessage.value = customMessage ?: when (failureKind) {
+            DavidLiveConnectionFailureKind.NETWORK_OFFLINE ->
+                "Соединение прервано. Проверьте интернет и нажмите на сферу для переподключения."
+            DavidLiveConnectionFailureKind.INVALID_API_KEY ->
+                "Недействительный API-ключ Gemini. Проверьте или обновите ключ в настройках."
+            DavidLiveConnectionFailureKind.MISSING_API_KEY ->
+                "Для запуска David Live укажите ваш Gemini API ключ."
+            else ->
+                "Что-то пошло не так. Попробуйте ещё раз."
+        }
+        _liveSubtitle.value = if (failureKind == DavidLiveConnectionFailureKind.NETWORK_OFFLINE) {
+            "Связь прервалась"
+        } else {
+            "Ошибка подключения"
+        }
+        recomputeVisualState()
+    }
+
+    private fun connectWebSocket(modelIndex: Int, isExplicitReconnect: Boolean = false) {
         intentionalClose.set(false)
         setupCompleted.set(false)
+        _isSessionReady.value = false
+        resetProcessingFlags()
+        _failureKind.value = DavidLiveConnectionFailureKind.NONE
         _errorMessage.value = null
-        _connectionState.value = if (modelIndex == 0) {
+        _connectionState.value = if (modelIndex == 0 && !isExplicitReconnect) {
             DavidLiveConnectionState.CONNECTING
         } else {
             DavidLiveConnectionState.RECONNECTING
         }
-        _liveSubtitle.value = "Подключаюсь к David Live..."
+        _liveSubtitle.value = if (_connectionState.value == DavidLiveConnectionState.RECONNECTING) {
+            "Восстанавливаю соединение с David Live..."
+        } else {
+            "Подключаюсь к David Live..."
+        }
+        recomputeVisualState()
 
         try {
             webSocket?.cancel()
@@ -270,6 +474,7 @@ class DavidLiveSessionController(
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    // Ready НЕ устанавливается по onOpen — ждём подтверждённого setupComplete от сервера
                     val setupPayload = buildSetupMessageJson(modelName)
                     webSocket.send(setupPayload.toString())
                 }
@@ -285,28 +490,69 @@ class DavidLiveSessionController(
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                     if (!intentionalClose.get() && !setupCompleted.get() && modelAttemptIndex + 1 < LIVE_MODELS.size) {
                         modelAttemptIndex++
-                        connectWebSocket(modelAttemptIndex)
+                        connectWebSocket(modelAttemptIndex, isExplicitReconnect = true)
                         return
                     }
                     if (!intentionalClose.get()) {
                         audioEngine.stop()
+                        resetProcessingFlags()
+                        _isSessionReady.value = false
+                        val kind = classifyConnectionFailure(httpOrWsCode = code, reason = reason)
+                        _failureKind.value = kind
                         _connectionState.value = DavidLiveConnectionState.ERROR
-                        _errorMessage.value = "Соединение прервано ($code). Проверьте сеть или попробуйте снова."
-                        _liveSubtitle.value = "Связь потеряна"
+                        _errorMessage.value = when (kind) {
+                            DavidLiveConnectionFailureKind.INVALID_API_KEY ->
+                                "Недействительный API-ключ Gemini ($code). Проверьте настройки API."
+                            DavidLiveConnectionFailureKind.NETWORK_OFFLINE ->
+                                "Соединение прервано ($code). Проверьте сеть или нажмите на сферу."
+                            else ->
+                                "Соединение прервано ($code). Проверьте сеть или попробуйте снова."
+                        }
+                        _liveSubtitle.value = if (kind == DavidLiveConnectionFailureKind.NETWORK_OFFLINE) {
+                            "Связь прервалась"
+                        } else {
+                            "Связь потеряна"
+                        }
+                        recomputeVisualState()
                     }
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     if (intentionalClose.get()) return
-                    if (!setupCompleted.get() && modelAttemptIndex + 1 < LIVE_MODELS.size) {
+                    val httpCode = response?.code
+                    val kind = classifyConnectionFailure(
+                        throwable = t,
+                        httpOrWsCode = httpCode,
+                        reason = response?.message
+                    )
+                    // Если ключ недействителен, не перебираем остальные модели впустую
+                    if (kind != DavidLiveConnectionFailureKind.INVALID_API_KEY &&
+                        !setupCompleted.get() &&
+                        modelAttemptIndex + 1 < LIVE_MODELS.size
+                    ) {
                         modelAttemptIndex++
-                        connectWebSocket(modelAttemptIndex)
+                        connectWebSocket(modelAttemptIndex, isExplicitReconnect = true)
                         return
                     }
                     audioEngine.stop()
+                    resetProcessingFlags()
+                    _isSessionReady.value = false
+                    _failureKind.value = kind
                     _connectionState.value = DavidLiveConnectionState.ERROR
-                    _errorMessage.value = "Ошибка подключения: ${t.localizedMessage ?: "Проверьте интернет и API ключ"}"
-                    _liveSubtitle.value = "Не удалось подключиться"
+                    _errorMessage.value = when (kind) {
+                        DavidLiveConnectionFailureKind.INVALID_API_KEY ->
+                            "Недействительный или неподдерживаемый API-ключ Gemini. Проверьте ключ в настройках."
+                        DavidLiveConnectionFailureKind.NETWORK_OFFLINE ->
+                            "Нет связи с сервером Gemini Live. Проверьте интернет и нажмите на сферу."
+                        else ->
+                            "Ошибка подключения: ${t.localizedMessage ?: "Проверьте интернет и API ключ"}"
+                    }
+                    _liveSubtitle.value = if (kind == DavidLiveConnectionFailureKind.NETWORK_OFFLINE) {
+                        "Связь прервалась"
+                    } else {
+                        "Не удалось подключиться"
+                    }
+                    recomputeVisualState()
                 }
             }
         )
@@ -393,53 +639,83 @@ class DavidLiveSessionController(
             return
         }
 
-        // 1. Setup Complete
+        // 1. Setup Complete (подтверждённая готовность сессии и аудиодвижка)
         if (root.has("setupComplete")) {
             setupCompleted.set(true)
-            _connectionState.value = DavidLiveConnectionState.LISTENING
-            _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Говорите, я слушаю..."
             if (ws != null) {
                 startAudioStreaming(ws)
             }
+            _isSessionReady.value = true
+            _failureKind.value = DavidLiveConnectionFailureKind.NONE
+            resetProcessingFlags()
+            _connectionState.value = DavidLiveConnectionState.LISTENING
+            _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Говорите, я слушаю..."
+            recomputeVisualState()
             return
         }
 
-        // 2. Tool Call (controlled on-demand financial queries)
+        // 2. Tool Call (controlled on-demand financial queries -> FINANCE_LOOKUP -> ANALYZING -> PREPARING_RESPONSE)
         val toolCall = root.optJSONObject("toolCall")
         if (toolCall != null) {
             val functionCalls = toolCall.optJSONArray("functionCalls")
             if (functionCalls != null && functionCalls.length() > 0) {
+                val firstToolName = functionCalls.optJSONObject(0)?.optString("name")?.takeIf { it.isNotBlank() }
+                _isModelThinking.value = false
+                _isAnalyzingToolData.value = false
+                _isPreparingResponse.value = false
+                _isToolLookupActive.value = true
+                _activeToolName.value = firstToolName
                 _liveSubtitle.value = "Проверяю ваши финансовые данные..."
-                controllerScope.launch {
-                    val responsesArray = JSONArray()
-                    for (i in 0 until functionCalls.length()) {
-                        val fc = functionCalls.optJSONObject(i) ?: continue
-                        val callId = fc.optString("id")
-                        val fnName = fc.optString("name")
-                        val args = fc.optJSONObject("args")
-                        val toolResult = financialToolsProvider.executeToolCall(fnName, args)
-                        responsesArray.put(
-                            JSONObject().apply {
-                                if (callId.isNotBlank()) put("id", callId)
-                                put("name", fnName)
-                                put(
-                                    "response",
-                                    JSONObject().apply {
-                                        put("output", toolResult)
-                                    }
-                                )
+                recomputeVisualState()
+
+                if (ws != null) {
+                    controllerScope.launch {
+                        val responsesArray = JSONArray()
+                        for (i in 0 until functionCalls.length()) {
+                            val fc = functionCalls.optJSONObject(i) ?: continue
+                            val callId = fc.optString("id")
+                            val fnName = fc.optString("name")
+                            if (fnName.isNotBlank()) {
+                                _activeToolName.value = fnName
+                                recomputeVisualState()
                             }
-                        )
+                            val args = fc.optJSONObject("args")
+                            val toolResult = financialToolsProvider.executeToolCall(fnName, args)
+                            responsesArray.put(
+                                JSONObject().apply {
+                                    if (callId.isNotBlank()) put("id", callId)
+                                    put("name", fnName)
+                                    put(
+                                        "response",
+                                        JSONObject().apply {
+                                            put("output", toolResult)
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                        // Поиск в БД завершён — переходим в фазу аналитического сопоставления (ANALYZING)
+                        _isToolLookupActive.value = false
+                        _activeToolName.value = null
+                        if (_connectionState.value != DavidLiveConnectionState.ERROR &&
+                            _connectionState.value != DavidLiveConnectionState.OFFLINE &&
+                            _connectionState.value != DavidLiveConnectionState.ENDED
+                        ) {
+                            _isAnalyzingToolData.value = true
+                            _liveSubtitle.value = "Проверяю цифры и составляю выводы..."
+                            recomputeVisualState()
+                        }
+
+                        val toolResponseMsg = JSONObject().apply {
+                            put(
+                                "toolResponse",
+                                JSONObject().apply {
+                                    put("functionResponses", responsesArray)
+                                }
+                            )
+                        }
+                        ws.send(toolResponseMsg.toString())
                     }
-                    val toolResponseMsg = JSONObject().apply {
-                        put(
-                            "toolResponse",
-                            JSONObject().apply {
-                                put("functionResponses", responsesArray)
-                            }
-                        )
-                    }
-                    ws?.send(toolResponseMsg.toString())
                 }
             }
             return
@@ -451,8 +727,10 @@ class DavidLiveSessionController(
         if (serverContent.optBoolean("interrupted", false)) {
             audioEngine.clearModelPlaybackQueue()
             flushPendingTranscripts()
+            resetProcessingFlags()
             _connectionState.value = DavidLiveConnectionState.LISTENING
             _liveSubtitle.value = "Слушаю вас..."
+            recomputeVisualState()
             return
         }
 
@@ -470,6 +748,11 @@ class DavidLiveSessionController(
             if (cleanedUserText.isNotBlank()) {
                 _liveSubtitle.value = cleanedUserText
             }
+            // Как только пользователь произнёс фразу, если не идёт поиск/речь Давида — активируем готовность к размышлению
+            if (!_isToolLookupActive.value && !_isAnalyzingToolData.value) {
+                _isModelThinking.value = true
+            }
+            recomputeVisualState()
         }
 
         // David's actual spoken voice transcription (outputTranscription)
@@ -482,11 +765,17 @@ class DavidLiveSessionController(
                 pendingUserTranscript.clear()
             }
             pendingDavidTranscript.append(outputTranscription)
+            _isToolLookupActive.value = false
+            _activeToolName.value = null
+            _isAnalyzingToolData.value = false
+            _isPreparingResponse.value = false
+            _isModelThinking.value = false
             _connectionState.value = DavidLiveConnectionState.DAVID_SPEAKING
             val cleanedDavidText = sanitizeSpokenSubtitle(pendingDavidTranscript.toString())
             if (cleanedDavidText.isNotBlank()) {
                 _liveSubtitle.value = cleanedDavidText
             }
+            recomputeVisualState()
         }
 
         val modelTurn = serverContent.optJSONObject("modelTurn")
@@ -501,6 +790,22 @@ class DavidLiveSessionController(
                 // while the real Russian spoken response arrives via `serverContent.outputTranscription`.
                 // We must NEVER display internal thought parts in the user's subtitle bubble!
                 val isThoughtPart = isInternalThoughtPart(part)
+                if (isThoughtPart) {
+                    // Внутренний Chain-of-Thought модели:
+                    // если уже были получены данные финансового инструмента — переводим Analyzing -> Preparing Response,
+                    // иначе показываем состояние Thinking!
+                    if (_isAnalyzingToolData.value) {
+                        _isAnalyzingToolData.value = false
+                        _isPreparingResponse.value = true
+                    } else if (!_isToolLookupActive.value &&
+                        !_isPreparingResponse.value &&
+                        _connectionState.value != DavidLiveConnectionState.DAVID_SPEAKING
+                    ) {
+                        _isModelThinking.value = true
+                    }
+                    recomputeVisualState()
+                }
+
                 val textPart = part.optString("text").takeIf { it.isNotBlank() }
                 if (!isThoughtPart && textPart != null && outputTranscription == null && ! part.has("inlineData")) {
                     val cleanedPart = sanitizeSpokenSubtitle(textPart)
@@ -525,11 +830,17 @@ class DavidLiveSessionController(
                                 recordTranscriptTurn(DavidLiveSpeaker.USER, pendingUserTranscript.toString())
                                 pendingUserTranscript.clear()
                             }
+                            _isToolLookupActive.value = false
+                            _activeToolName.value = null
+                            _isAnalyzingToolData.value = false
+                            _isPreparingResponse.value = false
+                            _isModelThinking.value = false
                             _connectionState.value = DavidLiveConnectionState.DAVID_SPEAKING
                             if (pendingDavidTranscript.isEmpty()) {
                                 _liveSubtitle.value = "Давид отвечает..."
                             }
                             audioEngine.enqueueModelAudioPcm24k(pcmBytes)
+                            recomputeVisualState()
                         }
                     }
                 }
@@ -538,10 +849,12 @@ class DavidLiveSessionController(
 
         if (serverContent.optBoolean("turnComplete", false)) {
             flushPendingTranscripts()
+            resetProcessingFlags()
             _connectionState.value = DavidLiveConnectionState.LISTENING
             if (!_isMicMuted.value && _liveSubtitle.value.isBlank()) {
                 _liveSubtitle.value = "Говорите, я слушаю..."
             }
+            recomputeVisualState()
         }
     }
 
@@ -634,8 +947,10 @@ class DavidLiveSessionController(
             },
             onUserBargeIn = {
                 flushPendingTranscripts()
+                resetProcessingFlags()
                 _connectionState.value = DavidLiveConnectionState.LISTENING
                 _liveSubtitle.value = "Слушаю вас..."
+                recomputeVisualState()
             }
         )
     }
