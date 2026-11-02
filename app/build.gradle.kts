@@ -252,9 +252,11 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
     mustRunAfter(
       ciStageBCompileKotlin,
       ":core:database:compileDebugKotlin",
+      ":core:database:bundleLibRuntimeToJarDebug",
       "compileDebugKotlin",
       "bundleDebugClassesToCompileJar",
-      "compileDebugUnitTestKotlin"
+      "compileDebugUnitTestKotlin",
+      "testDebugUnitTest"
     )
   }
 
