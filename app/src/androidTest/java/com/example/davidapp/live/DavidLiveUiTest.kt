@@ -347,6 +347,48 @@ class DavidLiveUiTest {
         composeTestRule.onNodeWithTag("david_live_circular_visualizer").assertIsDisplayed()
         composeTestRule.onNodeWithTag("david_live_state_badge").assertIsDisplayed()
     }
+
+    @Test
+    fun davidLiveMuteTogglesVisualStateAndPreservesOfflineAndApiMissingPriority() {
+        var isMuted by mutableStateOf(false)
+        var currentVisualState by mutableStateOf(DavidLiveVisualState.IDLE_LISTENING)
+
+        composeTestRule.setContent {
+            DavidLiveSheet(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                liveSubtitle = "Слушаю тебя...",
+                rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.25f },
+                overallEnergy = 0.2f,
+                activeSpeaker = DavidLiveSpeaker.NONE,
+                isMicMuted = isMuted,
+                errorMessage = null,
+                onToggleMicMute = { isMuted = !isMuted },
+                onRetryConnection = {},
+                onOpenApiKeySettings = {},
+                onEndSession = {},
+                visualState = currentVisualState
+            )
+        }
+
+        // 1. В режиме ожидания с включённым микрофоном отображается "Слушаю тебя..."
+        composeTestRule.onNodeWithText("Слушаю тебя...").assertIsDisplayed()
+
+        // 2. Выключаем микрофон центральной нижней кнопкой -> статус меняется на "Микрофон выключен"
+        composeTestRule.onNodeWithTag("david_live_bottom_mute_button").performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(isMuted)
+        composeTestRule.onNodeWithTag("david_live_sphere_status_caption").assertIsDisplayed()
+
+        // 3. При переходе в OFFLINE или API_MISSING при выключенном микрофоне системный статус сохраняет приоритет
+        currentVisualState = DavidLiveVisualState.OFFLINE
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Повторить").assertIsDisplayed()
+
+        currentVisualState = DavidLiveVisualState.API_MISSING
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Добавить API").assertIsDisplayed()
+    }
 }
+
 
 

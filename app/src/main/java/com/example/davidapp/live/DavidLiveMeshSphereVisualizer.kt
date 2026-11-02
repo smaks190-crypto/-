@@ -1,5 +1,6 @@
 package com.example.davidapp.live
 
+import android.provider.Settings
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -9,6 +10,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,15 +30,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.PriorityHigh
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,11 +48,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -65,46 +70,140 @@ import kotlin.math.sin
 /**
  * Цветовые токены премиальной дизайн-системы Obsidian Neo-Bank для David Live (Issue #56).
  */
-private val ObsidianCoreDark = Color(0xFF060D17)
-private val ObsidianCoreDeep = Color(0xFF02060C)
+private val ObsidianCoreDark = Color(0xFF050C16)
+private val ObsidianCoreDeep = Color(0xFF02050A)
 
-// Изумрудная гамма (Ожидание, Говорит Давид)
+// Изумрудная гамма (Ожидание — Медленное вращение)
 private val EmeraldPrimary = Color(0xFF00E5A8)
-private val EmeraldMint = Color(0xFF00F0A0)
+private val EmeraldMint = Color(0xFF00F5B8)
 private val EmeraldDeep = Color(0xFF059669)
 
-// Бирюзовая гамма (Ты говоришь)
+// Бирюзово-голубая гамма (Ты говоришь — Ускоренное вращение)
 private val TurquoiseSpeech = Color(0xFF00D9F5)
-private val TurquoiseCyan = Color(0xFF06B6D4)
+private val TurquoiseCyan = Color(0xFF00B4FF)
+private val SkyBlueGlow = Color(0xFF38BDF8)
 
-// Cyan / Electric Blue (Думаю, Анализирую, Подключение)
-private val CyanElectric = Color(0xFF00B4FF)
-private val CyanSky = Color(0xFF38BDF8)
-private val CyanDeep = Color(0xFF0284C7)
+// Индиго-фиолетовая / электро-синяя гамма (Давид думает — Плавное вращение)
+private val ThinkingIndigo = Color(0xFF6366F1)
+private val ThinkingViolet = Color(0xFF8B5CF6)
+private val ThinkingCyan = Color(0xFF38BDF8)
 
-// Красная гамма (Нет связи / Offline)
+// Ярко-бирюзовая / изумрудная гамма (Давид отвечает — Активное вращение)
+private val DavidSpeakingTurquoise = Color(0xFF00F0D0)
+private val DavidSpeakingEmerald = Color(0xFF00E5A8)
+
+// Приглушённая серебристо-сланцевая гамма (Микрофон выключен — Приглушённая сфера)
+internal val MutedSlatePrimary = Color(0xFF94A3B8)
+internal val MutedSilverSecondary = Color(0xFFCBD5E1)
+private val MutedSlateGlow = Color(0xFF475569)
+private val MutedSlateCore = Color(0xFF334155)
+
+// Красная гамма (Нет интернета — Красная сфера)
 private val CrimsonOffline = Color(0xFFEF4444)
 private val CrimsonGlow = Color(0xFFDC2626)
 private val CrimsonLight = Color(0xFFF87171)
 
-// Золотистая гамма (Нет API-ключа)
+// Золотисто-жёлтая гамма (API требуется — Жёлтая сфера)
 private val GoldApiAmber = Color(0xFFF59E0B)
 private val GoldApiGlow = Color(0xFFFBBF24)
 private val GoldApiWarm = Color(0xFFD97706)
 
-// Фиолетовая гамма (Ошибка)
+// Маджента-красно-фиолетовая гамма (Ошибка — Пульсирующая сфера)
 private val VioletError = Color(0xFFA855F7)
+private val CrimsonMagentaError = Color(0xFFF43F5E)
 private val VioletGlow = Color(0xFF9333EA)
-private val VioletLight = Color(0xFFC084FC)
 
 // Зелёная гамма (Готово / Успех)
 private val SuccessGreen = Color(0xFF10B981)
 private val SuccessMint = Color(0xFF00F0A0)
 
 /**
- * Палитра визуального состояния 3D mesh-сферы.
+ * Определяет, должна ли применяться приглушённая палитра выключенного микрофона (Mute).
+ *
+ * Правила приоритетов (Issue #56):
+ * - Системные состояния (`OFFLINE`, `API_MISSING`, `ERROR`, `CONNECTING`, `RECONNECTING`, `SUCCESS`)
+ *   всегда сохраняют собственную цветовую индикацию и действия.
+ * - Исходящая речь Давида (`DAVID_SPEAKING`) НЕ маскируется состоянием пользовательского микрофона:
+ *   Давид продолжает говорить со своей штатной изумрудно-бирюзовой анимацией.
+ * - Во всех остальных состояниях (`IDLE_LISTENING`, `USER_SPEAKING`, `THINKING`, `FINANCE_LOOKUP`,
+ *   `ANALYZING`, `PREPARING_RESPONSE`) выключение микрофона переводит сферу в заметную
+ *   приглушённую серебристо-сланцевую палитру.
  */
-private data class SpherePalette(
+internal fun shouldApplyMutedVisualPalette(
+    visualState: DavidLiveVisualState,
+    isMicMuted: Boolean
+): Boolean {
+    if (!isMicMuted) return false
+    return when (visualState) {
+        DavidLiveVisualState.OFFLINE,
+        DavidLiveVisualState.API_MISSING,
+        DavidLiveVisualState.ERROR,
+        DavidLiveVisualState.CONNECTING,
+        DavidLiveVisualState.RECONNECTING,
+        DavidLiveVisualState.SUCCESS,
+        DavidLiveVisualState.DAVID_SPEAKING -> false
+
+        DavidLiveVisualState.IDLE_LISTENING,
+        DavidLiveVisualState.USER_SPEAKING,
+        DavidLiveVisualState.THINKING,
+        DavidLiveVisualState.FINANCE_LOOKUP,
+        DavidLiveVisualState.ANALYZING,
+        DavidLiveVisualState.PREPARING_RESPONSE -> true
+    }
+}
+
+/**
+ * Вычисляет целевую угловую скорость орбитального движения (рад/с) в зависимости от
+ * реального состояния [DavidLiveVisualState], флага `isMicMuted` и входящей/исходящей аудиоэнергии.
+ *
+ * Используется для плавной инерционной интерполяции скорости без сброса фазы вращения.
+ */
+internal fun resolveTargetOrbitAngularSpeed(
+    visualState: DavidLiveVisualState,
+    isMicMuted: Boolean = false,
+    audioEnergy: Float = 0f
+): Float {
+    val clampedEnergy = audioEnergy.coerceIn(0f, 1f)
+    if (shouldApplyMutedVisualPalette(visualState, isMicMuted)) {
+        return 0.22f
+    }
+    return when (visualState) {
+        DavidLiveVisualState.OFFLINE -> 0.14f
+        DavidLiveVisualState.API_MISSING -> 0.18f
+        DavidLiveVisualState.ERROR -> 0.26f
+        DavidLiveVisualState.IDLE_LISTENING -> 0.44f
+        DavidLiveVisualState.CONNECTING,
+        DavidLiveVisualState.RECONNECTING -> 0.68f
+        DavidLiveVisualState.THINKING -> 0.78f
+        DavidLiveVisualState.ANALYZING -> 0.88f
+        DavidLiveVisualState.FINANCE_LOOKUP -> 0.96f
+        DavidLiveVisualState.PREPARING_RESPONSE -> 1.04f
+        DavidLiveVisualState.SUCCESS -> 1.12f
+        DavidLiveVisualState.USER_SPEAKING -> 1.24f + clampedEnergy * 0.92f
+        DavidLiveVisualState.DAVID_SPEAKING -> 1.34f + clampedEnergy * 1.05f
+    }
+}
+
+/**
+ * Вычисляет следующее значение непрерывной фазы орбитального движения (в радианах)
+ * без скачков и сбросов при переключении состояний.
+ */
+internal fun advanceContinuousOrbitPhase(
+    currentPhaseRad: Float,
+    deltaMs: Long,
+    angularSpeedRadPerSec: Float,
+    reduceMotion: Boolean = false
+): Float {
+    if (reduceMotion || deltaMs <= 0L) return currentPhaseRad
+    val boundedDeltaSec = (deltaMs.coerceIn(1L, 64L)) / 1000f
+    val periodWrap = (2000.0 * PI).toFloat()
+    return (currentPhaseRad + boundedDeltaSec * angularSpeedRadPerSec.coerceAtLeast(0f)) % periodWrap
+}
+
+/**
+ * Палитра визуального состояния живой 3D-сферы.
+ */
+internal data class SpherePalette(
     val primary: Color,
     val secondary: Color,
     val haloGlow: Color,
@@ -112,124 +211,176 @@ private data class SpherePalette(
     val waveAccent: Color
 )
 
-private fun resolveSpherePalette(state: DavidLiveVisualState): SpherePalette {
+internal fun resolveSpherePalette(
+    state: DavidLiveVisualState,
+    isMicMuted: Boolean = false
+): SpherePalette {
+    if (shouldApplyMutedVisualPalette(state, isMicMuted)) {
+        return SpherePalette(
+            primary = MutedSlatePrimary,
+            secondary = MutedSilverSecondary,
+            haloGlow = MutedSlateGlow.copy(alpha = 0.30f),
+            coreGlow = MutedSlateCore.copy(alpha = 0.24f),
+            waveAccent = MutedSilverSecondary
+        )
+    }
+
     return when (state) {
         DavidLiveVisualState.IDLE_LISTENING -> SpherePalette(
             primary = EmeraldPrimary,
             secondary = EmeraldMint,
-            haloGlow = EmeraldDeep.copy(alpha = 0.35f),
-            coreGlow = EmeraldPrimary.copy(alpha = 0.22f),
-            waveAccent = EmeraldPrimary
+            haloGlow = EmeraldDeep.copy(alpha = 0.38f),
+            coreGlow = EmeraldPrimary.copy(alpha = 0.25f),
+            waveAccent = EmeraldMint
         )
 
         DavidLiveVisualState.USER_SPEAKING -> SpherePalette(
             primary = TurquoiseSpeech,
             secondary = TurquoiseCyan,
-            haloGlow = TurquoiseSpeech.copy(alpha = 0.45f),
-            coreGlow = TurquoiseCyan.copy(alpha = 0.28f),
+            haloGlow = TurquoiseCyan.copy(alpha = 0.46f),
+            coreGlow = SkyBlueGlow.copy(alpha = 0.30f),
             waveAccent = TurquoiseSpeech
         )
 
         DavidLiveVisualState.THINKING -> SpherePalette(
-            primary = CyanElectric,
-            secondary = CyanSky,
-            haloGlow = CyanDeep.copy(alpha = 0.42f),
-            coreGlow = CyanElectric.copy(alpha = 0.25f),
-            waveAccent = CyanElectric
+            primary = ThinkingViolet,
+            secondary = ThinkingCyan,
+            haloGlow = ThinkingIndigo.copy(alpha = 0.44f),
+            coreGlow = ThinkingViolet.copy(alpha = 0.28f),
+            waveAccent = ThinkingCyan
         )
 
         DavidLiveVisualState.FINANCE_LOOKUP -> SpherePalette(
             primary = EmeraldMint,
             secondary = TurquoiseSpeech,
-            haloGlow = EmeraldDeep.copy(alpha = 0.40f),
-            coreGlow = GoldApiAmber.copy(alpha = 0.20f),
+            haloGlow = EmeraldDeep.copy(alpha = 0.42f),
+            coreGlow = GoldApiAmber.copy(alpha = 0.22f),
             waveAccent = EmeraldMint
         )
 
         DavidLiveVisualState.ANALYZING -> SpherePalette(
-            primary = CyanElectric,
-            secondary = EmeraldPrimary,
-            haloGlow = CyanDeep.copy(alpha = 0.45f),
-            coreGlow = CyanElectric.copy(alpha = 0.26f),
-            waveAccent = CyanSky
+            primary = ThinkingCyan,
+            secondary = ThinkingViolet,
+            haloGlow = ThinkingIndigo.copy(alpha = 0.46f),
+            coreGlow = ThinkingCyan.copy(alpha = 0.28f),
+            waveAccent = EmeraldPrimary
         )
 
         DavidLiveVisualState.PREPARING_RESPONSE -> SpherePalette(
             primary = TurquoiseSpeech,
             secondary = EmeraldPrimary,
-            haloGlow = EmeraldDeep.copy(alpha = 0.38f),
-            coreGlow = TurquoiseSpeech.copy(alpha = 0.24f),
+            haloGlow = EmeraldDeep.copy(alpha = 0.40f),
+            coreGlow = TurquoiseSpeech.copy(alpha = 0.26f),
             waveAccent = EmeraldPrimary
         )
 
         DavidLiveVisualState.DAVID_SPEAKING -> SpherePalette(
-            primary = EmeraldPrimary,
-            secondary = TurquoiseSpeech,
-            haloGlow = EmeraldDeep.copy(alpha = 0.50f),
-            coreGlow = EmeraldMint.copy(alpha = 0.32f),
-            waveAccent = EmeraldPrimary
+            primary = DavidSpeakingTurquoise,
+            secondary = DavidSpeakingEmerald,
+            haloGlow = EmeraldDeep.copy(alpha = 0.52f),
+            coreGlow = DavidSpeakingTurquoise.copy(alpha = 0.34f),
+            waveAccent = DavidSpeakingEmerald
         )
 
         DavidLiveVisualState.CONNECTING,
         DavidLiveVisualState.RECONNECTING -> SpherePalette(
-            primary = CyanElectric,
-            secondary = CyanSky,
-            haloGlow = CyanDeep.copy(alpha = 0.35f),
-            coreGlow = CyanElectric.copy(alpha = 0.20f),
-            waveAccent = CyanElectric
+            primary = ThinkingCyan,
+            secondary = TurquoiseSpeech,
+            haloGlow = ThinkingIndigo.copy(alpha = 0.36f),
+            coreGlow = ThinkingCyan.copy(alpha = 0.22f),
+            waveAccent = TurquoiseSpeech
         )
 
         DavidLiveVisualState.OFFLINE -> SpherePalette(
             primary = CrimsonOffline,
             secondary = CrimsonLight,
-            haloGlow = CrimsonGlow.copy(alpha = 0.42f),
-            coreGlow = CrimsonOffline.copy(alpha = 0.25f),
-            waveAccent = CrimsonOffline
+            haloGlow = CrimsonGlow.copy(alpha = 0.44f),
+            coreGlow = CrimsonOffline.copy(alpha = 0.28f),
+            waveAccent = CrimsonLight
         )
 
         DavidLiveVisualState.API_MISSING -> SpherePalette(
             primary = GoldApiAmber,
             secondary = GoldApiGlow,
-            haloGlow = GoldApiWarm.copy(alpha = 0.40f),
-            coreGlow = GoldApiAmber.copy(alpha = 0.24f),
-            waveAccent = GoldApiAmber
+            haloGlow = GoldApiWarm.copy(alpha = 0.42f),
+            coreGlow = GoldApiAmber.copy(alpha = 0.26f),
+            waveAccent = GoldApiGlow
         )
 
         DavidLiveVisualState.ERROR -> SpherePalette(
-            primary = VioletError,
-            secondary = VioletLight,
-            haloGlow = VioletGlow.copy(alpha = 0.42f),
-            coreGlow = VioletError.copy(alpha = 0.26f),
+            primary = CrimsonMagentaError,
+            secondary = VioletError,
+            haloGlow = VioletGlow.copy(alpha = 0.44f),
+            coreGlow = CrimsonMagentaError.copy(alpha = 0.28f),
             waveAccent = VioletError
         )
 
         DavidLiveVisualState.SUCCESS -> SpherePalette(
             primary = SuccessMint,
             secondary = SuccessGreen,
-            haloGlow = SuccessGreen.copy(alpha = 0.55f),
-            coreGlow = SuccessMint.copy(alpha = 0.35f),
+            haloGlow = SuccessGreen.copy(alpha = 0.54f),
+            coreGlow = SuccessMint.copy(alpha = 0.34f),
             waveAccent = SuccessMint
         )
     }
 }
 
 /**
- * 3D Mesh-сфера визуализатора **David Live** нового поколения (Issue #56).
+ * Параметры отдельной 3D-орбиты вокруг живой энергетической сферы.
+ */
+private class OrbitRingSpec(
+    val rollDegrees: Float,
+    val pitchDegrees: Float,
+    val radiusRatio: Float,
+    val speedMultiplier: Float,
+    val phaseOffsetRad: Float,
+    val ribbonWidthDp: Float,
+    val useSecondaryColor: Boolean
+)
+
+private val DefaultOrbitSpecs = arrayOf(
+    // 1. Главная диагональная световая орбита (как яркое кольцо на референсе)
+    OrbitRingSpec(
+        rollDegrees = -21f,
+        pitchDegrees = 70f,
+        radiusRatio = 1.36f,
+        speedMultiplier = 1.0f,
+        phaseOffsetRad = 0.2f,
+        ribbonWidthDp = 2.6f,
+        useSecondaryColor = false
+    ),
+    // 2. Встречная наклонная орбита, создающая объёмное перекрестие в 3D
+    OrbitRingSpec(
+        rollDegrees = 26f,
+        pitchDegrees = 64f,
+        radiusRatio = 1.26f,
+        speedMultiplier = -0.76f,
+        phaseOffsetRad = 2.1f,
+        ribbonWidthDp = 2.0f,
+        useSecondaryColor = true
+    ),
+    // 3. Тонкая крутая орбита для ощущения многослойного энергетического поля
+    OrbitRingSpec(
+        rollDegrees = -52f,
+        pitchDegrees = 73f,
+        radiusRatio = 1.18f,
+        speedMultiplier = 1.28f,
+        phaseOffsetRad = 4.2f,
+        ribbonWidthDp = 1.5f,
+        useSecondaryColor = false
+    )
+)
+
+/**
+ * Живая 3D энергетическая сфера **David Live** со световыми орбитами (Issue #56 Redesign).
  *
- * Воплощает визуальный язык Obsidian Neo-Bank:
- * - Прозрачная объёмная оболочка из тонких переплетённых светящихся линий (параллели, меридианы, диагонали).
- * - Глубокая тёмная обсидиановая сердцевина с мягким неоновым свечением.
- * - Плавные гармонические волны с защитой от резкого исчезновения (затухание 300–450 мс).
- * - Реакция на реальную аудио-энергию микрофона и воспроизведения Давида.
- * - Уникальные анимированные слои для каждого состояния:
- *   - `FINANCE_LOOKUP`: 3D-кольцо планетарного сканирования с финансовыми микро-акцентами (документ, график, монеты, календарь).
- *   - `ANALYZING`: перекрёстные орбитальные кольца с движущимися маяками данных.
- *   - `USER_SPEAKING`: эквалайзер входящей речи под сферой.
- *   - `DAVID_SPEAKING`: акустические дуги звукового давления по бокам сферы.
- *   - `OFFLINE`: красная mesh-сфера с «!», нажатие на сферу запускает reconnect.
- *   - `API_MISSING`: золотистая mesh-сфера с иконкой ключа, нажатие открывает настройки API.
- *   - `ERROR`: фиолетовая mesh-сфера с «!», повтор по нажатию.
- *   - `SUCCESS`: зелёная пульсация с подтверждающей галочкой.
+ * Реализует утверждённый дизайн-референс «Новый дизайн. Живая сфера. Умный Давид»:
+ * - Полупрозрачное стеклянное энергетическое ядро с глубоким внутренним свечением и бликами;
+ * - Трёхмерные эллиптические световые орбиты с честным разделением глубины:
+ *   задняя полусфера орбит (`z < 0`) проходит за ядром, передняя (`z >= 0`) — перед ним;
+ * - Непрерывное инерционное движение орбит без сброса фазы при смене состояний;
+ * - Мгновенно различимая приглушённая серебристо-сланцевая палитра при выключении микрофона (`isMicMuted`),
+ *   не маскирующая приоритетные состояния (`OFFLINE`, `API_MISSING`, `ERROR`) и не блокирующая речь Давида (`DAVID_SPEAKING`).
  */
 @Composable
 fun DavidLiveMeshSphereVisualizer(
@@ -242,92 +393,135 @@ fun DavidLiveMeshSphereVisualizer(
     visualizerSize: Dp = 276.dp,
     activeToolName: String? = null
 ) {
-    val targetPalette = resolveSpherePalette(visualState)
+    val context = LocalContext.current
+    val reduceMotion = remember(context) {
+        try {
+            Settings.Global.getFloat(
+                context.contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f
+            ) <= 0.05f
+        } catch (_: Exception) {
+            false
+        }
+    }
 
-    // Плавная интерполяция цветов при переходе между состояниями (400 мс)
+    val targetPalette = remember(visualState, isMicMuted) {
+        resolveSpherePalette(visualState, isMicMuted)
+    }
+
+    // Плавная интерполяция цветов сферы и орбит за 400 мс (требование 300–500 мс)
     val animatedPrimaryColor by animateColorAsState(
         targetValue = targetPalette.primary,
         animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
-        label = "mesh_primary_color"
+        label = "sphere_primary_color"
     )
     val animatedSecondaryColor by animateColorAsState(
         targetValue = targetPalette.secondary,
         animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
-        label = "mesh_secondary_color"
+        label = "sphere_secondary_color"
     )
     val animatedHaloColor by animateColorAsState(
         targetValue = targetPalette.haloGlow,
         animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
-        label = "mesh_halo_color"
+        label = "sphere_halo_color"
     )
     val animatedCoreGlowColor by animateColorAsState(
         targetValue = targetPalette.coreGlow,
         animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
-        label = "mesh_core_color"
+        label = "sphere_core_color"
     )
 
-    // Плавное затухание амплитуды волн (380 мс) — предотвращает резкий обрыв анимации речи
-    val isSpeechActive = (visualState == DavidLiveVisualState.USER_SPEAKING ||
-        visualState == DavidLiveVisualState.DAVID_SPEAKING) && !isMicMuted
-    val targetAudioEnergy = if (isSpeechActive) overallEnergy.coerceIn(0.08f, 1f) else 0.04f
+    // Mute влияет ТОЛЬКО на входящую речь пользователя и НЕ подавляет исходящую речь Давида
+    val isUserSpeechActive = visualState == DavidLiveVisualState.USER_SPEAKING && !isMicMuted
+    val isDavidSpeechActive = visualState == DavidLiveVisualState.DAVID_SPEAKING
+    val isSpeechActive = isUserSpeechActive || isDavidSpeechActive
 
+    val targetAudioEnergy = if (isSpeechActive) {
+        overallEnergy.coerceIn(0.08f, 1f)
+    } else {
+        0.03f
+    }
+
+    // Плавное затухание амплитуды (380 мс) без резкого обрыва после окончания фразы
     val smoothedEnergy by animateFloatAsState(
         targetValue = targetAudioEnergy,
         animationSpec = tween(
             durationMillis = if (isSpeechActive) 90 else 380,
             easing = FastOutSlowInEasing
         ),
-        label = "mesh_energy_smoothing"
+        label = "sphere_energy_smoothing"
     )
 
-    // Непрерывные циклические анимации для естественного дыхания и вращения 3D-сетки
-    val infiniteTransition = rememberInfiniteTransition(label = "david_live_mesh_motion")
+    // Целевая угловая скорость орбит с плавной инерционной интерполяцией (ease-in / ease-out)
+    val targetOrbitSpeed = resolveTargetOrbitAngularSpeed(
+        visualState = visualState,
+        isMicMuted = isMicMuted,
+        audioEnergy = smoothedEnergy
+    )
+    val smoothedOrbitSpeed by animateFloatAsState(
+        targetValue = targetOrbitSpeed,
+        animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+        label = "sphere_orbit_angular_speed"
+    )
+    val currentOrbitSpeedState by rememberUpdatedState(smoothedOrbitSpeed)
 
-    // Спокойное дыхание сферы (период 3200 мс)
+    // Непрерывный аккумулятор фазы вращения — никогда не сбрасывается при смене visualState
+    var continuousOrbitPhaseRad by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(reduceMotion) {
+        if (reduceMotion) return@LaunchedEffect
+        var lastFrameMs = -1L
+        while (true) {
+            withInfiniteAnimationFrameMillis { frameTimeMs ->
+                if (lastFrameMs >= 0L) {
+                    val deltaMs = frameTimeMs - lastFrameMs
+                    continuousOrbitPhaseRad = advanceContinuousOrbitPhase(
+                        currentPhaseRad = continuousOrbitPhaseRad,
+                        deltaMs = deltaMs,
+                        angularSpeedRadPerSec = currentOrbitSpeedState,
+                        reduceMotion = false
+                    )
+                }
+                lastFrameMs = frameTimeMs
+            }
+        }
+    }
+
+    // Спокойное дыхание ядра и пульсация для состояния ERROR
+    val infiniteTransition = rememberInfiniteTransition(label = "david_live_sphere_breathing")
     val breathProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3200, easing = FastOutSlowInEasing),
+            animation = tween(
+                durationMillis = if (visualState == DavidLiveVisualState.ERROR) 1600 else 3200,
+                easing = FastOutSlowInEasing
+            ),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "sphere_breathing"
+        label = "sphere_breathing_cycle"
     )
 
-    // Плавное вращение вокруг вертикальной оси Y (yaw)
-    val rotationYawDegrees by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = when (visualState) {
-                    DavidLiveVisualState.THINKING,
-                    DavidLiveVisualState.ANALYZING -> 4500
-                    DavidLiveVisualState.FINANCE_LOOKUP -> 6000
-                    DavidLiveVisualState.CONNECTING,
-                    DavidLiveVisualState.RECONNECTING -> 4000
-                    DavidLiveVisualState.OFFLINE -> 16000
-                    else -> 9000
-                },
-                easing = LinearEasing
-            ),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "sphere_yaw_rotation"
-    )
-
-    // Импульс сканирования / движения орбит
-    val orbitProgress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "sphere_orbit_scan"
+    // Плавный коэффициент яркости орбит (приглушается при Mute и Offline)
+    val targetOrbitIntensity = when {
+        shouldApplyMutedVisualPalette(visualState, isMicMuted) -> 0.56f
+        visualState == DavidLiveVisualState.OFFLINE -> 0.72f
+        visualState == DavidLiveVisualState.API_MISSING -> 0.85f
+        visualState == DavidLiveVisualState.ERROR -> 0.80f + 0.18f * breathProgress
+        visualState == DavidLiveVisualState.USER_SPEAKING ||
+            visualState == DavidLiveVisualState.DAVID_SPEAKING -> 0.94f + 0.06f * smoothedEnergy
+        else -> 0.86f
+    }
+    val orbitIntensity by animateFloatAsState(
+        targetValue = targetOrbitIntensity,
+        animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
+        label = "sphere_orbit_intensity"
     )
 
     val interactionSource = remember { MutableInteractionSource() }
+    val orbitProgressNormalized = ((continuousOrbitPhaseRad / (2f * PI.toFloat())) % 1f + 1f) % 1f
+    val yawDegreesContinuous = ((continuousOrbitPhaseRad * 180f / PI.toFloat()) * 0.45f) % 360f
 
     Box(
         modifier = modifier
@@ -352,15 +546,20 @@ fun DavidLiveMeshSphereVisualizer(
     ) {
         Canvas(modifier = Modifier.size(visualizerSize)) {
             val center = Offset(size.width / 2f, size.height / 2f)
-            val baseRadius = (size.minDimension / 2f) * 0.70f
+            val baseRadius = (size.minDimension / 2f) * 0.62f
+            val dynamicRadius = baseRadius * (
+                1f +
+                    0.025f * sin(breathProgress * PI.toFloat()) +
+                    smoothedEnergy * 0.085f
+                )
 
-            // 1. Внешнее неоновое атмосферное свечение (Halo)
-            val haloRadius = baseRadius * (1.18f + 0.08f * breathProgress + smoothedEnergy * 0.15f)
+            // 1. Внешнее атмосферное свечение (Neon Halo) + микро-частицы в пространстве вокруг сферы
+            val haloRadius = dynamicRadius * (1.46f + 0.08f * breathProgress + smoothedEnergy * 0.16f)
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        animatedHaloColor,
-                        animatedHaloColor.copy(alpha = animatedHaloColor.alpha * 0.40f),
+                        animatedHaloColor.copy(alpha = (animatedHaloColor.alpha * 1.15f).coerceAtMost(0.68f)),
+                        animatedHaloColor.copy(alpha = animatedHaloColor.alpha * 0.42f),
                         Color.Transparent
                     ),
                     center = center,
@@ -370,41 +569,71 @@ fun DavidLiveMeshSphereVisualizer(
                 center = center
             )
 
-            // 2. Тёмная сердцевина сферы (Obsidian Core)
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        animatedCoreGlowColor,
-                        ObsidianCoreDark,
-                        ObsidianCoreDeep
-                    ),
-                    center = center,
-                    radius = baseRadius
-                ),
-                radius = baseRadius,
-                center = center
+            drawAmbientSpaceParticles(
+                center = center,
+                sphereRadius = dynamicRadius,
+                phaseRad = continuousOrbitPhaseRad,
+                primaryColor = animatedPrimaryColor,
+                secondaryColor = animatedSecondaryColor,
+                intensity = orbitIntensity
             )
 
-            // 3. Отрисовка 3D Mesh-сферы (параллели, меридианы, узлы)
-            drawWireframeMeshSphere(
+            // 2. ЗАДНЯЯ ПОЛУСФЕРА 3D-орбит (z < 0) — проходит ЗА стеклянным ядром сферы
+            drawThreeDimensionalOrbits(
                 center = center,
-                radius = baseRadius,
-                breathProgress = breathProgress,
-                yawDegrees = rotationYawDegrees,
-                orbitProgress = orbitProgress,
+                sphereRadius = dynamicRadius,
+                phaseRad = continuousOrbitPhaseRad,
                 energy = smoothedEnergy,
                 primaryColor = animatedPrimaryColor,
                 secondaryColor = animatedSecondaryColor,
-                visualState = visualState
+                intensity = orbitIntensity,
+                drawFrontHemisphere = false
             )
 
-            // 4. Отрисовка специфических состояний (орбиты, кольца, волны)
+            // 3. Полупрозрачное стеклянное энергетическое ядро сферы (Glass Core + Inner Plasma + Rim Light)
+            drawTranslucentGlassSphereCore(
+                center = center,
+                radius = dynamicRadius,
+                phaseRad = continuousOrbitPhaseRad,
+                breathProgress = breathProgress,
+                energy = smoothedEnergy,
+                primaryColor = animatedPrimaryColor,
+                secondaryColor = animatedSecondaryColor,
+                coreGlowColor = animatedCoreGlowColor,
+                intensity = orbitIntensity
+            )
+
+            // 4. Тонкие внутренние энергетические потоки внутри стеклянной оболочки
+            drawSubtleInnerEnergyMesh(
+                center = center,
+                radius = dynamicRadius * 0.96f,
+                breathProgress = breathProgress,
+                yawDegrees = yawDegreesContinuous,
+                energy = smoothedEnergy,
+                primaryColor = animatedPrimaryColor,
+                secondaryColor = animatedSecondaryColor,
+                intensity = orbitIntensity
+            )
+
+            // 5. ПЕРЕДНЯЯ ПОЛУСФЕРА 3D-орбит (z >= 0) — огибает сферу СПЕРЕДИ с яркими световыми потоками
+            drawThreeDimensionalOrbits(
+                center = center,
+                sphereRadius = dynamicRadius,
+                phaseRad = continuousOrbitPhaseRad,
+                energy = smoothedEnergy,
+                primaryColor = animatedPrimaryColor,
+                secondaryColor = animatedSecondaryColor,
+                intensity = orbitIntensity,
+                drawFrontHemisphere = true
+            )
+
+            // 6. Специфические акценты состояний поверх орбит
             when (visualState) {
                 DavidLiveVisualState.FINANCE_LOOKUP -> {
                     drawPlanetaryFinanceRing(
                         center = center,
-                        radius = baseRadius,
-                        orbitProgress = orbitProgress,
+                        radius = dynamicRadius,
+                        orbitProgress = orbitProgressNormalized,
                         accentColor = animatedPrimaryColor,
                         goldColor = GoldApiGlow
                     )
@@ -413,8 +642,8 @@ fun DavidLiveMeshSphereVisualizer(
                 DavidLiveVisualState.ANALYZING -> {
                     drawAnalyzingDualOrbits(
                         center = center,
-                        radius = baseRadius,
-                        orbitProgress = orbitProgress,
+                        radius = dynamicRadius,
+                        orbitProgress = orbitProgressNormalized,
                         cyanColor = animatedPrimaryColor,
                         emeraldColor = animatedSecondaryColor
                     )
@@ -423,7 +652,7 @@ fun DavidLiveMeshSphereVisualizer(
                 DavidLiveVisualState.DAVID_SPEAKING -> {
                     drawAcousticSoundwaveArcs(
                         center = center,
-                        radius = baseRadius,
+                        radius = dynamicRadius,
                         energy = smoothedEnergy,
                         breathProgress = breathProgress,
                         color = animatedPrimaryColor
@@ -434,8 +663,8 @@ fun DavidLiveMeshSphereVisualizer(
                 DavidLiveVisualState.RECONNECTING -> {
                     drawConnectingHandshakeArcs(
                         center = center,
-                        radius = baseRadius,
-                        orbitProgress = orbitProgress,
+                        radius = dynamicRadius,
+                        orbitProgress = orbitProgressNormalized,
                         color = animatedPrimaryColor
                     )
                 }
@@ -443,102 +672,295 @@ fun DavidLiveMeshSphereVisualizer(
                 DavidLiveVisualState.SUCCESS -> {
                     drawSuccessExpansionRing(
                         center = center,
-                        radius = baseRadius,
-                        orbitProgress = orbitProgress,
+                        radius = dynamicRadius,
+                        orbitProgress = orbitProgressNormalized,
                         color = animatedPrimaryColor
                     )
                 }
 
-                else -> {
-                    // IDLE, USER_SPEAKING, THINKING, OFFLINE, API_MISSING, ERROR
-                }
-            }
-
-            // 5. Нижний эквалайзер речи (для USER_SPEAKING и DAVID_SPEAKING)
-            if (isSpeechActive) {
-                drawSpeechEqualizerBars(
-                    center = center,
-                    sphereRadius = baseRadius,
-                    energy = smoothedEnergy,
-                    rayMagnitudes = rayMagnitudes,
-                    color = animatedPrimaryColor
-                )
-            }
-        }
-
-        // 6. Центральный контекстный бейдж для состояний с явным фокусом (Offline, No API, Error, Success)
-        when (visualState) {
-            DavidLiveVisualState.OFFLINE -> {
-                CentralStatusBadge(
-                    badgeColor = CrimsonOffline,
-                    glowColor = CrimsonGlow,
-                    icon = Icons.Default.PriorityHigh,
-                    contentDescription = "Связь потеряна"
-                )
-            }
-
-            DavidLiveVisualState.API_MISSING -> {
-                CentralStatusBadge(
-                    badgeColor = GoldApiAmber,
-                    glowColor = GoldApiWarm,
-                    icon = Icons.Default.Key,
-                    contentDescription = "Требуется API-ключ"
-                )
-            }
-
-            DavidLiveVisualState.ERROR -> {
-                CentralStatusBadge(
-                    badgeColor = VioletError,
-                    glowColor = VioletGlow,
-                    icon = Icons.Default.PriorityHigh,
-                    contentDescription = "Ошибка связи"
-                )
-            }
-
-            DavidLiveVisualState.SUCCESS -> {
-                CentralStatusBadge(
-                    badgeColor = SuccessGreen,
-                    glowColor = SuccessMint,
-                    icon = Icons.Default.Check,
-                    contentDescription = "Успешно"
-                )
-            }
-
-            else -> {
-                // В обычных голосовых режимах сердцевина прозрачна и демонстрирует глубину 3D-сетки
+                else -> Unit
             }
         }
     }
 }
 
 /**
- * Отрисовка объёмной 3D-сетки mesh-сферы с изометрическим наклоном и перспективой.
+ * Отрисовка полупрозрачного стеклянного ядра сферы с внутренним плазменным свечением,
+ * краевым неоновым рефлексом (Fresnel rim) и мягким глянцевым бликом сверху-слева.
  */
-private fun DrawScope.drawWireframeMeshSphere(
+private fun DrawScope.drawTranslucentGlassSphereCore(
+    center: Offset,
+    radius: Float,
+    phaseRad: Float,
+    breathProgress: Float,
+    energy: Float,
+    primaryColor: Color,
+    secondaryColor: Color,
+    coreGlowColor: Color,
+    intensity: Float
+) {
+    // 1. Тёмная глубокая основа сферы
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                ObsidianCoreDark.copy(alpha = 0.90f),
+                ObsidianCoreDeep.copy(alpha = 0.96f)
+            ),
+            center = center,
+            radius = radius
+        ),
+        radius = radius,
+        center = center
+    )
+
+    // 2. Живое внутреннее плазменное облако (мягко смещается по фазе вращения)
+    val driftX = center.x + radius * 0.16f * cos(phaseRad * 0.65f)
+    val driftY = center.y - radius * 0.14f * sin(phaseRad * 0.50f)
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                secondaryColor.copy(alpha = (0.34f + 0.18f * energy) * intensity),
+                primaryColor.copy(alpha = (0.24f + 0.12f * breathProgress) * intensity),
+                coreGlowColor.copy(alpha = 0.14f * intensity),
+                Color.Transparent
+            ),
+            center = Offset(driftX, driftY),
+            radius = radius * 0.95f
+        ),
+        radius = radius,
+        center = center
+    )
+
+    // 3. Вторичное нижнее внутреннее отражение для объёма
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                primaryColor.copy(alpha = (0.22f + 0.14f * energy) * intensity),
+                Color.Transparent
+            ),
+            center = Offset(center.x + radius * 0.24f, center.y + radius * 0.32f),
+            radius = radius * 0.78f
+        ),
+        radius = radius,
+        center = center
+    )
+
+    // 4. Глянцевый стеклянный блик в верхней левой части сферы
+    val highlightCenter = Offset(center.x - radius * 0.28f, center.y - radius * 0.32f)
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.22f * intensity),
+                secondaryColor.copy(alpha = 0.18f * intensity),
+                Color.Transparent
+            ),
+            center = highlightCenter,
+            radius = radius * 0.56f
+        ),
+        radius = radius,
+        center = center
+    )
+
+    // 5. Светящийся стеклянный обод (Fresnel Rim Light) по контуру сферы
+    drawCircle(
+        brush = Brush.sweepGradient(
+            colors = listOf(
+                secondaryColor.copy(alpha = 0.82f * intensity),
+                primaryColor.copy(alpha = 0.35f * intensity),
+                Color.White.copy(alpha = 0.72f * intensity),
+                primaryColor.copy(alpha = 0.45f * intensity),
+                secondaryColor.copy(alpha = 0.82f * intensity)
+            ),
+            center = center
+        ),
+        radius = radius,
+        center = center,
+        style = Stroke(width = 2.0.dp.toPx())
+    )
+
+    // Мягкий внешний ореол непосредственно вокруг стеклянной кромки
+    drawCircle(
+        color = primaryColor.copy(alpha = (0.22f + 0.14f * energy) * intensity),
+        radius = radius * 1.02f,
+        center = center,
+        style = Stroke(width = 4.5.dp.toPx())
+    )
+}
+
+/**
+ * Отрисовка трёхмерных наклонных эллиптических световых орбит с честной глубиной:
+ * - При `drawFrontHemisphere == false` рисуются только сегменты, находящиеся ЗА сферой (`z < 0`).
+ * - При `drawFrontHemisphere == true` рисуются сегменты ПЕРЕД сферой (`z >= 0`), включая
+ *   движущиеся по орбите яркие энергетические сгустки (кометные шлейфы) и узлы свечения.
+ */
+private fun DrawScope.drawThreeDimensionalOrbits(
+    center: Offset,
+    sphereRadius: Float,
+    phaseRad: Float,
+    energy: Float,
+    primaryColor: Color,
+    secondaryColor: Color,
+    intensity: Float,
+    drawFrontHemisphere: Boolean
+) {
+    val segments = 64
+    val stepAngle = (2.0 * PI / segments).toFloat()
+    val cameraDistance = sphereRadius * 3.8f
+
+    for ((orbitIndex, spec) in DefaultOrbitSpecs.withIndex()) {
+        val rollRad = (spec.rollDegrees * PI / 180.0).toFloat()
+        val pitchRad = (spec.pitchDegrees * PI / 180.0).toFloat()
+        val cosRoll = cos(rollRad)
+        val sinRoll = sin(rollRad)
+        val cosPitch = cos(pitchRad)
+        val sinPitch = sin(pitchRad)
+
+        val orbitRadius = sphereRadius * spec.radiusRatio * (1f + energy * 0.04f)
+        val baseColor = if (spec.useSecondaryColor) secondaryColor else primaryColor
+        val accentColor = if (spec.useSecondaryColor) primaryColor else secondaryColor
+        val orbitDynamicPhase = phaseRad * spec.speedMultiplier + spec.phaseOffsetRad
+
+        var prevX = 0f
+        var prevY = 0f
+        var prevZ = 0f
+        var hasPrev = false
+
+        for (i in 0..segments) {
+            val theta = i * stepAngle
+            // Волновая микро-модуляция орбиты от реального голоса
+            val waveOffset = if (energy > 0.06f) {
+                sphereRadius * 0.028f * energy * sin(theta * 3f + orbitDynamicPhase * 2f)
+            } else {
+                0f
+            }
+            val r = orbitRadius + waveOffset
+
+            // Координаты в плоскости орбиты
+            val xLocal = r * cos(theta)
+            val zLocal = r * sin(theta)
+
+            // Наклон по Pitch (вокруг оси X): формирует эллипс и глубину Z
+            val yPitch = -zLocal * cosPitch
+            val zPitch = zLocal * sinPitch
+
+            // Поворот по Roll (вокруг оси Z экрана): задаёт диагональный наклон орбиты
+            val xWorld = xLocal * cosRoll - yPitch * sinRoll
+            val yWorld = xLocal * sinRoll + yPitch * cosRoll
+            val zWorld = zPitch
+
+            val perspective = cameraDistance / (cameraDistance - zWorld).coerceAtLeast(sphereRadius * 0.8f)
+            val screenX = center.x + xWorld * perspective
+            val screenY = center.y + yWorld * perspective
+
+            if (hasPrev) {
+                val midZ = (zWorld + prevZ) * 0.5f
+                val isFront = midZ >= 0f
+                if (isFront == drawFrontHemisphere) {
+                    val depthFactor = ((midZ / orbitRadius) + 1f) * 0.5f // 0..1
+                    // Бегущая световая волна вдоль орбиты (кометный поток)
+                    val midTheta = theta - stepAngle * 0.5f
+                    val streamWave = ((cos(midTheta - orbitDynamicPhase) + 1f) * 0.5f)
+                    val streamHighlight = streamWave * streamWave * streamWave
+
+                    val baseAlpha = if (isFront) {
+                        (0.32f + 0.52f * streamHighlight + 0.14f * depthFactor) * intensity
+                    } else {
+                        (0.10f + 0.16f * streamHighlight) * intensity
+                    }
+
+                    val strokePx = spec.ribbonWidthDp.dp.toPx() *
+                        (if (isFront) 0.85f + 0.55f * streamHighlight else 0.62f)
+
+                    // Мягкое неоновое свечение вокруг передней дуги орбиты
+                    if (isFront && streamHighlight > 0.25f) {
+                        drawLine(
+                            color = baseColor.copy(alpha = (baseAlpha * 0.34f).coerceIn(0f, 0.45f)),
+                            start = Offset(prevX, prevY),
+                            end = Offset(screenX, screenY),
+                            strokeWidth = strokePx * 3.0f,
+                            cap = StrokeCap.Round
+                        )
+                    }
+
+                    val segmentColor = lerp(
+                        baseColor,
+                        Color.White,
+                        if (isFront) (streamHighlight * 0.48f).coerceIn(0f, 0.55f) else 0f
+                    )
+
+                    drawLine(
+                        color = segmentColor.copy(alpha = baseAlpha.coerceIn(0.05f, 0.96f)),
+                        start = Offset(prevX, prevY),
+                        end = Offset(screenX, screenY),
+                        strokeWidth = strokePx,
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
+
+            prevX = screenX
+            prevY = screenY
+            prevZ = zWorld
+            hasPrev = true
+        }
+
+        // Светящаяся энергетическая частица (flare), бегущая по передней части орбиты
+        val headTheta = orbitDynamicPhase
+        val headXLocal = orbitRadius * cos(headTheta)
+        val headZLocal = orbitRadius * sin(headTheta)
+        val headYPitch = -headZLocal * cosPitch
+        val headZWorld = headZLocal * sinPitch
+
+        if ((headZWorld >= 0f) == drawFrontHemisphere) {
+            val headXWorld = headXLocal * cosRoll - headYPitch * sinRoll
+            val headYWorld = headXLocal * sinRoll + headYPitch * cosRoll
+            val headPerspective = cameraDistance / (cameraDistance - headZWorld).coerceAtLeast(sphereRadius * 0.8f)
+            val headPos = Offset(
+                center.x + headXWorld * headPerspective,
+                center.y + headYWorld * headPerspective
+            )
+            val flareAlpha = (if (drawFrontHemisphere) 0.90f else 0.28f) * intensity
+            val flareRadius = (if (orbitIndex == 0) 3.4.dp else 2.5.dp).toPx() * headPerspective
+
+            drawCircle(
+                color = accentColor.copy(alpha = flareAlpha * 0.42f),
+                radius = flareRadius * 2.8f,
+                center = headPos
+            )
+            drawCircle(
+                color = Color.White.copy(alpha = flareAlpha),
+                radius = flareRadius * 0.85f,
+                center = headPos
+            )
+        }
+    }
+}
+
+/**
+ * Отрисовка деликатных внутренних 3D-линий потока внутри стеклянной сферы (не перекрывающих прозрачное ядро).
+ */
+private fun DrawScope.drawSubtleInnerEnergyMesh(
     center: Offset,
     radius: Float,
     breathProgress: Float,
     yawDegrees: Float,
-    orbitProgress: Float,
     energy: Float,
     primaryColor: Color,
     secondaryColor: Color,
-    visualState: DavidLiveVisualState
+    intensity: Float
 ) {
-    val pitchRadians = (28.0 * PI / 180.0).toFloat() // Фиксированный угол наклона 3D (28°)
+    val pitchRadians = (24.0 * PI / 180.0).toFloat()
     val yawRadians = (yawDegrees * PI / 180.0).toFloat()
     val cosPitch = cos(pitchRadians)
     val sinPitch = sin(pitchRadians)
     val cosYaw = cos(yawRadians)
     val sinYaw = sin(yawRadians)
 
-    // Динамический радиус с учётом дыхания и звуковой энергии
-    val breathingRadius = radius * (1f + 0.035f * sin(breathProgress * 2f * PI.toFloat()) + energy * 0.12f)
-    val cameraDistance = breathingRadius * 3.4f
+    val breathingRadius = radius * (1f + 0.02f * sin(breathProgress * 2f * PI.toFloat()))
+    val cameraDistance = breathingRadius * 3.5f
 
-    // 1. Отрисовка параллелей (широтных колец)
-    val latitudeAngles = floatArrayOf(-60f, -40f, -20f, 0f, 20f, 40f, 60f)
-    val stepTheta = (PI * 2.0 / 32.0).toFloat()
+    val latitudeAngles = floatArrayOf(-38f, 0f, 38f)
+    val stepTheta = (PI * 2.0 / 28.0).toFloat()
 
     for (latDeg in latitudeAngles) {
         val phi = (latDeg * PI / 180.0).toFloat()
@@ -552,77 +974,13 @@ private fun DrawScope.drawWireframeMeshSphere(
         var prevZ = 0f
         var isFirst = true
 
-        for (i in 0..32) {
+        for (i in 0..28) {
             val theta = i * stepTheta
-            // Гармоническая деформация поверхности от аудиосигнала
-            val waveDeform = if (energy > 0.08f) {
-                0.045f * energy * sin(theta * 4f + phi * 3f + yawRadians * 2f)
-            } else {
-                0f
-            }
+            val waveDeform = 0.03f * (0.3f + energy) * sin(theta * 3f + phi * 2f + yawRadians)
             val rCurrent = latRadius * (1f + waveDeform)
 
             val x0 = rCurrent * cos(theta)
             val z0 = rCurrent * sin(theta)
-
-            // Вращение по Yaw (ось Y)
-            val x1 = x0 * cosYaw + z0 * sinYaw
-            val z1 = -x0 * sinYaw + z0 * cosYaw
-
-            // Вращение по Pitch (ось X)
-            val y2 = y0 * cosPitch - z1 * sinPitch
-            val z2 = y0 * sinPitch + z1 * cosPitch
-
-            // Перспективная проекция на плоскость экрана
-            val perspectiveK = cameraDistance / (cameraDistance - z2)
-            val screenX = center.x + x1 * perspectiveK
-            val screenY = center.y + y2 * perspectiveK
-
-            if (!isFirst) {
-                val isFront = (z2 + prevZ) / 2f >= -breathingRadius * 0.15f
-                val strokeAlpha = if (isFront) {
-                    0.85f.coerceAtMost(0.40f + (z2 / breathingRadius) * 0.50f)
-                } else {
-                    0.18f
-                }
-                val strokeWidth = if (isFront) 1.9.dp.toPx() else 1.0.dp.toPx()
-                val lineColor = if (latDeg == 0f) secondaryColor else primaryColor
-
-                drawLine(
-                    color = lineColor.copy(alpha = strokeAlpha.coerceIn(0.08f, 0.95f)),
-                    start = Offset(prevScreenX, prevScreenY),
-                    end = Offset(screenX, screenY),
-                    strokeWidth = strokeWidth,
-                    cap = StrokeCap.Round
-                )
-            }
-
-            prevScreenX = screenX
-            prevScreenY = screenY
-            prevZ = z2
-            isFirst = false
-        }
-    }
-
-    // 2. Отрисовка меридианов (продольных дуг)
-    val meridianCount = 8
-    val stepPhi = (PI / 20.0).toFloat()
-
-    for (m in 0 until meridianCount) {
-        val baseTheta = (m * (PI * 2.0 / meridianCount)).toFloat()
-        var prevScreenX = 0f
-        var prevScreenY = 0f
-        var prevZ = 0f
-        var isFirst = true
-
-        for (j in -10..10) {
-            val phi = j * stepPhi
-            val cosPhi = cos(phi)
-            val sinPhi = sin(phi)
-
-            val x0 = breathingRadius * cosPhi * cos(baseTheta)
-            val z0 = breathingRadius * cosPhi * sin(baseTheta)
-            val y0 = breathingRadius * sinPhi
 
             val x1 = x0 * cosYaw + z0 * sinYaw
             val z1 = -x0 * sinYaw + z0 * cosYaw
@@ -636,14 +994,14 @@ private fun DrawScope.drawWireframeMeshSphere(
 
             if (!isFirst) {
                 val isFront = (z2 + prevZ) / 2f >= 0f
-                val strokeAlpha = if (isFront) 0.60f else 0.14f
-                val strokeWidth = if (isFront) 1.5.dp.toPx() else 0.9.dp.toPx()
+                val strokeAlpha = (if (isFront) 0.16f else 0.06f) * intensity
+                val lineColor = if (latDeg == 0f) secondaryColor else primaryColor
 
                 drawLine(
-                    color = primaryColor.copy(alpha = strokeAlpha),
+                    color = lineColor.copy(alpha = strokeAlpha.coerceIn(0.03f, 0.28f)),
                     start = Offset(prevScreenX, prevScreenY),
                     end = Offset(screenX, screenY),
-                    strokeWidth = strokeWidth,
+                    strokeWidth = 1.0.dp.toPx(),
                     cap = StrokeCap.Round
                 )
             }
@@ -654,52 +1012,35 @@ private fun DrawScope.drawWireframeMeshSphere(
             isFirst = false
         }
     }
+}
 
-    // 3. Светящиеся узлы (частицы) на пересечениях сетки
-    val nodePoints = floatArrayOf(
-        0f, 0f,
-        PI.toFloat() / 2f, 20f,
-        PI.toFloat(), -20f,
-        3f * PI.toFloat() / 2f, 40f,
-        PI.toFloat() / 4f, -40f,
-        3f * PI.toFloat() / 4f, 20f,
-        5f * PI.toFloat() / 4f, 0f,
-        7f * PI.toFloat() / 4f, -20f
-    )
+/**
+ * Отрисовка фоновых микро-частиц (stardust) вокруг сферы, создающих атмосферу живого поля.
+ */
+private fun DrawScope.drawAmbientSpaceParticles(
+    center: Offset,
+    sphereRadius: Float,
+    phaseRad: Float,
+    primaryColor: Color,
+    secondaryColor: Color,
+    intensity: Float
+) {
+    val particleCount = 10
+    for (i in 0 until particleCount) {
+        val baseAngle = (i * (2.0 * PI / particleCount)).toFloat() + phaseRad * (if (i % 2 == 0) 0.22f else -0.18f)
+        val distRatio = 1.16f + (i % 3) * 0.11f + 0.04f * sin(phaseRad * 0.8f + i)
+        val px = center.x + sphereRadius * distRatio * cos(baseAngle)
+        val py = center.y + sphereRadius * (distRatio * 0.82f) * sin(baseAngle)
+        val twinkle = ((sin(phaseRad * 1.4f + i * 1.7f) + 1f) * 0.5f)
+        val alpha = (0.14f + 0.36f * twinkle) * intensity
+        val particleColor = if (i % 2 == 0) primaryColor else secondaryColor
+        val r = (1.2.dp.toPx() + 1.0.dp.toPx() * twinkle)
 
-    var idx = 0
-    while (idx < nodePoints.size) {
-        val theta = nodePoints[idx]
-        val phi = (nodePoints[idx + 1] * PI / 180.0).toFloat()
-        idx += 2
-
-        val x0 = breathingRadius * cos(phi) * cos(theta)
-        val z0 = breathingRadius * cos(phi) * sin(theta)
-        val y0 = breathingRadius * sin(phi)
-
-        val x1 = x0 * cosYaw + z0 * sinYaw
-        val z1 = -x0 * sinYaw + z0 * cosYaw
-
-        val y2 = y0 * cosPitch - z1 * sinPitch
-        val z2 = y0 * sinPitch + z1 * cosPitch
-
-        if (z2 >= -breathingRadius * 0.2f) {
-            val perspectiveK = cameraDistance / (cameraDistance - z2)
-            val screenX = center.x + x1 * perspectiveK
-            val screenY = center.y + y2 * perspectiveK
-            val nodeRadius = (2.4.dp.toPx() * perspectiveK).coerceIn(1.8.dp.toPx(), 4.5.dp.toPx())
-
-            drawCircle(
-                color = secondaryColor.copy(alpha = 0.85f),
-                radius = nodeRadius,
-                center = Offset(screenX, screenY)
-            )
-            drawCircle(
-                color = primaryColor.copy(alpha = 0.35f),
-                radius = nodeRadius * 2.2f,
-                center = Offset(screenX, screenY)
-            )
-        }
+        drawCircle(
+            color = particleColor.copy(alpha = alpha.coerceIn(0.05f, 0.55f)),
+            radius = r,
+            center = Offset(px, py)
+        )
     }
 }
 
@@ -713,12 +1054,11 @@ private fun DrawScope.drawPlanetaryFinanceRing(
     accentColor: Color,
     goldColor: Color
 ) {
-    val ringRadiusX = radius * 1.34f
+    val ringRadiusX = radius * 1.38f
     val ringRadiusY = radius * 0.44f
     val tiltAngleDegrees = -18f
 
     rotate(degrees = tiltAngleDegrees, pivot = center) {
-        // Фоновое свечение экваториального кольца
         drawOval(
             brush = Brush.radialGradient(
                 colors = listOf(
@@ -731,10 +1071,9 @@ private fun DrawScope.drawPlanetaryFinanceRing(
             ),
             topLeft = Offset(center.x - ringRadiusX, center.y - ringRadiusY),
             size = Size(ringRadiusX * 2f, ringRadiusY * 2f),
-            style = Stroke(width = 3.2.dp.toPx())
+            style = Stroke(width = 2.8.dp.toPx())
         )
 
-        // Бегущий импульс сканирования по периметру кольца
         val scanAngle = orbitProgress * 2f * PI.toFloat()
         val pulseX = center.x + ringRadiusX * cos(scanAngle)
         val pulseY = center.y + ringRadiusY * sin(scanAngle)
@@ -749,87 +1088,6 @@ private fun DrawScope.drawPlanetaryFinanceRing(
             radius = 9.5.dp.toPx(),
             center = Offset(pulseX, pulseY)
         )
-
-        // 4 финансовых микро-акцента по квадрантам кольца
-        val angles = floatArrayOf(
-            0.15f * PI.toFloat(),
-            0.65f * PI.toFloat(),
-            1.15f * PI.toFloat(),
-            1.65f * PI.toFloat()
-        )
-        for ((iconIdx, ang) in angles.withIndex()) {
-            val posX = center.x + ringRadiusX * cos(ang)
-            val posY = center.y + ringRadiusY * sin(ang)
-
-            drawCircle(
-                color = ObsidianCoreDeep,
-                radius = 7.5.dp.toPx(),
-                center = Offset(posX, posY)
-            )
-            drawCircle(
-                color = goldColor.copy(alpha = 0.85f),
-                radius = 7.5.dp.toPx(),
-                center = Offset(posX, posY),
-                style = Stroke(width = 1.2.dp.toPx())
-            )
-
-            // Микро-иконки в зависимости от квадранта:
-            // 0 -> Документ/чек, 1 -> График/аналитика, 2 -> Монета, 3 -> Календарь
-            when (iconIdx) {
-                0 -> { // Документ
-                    drawLine(
-                        color = goldColor,
-                        start = Offset(posX - 3.dp.toPx(), posY - 2.dp.toPx()),
-                        end = Offset(posX + 3.dp.toPx(), posY - 2.dp.toPx()),
-                        strokeWidth = 1.1.dp.toPx()
-                    )
-                    drawLine(
-                        color = goldColor,
-                        start = Offset(posX - 3.dp.toPx(), posY + 1.dp.toPx()),
-                        end = Offset(posX + 1.dp.toPx(), posY + 1.dp.toPx()),
-                        strokeWidth = 1.1.dp.toPx()
-                    )
-                }
-
-                1 -> { // Столбцы графика
-                    drawLine(
-                        color = accentColor,
-                        start = Offset(posX - 3.dp.toPx(), posY + 3.dp.toPx()),
-                        end = Offset(posX - 3.dp.toPx(), posY - 1.dp.toPx()),
-                        strokeWidth = 1.3.dp.toPx()
-                    )
-                    drawLine(
-                        color = accentColor,
-                        start = Offset(posX, posY + 3.dp.toPx()),
-                        end = Offset(posX, posY - 3.dp.toPx()),
-                        strokeWidth = 1.3.dp.toPx()
-                    )
-                    drawLine(
-                        color = accentColor,
-                        start = Offset(posX + 3.dp.toPx(), posY + 3.dp.toPx()),
-                        end = Offset(posX + 3.dp.toPx(), posY + 1.dp.toPx()),
-                        strokeWidth = 1.3.dp.toPx()
-                    )
-                }
-
-                2 -> { // Монета
-                    drawCircle(
-                        color = goldColor,
-                        radius = 2.4.dp.toPx(),
-                        center = Offset(posX, posY)
-                    )
-                }
-
-                3 -> { // Календарь
-                    drawRect(
-                        color = accentColor,
-                        topLeft = Offset(posX - 2.5.dp.toPx(), posY - 2.5.dp.toPx()),
-                        size = Size(5.dp.toPx(), 5.dp.toPx()),
-                        style = Stroke(width = 1.0.dp.toPx())
-                    )
-                }
-            }
-        }
     }
 }
 
@@ -843,41 +1101,27 @@ private fun DrawScope.drawAnalyzingDualOrbits(
     cyanColor: Color,
     emeraldColor: Color
 ) {
-    val orbitRadiusX = radius * 1.28f
+    val orbitRadiusX = radius * 1.30f
     val orbitRadiusY = radius * 0.46f
 
-    // 1-я орбита (+34 градуса)
     rotate(degrees = 34f, pivot = center) {
-        drawOval(
-            color = cyanColor.copy(alpha = 0.35f),
-            topLeft = Offset(center.x - orbitRadiusX, center.y - orbitRadiusY),
-            size = Size(orbitRadiusX * 2f, orbitRadiusY * 2f),
-            style = Stroke(width = 1.6.dp.toPx())
-        )
         val ang1 = orbitProgress * 2f * PI.toFloat()
         val beacon1X = center.x + orbitRadiusX * cos(ang1)
         val beacon1Y = center.y + orbitRadiusY * sin(ang1)
         drawCircle(
             color = cyanColor,
-            radius = 3.8.dp.toPx(),
+            radius = 3.6.dp.toPx(),
             center = Offset(beacon1X, beacon1Y)
         )
     }
 
-    // 2-я орбита (-34 градуса)
     rotate(degrees = -34f, pivot = center) {
-        drawOval(
-            color = emeraldColor.copy(alpha = 0.35f),
-            topLeft = Offset(center.x - orbitRadiusX, center.y - orbitRadiusY),
-            size = Size(orbitRadiusX * 2f, orbitRadiusY * 2f),
-            style = Stroke(width = 1.6.dp.toPx())
-        )
         val ang2 = (orbitProgress + 0.5f) * 2f * PI.toFloat()
         val beacon2X = center.x + orbitRadiusX * cos(ang2)
         val beacon2Y = center.y + orbitRadiusY * sin(ang2)
         drawCircle(
             color = emeraldColor,
-            radius = 3.8.dp.toPx(),
+            radius = 3.6.dp.toPx(),
             center = Offset(beacon2X, beacon2Y)
         )
     }
@@ -893,34 +1137,32 @@ private fun DrawScope.drawAcousticSoundwaveArcs(
     breathProgress: Float,
     color: Color
 ) {
-    val arcCount = 3
-    val maxExpansion = 28.dp.toPx() * energy.coerceIn(0.1f, 1f)
+    val arcCount = 2
+    val maxExpansion = 22.dp.toPx() * energy.coerceIn(0.1f, 1f)
 
     for (i in 1..arcCount) {
-        val extraDist = i * (8.dp.toPx() + maxExpansion * (i / 3f))
+        val extraDist = i * (10.dp.toPx() + maxExpansion * (i / 2f))
         val currentRadius = radius + extraDist
-        val alpha = (0.75f - (i * 0.20f)).coerceAtLeast(0.12f) * (0.6f + energy * 0.4f)
+        val alpha = (0.52f - (i * 0.16f)).coerceAtLeast(0.10f) * (0.5f + energy * 0.5f)
 
-        // Левая акустическая дуга
         drawArc(
             color = color.copy(alpha = alpha),
-            startAngle = 135f,
-            sweepAngle = 90f,
+            startAngle = 142f,
+            sweepAngle = 76f,
             useCenter = false,
             topLeft = Offset(center.x - currentRadius, center.y - currentRadius),
             size = Size(currentRadius * 2f, currentRadius * 2f),
-            style = Stroke(width = 2.0.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
         )
 
-        // Правая акустическая дуга
         drawArc(
             color = color.copy(alpha = alpha),
-            startAngle = -45f,
-            sweepAngle = 90f,
+            startAngle = -38f,
+            sweepAngle = 76f,
             useCenter = false,
             topLeft = Offset(center.x - currentRadius, center.y - currentRadius),
             size = Size(currentRadius * 2f, currentRadius * 2f),
-            style = Stroke(width = 2.0.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
         )
     }
 }
@@ -939,22 +1181,22 @@ private fun DrawScope.drawConnectingHandshakeArcs(
 
     rotate(degrees = baseRot, pivot = center) {
         drawArc(
-            color = color.copy(alpha = 0.85f),
+            color = color.copy(alpha = 0.78f),
             startAngle = 0f,
-            sweepAngle = 75f,
+            sweepAngle = 70f,
             useCenter = false,
             topLeft = Offset(center.x - outerRadius, center.y - outerRadius),
             size = Size(outerRadius * 2f, outerRadius * 2f),
-            style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
         )
         drawArc(
-            color = color.copy(alpha = 0.85f),
+            color = color.copy(alpha = 0.78f),
             startAngle = 180f,
-            sweepAngle = 75f,
+            sweepAngle = 70f,
             useCenter = false,
             topLeft = Offset(center.x - outerRadius, center.y - outerRadius),
             size = Size(outerRadius * 2f, outerRadius * 2f),
-            style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
         )
     }
 }
@@ -969,82 +1211,14 @@ private fun DrawScope.drawSuccessExpansionRing(
     color: Color
 ) {
     val ringR = radius * (1f + 0.35f * orbitProgress)
-    val ringAlpha = (1f - orbitProgress).coerceIn(0f, 0.95f)
+    val ringAlpha = (1f - orbitProgress).coerceIn(0f, 0.90f)
 
     drawCircle(
         color = color.copy(alpha = ringAlpha),
         radius = ringR,
         center = center,
-        style = Stroke(width = 2.6.dp.toPx())
+        style = Stroke(width = 2.4.dp.toPx())
     )
-}
-
-/**
- * Горизонтальный эквалайзер речи под сферой (как на дизайн-макете "Ты говоришь").
- */
-private fun DrawScope.drawSpeechEqualizerBars(
-    center: Offset,
-    sphereRadius: Float,
-    energy: Float,
-    rayMagnitudes: List<Float>,
-    color: Color
-) {
-    val barCount = 20
-    val totalWidth = sphereRadius * 1.6f
-    val startX = center.x - totalWidth / 2f
-    val barY = center.y + sphereRadius * 1.16f
-    val barSpacing = totalWidth / (barCount - 1)
-    val maxBarHeight = 18.dp.toPx()
-
-    for (b in 0 until barCount) {
-        val rayIdx = (b * (DavidLiveSpectrumAnalyzer.RAY_COUNT / barCount)).coerceIn(0, rayMagnitudes.lastIndex)
-        val rawMag = rayMagnitudes.getOrElse(rayIdx) { 0f }
-        val centerFalloff = 1f - abs((b - barCount / 2f) / (barCount / 2f)) * 0.45f
-        val h = (maxBarHeight * rawMag * centerFalloff * (0.4f + energy * 0.6f)).coerceIn(2.5.dp.toPx(), maxBarHeight)
-
-        val bx = startX + b * barSpacing
-        drawLine(
-            color = color.copy(alpha = 0.85f),
-            start = Offset(bx, barY - h / 2f),
-            end = Offset(bx, barY + h / 2f),
-            strokeWidth = 2.2.dp.toPx(),
-            cap = StrokeCap.Round
-        )
-    }
-}
-
-/**
- * Центральный светящийся бейдж с иконкой (восклицательный знак, ключ, галочка) для фокусных состояний.
- */
-@Composable
-private fun CentralStatusBadge(
-    badgeColor: Color,
-    glowColor: Color,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    contentDescription: String
-) {
-    Box(
-        modifier = Modifier
-            .size(54.dp)
-            .clip(CircleShape)
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        badgeColor.copy(alpha = 0.35f),
-                        ObsidianCoreDeep.copy(alpha = 0.95f)
-                    )
-                )
-            )
-            .border(1.5.dp, badgeColor.copy(alpha = 0.85f), CircleShape),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = badgeColor,
-            modifier = Modifier.size(26.dp)
-        )
-    }
 }
 
 /**

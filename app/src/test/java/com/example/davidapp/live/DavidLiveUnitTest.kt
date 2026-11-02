@@ -1757,6 +1757,112 @@ class DavidLiveUnitTest {
         assertEquals(DavidLiveConnectionFailureKind.NONE, controller.failureKind.value)
         assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
     }
+
+    @Test
+    fun `mute visual palette applies dimmed silver-slate colors to mic states without masking priority states or David speaking`() {
+        val micDrivenStates = listOf(
+            DavidLiveVisualState.IDLE_LISTENING,
+            DavidLiveVisualState.USER_SPEAKING,
+            DavidLiveVisualState.THINKING,
+            DavidLiveVisualState.FINANCE_LOOKUP,
+            DavidLiveVisualState.ANALYZING,
+            DavidLiveVisualState.PREPARING_RESPONSE
+        )
+
+        for (state in micDrivenStates) {
+            assertTrue(
+                "Muted visual palette must apply to $state when isMicMuted=true",
+                shouldApplyMutedVisualPalette(state, isMicMuted = true)
+            )
+            val unmutedPalette = resolveSpherePalette(state, isMicMuted = false)
+            val mutedPalette = resolveSpherePalette(state, isMicMuted = true)
+            assertEquals(MutedSlatePrimary, mutedPalette.primary)
+            assertEquals(MutedSilverSecondary, mutedPalette.secondary)
+            assertFalse(
+                "Sphere primary color for $state must change when mic is muted",
+                unmutedPalette.primary == mutedPalette.primary
+            )
+
+            val (sheetPrimary, sheetSecondary) = resolveVisualStateColors(state, isMicMuted = true)
+            assertEquals(MutedSlatePrimary, sheetPrimary)
+            assertEquals(MutedSilverSecondary, sheetSecondary)
+        }
+
+        // Приоритетные системные состояния и исходящая речь Давида НЕ маскируются mute-оформлением
+        val nonMaskedStates = listOf(
+            DavidLiveVisualState.DAVID_SPEAKING,
+            DavidLiveVisualState.OFFLINE,
+            DavidLiveVisualState.API_MISSING,
+            DavidLiveVisualState.ERROR,
+            DavidLiveVisualState.CONNECTING,
+            DavidLiveVisualState.RECONNECTING,
+            DavidLiveVisualState.SUCCESS
+        )
+
+        for (state in nonMaskedStates) {
+            assertFalse(
+                "Priority or outgoing speech state $state must NOT be masked by mic mute",
+                shouldApplyMutedVisualPalette(state, isMicMuted = true)
+            )
+            val unmutedPalette = resolveSpherePalette(state, isMicMuted = false)
+            val mutedPalette = resolveSpherePalette(state, isMicMuted = true)
+            assertEquals(
+                "Palette for $state must remain unchanged when mic is muted",
+                unmutedPalette,
+                mutedPalette
+            )
+            assertEquals(
+                resolveVisualStateColors(state, isMicMuted = false),
+                resolveVisualStateColors(state, isMicMuted = true)
+            )
+        }
+    }
+
+    @Test
+    fun `orbital motion speed hierarchy and continuous phase accumulator transition without resetting phase`() {
+        val offlineSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.OFFLINE)
+        val mutedIdleSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.IDLE_LISTENING, isMicMuted = true)
+        val idleSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.IDLE_LISTENING, isMicMuted = false)
+        val thinkingSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.THINKING)
+        val analyzingSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.ANALYZING)
+        val financeSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.FINANCE_LOOKUP)
+        val userQuietSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.USER_SPEAKING, audioEnergy = 0.1f)
+        val userLoudSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.USER_SPEAKING, audioEnergy = 0.9f)
+        val davidSpeakingSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.DAVID_SPEAKING, audioEnergy = 0.85f)
+
+        assertTrue(offlineSpeed < mutedIdleSpeed)
+        assertTrue(mutedIdleSpeed < idleSpeed)
+        assertTrue(idleSpeed < thinkingSpeed)
+        assertTrue(thinkingSpeed < analyzingSpeed)
+        assertTrue(analyzingSpeed < financeSpeed)
+        assertTrue(financeSpeed < userQuietSpeed)
+        assertTrue("Audio energy must boost user speaking orbit speed", userLoudSpeed > userQuietSpeed)
+        assertTrue(davidSpeakingSpeed > thinkingSpeed)
+
+        // Непрерывное накопление фазы при смене состояний без сброса в 0
+        var phase = 0f
+        phase = advanceContinuousOrbitPhase(phase, deltaMs = 16L, angularSpeedRadPerSec = idleSpeed)
+        val afterIdle = phase
+        assertTrue(afterIdle > 0f)
+
+        phase = advanceContinuousOrbitPhase(phase, deltaMs = 16L, angularSpeedRadPerSec = userLoudSpeed)
+        val afterUserSpeech = phase
+        assertTrue("Phase must continue advancing from current value on state change", afterUserSpeech > afterIdle)
+
+        phase = advanceContinuousOrbitPhase(phase, deltaMs = 16L, angularSpeedRadPerSec = thinkingSpeed)
+        val afterThinking = phase
+        assertTrue("Phase must continue advancing during Thinking without resetting", afterThinking > afterUserSpeech)
+
+        // При включённом системном ограничении анимаций (reduceMotion = true) фаза остаётся стабильной
+        val frozenPhase = advanceContinuousOrbitPhase(
+            currentPhaseRad = afterThinking,
+            deltaMs = 16L,
+            angularSpeedRadPerSec = davidSpeakingSpeed,
+            reduceMotion = true
+        )
+        assertEquals(afterThinking, frozenPhase, 0.0001f)
+    }
 }
+
 
 
