@@ -10,9 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
@@ -23,8 +21,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * Reveals a live speech transcript without replacing the whole Text node on every partial update.
@@ -46,14 +42,14 @@ internal fun DavidLiveStreamingText(
     overflow: TextOverflow,
     modifier: Modifier = Modifier
 ) {
-    val latestText = rememberUpdatedState(text)
-
     var activeStreamKey by remember { mutableStateOf(streamKey) }
     var renderedText by remember { mutableStateOf(text) }
     var revealedEnd by remember {
         mutableIntStateOf(if (isStreaming) 0 else text.length)
     }
     var activeRange by remember { mutableStateOf<IntRange?>(null) }
+    var previousTarget by remember(activeStreamKey) { mutableStateOf("") }
+    var revealCursor by remember(activeStreamKey) { mutableIntStateOf(0) }
 
     val contentAlpha = remember { Animatable(1f) }
     val segmentAlpha = remember { Animatable(1f) }
@@ -74,57 +70,47 @@ internal fun DavidLiveStreamingText(
         }
     }
 
-    // snapshotFlow conflates rapid partial updates. If the transcript changes during a segment
-    // animation, the next emission is reconciled against the last stable prefix.
-    LaunchedEffect(activeStreamKey) {
-        var previousTarget = ""
-        var cursor = 0
+    // The effect is keyed by the incoming transcript: a newer partial instantly cancels any
+    // in-flight animation for stale text and resumes at the last fully revealed boundary.
+    LaunchedEffect(activeStreamKey, text, isStreaming) {
+        renderedText = text
 
-        snapshotFlow { latestText.value }
-            .distinctUntilChanged()
-            .collect { incoming ->
-                renderedText = incoming
+        if (!isStreaming) {
+            revealCursor = text.length
+            revealedEnd = text.length
+            activeRange = null
+            previousTarget = text
+            return@LaunchedEffect
+        }
 
-                if (!isStreaming) {
-                    cursor = incoming.length
-                    revealedEnd = incoming.length
-                    activeRange = null
-                    previousTarget = incoming
-                    return@collect
-                }
+        revealCursor = speechBubbleRevealStartIndex(
+            previousText = previousTarget,
+            nextText = text,
+            currentlyRevealedLength = revealCursor
+        )
+        revealedEnd = revealCursor
+        activeRange = null
+        previousTarget = text
 
-                cursor = speechBubbleRevealStartIndex(
-                    previousText = previousTarget,
-                    nextText = incoming,
-                    currentlyRevealedLength = cursor
+        while (revealCursor < text.length) {
+            val segmentEnd = nextSpeechBubbleRevealEnd(text, revealCursor)
+            if (segmentEnd <= revealCursor) break
+
+            activeRange = revealCursor until segmentEnd
+            segmentAlpha.snapTo(0f)
+            segmentAlpha.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 105,
+                    easing = FastOutSlowInEasing
                 )
-                revealedEnd = cursor
-                activeRange = null
-                previousTarget = incoming
+            )
 
-                while (cursor < incoming.length) {
-                    val segmentEnd = nextSpeechBubbleRevealEnd(incoming, cursor)
-                    if (segmentEnd <= cursor) break
-
-                    activeRange = cursor until segmentEnd
-                    segmentAlpha.snapTo(0f)
-                    segmentAlpha.animateTo(
-                        targetValue = 1f,
-                        animationSpec = tween(
-                            durationMillis = 105,
-                            easing = FastOutSlowInEasing
-                        )
-                    )
-
-                    cursor = segmentEnd
-                    revealedEnd = cursor
-                    activeRange = null
-
-                    // Do not finish revealing a stale phrase when Gemini has already corrected it.
-                    if (latestText.value != incoming) break
-                    delay(12L)
-                }
-            }
+            revealCursor = segmentEnd
+            revealedEnd = revealCursor
+            activeRange = null
+            delay(12L)
+        }
     }
 
     val annotatedText = buildAnnotatedString {
