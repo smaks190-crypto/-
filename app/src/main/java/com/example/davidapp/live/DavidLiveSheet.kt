@@ -5,6 +5,7 @@ import android.media.AudioManager
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -14,6 +15,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -163,6 +167,25 @@ fun resolveDavidLiveStatusLabel(
 }
 
 /**
+ * The speech surface follows the currently arriving phrase instead of keeping the complete
+ * accumulated transcript in one bubble. Punctuation is the boundary because the Live stream
+ * appends transcript chunks as the model finishes phrases.
+ */
+internal fun resolveLatestSpeechPhrase(text: String): String {
+    val normalized = text.replace(Regex("\\s+"), " ").trim()
+    if (normalized.isBlank()) return ""
+    val latest = Regex("(?<=[.!?…])\\s+")
+        .split(normalized)
+        .lastOrNull()
+        .orEmpty()
+        .trim()
+    if (latest.length <= 180) return latest
+    val tail = latest.takeLast(180)
+    val firstWordBoundary = tail.indexOf(' ')
+    return if (firstWordBoundary in 1..24) tail.substring(firstWordBoundary + 1) else tail
+}
+
+/**
  * Resolves the state icon for the top status badge and contextual cloud.
  */
 private fun resolveVisualStateIcon(visualState: DavidLiveVisualState, isMicMuted: Boolean): ImageVector {
@@ -266,6 +289,14 @@ fun DavidLiveHorizontalWaveVisualizer(
     )
 
     val radialEnvelope = remember { DavidLiveSpectrumAnalyzer().getRadialSpatialEnvelope() }
+    val smoothedRayMagnitudes = rayMagnitudes.mapIndexed { index, magnitude ->
+        val smoothed by animateFloatAsState(
+            targetValue = magnitude.coerceIn(0f, 1f),
+            animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+            label = "horizontal_wave_ray_$index"
+        )
+        smoothed
+    }
     val (statePrimaryColor, stateSecondaryColor) = remember(effectiveVisualState, isMicMuted) {
         resolveVisualStateColors(effectiveVisualState, isMicMuted)
     }
@@ -309,7 +340,7 @@ fun DavidLiveHorizontalWaveVisualizer(
             val distFromCenter = kotlin.math.abs(normPos - 0.5f) * 2f
             val rayIdx = ((distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
             val env = radialEnvelope.getOrElse(rayIdx) { 0.7f }.coerceAtLeast(0.38f)
-            val rawRay = (rayMagnitudes.getOrElse(rayIdx) { 0.08f } / env).coerceIn(0f, 1f)
+            val rawRay = (smoothedRayMagnitudes.getOrElse(rayIdx) { 0.08f } / env).coerceIn(0f, 1f)
 
             val activeMagnitude = if (isMicMuted && !isDavidSpeaking && !isProcessing) {
                 0.06f
@@ -334,6 +365,21 @@ fun DavidLiveHorizontalWaveVisualizer(
                 )
             }
 
+            // Two soft under-strokes create a feathered glow instead of hard rectangular blocks.
+            drawLine(
+                color = barColor.copy(alpha = barColor.alpha * 0.16f * waveActivity),
+                start = Offset(x, centerY - halfBar),
+                end = Offset(x, centerY + halfBar),
+                strokeWidth = strokeWidth * 2.8f,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = barColor.copy(alpha = barColor.alpha * 0.34f * waveActivity),
+                start = Offset(x, centerY - halfBar),
+                end = Offset(x, centerY + halfBar),
+                strokeWidth = strokeWidth * 1.7f,
+                cap = StrokeCap.Round
+            )
             drawLine(
                 color = barColor,
                 start = Offset(x, centerY - halfBar),
@@ -832,6 +878,16 @@ fun DavidLiveSheet(
         visualState = effectiveVisualState,
         failureKind = effectiveFailureKind
     )
+    val subtitleBubbleText = when (effectiveVisualState) {
+        DavidLiveVisualState.USER_SPEAKING,
+        DavidLiveVisualState.DAVID_SPEAKING -> resolveLatestSpeechPhrase(liveSubtitle)
+            .ifBlank { visualMetadata.subtitle }
+        DavidLiveVisualState.IDLE_LISTENING -> if (isMicMuted) "Микрофон выключен" else visualMetadata.subtitle
+        DavidLiveVisualState.OFFLINE -> "Связь прервалась"
+        DavidLiveVisualState.API_MISSING -> "Требуется API-ключ"
+        DavidLiveVisualState.ERROR -> "Ошибка подключения"
+        else -> visualMetadata.subtitle
+    }
 
     // Contextual synthetic energy for debug preview of USER_SPEAKING / DAVID_SPEAKING when no real mic input is active
     val effectiveEnergy = if (activeDebugOverride == DavidLiveVisualState.USER_SPEAKING ||
@@ -1142,9 +1198,22 @@ fun DavidLiveSheet(
                                     .padding(horizontal = 16.dp, vertical = if (isEmbeddedInModalCard) 10.dp else 13.dp)
                                     .testTag("david_live_subtitle_bubble")
                             ) {
-                                Column {
+                                AnimatedContent(
+                                    targetState = subtitleBubbleText,
+                                    transitionSpec = {
+                                        (slideInVertically(
+                                            initialOffsetY = { height -> height / 3 },
+                                            animationSpec = tween(220, easing = FastOutSlowInEasing)
+                                        ) + fadeIn(animationSpec = tween(220))) togetherWith
+                                            (slideOutVertically(
+                                                targetOffsetY = { height -> -height / 3 },
+                                                animationSpec = tween(170, easing = FastOutSlowInEasing)
+                                            ) + fadeOut(animationSpec = tween(170)))
+                                    },
+                                    label = "david_live_current_phrase"
+                                ) { currentPhrase ->
                                     Text(
-                                        text = visualMetadata.subtitle,
+                                        text = currentPhrase,
                                         color = when (effectiveVisualState) {
                                             DavidLiveVisualState.OFFLINE -> Color(0xFFFECACA)
                                             DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
@@ -1152,64 +1221,13 @@ fun DavidLiveSheet(
                                             DavidLiveVisualState.SUCCESS -> Color(0xFFBBF7D0)
                                             else -> Color(0xFFF1F5F9)
                                         },
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        lineHeight = 20.5.sp,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        lineHeight = 22.sp,
                                         maxLines = 3,
                                         overflow = TextOverflow.Ellipsis
                                     )
-
-                                    AnimatedVisibility(
-                                        visible = visualMetadata.actionType != DavidLiveVisualActionType.NONE &&
-                                            visualMetadata.actionLabel != null,
-                                        enter = fadeIn(),
-                                        exit = fadeOut()
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(top = 10.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            val actionLabel = visualMetadata.actionLabel ?: ""
-                                            val isApiAction = visualMetadata.actionType == DavidLiveVisualActionType.OPEN_API_SETTINGS ||
-                                                visualMetadata.actionType == DavidLiveVisualActionType.ADD_API_KEY ||
-                                                visualMetadata.actionType == DavidLiveVisualActionType.UPDATE_API_KEY
-                                            Button(
-                                                onClick = {
-                                                    if (isApiAction) {
-                                                        onOpenApiKeySettings()
-                                                    } else {
-                                                        onRetryConnection()
-                                                    }
-                                                },
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = statePrimaryColor.copy(alpha = 0.20f),
-                                                    contentColor = statePrimaryColor
-                                                ),
-                                                shape = RoundedCornerShape(14.dp),
-                                                modifier = Modifier
-                                                    .height(36.dp)
-                                                    .border(
-                                                        width = 1.dp,
-                                                        color = statePrimaryColor.copy(alpha = 0.65f),
-                                                        shape = RoundedCornerShape(14.dp)
-                                                    )
-                                                    .testTag("david_live_contextual_action_button")
-                                            ) {
-                                                Icon(
-                                                    imageVector = if (isApiAction) Icons.Default.Key else Icons.Default.Refresh,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(15.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(
-                                                    text = actionLabel,
-                                                    fontSize = 12.5.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        }
-                                    }
+                                }
                                 }
                             }
 
@@ -1279,16 +1297,6 @@ fun DavidLiveSheet(
                                     modifier = Modifier.testTag("david_live_sphere_status_caption")
                                 )
 
-                                if (effectiveVisualState == DavidLiveVisualState.OFFLINE) {
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = "Нажмите на сферу для переподключения",
-                                        color = Color(0xFF94A3B8),
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
                             }
                         }
 
@@ -1361,41 +1369,7 @@ fun DavidLiveSheet(
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Left: Mic Mute Toggle Button
-                            Box(
-                                modifier = Modifier
-                                    .size(50.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (isMicMuted) ErrorCrimson.copy(alpha = 0.18f) else CancelPillSurface
-                                    )
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isMicMuted) ErrorCrimson.copy(alpha = 0.72f) else CancelPillBorder,
-                                        shape = CircleShape
-                                    )
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        role = Role.Button,
-                                        onClick = onToggleMicMute
-                                    )
-                                    .testTag("david_live_bottom_mute_button")
-                                    .semantics {
-                                        contentDescription = if (isMicMuted) "Включить микрофон" else "Выключить микрофон"
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (isMicMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                                    contentDescription = null,
-                                    tint = if (isMicMuted) ErrorCrimson else Color(0xFFCBD5E1),
-                                    modifier = Modifier.size(21.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(20.dp))
-
+                            // The sphere owns contextual microphone actions; only persistent actions remain below.
                             // Centered end-call button
                             Box(
                                 modifier = Modifier
