@@ -1862,7 +1862,227 @@ class DavidLiveUnitTest {
         )
         assertEquals(afterThinking, frozenPhase, 0.0001f)
     }
+
+    @Test
+    fun `extractActiveSpeechBubbleSegment prevents completed phrase accumulation and splits long streams cleanly`() {
+        val singlePhrase = extractActiveSpeechBubbleSegment("Привет! ")
+        assertEquals("Привет!", singlePhrase.text)
+        assertEquals(0, singlePhrase.segmentIndex)
+
+        // Когда начинается следующее предложение в потоке транскрипции, в облачке отображается только новая активная фраза
+        val multiSentence = extractActiveSpeechBubbleSegment(
+            "Привет! Я проверил твой бюджет за октябрь. Сейчас расскажу про подписки"
+        )
+        assertEquals("Сейчас расскажу про подписки", multiSentence.text)
+        assertEquals(2, multiSentence.segmentIndex)
+
+        // Если все предложения уже закрыты знаками препинания, показывается последнее актуальное предложение без склейки со старыми
+        val twoCompletedSentences = extractActiveSpeechBubbleSegment(
+            "Записал расход 450 рублей в кафе. Баланс обновлён!"
+        )
+        assertEquals("Баланс обновлён!", twoCompletedSentences.text)
+        assertEquals(1, twoCompletedSentences.segmentIndex)
+
+        // Длинная фраза без точек автоматически делится по естественным границам синтагм, чтобы не копить простыню текста
+        val longRunOnClause = extractActiveSpeechBubbleSegment(
+            "Смотри внимательно на свои расходы за прошлую неделю, потому что в категории ресторанов и доставки мы вышли за лимит, а вот по супермаркетам всё идёт отлично"
+        )
+        assertTrue(
+            "Long unpunctuated stream must segment into a readable active clause",
+            longRunOnClause.text.length <= 105
+        )
+        assertTrue(longRunOnClause.segmentIndex >= 1)
+        assertTrue(longRunOnClause.text.contains("супермаркетам"))
+    }
+
+    @Test
+    fun `shouldDismissCompletedSpokenSubtitle clears finished speech when David finishes speaking and resets on next phrase`() {
+        val completedSpeech = "Записал 500 рублей на такси."
+
+        // 1. Во время активной речи Давида субтитр НЕ скрывается
+        assertFalse(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.DAVID_SPEAKING,
+                rawLiveSubtitle = completedSpeech,
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+
+        // 2. Сразу после завершения речи и перехода в IDLE_LISTENING отговорившая фраза уходит вверх и исчезает
+        assertTrue(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.IDLE_LISTENING,
+                rawLiveSubtitle = completedSpeech,
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+
+        // 3. Когда начинается следующая фраза (или пользователь начинает говорить), новое сообщение снова отображается
+        assertFalse(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.IDLE_LISTENING,
+                rawLiveSubtitle = "Слушаю следующий вопрос",
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+
+        // 4. Приоритетные карточки (OFFLINE / API_MISSING / ERROR) никогда не подавляются
+        assertFalse(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.OFFLINE,
+                rawLiveSubtitle = completedSpeech,
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+    }
+
+    @Test
+    fun `evaluateSphereTouchGesture separates short tap action from hold and drag 3D energy attraction`() {
+        val touchSlopPx = 18f
+
+        // Короткий тап (< 165 мс и без сдвига) -> выполняется действие (Mute / Retry / API), без залипания притяжения
+        val shortTapOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = 95L,
+            maxDisplacementPx = 4f,
+            touchSlopPx = touchSlopPx,
+            wasCanceled = false
+        )
+        assertEquals(SphereTouchGestureOutcome.SHORT_TAP_ACTION, shortTapOutcome)
+
+        // Удержание пальца (>= 165 мс) на сфере -> активируется только притяжение света/сгустков без срабатывания тапа
+        val holdOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = SPHERE_TOUCH_HOLD_ACTIVATION_MS + 40L,
+            maxDisplacementPx = 3f,
+            touchSlopPx = touchSlopPx,
+            wasCanceled = false
+        )
+        assertEquals(SphereTouchGestureOutcome.HOLD_OR_DRAG_ATTRACTION, holdOutcome)
+
+        // Перемещение пальца по сфере (drag > touchSlop) даже за короткое время -> 3D-притяжение без ложного тапа
+        val dragOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = 80L,
+            maxDisplacementPx = touchSlopPx + 6f,
+            touchSlopPx = touchSlopPx,
+            wasCanceled = false
+        )
+        assertEquals(SphereTouchGestureOutcome.HOLD_OR_DRAG_ATTRACTION, dragOutcome)
+
+        // Отменённый жест (например, перехват скролла или сворачивание) -> безопасно игнорируется
+        val canceledOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = 60L,
+            maxDisplacementPx = 2f,
+            touchSlopPx = touchSlopPx,
+            wasCanceled = true
+        )
+        assertEquals(SphereTouchGestureOutcome.CANCELED, canceledOutcome)
+    }
+
+    @Test
+    fun `volumetric 3D sphere projection and cluster attraction respond to finger tracking and disperse smoothly`() {
+        val center = androidx.compose.ui.geometry.Offset(200f, 200f)
+        val sphereRadius = 120f
+
+        // 1. Проекция точки касания на переднюю полусферу сохраняет выпуклую глубину normZ > 0
+        val centerTouch = projectTouchTo3DSphere(
+            touchOffset = androidx.compose.ui.geometry.Offset(200f, 200f),
+            center = center,
+            sphereRadius = sphereRadius
+        )
+        assertEquals(0f, centerTouch.normX, 0.001f)
+        assertEquals(0f, centerTouch.normY, 0.001f)
+        assertTrue("Center touch on convex sphere must have maximal positive Z depth", centerTouch.normZ > 0.99f)
+
+        val edgeTouch = projectTouchTo3DSphere(
+            touchOffset = androidx.compose.ui.geometry.Offset(350f, 200f),
+            center = center,
+            sphereRadius = sphereRadius
+        )
+        assertTrue("Touch outside sphere rim must be clamped to convex surface boundary", edgeTouch.radialDistanceNorm <= 0.94f)
+        assertTrue("Clamped rim touch must retain positive Z depth on front hemisphere", edgeTouch.normZ > 0.3f)
+
+        // 2. Плавное следование за пальцем по сфере и мягкое нарастание/рассеивание силы притяжения
+        val trackedX = interpolateTouchSurfaceCoordinate(currentValue = 0f, targetValue = 0.6f, deltaMs = 16L)
+        assertTrue(trackedX in 0.1f..0.55f)
+
+        var attraction = 0f
+        repeat(12) {
+            attraction = advanceTouchAttractionStrength(
+                currentStrength = attraction,
+                isTouchActive = true,
+                deltaMs = 16L
+            )
+        }
+        assertTrue("Holding finger on sphere must smoothly build attraction strength", attraction > 0.5f)
+
+        // 3. Внутренние 3D-сгустки распределены по передней и задней полусферам и стягиваются к точке касания
+        val spec = DefaultVolumetricClusters.first()
+        val unattractedCluster = computeVolumetricCluster3D(
+            spec = spec,
+            phaseRad = 1.1f,
+            audioEnergy = 0.35f,
+            state = DavidLiveVisualState.IDLE_LISTENING,
+            center = center,
+            sphereRadius = sphereRadius,
+            touchPoint3D = edgeTouch,
+            touchAttractionStrength = 0f
+        )
+        val attractedCluster = computeVolumetricCluster3D(
+            spec = spec,
+            phaseRad = 1.1f,
+            audioEnergy = 0.35f,
+            state = DavidLiveVisualState.IDLE_LISTENING,
+            center = center,
+            sphereRadius = sphereRadius,
+            touchPoint3D = edgeTouch,
+            touchAttractionStrength = 0.85f
+        )
+
+        val distBefore = kotlin.math.hypot(
+            (unattractedCluster.screenPosition.x - edgeTouch.screenPosition.x).toDouble(),
+            (unattractedCluster.screenPosition.y - edgeTouch.screenPosition.y).toDouble()
+        )
+        val distAfter = kotlin.math.hypot(
+            (attractedCluster.screenPosition.x - edgeTouch.screenPosition.x).toDouble(),
+            (attractedCluster.screenPosition.y - edgeTouch.screenPosition.y).toDouble()
+        )
+        assertTrue(
+            "3D light cluster must move closer to the finger touch point when attraction is active",
+            distAfter < distBefore
+        )
+        assertTrue(
+            "Attracted cluster must brighten and concentrate near the touch point",
+            attractedCluster.alphaBoost > unattractedCluster.alphaBoost
+        )
+
+        // Проверяем, что в ансамбле 3D-сгустков одновременно присутствуют элементы как передней (z >= 0), так и задней (z < 0) полусферы
+        val allClustersAtPhase = DefaultVolumetricClusters.map { clusterSpec ->
+            computeVolumetricCluster3D(
+                spec = clusterSpec,
+                phaseRad = 0.75f,
+                audioEnergy = 0.25f,
+                state = DavidLiveVisualState.IDLE_LISTENING,
+                center = center,
+                sphereRadius = sphereRadius,
+                touchPoint3D = null,
+                touchAttractionStrength = 0f
+            )
+        }
+        assertTrue("Sphere must have front-hemisphere 3D clusters", allClustersAtPhase.any { it.isFrontHemisphere })
+        assertTrue("Sphere must have back-hemisphere 3D clusters for volumetric depth", allClustersAtPhase.any { !it.isFrontHemisphere })
+
+        // 4. После отпускания пальца сгустки мягко расходятся обратно в обычный режим
+        var dispersed = attraction
+        repeat(25) {
+            dispersed = advanceTouchAttractionStrength(
+                currentStrength = dispersed,
+                isTouchActive = false,
+                deltaMs = 16L
+            )
+        }
+        assertTrue("Releasing finger must softly disperse touch attraction back toward 0", dispersed < 0.08f)
+    }
 }
+
 
 
 

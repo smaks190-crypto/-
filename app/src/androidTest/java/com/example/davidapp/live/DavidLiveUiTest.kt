@@ -3,6 +3,7 @@ package com.example.davidapp.live
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -387,6 +388,63 @@ class DavidLiveUiTest {
         currentVisualState = DavidLiveVisualState.API_MISSING
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("Добавить API").assertIsDisplayed()
+    }
+
+    @Test
+    fun davidLiveHeaderAvatarHasNoCoinAndSpeechBubbleReplacesCompletedPhrasesAndSphereSeparatesHoldFromTap() {
+        var isMuted by mutableStateOf(false)
+        var currentVisualState by mutableStateOf(DavidLiveVisualState.DAVID_SPEAKING)
+        var liveSubtitle by mutableStateOf("Привет! Сейчас проверим твои расходы за неделю.")
+
+        composeTestRule.setContent {
+            DavidLiveSheet(
+                connectionState = DavidLiveConnectionState.SPEAKING,
+                liveSubtitle = liveSubtitle,
+                rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.45f },
+                overallEnergy = 0.42f,
+                activeSpeaker = DavidLiveSpeaker.DAVID,
+                isMicMuted = isMuted,
+                errorMessage = null,
+                onToggleMicMute = { isMuted = !isMuted },
+                onRetryConnection = {},
+                onOpenApiKeySettings = {},
+                onEndSession = {},
+                visualState = currentVisualState
+            )
+        }
+
+        // 1. Аватар Давида в шапке чистый, без декоративной монетки "₽"
+        composeTestRule.onNodeWithTag("david_live_header_avatar").assertIsDisplayed()
+        composeTestRule.onNodeWithText("₽").assertDoesNotExist()
+
+        // 2. В облачке речи отображается только актуальная произносимая фраза, без накопления предыдущих предложений
+        composeTestRule.onNodeWithTag("david_live_subtitle_bubble").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Сейчас проверим твои расходы за неделю.").assertIsDisplayed()
+
+        // Когда Давид договаривает фразу и переходит в режим ожидания, завершённая фраза уходит вверх, оставляя чистый статус
+        currentVisualState = DavidLiveVisualState.IDLE_LISTENING
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Слушаю вас").assertIsDisplayed()
+
+        // Когда начинается новая реплика, она появляется как свежее сообщение без склейки со старой
+        currentVisualState = DavidLiveVisualState.DAVID_SPEAKING
+        liveSubtitle = "Привет! Сейчас проверим твои расходы за неделю. По подпискам всё чисто!"
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("По подпискам всё чисто!").assertIsDisplayed()
+
+        // 3. Удержание пальца (longClick) на сфере активирует 3D-притяжение света, НЕ переключая микрофон
+        currentVisualState = DavidLiveVisualState.IDLE_LISTENING
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("david_live_circular_visualizer").performTouchInput {
+            longClick()
+        }
+        composeTestRule.waitForIdle()
+        assertEquals(false, isMuted)
+
+        // Короткое нажатие (performClick) на сферу по-прежнему переключает микрофон
+        composeTestRule.onNodeWithTag("david_live_circular_visualizer").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(true, isMuted)
     }
 }
 

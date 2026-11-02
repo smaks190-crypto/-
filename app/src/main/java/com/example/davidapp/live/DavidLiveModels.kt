@@ -269,7 +269,8 @@ object DavidLiveVisualStateResolver {
                 subtitle = if (isMicMuted) {
                     "Нажми на кнопку микрофона, чтобы продолжить разговор"
                 } else {
-                    customSpokenSubtitle ?: "Я здесь, слушаю тебя"
+                    customSpokenSubtitle?.let { extractActiveSpeechBubbleSegment(it).activeText }
+                        ?: "Я здесь, слушаю тебя"
                 },
                 badgeText = "LIVE",
                 actionType = DavidLiveVisualActionType.NONE,
@@ -281,7 +282,8 @@ object DavidLiveVisualStateResolver {
             DavidLiveVisualState.USER_SPEAKING -> DavidLiveVisualMetadata(
                 visualState = visualState,
                 title = "Ты говоришь",
-                subtitle = customSpokenSubtitle ?: "Слушаю...",
+                subtitle = customSpokenSubtitle?.let { extractActiveSpeechBubbleSegment(it).activeText }
+                    ?: "Слушаю...",
                 badgeText = "LIVE",
                 actionType = DavidLiveVisualActionType.NONE,
                 actionLabel = null,
@@ -292,7 +294,9 @@ object DavidLiveVisualStateResolver {
             DavidLiveVisualState.THINKING -> DavidLiveVisualMetadata(
                 visualState = visualState,
                 title = "Думаю...",
-                subtitle = liveSubtitle?.takeIf { it.isNotBlank() && it != "Говорите, я слушаю..." } ?: "Анализирую запрос",
+                subtitle = liveSubtitle?.takeIf { it.isNotBlank() && it != "Говорите, я слушаю..." }
+                    ?.let { extractActiveSpeechBubbleSegment(it).activeText }
+                    ?: "Анализирую запрос",
                 badgeText = "THINKING",
                 actionType = DavidLiveVisualActionType.NONE,
                 actionLabel = null,
@@ -355,7 +359,9 @@ object DavidLiveVisualStateResolver {
             DavidLiveVisualState.DAVID_SPEAKING -> DavidLiveVisualMetadata(
                 visualState = visualState,
                 title = "Говорит Давид",
-                subtitle = liveSubtitle?.takeIf { it.isNotBlank() } ?: "Вот что я думаю...",
+                subtitle = liveSubtitle?.takeIf { it.isNotBlank() }
+                    ?.let { extractActiveSpeechBubbleSegment(it).activeText }
+                    ?: "Вот что я думаю...",
                 badgeText = "LIVE",
                 actionType = DavidLiveVisualActionType.NONE,
                 actionLabel = null,
@@ -446,6 +452,97 @@ object DavidLiveVisualStateResolver {
             )
         }
     }
+}
+
+/**
+ * Актуальный сегмент произносимой реплики для отображения в облачке речи (`david_live_subtitle_bubble`).
+ *
+ * Гарантирует, что завершённые фразы не накапливаются в одном облачке в длинную историю:
+ * как только начинается следующая фраза/предложение, предыдущая уходит вверх и исчезает,
+ * а в облачке отображается только [activeText] с монотонно растущим [segmentIndex].
+ */
+@Immutable
+data class ActiveSpeechSegment(
+    val activeText: String,
+    val segmentIndex: Int,
+    val totalSegments: Int
+)
+
+private val SentenceBoundaryRegex = Regex("(?<=[.!?…])\\s+|\\n+")
+private val ClauseBoundaryRegex = Regex("(?<=;|—|:)\\s+|(?<=,)\\s+")
+
+/**
+ * Извлекает текущую актуальную фразу из потоковой транскрипции речи Давида или пользователя,
+ * отсекая уже произнесённые завершённые предложения и длинные клаузы.
+ */
+internal fun extractActiveSpeechBubbleSegment(rawText: String): ActiveSpeechSegment {
+    val normalized = rawText.replace(Regex("\\s+"), " ").trim()
+    if (normalized.isEmpty()) {
+        return ActiveSpeechSegment(activeText = "", segmentIndex = 0, totalSegments = 0)
+    }
+
+    val rawSentences = normalized
+        .split(SentenceBoundaryRegex)
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+
+    val phraseSegments = mutableListOf<String>()
+    for (sentence in rawSentences) {
+        if (sentence.length <= 96) {
+            phraseSegments.add(sentence)
+        } else {
+            // Если одно предложение слишком длинное без точек, делим его по естественным смысловым паузам (тире, точка с запятой, запятая)
+            val clauses = sentence.split(ClauseBoundaryRegex).map { it.trim() }.filter { it.isNotEmpty() }
+            var currentChunk = StringBuilder()
+            for (clause in clauses) {
+                if (currentChunk.isEmpty()) {
+                    currentChunk.append(clause)
+                } else if (currentChunk.length + 1 + clause.length <= 92 || currentChunk.length < 34) {
+                    currentChunk.append(' ').append(clause)
+                } else {
+                    phraseSegments.add(currentChunk.toString())
+                    currentChunk = StringBuilder(clause)
+                }
+            }
+            if (currentChunk.isNotEmpty()) {
+                phraseSegments.add(currentChunk.toString())
+            }
+        }
+    }
+
+    if (phraseSegments.isEmpty()) {
+        return ActiveSpeechSegment(activeText = normalized, segmentIndex = 0, totalSegments = 1)
+    }
+
+    val lastIdx = phraseSegments.lastIndex
+    return ActiveSpeechSegment(
+        activeText = phraseSegments[lastIdx],
+        segmentIndex = lastIdx,
+        totalSegments = phraseSegments.size
+    )
+}
+
+/**
+ * Определяет, должна ли завершённая реплика Давида/пользователя быть скрыта (с плавным уходом вверх),
+ * когда реальное состояние озвучки (`DAVID_SPEAKING` / `USER_SPEAKING`) завершилось и сменилось
+ * на ожидание или следующую фазу, а в `liveSubtitle` ещё остаётся текст только что завершённой реплики.
+ */
+internal fun shouldDismissCompletedSpokenSubtitle(
+    visualState: DavidLiveVisualState,
+    currentLiveSubtitle: String?,
+    lastCompletedSpokenSubtitle: String?
+): Boolean {
+    if (visualState == DavidLiveVisualState.DAVID_SPEAKING ||
+        visualState == DavidLiveVisualState.USER_SPEAKING
+    ) {
+        return false
+    }
+    val currentTrimmed = currentLiveSubtitle?.trim().orEmpty()
+    val completedTrimmed = lastCompletedSpokenSubtitle?.trim().orEmpty()
+    if (currentTrimmed.isEmpty() || completedTrimmed.isEmpty()) {
+        return false
+    }
+    return currentTrimmed == completedTrimmed
 }
 
 /**

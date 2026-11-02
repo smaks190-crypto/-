@@ -4,6 +4,7 @@ import android.app.Activity
 import android.media.AudioManager
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -17,6 +18,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -70,6 +74,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -760,11 +765,60 @@ fun DavidLiveSheet(
         }
     }
 
+    // Синхронизация смены фраз в облачке речи с реальными сегментами и завершением озвучки Давида/пользователя
+    var previousVisualStateForSpeech by remember { mutableStateOf(effectiveVisualState) }
+    var lastSpokenSubtitleWhileSpeaking by remember { mutableStateOf<String?>(null) }
+    var lastCompletedSpokenSubtitle by remember { mutableStateOf<String?>(null) }
+    var speechTurnEpoch by remember { mutableIntStateOf(0) }
+
+    val isCurrentlySpeakingState = effectiveVisualState == DavidLiveVisualState.DAVID_SPEAKING ||
+        effectiveVisualState == DavidLiveVisualState.USER_SPEAKING
+    val wasPreviouslySpeakingState = previousVisualStateForSpeech == DavidLiveVisualState.DAVID_SPEAKING ||
+        previousVisualStateForSpeech == DavidLiveVisualState.USER_SPEAKING
+
+    if (isCurrentlySpeakingState) {
+        if (!wasPreviouslySpeakingState || previousVisualStateForSpeech != effectiveVisualState) {
+            speechTurnEpoch++
+        }
+        val trimmedLive = liveSubtitle.trim()
+        if (trimmedLive.isNotEmpty()) {
+            lastSpokenSubtitleWhileSpeaking = trimmedLive
+        }
+    } else if (wasPreviouslySpeakingState) {
+        // Речь завершилась: фиксируем отзвучавшую реплику, чтобы она плавно ушла вверх и не оставалась в облачке
+        lastCompletedSpokenSubtitle = lastSpokenSubtitleWhileSpeaking ?: liveSubtitle.trim()
+        speechTurnEpoch++
+    }
+    if (previousVisualStateForSpeech != effectiveVisualState) {
+        previousVisualStateForSpeech = effectiveVisualState
+    }
+
+    val effectiveLiveSubtitleForBubble = remember(
+        effectiveVisualState,
+        liveSubtitle,
+        lastCompletedSpokenSubtitle
+    ) {
+        if (shouldDismissCompletedSpokenSubtitle(
+                visualState = effectiveVisualState,
+                currentLiveSubtitle = liveSubtitle,
+                lastCompletedSpokenSubtitle = lastCompletedSpokenSubtitle
+            )
+        ) {
+            null
+        } else {
+            liveSubtitle
+        }
+    }
+
+    val activeSpeechSegment = remember(effectiveLiveSubtitleForBubble) {
+        extractActiveSpeechBubbleSegment(effectiveLiveSubtitleForBubble.orEmpty())
+    }
+
     val visualMetadata = remember(
         effectiveVisualState,
         effectiveFailureKind,
         isMicMuted,
-        liveSubtitle,
+        effectiveLiveSubtitleForBubble,
         errorMessage,
         activeToolName
     ) {
@@ -772,11 +826,22 @@ fun DavidLiveSheet(
             visualState = effectiveVisualState,
             failureKind = effectiveFailureKind,
             isMicMuted = isMicMuted,
-            liveSubtitle = liveSubtitle,
+            liveSubtitle = effectiveLiveSubtitleForBubble,
             errorMessage = errorMessage,
             activeToolName = activeToolName
         )
     }
+
+    val speechPhraseSlotKey = remember(
+        speechTurnEpoch,
+        effectiveVisualState,
+        isMicMuted,
+        activeSpeechSegment.segmentIndex
+    ) {
+        "$speechTurnEpoch:${effectiveVisualState.name}:$isMicMuted:${activeSpeechSegment.segmentIndex}"
+    }
+    val phraseSlotTexts = remember { mutableStateMapOf<String, String>() }
+    phraseSlotTexts[speechPhraseSlotKey] = visualMetadata.subtitle
 
     val (targetStatePrimaryColor, targetStateSecondaryColor) = remember(effectiveVisualState, isMicMuted) {
         resolveVisualStateColors(effectiveVisualState, isMicMuted)
@@ -968,57 +1033,28 @@ fun DavidLiveSheet(
 
                                 Spacer(modifier = Modifier.width(10.dp))
 
-                                // Frog Avatar with Gold Coin badge (matching the reference header)
+                                // Чистый аватар Давида без декоративной монетки (Дополнение к ТЗ п. 2)
                                 Box(
-                                    modifier = Modifier.size(48.dp),
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            Brush.radialGradient(
+                                                colors = listOf(
+                                                    statePrimaryColor.copy(alpha = 0.32f),
+                                                    Color(0xFF0A1622)
+                                                )
+                                            )
+                                        )
+                                        .border(
+                                            width = 1.6.dp,
+                                            color = statePrimaryColor.copy(alpha = 0.82f),
+                                            shape = CircleShape
+                                        )
+                                        .testTag("david_live_header_avatar"),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(46.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                Brush.radialGradient(
-                                                    colors = listOf(
-                                                        statePrimaryColor.copy(alpha = 0.32f),
-                                                        Color(0xFF0A1622)
-                                                    )
-                                                )
-                                            )
-                                            .border(
-                                                width = 1.6.dp,
-                                                color = statePrimaryColor.copy(alpha = 0.82f),
-                                                shape = CircleShape
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        BrandFrogAvatar(size = 33.dp)
-                                    }
-
-                                    // Gold coin accent at bottom-right of avatar
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .size(16.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                Brush.radialGradient(
-                                                    colors = listOf(
-                                                        Color(0xFFFDE047),
-                                                        Color(0xFFF59E0B)
-                                                    )
-                                                )
-                                            )
-                                            .border(1.dp, Color(0xFF070D19), CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "₽",
-                                            color = Color(0xFF451A03),
-                                            fontSize = 9.sp,
-                                            fontWeight = FontWeight.ExtraBold
-                                        )
-                                    }
+                                    BrandFrogAvatar(size = 33.dp)
                                 }
 
                                 Spacer(modifier = Modifier.width(10.dp))
@@ -1315,22 +1351,62 @@ fun DavidLiveSheet(
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
-                                        Text(
-                                            text = visualMetadata.subtitle,
-                                            color = when (effectiveVisualState) {
-                                                DavidLiveVisualState.OFFLINE -> Color(0xFFFECACA)
-                                                DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
-                                                DavidLiveVisualState.ERROR -> Color(0xFFFBCFE8)
-                                                DavidLiveVisualState.SUCCESS -> Color(0xFFBBF7D0)
-                                                else -> Color(0xFFCBD5E1)
+                                        AnimatedContent(
+                                            targetState = speechPhraseSlotKey,
+                                            transitionSpec = {
+                                                (slideInVertically(
+                                                    animationSpec = tween(
+                                                        durationMillis = 320,
+                                                        easing = FastOutSlowInEasing
+                                                    ),
+                                                    initialOffsetY = { fullHeight -> fullHeight / 2 }
+                                                ) + fadeIn(
+                                                    animationSpec = tween(
+                                                        durationMillis = 260,
+                                                        easing = FastOutSlowInEasing
+                                                    )
+                                                )).togetherWith(
+                                                    slideOutVertically(
+                                                        animationSpec = tween(
+                                                            durationMillis = 320,
+                                                            easing = FastOutSlowInEasing
+                                                        ),
+                                                        targetOffsetY = { fullHeight -> -fullHeight }
+                                                    ) + fadeOut(
+                                                        animationSpec = tween(
+                                                            durationMillis = 220,
+                                                            easing = FastOutSlowInEasing
+                                                        )
+                                                    )
+                                                )
                                             },
-                                            fontSize = 13.5.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            lineHeight = 18.5.sp,
-                                            textAlign = TextAlign.Center,
-                                            maxLines = 3,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
+                                            label = "david_live_speech_phrase_transition"
+                                        ) { slotKey ->
+                                            val displayedPhrase = phraseSlotTexts[slotKey] ?: visualMetadata.subtitle
+                                            Text(
+                                                text = displayedPhrase,
+                                                color = when (effectiveVisualState) {
+                                                    DavidLiveVisualState.OFFLINE -> Color(0xFFFECACA)
+                                                    DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
+                                                    DavidLiveVisualState.ERROR -> Color(0xFFFBCFE8)
+                                                    DavidLiveVisualState.SUCCESS -> Color(0xFFBBF7D0)
+                                                    DavidLiveVisualState.DAVID_SPEAKING,
+                                                    DavidLiveVisualState.USER_SPEAKING -> Color(0xFFF8FAFC)
+                                                    else -> Color(0xFFE2E8F0)
+                                                },
+                                                fontSize = 15.sp,
+                                                fontWeight = if (isCurrentlySpeakingState || isAlertState) {
+                                                    FontWeight.Bold
+                                                } else {
+                                                    FontWeight.SemiBold
+                                                },
+                                                lineHeight = 20.5.sp,
+                                                textAlign = TextAlign.Center,
+                                                maxLines = 3,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.testTag("david_live_subtitle_text")
+                                            )
+                                        }
 
                                         AnimatedVisibility(
                                             visible = visualMetadata.actionType != DavidLiveVisualActionType.NONE &&
