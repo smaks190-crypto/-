@@ -2215,7 +2215,12 @@ class DavidLiveUnitTest {
             val t = idx.toDouble() / 16_000.0
             (kotlin.math.sin(2.0 * Math.PI * 320.0 * t) * 1450.0).toInt().toShort()
         }
-        val rawRms = analyzer.computeNormalizedRms(rawMicSamples, rawMicSamples.size)
+        var sumSq = 0.0
+        for (sample in rawMicSamples) {
+            val norm = sample / 32768.0
+            sumSq += norm * norm
+        }
+        val rawRms = kotlin.math.sqrt(sumSq / rawMicSamples.size).toFloat()
         assertTrue("Conversational VOICE_COMMUNICATION mic RMS should be in 0.015..0.06 range", rawRms in 0.015f..0.06f)
 
         val boostedSamples = ShortArray(512)
@@ -2225,9 +2230,13 @@ class DavidLiveUnitTest {
             count = rawMicSamples.size,
             rms = rawRms
         )
-        val frame = analyzer.analyzePcm16(boostedSamples, boostedSamples.size, sampleRateHz = 16_000)
+        val rays = analyzer.analyzePcmFrame(
+            pcmSamples = boostedSamples,
+            sampleCount = boostedSamples.size,
+            sampleRateHz = 16_000
+        )
         val boostedEnergy = DavidLiveAudioEngine.computeUserVisualizerEnergy(
-            fftEnergy = frame.overallEnergy,
+            fftEnergy = analyzer.overallEnergy,
             micRms = rawRms
         )
         assertTrue(
@@ -2236,12 +2245,7 @@ class DavidLiveUnitTest {
         )
 
         val totalBars = 29
-        val centerIndex = (totalBars - 1) / 2f
-        val radialEnvelope = FloatArray(totalBars) { index ->
-            val normDist = kotlin.math.abs(index - centerIndex) / centerIndex
-            val gaussian = kotlin.math.exp(-2.8 * normDist * normDist).toFloat()
-            (0.10f + 0.90f * gaussian).coerceIn(0.08f, 1f)
-        }
+        val radialEnvelope = analyzer.getRadialSpatialEnvelope()
 
         val idleCenterBar = computeHorizontalWaveBarTargetMagnitude(
             barIndex = 14,
@@ -2250,25 +2254,40 @@ class DavidLiveUnitTest {
             radialEnvelope = radialEnvelope,
             overallEnergy = 0.02f,
             wavePhaseRad = 0.8f,
-            visualState = DavidLiveVisualState.IDLE_LISTENING
+            waveActivity = 0.25f,
+            isMicMuted = false,
+            isUserSpeaking = false,
+            isDavidSpeaking = false,
+            isProcessing = false,
+            isIdleListeningUnmuted = true
         )
         val userSpeakingCenterBarPhaseA = computeHorizontalWaveBarTargetMagnitude(
             barIndex = 14,
             totalBars = totalBars,
-            rayMagnitudes = frame.rayMagnitudes,
+            rayMagnitudes = rays,
             radialEnvelope = radialEnvelope,
             overallEnergy = boostedEnergy,
             wavePhaseRad = 0.4f,
-            visualState = DavidLiveVisualState.USER_SPEAKING
+            waveActivity = 1f,
+            isMicMuted = false,
+            isUserSpeaking = true,
+            isDavidSpeaking = false,
+            isProcessing = false,
+            isIdleListeningUnmuted = false
         )
         val userSpeakingCenterBarPhaseB = computeHorizontalWaveBarTargetMagnitude(
             barIndex = 14,
             totalBars = totalBars,
-            rayMagnitudes = frame.rayMagnitudes,
+            rayMagnitudes = rays,
             radialEnvelope = radialEnvelope,
             overallEnergy = boostedEnergy,
             wavePhaseRad = 1.9f,
-            visualState = DavidLiveVisualState.USER_SPEAKING
+            waveActivity = 1f,
+            isMicMuted = false,
+            isUserSpeaking = true,
+            isDavidSpeaking = false,
+            isProcessing = false,
+            isIdleListeningUnmuted = false
         )
 
         assertTrue(
