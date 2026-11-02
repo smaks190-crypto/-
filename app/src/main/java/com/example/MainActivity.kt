@@ -614,6 +614,8 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             val liveActiveSpeaker by davidViewModel.liveActiveSpeaker.collectAsState()
             val isLiveMicMuted by davidViewModel.isLiveMicMuted.collectAsState()
             val liveErrorMessage by davidViewModel.liveErrorMessage.collectAsState()
+            val liveVisualState by davidViewModel.liveVisualState.collectAsState()
+            val liveFailureKind by davidViewModel.liveFailureKind.collectAsState()
 
             val currentBudgetProfile = budgetProfiles.find { it.id == selectedBudgetId }
             LaunchedEffect(selectedBudgetId, currentBudgetProfile?.name, apiKey) {
@@ -695,7 +697,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     },
                                     onToggleMicMute = { davidViewModel.toggleLiveMicMute() },
                                     onEndSession = { davidViewModel.endDavidLiveSession() },
-                                    embeddedInBottomBar = true
+                                    embeddedInBottomBar = true,
+                                    visualState = liveVisualState,
+                                    failureKind = liveFailureKind
                                 )
                             }
                         } else {

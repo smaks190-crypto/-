@@ -15,6 +15,7 @@ import com.example.data.db.NotificationEntity
 import com.example.data.db.TransactionEntity
 import com.example.data.repository.BudgetRepository
 import com.example.davidapp.live.DavidLiveAudioEngine
+import com.example.davidapp.live.DavidLiveConnectionFailureKind
 import com.example.davidapp.live.DavidLiveConnectionState
 import com.example.davidapp.live.DavidLiveDisplayMode
 import com.example.davidapp.live.DavidLiveFinancialToolsProvider
@@ -23,6 +24,7 @@ import com.example.davidapp.live.DavidLiveSpeaker
 import com.example.davidapp.live.DavidLiveSummaryGenerator
 import com.example.davidapp.live.DavidLiveToolFact
 import com.example.davidapp.live.DavidLiveTranscriptTurn
+import com.example.davidapp.live.DavidLiveVisualState
 import com.example.ui.components.extractOpsAndComment
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -123,6 +125,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     val liveActiveSpeaker: StateFlow<DavidLiveSpeaker> = liveSessionController.audioEngine.activeSpeaker
     val isLiveMicMuted: StateFlow<Boolean> = liveSessionController.isMicMuted
     val liveErrorMessage: StateFlow<String?> = liveSessionController.errorMessage
+    val liveVisualState: StateFlow<DavidLiveVisualState> = liveSessionController.visualState
+    val liveFailureKind: StateFlow<DavidLiveConnectionFailureKind> = liveSessionController.failureKind
+    val liveActiveToolName: StateFlow<String?> = liveSessionController.activeToolName
+    val liveDebugOverrideVisualState: StateFlow<DavidLiveVisualState?> = liveSessionController.debugOverrideVisualState
 
     private val prefs: SharedPreferences =
         application.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
@@ -919,6 +925,14 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
     fun retryLiveConnection() {
         liveSessionController.retryConnection()
+    }
+
+    fun setDebugLiveVisualStateOverride(state: DavidLiveVisualState?) {
+        liveSessionController.setDebugVisualStateOverride(state)
+    }
+
+    fun triggerLiveSuccessPulse() {
+        liveSessionController.triggerSuccessPulse()
     }
 
     fun endDavidLiveSession(soundManager: SoundManager? = null) {

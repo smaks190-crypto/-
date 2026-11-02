@@ -1352,4 +1352,225 @@ class DavidLiveUnitTest {
             db.close()
         }
     }
+
+    @Test
+    fun `visual state resolver evaluates all 13 states strictly respecting priority hierarchy`() {
+        // 1. Отсутствие API-ключа имеет высший приоритет (никогда не начинает бесконечный reconnect)
+        val missingKey = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.NO_API_KEY,
+            activeSpeaker = DavidLiveSpeaker.DAVID,
+            failureKind = DavidLiveConnectionFailureKind.MISSING_API_KEY
+        )
+        assertEquals(DavidLiveVisualState.API_MISSING, missingKey)
+
+        // 2. Потеря интернет-соединения (Offline) имеет абсолютный приоритет над речью, поиском и мышлением
+        val offlinePrioritized = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.OFFLINE,
+            activeSpeaker = DavidLiveSpeaker.DAVID,
+            isToolLookupActive = true,
+            isAnalyzingToolData = true,
+            isModelThinking = true,
+            failureKind = DavidLiveConnectionFailureKind.NETWORK_OFFLINE
+        )
+        assertEquals(DavidLiveVisualState.OFFLINE, offlinePrioritized)
+
+        // 3. Критическая ошибка протокола/сервера
+        val protocolError = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.ERROR,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            failureKind = DavidLiveConnectionFailureKind.PROTOCOL_OR_SERVER_ERROR
+        )
+        assertEquals(DavidLiveVisualState.ERROR, protocolError)
+
+        // 4. Переподключение
+        val reconnecting = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.RECONNECTING,
+            activeSpeaker = DavidLiveSpeaker.NONE
+        )
+        assertEquals(DavidLiveVisualState.RECONNECTING, reconnecting)
+
+        // 5. Первичное подключение (пока сессия не подтвердила готовность)
+        val connectingUnready = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isSessionReady = false
+        )
+        assertEquals(DavidLiveVisualState.CONNECTING, connectingUnready)
+
+        // 6. Речь Давида (только при наличии незавершённого playback или окна удержания)
+        val davidSpeaking = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.DAVID_SPEAKING,
+            activeSpeaker = DavidLiveSpeaker.DAVID,
+            isPlaybackDrained = false,
+            isWithinDavidSpeechHold = true
+        )
+        assertEquals(DavidLiveVisualState.DAVID_SPEAKING, davidSpeaking)
+
+        // 7. Речь пользователя (с удержанием коротких пауз между словами)
+        val userSpeakingWithHold = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isWithinUserSpeechHold = true,
+            isMicMuted = false
+        )
+        assertEquals(DavidLiveVisualState.USER_SPEAKING, userSpeakingWithHold)
+
+        // 8. Поиск финансовых данных (активен СТРОГО только при реальном запуске инструмента)
+        val financeLookup = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isToolLookupActive = true,
+            activeToolName = DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW
+        )
+        assertEquals(DavidLiveVisualState.FINANCE_LOOKUP, financeLookup)
+
+        // 9. Анализ полученных данных
+        val analyzing = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isAnalyzingToolData = true
+        )
+        assertEquals(DavidLiveVisualState.ANALYZING, analyzing)
+
+        // 10. Подготовка голосового ответа
+        val preparing = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isPreparingResponse = true
+        )
+        assertEquals(DavidLiveVisualState.PREPARING_RESPONSE, preparing)
+
+        // 11. Размышление модели (Thinking)
+        val thinking = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.DAVID_THINKING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isModelThinking = true
+        )
+        assertEquals(DavidLiveVisualState.THINKING, thinking)
+
+        // 12. Кратковременный импульс успеха (Success)
+        val success = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isSuccessPulseActive = true
+        )
+        assertEquals(DavidLiveVisualState.SUCCESS, success)
+
+        // 13. Спокойное ожидание (Idle / Listening)
+        val idle = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isPlaybackDrained = true
+        )
+        assertEquals(DavidLiveVisualState.IDLE_LISTENING, idle)
+
+        // Debug override имеет приоритет над всеми событиями
+        val overridden = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.OFFLINE,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            debugOverrideState = DavidLiveVisualState.FINANCE_LOOKUP
+        )
+        assertEquals(DavidLiveVisualState.FINANCE_LOOKUP, overridden)
+    }
+
+    @Test
+    fun `visual state metadata generates authentic Russian labels actions and sphere tap flags`() {
+        // Ожидание
+        val idleMeta = DavidLiveVisualStateResolver.resolveMetadata(DavidLiveVisualState.IDLE_LISTENING)
+        assertEquals("Ожидание", idleMeta.title)
+        assertEquals("Я здесь, слушаю тебя", idleMeta.subtitle)
+        assertEquals("LIVE", idleMeta.badgeText)
+        assertFalse(idleMeta.sphereTapTriggersReconnect)
+        assertFalse(idleMeta.sphereTapOpensApiSettings)
+
+        // Поиск финансов с подсказкой конкретного инструмента
+        val financeMeta = DavidLiveVisualStateResolver.resolveMetadata(
+            visualState = DavidLiveVisualState.FINANCE_LOOKUP,
+            activeToolName = DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST
+        )
+        assertEquals("Ищу финансы", financeMeta.title)
+        assertTrue(financeMeta.subtitle.contains("Safe-to-Spend"))
+        assertEquals("SCAN", financeMeta.badgeText)
+
+        // Анализ
+        val analyzeMeta = DavidLiveVisualStateResolver.resolveMetadata(DavidLiveVisualState.ANALYZING)
+        assertEquals("Анализирую", analyzeMeta.title)
+        assertEquals("ANALYZE", analyzeMeta.badgeText)
+
+        // Потеря связи (Offline): нажатие на сферу запускает reconnect, действие «Повторить»
+        val offlineMeta = DavidLiveVisualStateResolver.resolveMetadata(DavidLiveVisualState.OFFLINE)
+        assertEquals("Связь прервалась", offlineMeta.title)
+        assertEquals("OFFLINE", offlineMeta.badgeText)
+        assertEquals(DavidLiveVisualActionType.RECONNECT, offlineMeta.actionType)
+        assertEquals("Повторить", offlineMeta.actionLabel)
+        assertTrue(offlineMeta.sphereTapTriggersReconnect)
+        assertFalse(offlineMeta.sphereTapOpensApiSettings)
+
+        // Отсутствие ключа: нажатие на сферу открывает безопасные настройки, действие «Добавить API»
+        val noKeyMeta = DavidLiveVisualStateResolver.resolveMetadata(DavidLiveVisualState.API_MISSING)
+        assertEquals("Нет API-ключа", noKeyMeta.title)
+        assertEquals("Добавь API-ключ Gemini для продолжения", noKeyMeta.subtitle)
+        assertEquals("API KEY", noKeyMeta.badgeText)
+        assertEquals(DavidLiveVisualActionType.ADD_API_KEY, noKeyMeta.actionType)
+        assertEquals("Добавить API", noKeyMeta.actionLabel)
+        assertFalse(noKeyMeta.sphereTapTriggersReconnect)
+        assertTrue(noKeyMeta.sphereTapOpensApiSettings)
+
+        // Неверный API-ключ в ошибке
+        val invalidKeyMeta = DavidLiveVisualStateResolver.resolveMetadata(
+            visualState = DavidLiveVisualState.ERROR,
+            errorMessage = "API key not valid (403)",
+            failureKind = DavidLiveConnectionFailureKind.INVALID_API_KEY
+        )
+        assertEquals("Неверный API-ключ", invalidKeyMeta.title)
+        assertEquals(DavidLiveVisualActionType.UPDATE_API_KEY, invalidKeyMeta.actionType)
+        assertEquals("Настроить API", invalidKeyMeta.actionLabel)
+        assertTrue(invalidKeyMeta.sphereTapOpensApiSettings)
+    }
+
+    @Test
+    fun `session controller manages visual states across tool calling thinking and disconnect cycles`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+
+        // Начальное состояние
+        assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
+
+        // 1. Ручной override для отладки всех 13 состояний
+        controller.setDebugVisualStateOverride(DavidLiveVisualState.ANALYZING)
+        assertEquals(DavidLiveVisualState.ANALYZING, controller.visualState.value)
+        controller.setDebugVisualStateOverride(null)
+        assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
+
+        // 2. Имитация вызова финансового инструмента -> переход в FINANCE_LOOKUP
+        val toolCallMsg = """
+            {
+              "toolCall": {
+                "functionCalls": [
+                  {
+                    "id": "call_123",
+                    "name": "${DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW}",
+                    "args": {}
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        controller.processServerMessageForTest(toolCallMsg)
+        assertTrue(controller.isToolLookupActive.value)
+        assertEquals(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, controller.activeToolName.value)
+        assertEquals(DavidLiveVisualState.FINANCE_LOOKUP, controller.visualState.value)
+
+        // 3. Импульс успешного завершения
+        controller.triggerSuccessPulse(durationMs = 500L)
+        assertTrue(controller.isSuccessPulseActive.value)
+        assertEquals(DavidLiveVisualState.SUCCESS, controller.visualState.value)
+    }
 }
+
