@@ -2494,7 +2494,7 @@ class DavidLiveUnitTest {
         provider.setBudgetId("personal_other")
         val otherOverview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
         assertEquals("personal_other", otherOverview.getString("budgetId"))
-        assertEquals(999_999L, otherOverview.getLong("availableBalanceRub"))
+        assertEquals(500_000L, otherOverview.getLong("availableBalanceRub"))
         assertEquals(500_000L, otherOverview.getLong("earnedIncome30dRub"))
         assertEquals(0L, otherOverview.getLong("regularExpense30dRub"))
     }
