@@ -34,14 +34,13 @@ class ReleaseNotesTest(unittest.TestCase):
         self.assertNotIn("dark mode", result)
         self.assertNotIn("/pull/", result)
 
-    def test_english_title_without_note_becomes_neutral_fallback(self):
+    def test_english_user_facing_title_without_note_fails(self):
         text = original(
             "* fix(live): resolve ping timeout by @dev in https://github.com/owner/repo/pull/11",
             "* fix: another english fix by @dev in https://github.com/owner/repo/pull/12",
         )
-        result = build(text)
-        self.assertIn("- Технические изменения без отдельного описания: 2", result)
-        self.assertNotRegex(result, r"ping timeout|english fix")
+        with self.assertRaisesRegex(ValueError, "Не удалось сформировать заметку"):
+            build(text)
 
     def test_russian_title_is_cleaned_and_used(self):
         text = original("* fix: Исправлен скачок графика (#49) by @dev in https://github.com/owner/repo/pull/13")
@@ -54,13 +53,13 @@ class ReleaseNotesTest(unittest.TestCase):
         text = original("* chore: bump deps by @dev in https://github.com/owner/repo/pull/14")
         result = build(text, {"14": "## Заметки релиза\nнет"})
         self.assertIn(notes.EMPTY_TEXT, result)
-        self.assertNotIn(notes.FALLBACK_TEXT, result)
+        self.assertNotIn("Технические изменения без отдельного описания", result)
 
     def test_empty_template_section_falls_back(self):
         text = original("* feat: english only by @dev in https://github.com/owner/repo/pull/15")
         body = "## Заметки релиза\n<!-- Опишите по-русски -->\n\n## Тесты"
-        result = build(text, {"15": body})
-        self.assertIn(f"{notes.FALLBACK_TEXT}: 1", result)
+        with self.assertRaisesRegex(ValueError, "Не удалось сформировать заметку"):
+            build(text, {"15": body})
 
     def test_category_prefix_in_note(self):
         text = original("* feat: english by @dev in https://github.com/owner/repo/pull/16")
@@ -77,7 +76,7 @@ class ReleaseNotesTest(unittest.TestCase):
         ]
         result = build(text, commits=commits)
         self.assertIn("- Исправлен вылет при старте", result)
-        self.assertIn(f"- {notes.FALLBACK_TEXT}: 1", result)
+        self.assertNotIn("Технические изменения без отдельного описания", result)
         self.assertNotIn("english", result)
         self.assertNotRegex(result, r"/commit/|[0-9a-f]{7}")
 
@@ -118,7 +117,10 @@ class ReleaseNotesTest(unittest.TestCase):
             "* feat: add voice picker by @dev in https://github.com/owner/repo/pull/50",
             "* fix: Исправлена загрузка by @dev in https://github.com/owner/repo/pull/51",
         )
-        result = build(text)
+        result = build(text, {
+            "50": "## Заметки релиза\nнет",
+            "51": "## Заметки релиза\n- Исправлена загрузка",
+        })
         self.assertNotIn("voice picker", result)
         self.assertIn("- Исправлена загрузка", result)
 
