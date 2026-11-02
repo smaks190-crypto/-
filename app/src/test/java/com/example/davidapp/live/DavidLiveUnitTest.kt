@@ -2134,7 +2134,7 @@ class DavidLiveUnitTest {
         val incomeItem = schedule.getJSONArray("upcomingIncomes").getJSONObject(0)
         assertEquals("Основная зарплата", incomeItem.getString("title"))
         assertEquals("2026-11-02", incomeItem.getString("nextDueDateIso"))
-        assertEquals("2 ноября 2026 г.", incomeItem.getString("nextDueDateHumanRu"))
+        assertEquals("2 ноября 2026", incomeItem.getString("nextDueDateHumanRu"))
         assertEquals("2 ноября 2026 года (второго ноября)", incomeItem.getString("nextDueDateSpokenRu"))
         assertEquals(2, incomeItem.getInt("dayOfMonth"))
         assertEquals("второго", incomeItem.getString("dayOrdinalGenitiveRu"))
@@ -2401,7 +2401,11 @@ class DavidLiveUnitTest {
         assertEquals("ok", whatIfSalaryDelay.getString("status"))
         assertEquals(8, whatIfSalaryDelay.getInt("baselineHorizonDays"))
         assertEquals(13, whatIfSalaryDelay.getInt("simulatedHorizonDays"))
-        assertTrue(whatIfSalaryDelay.getDouble("simulatedCanSpendTodayRub") < baseSafeToday)
+        assertEquals(52_000.0, whatIfSalaryDelay.getDouble("baselineObligationsReservedRub"), 0.01)
+        assertEquals(58_800.0, whatIfSalaryDelay.getDouble("simulatedObligationsReservedRub"), 0.01)
+        assertEquals(56_200.0, whatIfSalaryDelay.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertEquals(1, whatIfSalaryDelay.getInt("newlyExposedObligationsCount"))
+        assertTrue(whatIfSalaryDelay.getDouble("simulatedCanSpendTodayRub") <= baseSafeToday)
 
         // 4c. Увеличение обязательного платежа (Аренда квартиры +4 000 ₽ -> 42 000 ₽)
         val whatIfMandatoryIncrease = provider.executeToolCall(
@@ -2483,7 +2487,7 @@ class DavidLiveUnitTest {
         assertEquals("2026-11-02", txArray.getJSONObject(0).getString("date"))
         assertEquals("2026-11-02", txArray.getJSONObject(1).getString("date"))
         assertEquals("2026-11-02", txArray.getJSONObject(2).getString("date"))
-        assertEquals("2026-11-01", txArray.getJSONObject(3).getString("date"))
+        assertEquals("2026-11-02", txArray.getJSONObject(3).getString("date"))
         assertEquals("2026-11-01", txArray.getJSONObject(4).getString("date"))
 
         // 9. Проверка строгой изоляции профилей: переключение на "personal_other" не смешивает данные с "demo_2026_test"
