@@ -53,7 +53,7 @@ class ReleaseNotesTest(unittest.TestCase):
         text = original("* chore: bump deps by @dev in https://github.com/owner/repo/pull/14")
         result = build(text, {"14": "## Заметки релиза\nнет"})
         self.assertIn(notes.EMPTY_TEXT, result)
-        self.assertNotIn(notes.FALLBACK_TEXT, result)
+        self.assertNotIn("Технические изменения без отдельного описания", result)
 
     def test_empty_template_section_falls_back(self):
         text = original("* feat: english only by @dev in https://github.com/owner/repo/pull/15")
