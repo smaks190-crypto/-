@@ -20,7 +20,6 @@ import com.example.data.safetospend.SafeToSpendResult
 import com.example.data.safetospend.WhatIfScenarioRequest
 import com.example.data.safetospend.WhatIfSimulator
 import com.example.data.safetospend.toDomain
-import com.example.util.GlobalConsoleLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.firstOrNull
 import org.json.JSONArray
@@ -365,12 +364,7 @@ class DavidLiveFinancialToolsProvider(
             }
         } catch (ce: CancellationException) {
             throw ce
-        } catch (e: Exception) {
-            GlobalConsoleLogger.log(
-                "WARN",
-                "DavidLiveTools",
-                "Read-only tool '$toolName' failed (${e::class.java.simpleName})"
-            )
+        } catch (_: Exception) {
             return JSONObject().apply {
                 put("status", "error")
                 put("dataAvailable", false)

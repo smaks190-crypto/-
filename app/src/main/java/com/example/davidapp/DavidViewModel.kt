@@ -82,16 +82,13 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         accountDao = database.accountDao(),
         recurringPaymentDao = database.recurringPaymentDao(),
         userSafetyFloorProvider = { activeBudgetId ->
-            com.example.data.preferences.BudgetPreferencesRepository(getApplication(), activeBudgetId)
-                .getSafetyFloorRub()
+            com.example.data.preferences.BudgetPreferencesRepository.getUserSafetyFloorRub(getApplication(), activeBudgetId)
         },
         userLockedReserveProvider = { activeBudgetId ->
-            com.example.data.preferences.BudgetPreferencesRepository(getApplication(), activeBudgetId)
-                .getLockedReserveRub()
+            com.example.data.preferences.BudgetPreferencesRepository.getUserLockedReserveRub(getApplication(), activeBudgetId)
         },
         userEssentialDailyNormProvider = { activeBudgetId ->
-            com.example.data.preferences.BudgetPreferencesRepository(getApplication(), activeBudgetId)
-                .getEssentialDailyNormRub()
+            com.example.data.preferences.BudgetPreferencesRepository.getUserEssentialDailyNormRub(getApplication(), activeBudgetId)
         }
     )
 
