@@ -73,7 +73,7 @@
 
 ## 4. Состояние Git и ограничения среды
 - **Рабочая ветка**: `feat/issue-56-david-live-mesh-visualizer`
-- **Commit SHA**: `9e9c448`
+- **Commit SHA**: `ac52177` (включает исправления метаданных `liveSubtitle` и обновлённый `DavidLiveUnitTest`)
 - **Сетевое ограничение**: Исходящий сетевой прокси песочницы Google AI Studio настроен только на `authorization` и `generativelanguage.googleapis.com`. Доступ к `github.com` заблокирован (HTTP 403 Forbidden). Поэтому push и создание PR должны быть выполнены владельцем репозитория из ветки `feat/issue-56-david-live-mesh-visualizer`.
 - **Локальная среда**: Java / Gradle не установлены в образе песочницы, поэтому сборка APK и запуск Robolectric производятся в стандартном workflow GitHub Actions (`.github/workflows/build.yml`).
 
