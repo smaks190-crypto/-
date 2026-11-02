@@ -463,7 +463,7 @@ class DavidLiveUnitTest {
 
         // Гарантия режима только для чтения
         assertFalse("David Live must never mutate financial records without confirmation", provider.canMutateRecords)
-        assertEquals(7, provider.buildFunctionDeclarationsJson().length())
+        assertEquals(8, provider.buildFunctionDeclarationsJson().length())
 
         // 1. Сводка бюджета
         val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
@@ -1661,7 +1661,10 @@ class DavidLiveUnitTest {
         assertEquals(30_000L, overview.getLong("availableBalanceRub"))
         assertEquals(0L, overview.getLong("earnedIncome30dRub"))
 
-        val schedule = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, null)
+        val schedule = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE,
+            JSONObject().put("horizonDays", 30)
+        )
         assertEquals(0.0, schedule.getDouble("totalGuaranteedFutureIncomeHorizonRub"), 0.01)
         assertEquals(60_000.0, schedule.getDouble("totalExpectedFutureIncomeHorizonRub"), 0.01)
         assertEquals(40_000.0, schedule.getDouble("totalHypotheticalFutureIncomeHorizonRub"), 0.01)
