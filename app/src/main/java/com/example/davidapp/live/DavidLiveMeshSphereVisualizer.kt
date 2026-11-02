@@ -1,5 +1,19 @@
 package com.example.davidapp.live
 
+import android.provider.Settings
+import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.isActive
+import kotlin.math.sqrt
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -13,7 +27,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,9 +63,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -100,6 +110,9 @@ private val VioletLight = Color(0xFFC084FC)
 // Зелёная гамма (Готово / Успех)
 private val SuccessGreen = Color(0xFF10B981)
 private val SuccessMint = Color(0xFF00F0A0)
+private val MutedSlatePrimary = Color(0xFF94A3B8)
+private val MutedSlateSecondary = Color(0xFFCBD5E1)
+private val MutedSlateGlow = Color(0xFF475569)
 
 /**
  * Палитра визуального состояния 3D mesh-сферы.
@@ -112,7 +125,67 @@ private data class SpherePalette(
     val waveAccent: Color
 )
 
-private fun resolveSpherePalette(state: DavidLiveVisualState): SpherePalette {
+internal fun shouldApplyMutedVisualPalette(
+    state: DavidLiveVisualState,
+    isMicMuted: Boolean
+): Boolean {
+    if (!isMicMuted) return false
+    return when (state) {
+        DavidLiveVisualState.OFFLINE,
+        DavidLiveVisualState.API_MISSING,
+        DavidLiveVisualState.ERROR,
+        DavidLiveVisualState.CONNECTING,
+        DavidLiveVisualState.RECONNECTING,
+        DavidLiveVisualState.SUCCESS,
+        DavidLiveVisualState.DAVID_SPEAKING -> false
+
+        DavidLiveVisualState.IDLE_LISTENING,
+        DavidLiveVisualState.USER_SPEAKING,
+        DavidLiveVisualState.THINKING,
+        DavidLiveVisualState.FINANCE_LOOKUP,
+        DavidLiveVisualState.ANALYZING,
+        DavidLiveVisualState.PREPARING_RESPONSE -> true
+    }
+}
+
+/** Target angular velocity in degrees per second; it changes independently from phase. */
+internal fun resolveSphereAngularSpeed(
+    state: DavidLiveVisualState,
+    isMicMuted: Boolean,
+    audioEnergy: Float
+): Float {
+    if (shouldApplyMutedVisualPalette(state, isMicMuted)) return 8f
+    val energy = audioEnergy.coerceIn(0f, 1f)
+    return when (state) {
+        DavidLiveVisualState.IDLE_LISTENING -> 10f
+        DavidLiveVisualState.USER_SPEAKING -> 18f + energy * 14f
+        DavidLiveVisualState.THINKING -> 14f
+        DavidLiveVisualState.FINANCE_LOOKUP -> 20f
+        DavidLiveVisualState.ANALYZING -> 16f
+        DavidLiveVisualState.PREPARING_RESPONSE -> 18f
+        DavidLiveVisualState.DAVID_SPEAKING -> 24f + energy * 16f
+        DavidLiveVisualState.CONNECTING -> 12f
+        DavidLiveVisualState.RECONNECTING -> 15f
+        DavidLiveVisualState.OFFLINE,
+        DavidLiveVisualState.API_MISSING,
+        DavidLiveVisualState.ERROR -> 0f
+        DavidLiveVisualState.SUCCESS -> 22f
+    }
+}
+
+internal fun resolveSpherePalette(
+    state: DavidLiveVisualState,
+    isMicMuted: Boolean = false
+): SpherePalette {
+    if (shouldApplyMutedVisualPalette(state, isMicMuted)) {
+        return SpherePalette(
+            primary = MutedSlatePrimary,
+            secondary = MutedSlateSecondary,
+            haloGlow = MutedSlateGlow.copy(alpha = 0.30f),
+            coreGlow = MutedSlatePrimary.copy(alpha = 0.14f),
+            waveAccent = MutedSlateSecondary
+        )
+    }
     return when (state) {
         DavidLiveVisualState.IDLE_LISTENING -> SpherePalette(
             primary = EmeraldPrimary,
@@ -242,7 +315,63 @@ fun DavidLiveMeshSphereVisualizer(
     visualizerSize: Dp = 276.dp,
     activeToolName: String? = null
 ) {
-    val targetPalette = resolveSpherePalette(visualState)
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val reduceMotion = remember(context) {
+        try {
+            Settings.Global.getFloat(
+                context.contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f
+            ) <= 0.05f
+        } catch (_: Exception) {
+            false
+        }
+    }
+    var lifecycleActive by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            lifecycleActive = when (event) {
+                Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> true
+                Lifecycle.Event.ON_STOP, Lifecycle.Event.ON_PAUSE -> false
+                else -> lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val ambientMotionEnabled = lifecycleActive && !reduceMotion &&
+        visualState != DavidLiveVisualState.OFFLINE &&
+        visualState != DavidLiveVisualState.API_MISSING &&
+        visualState != DavidLiveVisualState.ERROR
+
+    val targetAngularSpeed = resolveSphereAngularSpeed(visualState, isMicMuted, overallEnergy)
+    val animatedAngularSpeed by animateFloatAsState(
+        targetValue = targetAngularSpeed,
+        animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+        label = "sphere_angular_speed"
+    )
+    val currentAngularSpeed by rememberUpdatedState(animatedAngularSpeed)
+    var rotationYawDegrees by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(lifecycleActive, reduceMotion) {
+        if (!lifecycleActive || reduceMotion) return@LaunchedEffect
+        var previousFrameMillis = 0L
+        while (isActive) {
+            withInfiniteAnimationFrameMillis { frameMillis ->
+                if (previousFrameMillis != 0L) {
+                    val deltaMillis = (frameMillis - previousFrameMillis).coerceIn(0L, 32L)
+                    rotationYawDegrees = (rotationYawDegrees +
+                        deltaMillis * currentAngularSpeed / 1000f) % 360f
+                }
+                previousFrameMillis = frameMillis
+            }
+        }
+    }
+
+    val targetPalette = resolveSpherePalette(visualState, isMicMuted)
 
     // Плавная интерполяция цветов при переходе между состояниями (400 мс)
     val animatedPrimaryColor by animateColorAsState(
@@ -267,8 +396,9 @@ fun DavidLiveMeshSphereVisualizer(
     )
 
     // Плавное затухание амплитуды волн (380 мс) — предотвращает резкий обрыв анимации речи
-    val isSpeechActive = (visualState == DavidLiveVisualState.USER_SPEAKING ||
-        visualState == DavidLiveVisualState.DAVID_SPEAKING) && !isMicMuted
+    val isSpeechActive =
+        (visualState == DavidLiveVisualState.USER_SPEAKING && !isMicMuted) ||
+            visualState == DavidLiveVisualState.DAVID_SPEAKING
     val targetAudioEnergy = if (isSpeechActive) overallEnergy.coerceIn(0.08f, 1f) else 0.04f
 
     val smoothedEnergy by animateFloatAsState(
@@ -279,14 +409,22 @@ fun DavidLiveMeshSphereVisualizer(
         ),
         label = "mesh_energy_smoothing"
     )
+    val smoothedRayMagnitudes = rayMagnitudes.mapIndexed { index, magnitude ->
+        val smoothed by animateFloatAsState(
+            targetValue = magnitude.coerceIn(0f, 1f),
+            animationSpec = tween(durationMillis = 170, easing = FastOutSlowInEasing),
+            label = "mesh_ray_smoothing_$index"
+        )
+        smoothed
+    }
 
     // Непрерывные циклические анимации для естественного дыхания и вращения 3D-сетки
     val infiniteTransition = rememberInfiniteTransition(label = "david_live_mesh_motion")
 
-    // Спокойное дыхание сферы (период 3200 мс)
+    // Спокойное дыхание сферы. Фаза не анимируется в фоне, при reduce motion и системных ошибках.
     val breathProgress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
+        initialValue = if (ambientMotionEnabled) 0f else 0.5f,
+        targetValue = if (ambientMotionEnabled) 1f else 0.5f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 3200, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
@@ -319,7 +457,7 @@ fun DavidLiveMeshSphereVisualizer(
     // Импульс сканирования / движения орбит
     val orbitProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
-        targetValue = 1f,
+        targetValue = if (ambientMotionEnabled) 1f else 0f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 2400, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
@@ -327,24 +465,39 @@ fun DavidLiveMeshSphereVisualizer(
         label = "sphere_orbit_scan"
     )
 
-    val interactionSource = remember { MutableInteractionSource() }
+    var touchPosition by remember { mutableStateOf(Offset(0.5f, 0.5f)) }
+    var isTouchActive by remember { mutableStateOf(false) }
+    val touchStrength by animateFloatAsState(
+        targetValue = if (isTouchActive) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (isTouchActive) 150 else 520,
+            easing = FastOutSlowInEasing
+        ),
+        label = "sphere_touch_strength"
+    )
+    LaunchedEffect(lifecycleActive) {
+        if (!lifecycleActive) isTouchActive = false
+    }
+    val sphereActionDescription = when (visualState) {
+        DavidLiveVisualState.OFFLINE -> "Связь потеряна. Нажмите на сферу для повторного подключения."
+        DavidLiveVisualState.API_MISSING -> "Требуется API-ключ Gemini. Нажмите для настройки."
+        DavidLiveVisualState.ERROR -> "Ошибка связи. Нажмите для повтора."
+        else -> if (isMicMuted) "Микрофон выключен. Нажмите, чтобы включить." else "Голосовой помощник David Live"
+    }
 
     Box(
         modifier = modifier
             .size(visualizerSize)
-            .semantics {
-                contentDescription = when (visualState) {
-                    DavidLiveVisualState.OFFLINE -> "Связь потеряна. Нажмите на сферу для повторного подключения."
-                    DavidLiveVisualState.API_MISSING -> "Требуется API-ключ Gemini. Нажмите для настройки."
-                    DavidLiveVisualState.ERROR -> "Ошибка связи. Нажмите для повтора."
-                    else -> if (isMicMuted) "Микрофон выключен. Нажмите, чтобы включить." else "Голосовой помощник David Live"
-                }
-            }
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                role = Role.Button,
-                onClick = onSphereClick
+            .davidLiveSphereGesture(
+                actionDescription = sphereActionDescription,
+                onTap = onSphereClick,
+                onLongPressStart = { point ->
+                    touchPosition = point
+                    isTouchActive = true
+                },
+                onLongPressMove = { point -> touchPosition = point },
+                onLongPressEnd = { isTouchActive = false },
+                onLongPressCancel = { isTouchActive = false }
             )
             .testTag("david_live_circular_visualizer")
             .testTag("david_live_mic_button"),
@@ -383,6 +536,17 @@ fun DavidLiveMeshSphereVisualizer(
                 ),
                 radius = baseRadius,
                 center = center
+            )
+
+            // 2.5. Живые внутренние энергетические слои: объёмная динамика самого ядра.
+            drawLivingCore(
+                center = center,
+                radius = baseRadius,
+                phaseDegrees = rotationYawDegrees,
+                breathProgress = breathProgress,
+                energy = smoothedEnergy,
+                primaryColor = animatedPrimaryColor,
+                secondaryColor = animatedSecondaryColor
             )
 
             // 3. Отрисовка 3D Mesh-сферы (параллели, меридианы, узлы)
@@ -454,13 +618,25 @@ fun DavidLiveMeshSphereVisualizer(
                 }
             }
 
+            // 4.5. Локальная магнитная концентрация света под удерживаемым пальцем.
+            if (touchStrength > 0.002f) {
+                drawTouchConcentration(
+                    center = center,
+                    radius = baseRadius,
+                    normalizedTouch = touchPosition,
+                    strength = touchStrength,
+                    phaseProgress = orbitProgress,
+                    color = animatedSecondaryColor
+                )
+            }
+
             // 5. Нижний эквалайзер речи (для USER_SPEAKING и DAVID_SPEAKING)
             if (isSpeechActive) {
                 drawSpeechEqualizerBars(
                     center = center,
                     sphereRadius = baseRadius,
                     energy = smoothedEnergy,
-                    rayMagnitudes = rayMagnitudes,
+                    rayMagnitudes = smoothedRayMagnitudes,
                     color = animatedPrimaryColor
                 )
             }
@@ -505,9 +681,140 @@ fun DavidLiveMeshSphereVisualizer(
             }
 
             else -> {
-                // В обычных голосовых режимах сердцевина прозрачна и демонстрирует глубину 3D-сетки
+                if (shouldApplyMutedVisualPalette(visualState, isMicMuted)) {
+                    CentralStatusBadge(
+                        badgeColor = MutedSlatePrimary,
+                        glowColor = MutedSlateGlow,
+                        icon = Icons.Default.MicOff,
+                        contentDescription = "Микрофон выключен"
+                    )
+                }
             }
         }
+    }
+}
+
+/**
+ * Несколько смещённых световых полей и внутренних частиц создают движение самого ядра,
+ * а не только вращение внешней сетки. Все вычисления ограничены локальным кругом сферы.
+ */
+private fun DrawScope.drawLivingCore(
+    center: Offset,
+    radius: Float,
+    phaseDegrees: Float,
+    breathProgress: Float,
+    energy: Float,
+    primaryColor: Color,
+    secondaryColor: Color
+) {
+    val phase = phaseDegrees * (PI / 180.0)
+    val driftA = Offset(
+        x = (cos(phase) * radius * 0.18f).toFloat(),
+        y = (sin(phase * 0.73) * radius * 0.12f).toFloat()
+    )
+    val driftB = Offset(
+        x = (sin(phase * 0.61) * radius * 0.22f).toFloat(),
+        y = (cos(phase * 0.89) * radius * 0.18f).toFloat()
+    )
+    val fieldRadius = radius * (0.58f + 0.025f * breathProgress)
+    val fieldAlpha = (0.10f + 0.10f * energy).coerceIn(0.08f, 0.22f)
+
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                primaryColor.copy(alpha = fieldAlpha),
+                primaryColor.copy(alpha = fieldAlpha * 0.28f),
+                Color.Transparent
+            ),
+            center = center + driftA,
+            radius = fieldRadius
+        ),
+        radius = fieldRadius,
+        center = center + driftA
+    )
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                secondaryColor.copy(alpha = fieldAlpha * 0.72f),
+                secondaryColor.copy(alpha = fieldAlpha * 0.18f),
+                Color.Transparent
+            ),
+            center = center + driftB,
+            radius = fieldRadius * 0.78f
+        ),
+        radius = fieldRadius * 0.78f,
+        center = center + driftB
+    )
+
+    for (index in 0 until 16) {
+        val t = phase + index * (2.0 * PI / 16.0)
+        val orbitRadius = radius * (0.22f + 0.11f * sin(t * 1.7).toFloat())
+        val x = (cos(t) * orbitRadius).toFloat()
+        val y = (sin(t * 1.23) * orbitRadius * 0.72f).toFloat()
+        val inside = (x * x + y * y) / (radius * radius)
+        if (inside < 0.46f) {
+            val depth = ((sin(t * 0.83) + 1.0) * 0.5).toFloat()
+            val color = if (index % 2 == 0) primaryColor else secondaryColor
+            drawCircle(
+                color = color.copy(alpha = (0.18f + depth * 0.30f) * (0.7f + energy * 0.3f)),
+                radius = 1.2.dp.toPx() + depth * 1.2.dp.toPx(),
+                center = center + Offset(x, y)
+            )
+        }
+    }
+}
+
+/**
+ * Проецирует удерживаемое касание на переднюю полусферу. Глубина точки определяет
+ * масштаб и яркость частиц, поэтому притяжение ощущается как взаимодействие с объёмом.
+ */
+private fun DrawScope.drawTouchConcentration(
+    center: Offset,
+    radius: Float,
+    normalizedTouch: Offset,
+    strength: Float,
+    phaseProgress: Float,
+    color: Color
+) {
+    var nx = normalizedTouch.x * 2f - 1f
+    var ny = normalizedTouch.y * 2f - 1f
+    val distanceSquared = nx * nx + ny * ny
+    if (distanceSquared > 0.82f) {
+        val scale = sqrt(0.82f / distanceSquared)
+        nx *= scale
+        ny *= scale
+    }
+    val projectedRadiusSquared = (nx * nx + ny * ny).coerceIn(0f, 0.99f)
+    val depth = sqrt(1f - projectedRadiusSquared)
+    val touchCenter = center + Offset(nx * radius * 0.78f, ny * radius * 0.78f)
+    val depthScale = 0.76f + depth * 0.32f
+    val haloRadius = radius * (0.15f + depth * 0.06f) * depthScale
+
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(
+                color.copy(alpha = 0.36f * strength),
+                color.copy(alpha = 0.13f * strength),
+                Color.Transparent
+            ),
+            center = touchCenter,
+            radius = haloRadius
+        ),
+        radius = haloRadius,
+        center = touchCenter
+    )
+
+    repeat(11) { index ->
+        val angle = phaseProgress * (2.0 * PI) + index * (2.0 * PI / 11.0)
+        val orbitRadius = radius * (0.045f + 0.095f * (1f - strength))
+        val x = touchCenter.x + cos(angle).toFloat() * orbitRadius * depthScale
+        val y = touchCenter.y + sin(angle * 1.13).toFloat() * orbitRadius * depthScale * 0.72f
+        val frontWeight = ((sin(angle + depth) + 1.0) * 0.5).toFloat()
+        drawCircle(
+            color = color.copy(alpha = strength * (0.30f + frontWeight * 0.55f)),
+            radius = (1.3f + frontWeight * 1.7f) * depthScale,
+            center = Offset(x, y)
+        )
     }
 }
 
