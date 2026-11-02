@@ -1,7 +1,7 @@
 package com.example.davidapp.live
 
 import android.provider.Settings
-import androidx.compose.animation.core.withInfiniteAnimationFrameMillis
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
@@ -16,12 +16,7 @@ import kotlin.math.sqrt
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -356,16 +351,25 @@ fun DavidLiveMeshSphereVisualizer(
     )
     val currentAngularSpeed by rememberUpdatedState(animatedAngularSpeed)
     var rotationYawDegrees by remember { mutableFloatStateOf(0f) }
+    var breathProgress by remember { mutableFloatStateOf(0.5f) }
+    var orbitProgress by remember { mutableFloatStateOf(0f) }
 
+    // One frame loop drives the whole sphere. It pauses entirely when hidden, offline,
+    // reduced-motion is enabled, or the lifecycle owner leaves the foreground.
     LaunchedEffect(ambientMotionEnabled) {
         if (!ambientMotionEnabled) return@LaunchedEffect
         var previousFrameMillis = 0L
+        var elapsedMotionMillis = 0f
         while (isActive) {
-            withInfiniteAnimationFrameMillis { frameMillis ->
+            withFrameMillis { frameMillis ->
                 if (previousFrameMillis != 0L) {
                     val deltaMillis = (frameMillis - previousFrameMillis).coerceIn(0L, 32L)
+                    elapsedMotionMillis += deltaMillis
                     rotationYawDegrees = (rotationYawDegrees +
                         deltaMillis * currentAngularSpeed / 1000f) % 360f
+                    orbitProgress = (orbitProgress + deltaMillis / 2400f) % 1f
+                    val breathPhase = elapsedMotionMillis / 3200f * PI.toFloat()
+                    breathProgress = 0.5f + 0.5f * sin(breathPhase)
                 }
                 previousFrameMillis = frameMillis
             }
