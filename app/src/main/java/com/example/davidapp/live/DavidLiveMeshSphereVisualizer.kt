@@ -520,61 +520,7 @@ fun DavidLiveMeshSphereVisualizer(
                 visualState = visualState
             )
 
-            // 4. Отрисовка специфических состояний (орбиты, кольца, волны)
-            when (visualState) {
-                DavidLiveVisualState.FINANCE_LOOKUP -> {
-                    drawPlanetaryFinanceRing(
-                        center = center,
-                        radius = baseRadius,
-                        orbitProgress = orbitProgress,
-                        accentColor = animatedPrimaryColor,
-                        goldColor = GoldApiGlow
-                    )
-                }
-
-                DavidLiveVisualState.ANALYZING -> {
-                    drawAnalyzingDualOrbits(
-                        center = center,
-                        radius = baseRadius,
-                        orbitProgress = orbitProgress,
-                        cyanColor = animatedPrimaryColor,
-                        emeraldColor = animatedSecondaryColor
-                    )
-                }
-
-                DavidLiveVisualState.DAVID_SPEAKING -> {
-                    drawAcousticSoundwaveArcs(
-                        center = center,
-                        radius = baseRadius,
-                        energy = smoothedEnergy,
-                        breathProgress = breathProgress,
-                        color = animatedPrimaryColor
-                    )
-                }
-
-                DavidLiveVisualState.CONNECTING,
-                DavidLiveVisualState.RECONNECTING -> {
-                    drawConnectingHandshakeArcs(
-                        center = center,
-                        radius = baseRadius,
-                        orbitProgress = orbitProgress,
-                        color = animatedPrimaryColor
-                    )
-                }
-
-                DavidLiveVisualState.SUCCESS -> {
-                    drawSuccessExpansionRing(
-                        center = center,
-                        radius = baseRadius,
-                        orbitProgress = orbitProgress,
-                        color = animatedPrimaryColor
-                    )
-                }
-
-                else -> {
-                    // IDLE, USER_SPEAKING, THINKING, OFFLINE, API_MISSING, ERROR
-                }
-            }
+            // Внешние орбиты, кольца и дуги отключены: оставляем чистый силуэт сферы.
 
             // 4.5. Локальная магнитная концентрация света под удерживаемым пальцем.
             if (touchStrength > 0.002f) {
