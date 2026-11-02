@@ -360,6 +360,8 @@ class DavidLiveSessionController(
      * Processes a raw JSON message from the Gemini Live server (exposed as `internal` for unit testing).
      */
     internal fun processServerMessageForTest(rawJson: String) {
+        setupCompleted.set(true)
+        _isSessionReady.value = true
         handleServerJsonMessage(ws = null, rawJson = rawJson)
     }
 

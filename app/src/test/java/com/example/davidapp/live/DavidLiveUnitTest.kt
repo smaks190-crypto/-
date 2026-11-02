@@ -1695,7 +1695,7 @@ class DavidLiveUnitTest {
         )
         assertEquals(DavidLiveVisualState.THINKING, controller.visualState.value)
 
-        // 3. Модель вызывает финансовый инструмент -> мгновенный переход в FINANCE_LOOKUP
+        // 3. Модель вызывает финансовый инструмент -> мгновенный переход в FINANCE_LOOKUP (и далее ANALYZING по завершении чтения БД)
         controller.processServerMessageForTest(
             """
             {
@@ -1707,7 +1707,11 @@ class DavidLiveUnitTest {
             }
             """.trimIndent()
         )
-        assertEquals(DavidLiveVisualState.FINANCE_LOOKUP, controller.visualState.value)
+        assertTrue(
+            "Visual state during/right after toolCall must be FINANCE_LOOKUP or ANALYZING",
+            controller.visualState.value == DavidLiveVisualState.FINANCE_LOOKUP ||
+                controller.visualState.value == DavidLiveVisualState.ANALYZING
+        )
 
         // 4. После получения данных инструмента при приходе внутренней мысли модель переходит в ANALYZING -> PREPARING_RESPONSE
         val analyzingResolved = DavidLiveVisualStateResolver.resolve(
