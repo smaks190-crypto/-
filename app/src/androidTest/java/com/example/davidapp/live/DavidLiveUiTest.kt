@@ -3,10 +3,10 @@ package com.example.davidapp.live
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -398,7 +398,7 @@ class DavidLiveUiTest {
 
         composeTestRule.setContent {
             DavidLiveSheet(
-                connectionState = DavidLiveConnectionState.SPEAKING,
+                connectionState = DavidLiveConnectionState.DAVID_SPEAKING,
                 liveSubtitle = liveSubtitle,
                 rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.45f },
                 overallEnergy = 0.42f,
@@ -415,7 +415,7 @@ class DavidLiveUiTest {
 
         // 1. Аватар Давида в шапке чистый, без декоративной монетки "₽"
         composeTestRule.onNodeWithTag("david_live_header_avatar").assertIsDisplayed()
-        composeTestRule.onNodeWithText("₽").assertDoesNotExist()
+        assertTrue(composeTestRule.onAllNodesWithText("₽").fetchSemanticsNodes().isEmpty())
 
         // 2. В облачке речи отображается только актуальная произносимая фраза, без накопления предыдущих предложений
         composeTestRule.onNodeWithTag("david_live_subtitle_bubble").assertIsDisplayed()

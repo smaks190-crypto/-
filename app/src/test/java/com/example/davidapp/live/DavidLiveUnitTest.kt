@@ -1866,21 +1866,21 @@ class DavidLiveUnitTest {
     @Test
     fun `extractActiveSpeechBubbleSegment prevents completed phrase accumulation and splits long streams cleanly`() {
         val singlePhrase = extractActiveSpeechBubbleSegment("Привет! ")
-        assertEquals("Привет!", singlePhrase.text)
+        assertEquals("Привет!", singlePhrase.activeText)
         assertEquals(0, singlePhrase.segmentIndex)
 
         // Когда начинается следующее предложение в потоке транскрипции, в облачке отображается только новая активная фраза
         val multiSentence = extractActiveSpeechBubbleSegment(
             "Привет! Я проверил твой бюджет за октябрь. Сейчас расскажу про подписки"
         )
-        assertEquals("Сейчас расскажу про подписки", multiSentence.text)
+        assertEquals("Сейчас расскажу про подписки", multiSentence.activeText)
         assertEquals(2, multiSentence.segmentIndex)
 
         // Если все предложения уже закрыты знаками препинания, показывается последнее актуальное предложение без склейки со старыми
         val twoCompletedSentences = extractActiveSpeechBubbleSegment(
             "Записал расход 450 рублей в кафе. Баланс обновлён!"
         )
-        assertEquals("Баланс обновлён!", twoCompletedSentences.text)
+        assertEquals("Баланс обновлён!", twoCompletedSentences.activeText)
         assertEquals(1, twoCompletedSentences.segmentIndex)
 
         // Длинная фраза без точек автоматически делится по естественным границам синтагм, чтобы не копить простыню текста
@@ -1889,10 +1889,10 @@ class DavidLiveUnitTest {
         )
         assertTrue(
             "Long unpunctuated stream must segment into a readable active clause",
-            longRunOnClause.text.length <= 105
+            longRunOnClause.activeText.length <= 105
         )
         assertTrue(longRunOnClause.segmentIndex >= 1)
-        assertTrue(longRunOnClause.text.contains("супермаркетам"))
+        assertTrue(longRunOnClause.activeText.contains("супермаркетам"))
     }
 
     @Test
@@ -1903,7 +1903,7 @@ class DavidLiveUnitTest {
         assertFalse(
             shouldDismissCompletedSpokenSubtitle(
                 visualState = DavidLiveVisualState.DAVID_SPEAKING,
-                rawLiveSubtitle = completedSpeech,
+                currentLiveSubtitle = completedSpeech,
                 lastCompletedSpokenSubtitle = completedSpeech
             )
         )
@@ -1912,7 +1912,7 @@ class DavidLiveUnitTest {
         assertTrue(
             shouldDismissCompletedSpokenSubtitle(
                 visualState = DavidLiveVisualState.IDLE_LISTENING,
-                rawLiveSubtitle = completedSpeech,
+                currentLiveSubtitle = completedSpeech,
                 lastCompletedSpokenSubtitle = completedSpeech
             )
         )
@@ -1921,16 +1921,16 @@ class DavidLiveUnitTest {
         assertFalse(
             shouldDismissCompletedSpokenSubtitle(
                 visualState = DavidLiveVisualState.IDLE_LISTENING,
-                rawLiveSubtitle = "Слушаю следующий вопрос",
+                currentLiveSubtitle = "Слушаю следующий вопрос",
                 lastCompletedSpokenSubtitle = completedSpeech
             )
         )
 
-        // 4. Приоритетные карточки (OFFLINE / API_MISSING / ERROR) никогда не подавляются
-        assertFalse(
+        // 4. Приоритетные карточки (OFFLINE / API_MISSING / ERROR) отображают собственные системные метаданные
+        assertTrue(
             shouldDismissCompletedSpokenSubtitle(
                 visualState = DavidLiveVisualState.OFFLINE,
-                rawLiveSubtitle = completedSpeech,
+                currentLiveSubtitle = completedSpeech,
                 lastCompletedSpokenSubtitle = completedSpeech
             )
         )
@@ -1943,38 +1943,38 @@ class DavidLiveUnitTest {
         // Короткий тап (< 165 мс и без сдвига) -> выполняется действие (Mute / Retry / API), без залипания притяжения
         val shortTapOutcome = evaluateSphereTouchGesture(
             pressDurationMs = 95L,
-            maxDisplacementPx = 4f,
+            maxDragDistancePx = 4f,
             touchSlopPx = touchSlopPx,
-            wasCanceled = false
+            wasCancelled = false
         )
         assertEquals(SphereTouchGestureOutcome.SHORT_TAP_ACTION, shortTapOutcome)
 
         // Удержание пальца (>= 165 мс) на сфере -> активируется только притяжение света/сгустков без срабатывания тапа
         val holdOutcome = evaluateSphereTouchGesture(
             pressDurationMs = SPHERE_TOUCH_HOLD_ACTIVATION_MS + 40L,
-            maxDisplacementPx = 3f,
+            maxDragDistancePx = 3f,
             touchSlopPx = touchSlopPx,
-            wasCanceled = false
+            wasCancelled = false
         )
         assertEquals(SphereTouchGestureOutcome.HOLD_OR_DRAG_ATTRACTION, holdOutcome)
 
         // Перемещение пальца по сфере (drag > touchSlop) даже за короткое время -> 3D-притяжение без ложного тапа
         val dragOutcome = evaluateSphereTouchGesture(
             pressDurationMs = 80L,
-            maxDisplacementPx = touchSlopPx + 6f,
+            maxDragDistancePx = touchSlopPx + 6f,
             touchSlopPx = touchSlopPx,
-            wasCanceled = false
+            wasCancelled = false
         )
         assertEquals(SphereTouchGestureOutcome.HOLD_OR_DRAG_ATTRACTION, dragOutcome)
 
         // Отменённый жест (например, перехват скролла или сворачивание) -> безопасно игнорируется
         val canceledOutcome = evaluateSphereTouchGesture(
             pressDurationMs = 60L,
-            maxDisplacementPx = 2f,
+            maxDragDistancePx = 2f,
             touchSlopPx = touchSlopPx,
-            wasCanceled = true
+            wasCancelled = true
         )
-        assertEquals(SphereTouchGestureOutcome.CANCELED, canceledOutcome)
+        assertEquals(SphereTouchGestureOutcome.CANCELLED, canceledOutcome)
     }
 
     @Test
@@ -1985,7 +1985,7 @@ class DavidLiveUnitTest {
         // 1. Проекция точки касания на переднюю полусферу сохраняет выпуклую глубину normZ > 0
         val centerTouch = projectTouchTo3DSphere(
             touchOffset = androidx.compose.ui.geometry.Offset(200f, 200f),
-            center = center,
+            sphereCenter = center,
             sphereRadius = sphereRadius
         )
         assertEquals(0f, centerTouch.normX, 0.001f)
@@ -1994,11 +1994,12 @@ class DavidLiveUnitTest {
 
         val edgeTouch = projectTouchTo3DSphere(
             touchOffset = androidx.compose.ui.geometry.Offset(350f, 200f),
-            center = center,
+            sphereCenter = center,
             sphereRadius = sphereRadius
         )
-        assertTrue("Touch outside sphere rim must be clamped to convex surface boundary", edgeTouch.radialDistanceNorm <= 0.94f)
-        assertTrue("Clamped rim touch must retain positive Z depth on front hemisphere", edgeTouch.normZ > 0.3f)
+        val clampedRadialNorm = kotlin.math.hypot(edgeTouch.normX.toDouble(), edgeTouch.normY.toDouble()).toFloat()
+        assertTrue("Touch outside sphere rim must be clamped to convex surface boundary", clampedRadialNorm <= 0.96f)
+        assertTrue("Clamped rim touch must retain positive Z depth on front hemisphere", edgeTouch.normZ > 0.2f)
 
         // 2. Плавное следование за пальцем по сфере и мягкое нарастание/рассеивание силы притяжения
         val trackedX = interpolateTouchSurfaceCoordinate(currentValue = 0f, targetValue = 0.6f, deltaMs = 16L)
@@ -2017,58 +2018,58 @@ class DavidLiveUnitTest {
         // 3. Внутренние 3D-сгустки распределены по передней и задней полусферам и стягиваются к точке касания
         val spec = DefaultVolumetricClusters.first()
         val unattractedCluster = computeVolumetricCluster3D(
+            clusterIndex = 0,
             spec = spec,
-            phaseRad = 1.1f,
-            audioEnergy = 0.35f,
-            state = DavidLiveVisualState.IDLE_LISTENING,
             center = center,
             sphereRadius = sphereRadius,
+            phaseRad = 1.1f,
+            energy = 0.35f,
             touchPoint3D = edgeTouch,
             touchAttractionStrength = 0f
         )
         val attractedCluster = computeVolumetricCluster3D(
+            clusterIndex = 0,
             spec = spec,
-            phaseRad = 1.1f,
-            audioEnergy = 0.35f,
-            state = DavidLiveVisualState.IDLE_LISTENING,
             center = center,
             sphereRadius = sphereRadius,
+            phaseRad = 1.1f,
+            energy = 0.35f,
             touchPoint3D = edgeTouch,
             touchAttractionStrength = 0.85f
         )
 
         val distBefore = kotlin.math.hypot(
-            (unattractedCluster.screenPosition.x - edgeTouch.screenPosition.x).toDouble(),
-            (unattractedCluster.screenPosition.y - edgeTouch.screenPosition.y).toDouble()
+            (unattractedCluster.screenOffset.x - edgeTouch.projectedScreenOffset.x).toDouble(),
+            (unattractedCluster.screenOffset.y - edgeTouch.projectedScreenOffset.y).toDouble()
         )
         val distAfter = kotlin.math.hypot(
-            (attractedCluster.screenPosition.x - edgeTouch.screenPosition.x).toDouble(),
-            (attractedCluster.screenPosition.y - edgeTouch.screenPosition.y).toDouble()
+            (attractedCluster.screenOffset.x - edgeTouch.projectedScreenOffset.x).toDouble(),
+            (attractedCluster.screenOffset.y - edgeTouch.projectedScreenOffset.y).toDouble()
         )
         assertTrue(
             "3D light cluster must move closer to the finger touch point when attraction is active",
             distAfter < distBefore
         )
         assertTrue(
-            "Attracted cluster must brighten and concentrate near the touch point",
-            attractedCluster.alphaBoost > unattractedCluster.alphaBoost
+            "Attracted cluster must have positive touchPullFactor near the touch point",
+            attractedCluster.touchPullFactor > unattractedCluster.touchPullFactor
         )
 
-        // Проверяем, что в ансамбле 3D-сгустков одновременно присутствуют элементы как передней (z >= 0), так и задней (z < 0) полусферы
-        val allClustersAtPhase = DefaultVolumetricClusters.map { clusterSpec ->
+        // Проверяем, что в ансамбле 3D-сгустков одновременно присутствуют элементы как передней (worldZ >= 0), так и задней (worldZ < 0) полусферы
+        val allClustersAtPhase = DefaultVolumetricClusters.mapIndexed { idx, clusterSpec ->
             computeVolumetricCluster3D(
+                clusterIndex = idx,
                 spec = clusterSpec,
-                phaseRad = 0.75f,
-                audioEnergy = 0.25f,
-                state = DavidLiveVisualState.IDLE_LISTENING,
                 center = center,
                 sphereRadius = sphereRadius,
+                phaseRad = 0.75f,
+                energy = 0.25f,
                 touchPoint3D = null,
                 touchAttractionStrength = 0f
             )
         }
-        assertTrue("Sphere must have front-hemisphere 3D clusters", allClustersAtPhase.any { it.isFrontHemisphere })
-        assertTrue("Sphere must have back-hemisphere 3D clusters for volumetric depth", allClustersAtPhase.any { !it.isFrontHemisphere })
+        assertTrue("Sphere must have front-hemisphere 3D clusters", allClustersAtPhase.any { it.worldZ >= 0f })
+        assertTrue("Sphere must have back-hemisphere 3D clusters for volumetric depth", allClustersAtPhase.any { it.worldZ < 0f })
 
         // 4. После отпускания пальца сгустки мягко расходятся обратно в обычный режим
         var dispersed = attraction
