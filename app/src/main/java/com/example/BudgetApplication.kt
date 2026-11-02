@@ -18,5 +18,6 @@ class BudgetApplication : Application() {
         }
 
         GlobalConsoleLogger.i("SYSTEM", "BudgetApplication initialized successfully.")
+        ciErrorReportControlledValidationProbe()
     }
 }
