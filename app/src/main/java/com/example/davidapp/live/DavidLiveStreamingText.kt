@@ -193,7 +193,7 @@ internal fun speechBubbleRevealStartIndex(
         commonPrefixLength
     } else {
         nextText.lastIndexOfAny(
-            charArrayOf(' ', '\\t', '\\n', '\\r'),
+            charArrayOf(' ', '\t', '\n', '\r'),
             startIndex = (commonPrefixLength - 1).coerceAtLeast(0)
         ).let { index -> if (index < 0) 0 else index + 1 }
     }
