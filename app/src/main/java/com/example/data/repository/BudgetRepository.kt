@@ -263,10 +263,31 @@ class BudgetRepository(
         allAccounts = allAccounts,
         createProfile = ::createProfile,
         clearAllData = ::clearAllData,
-        initializeDefaultCategories = ::initializeDefaultCategories
+        initializeDefaultCategories = ::initializeDefaultCategories,
+        recurringPaymentDao = recurringPaymentDao
     )
 
     suspend fun syncToFile() = backupManager.syncToFile()
+
+    suspend fun seedRealisticTestBudget2026(
+        budgetId: String = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID
+    ) = backupManager.seedRealisticTestBudget2026(budgetId)
+
+    suspend fun ensureRealisticTestProfileExists(): BudgetProfileEntity {
+        val testId = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID
+        val existingProfile = budgetProfileDao.getProfileById(testId)
+        val profile = existingProfile ?: BudgetProfileEntity(
+            id = testId,
+            name = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_PROFILE_NAME
+        ).also { budgetProfileDao.insertProfile(it) }
+
+        val testTxs = transactionDao.getTransactionsByBudgetId(testId).first()
+        val testRecs = recurringPaymentDao.getRecurringPaymentsByBudgetId(testId).first()
+        if (testTxs.isEmpty() || testRecs.isEmpty()) {
+            backupManager.seedRealisticTestBudget2026(testId)
+        }
+        return profile
+    }
 
     suspend fun createProfile(name: String): BudgetProfileEntity {
         val profile = BudgetProfileEntity(name = name)
@@ -307,11 +328,11 @@ class BudgetRepository(
     // budget_storage.json больше не поддерживается в актуальном состоянии на каждую запись и используется только для миграции легаси-данных
     suspend fun ensureDefaultProfileExists(): BudgetProfileEntity {
         val existing = allProfiles.first()
-        if (existing.isEmpty()) {
+        val primaryProfile = if (existing.isEmpty()) {
             val default = BudgetProfileEntity(id = "default", name = "Казума Сато")
             budgetProfileDao.insertProfile(default)
             loadDemoData("default")
-            return default
+            default
         } else {
             val firstProfile = existing.first()
             val currentTxs = allTransactions.first()
@@ -321,8 +342,10 @@ class BudgetRepository(
                 // Автоматическое обновление старого неполного демо-бюджета на полный сатирический год
                 loadDemoData(firstProfile.id)
             }
+            firstProfile
         }
-        return existing.first()
+        ensureRealisticTestProfileExists()
+        return primaryProfile
     }
 
 

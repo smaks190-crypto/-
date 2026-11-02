@@ -2074,4 +2074,421 @@ class DavidLiveUnitTest {
         assertEquals("INCOME_DELAY", whatIfSpec.args.getString("scenarioType"))
         assertEquals(5, whatIfSpec.args.getInt("delayDays"))
     }
+
+    @Test
+    fun `pr82 test 1 - today scheduled income is reported as due today with 0 days remaining and never shifted 30 days ahead`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 2).toEpochDay()
+        val nowMs = java.time.LocalDate.of(2026, 11, 2)
+            .atTime(12, 0)
+            .atZone(java.time.ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+
+        val accounts = listOf(
+            AccountEntity(id = "acc_card", budgetId = "b_today_income", name = "Основная карта", balance = 42_000.0, type = "bank")
+        )
+        val txs = listOf(
+            TransactionEntity(
+                id = "tx_coffee",
+                budgetId = "b_today_income",
+                type = "expense",
+                date = "2026-11-02",
+                category = "Кафе и Доставка",
+                subcategory = "Утренний кофе",
+                amount = 350.0,
+                accountId = "acc_card",
+                createdAt = nowMs - 3_600_000L
+            )
+        )
+        // Зарплата назначена на СЕГОДНЯ (2026-11-02, 2-е число месяца) и ещё НЕ получена (нет PAID лога)
+        val salaryRuleToday = com.example.data.db.RecurringPaymentEntity(
+            id = 501L,
+            budgetId = "b_today_income",
+            title = "Основная зарплата",
+            amount = 85_000.0,
+            isIncome = true,
+            incomeCertainty = "GUARANTEED",
+            categoryName = "Зарплата",
+            frequency = "MONTHLY",
+            intervalDays = 30,
+            nextDueDateEpochDay = d0,
+            priority = "MANDATORY",
+            status = "ACTIVE"
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b_today_income",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(accounts),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(listOf(salaryRuleToday), emptyList()),
+            userEssentialDailyNormProvider = { 1_000.0 },
+            todayEpochDayProvider = { d0 }
+        )
+
+        // 1. Проверяем get_recurring_schedule
+        val schedule = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, null)
+        assertEquals("ok", schedule.getString("status"))
+        assertEquals(1, schedule.getInt("upcomingIncomesCount"))
+        val incomeItem = schedule.getJSONArray("upcomingIncomes").getJSONObject(0)
+        assertEquals("Основная зарплата", incomeItem.getString("title"))
+        assertEquals("2026-11-02", incomeItem.getString("nextDueDateIso"))
+        assertEquals("2 ноября 2026 г.", incomeItem.getString("nextDueDateHumanRu"))
+        assertEquals("2 ноября 2026 года (второго ноября)", incomeItem.getString("nextDueDateSpokenRu"))
+        assertEquals(2, incomeItem.getInt("dayOfMonth"))
+        assertEquals("второго", incomeItem.getString("dayOrdinalGenitiveRu"))
+        assertEquals("второе", incomeItem.getString("dayOrdinalNominativeRu"))
+        assertEquals(0, incomeItem.getInt("daysUntilNextDue"))
+        assertTrue("Salary scheduled for today must have isDueToday=true", incomeItem.getBoolean("isDueToday"))
+        assertFalse("Salary not yet received must have executedToday=false", incomeItem.getBoolean("executedToday"))
+        assertEquals("сегодня, 2 ноября 2026 года (второго ноября)", incomeItem.getString("whenSpokenRu"))
+        assertEquals("2026-12-02", incomeItem.getString("followingCycleDueDateIso"))
+        assertTrue(schedule.getString("humanSummary").contains("сегодня, 2 ноября 2026 года (второго ноября)"))
+
+        // 2. Проверяем get_safe_to_spend_forecast
+        val forecast = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, null)
+        assertEquals("ok", forecast.getString("status"))
+        assertEquals("2026-11-02", forecast.getString("nextIncomeDateIso"))
+        assertEquals("2 ноября 2026 года (второго ноября)", forecast.getString("nextIncomeSpokenRu"))
+        assertEquals("сегодня, 2 ноября 2026 года (второго ноября)", forecast.getString("nextIncomeWhenSpokenRu"))
+        val forecastIncomes = forecast.getJSONArray("upcomingIncomes")
+        assertTrue(forecastIncomes.length() >= 1)
+        val firstForecastIncome = forecastIncomes.getJSONObject(0)
+        assertEquals("2026-11-02", firstForecastIncome.getString("dueDateIso"))
+        assertEquals(0, firstForecastIncome.getInt("daysUntilDue"))
+        assertTrue(firstForecastIncome.getBoolean("isDueToday"))
+
+        // 3. Проверяем get_financial_overview
+        val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        assertEquals("ok", overview.getString("status"))
+        assertEquals(1, overview.getInt("upcomingIncomesCount"))
+        assertEquals("2026-11-02", overview.getString("nextIncomeDueDateIso"))
+        assertEquals(0, overview.getInt("nextIncomeDaysUntilDue"))
+        assertTrue(overview.getBoolean("nextIncomeIsDueToday"))
+        assertEquals("сегодня, 2 ноября 2026 года (второго ноября)", overview.getString("nextIncomeWhenSpokenRu"))
+    }
+
+    @Test
+    fun `pr82 test 1 - RussianDateVerbalizer and DavidLiveSessionController prevent 2nd day from turning into 22nd in voice or transcript`() {
+        val nov2 = java.time.LocalDate.of(2026, 11, 2).toEpochDay()
+        val nov12 = java.time.LocalDate.of(2026, 11, 12).toEpochDay()
+        val nov22 = java.time.LocalDate.of(2026, 11, 22).toEpochDay()
+
+        assertEquals("второго", com.example.data.safetospend.RussianDateVerbalizer.dayOrdinalGenitiveRu(2))
+        assertEquals("двенадцатого", com.example.data.safetospend.RussianDateVerbalizer.dayOrdinalGenitiveRu(12))
+        assertEquals("двадцать второго", com.example.data.safetospend.RussianDateVerbalizer.dayOrdinalGenitiveRu(22))
+
+        assertEquals("2 ноября 2026 года (второго ноября)", com.example.data.safetospend.RussianDateVerbalizer.formatSpokenDateGenitiveRu(nov2))
+        assertEquals("12 ноября 2026 года (двенадцатого ноября)", com.example.data.safetospend.RussianDateVerbalizer.formatSpokenDateGenitiveRu(nov12))
+        assertEquals("22 ноября 2026 года (двадцать второго ноября)", com.example.data.safetospend.RussianDateVerbalizer.formatSpokenDateGenitiveRu(nov22))
+        assertEquals("сегодня, 2 ноября 2026 года (второго ноября)", com.example.data.safetospend.RussianDateVerbalizer.formatRelativeDueSpokenRu(nov2, nov2))
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        controller.processServerMessageForTest("""{"setupComplete": {}}""")
+
+        // Сценарий A: приходят потоковые чанки outputTranscription И одновременно дублирующий modelTurn.parts.text с числом "2"
+        // Контроллер НЕ должен склеивать оба потока и превращать "2" + "2" в "22"
+        controller.processServerMessageForTest(
+            """{"serverContent":{"outputTranscription":{"text":"Следующая зарплата придет 2"}}}"""
+        )
+        controller.processServerMessageForTest(
+            """{"serverContent":{"modelTurn":{"parts":[{"text":"2 ноября"}]}}}"""
+        )
+        controller.processServerMessageForTest(
+            """{"serverContent":{"outputTranscription":{"text":" ноября (второго ноября)."}}}"""
+        )
+        controller.processServerMessageForTest(
+            """{"serverContent":{"turnComplete":true}}"""
+        )
+
+        val davidTurns = controller.transcriptTurns.filter { it.speaker == DavidLiveSpeaker.DAVID }
+        assertEquals(1, davidTurns.size)
+        assertEquals("Следующая зарплата придет 2 ноября (второго ноября).", davidTurns.first().text)
+        assertFalse("Must never turn '2' into '22'", davidTurns.first().text.contains("22"))
+    }
+
+    @Test
+    fun `pr82 full verification - realistic budget 01_01_2026 to 02_11_2026 verifies all 8 tools WhatIf month boundaries and profile isolation`() = runBlocking {
+        val dataset = com.example.data.safetospend.RealisticTestBudget2026Seeder.buildDataset(
+            budgetId = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID
+        )
+        val d0 = dataset.referenceTodayEpochDay // 2026-11-02 (epochDay = 20759)
+
+        // 0. Проверка границ диапазона дат 01.01.2026 – 02.11.2026 включительно и отсутствия будущих операций
+        val minDate = dataset.transactions.minOf { it.date }
+        val maxDate = dataset.transactions.maxOf { it.date }
+        assertEquals("2026-01-01", minDate)
+        assertEquals("2026-11-02", maxDate)
+        assertTrue(
+            "Zero transactions may have dates after 2026-11-02",
+            dataset.transactions.none { it.date > "2026-11-02" }
+        )
+        // Проверяем, что представлены все 11 месяцев с января по ноябрь 2026
+        val monthsPresent = dataset.transactions.map { it.date.substring(0, 7) }.toSet()
+        assertEquals(
+            setOf(
+                "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
+                "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"
+            ),
+            monthsPresent
+        )
+
+        // Проверка переходов границ месяцев (31 января -> 28 февраля -> 31 марта)
+        val jan31 = java.time.LocalDate.of(2026, 1, 31).toEpochDay()
+        val feb28 = com.example.data.safetospend.SafeToSpendCalculator.advanceEpochDay(
+            currentEpochDay = jan31,
+            frequency = com.example.data.safetospend.RecurringFrequency.MONTHLY,
+            intervalDays = 30,
+            anchorDayOfMonth = 31
+        )
+        assertEquals(java.time.LocalDate.of(2026, 2, 28).toEpochDay(), feb28)
+        val mar31 = com.example.data.safetospend.SafeToSpendCalculator.advanceEpochDay(
+            currentEpochDay = feb28,
+            frequency = com.example.data.safetospend.RecurringFrequency.MONTHLY,
+            intervalDays = 30,
+            anchorDayOfMonth = 31
+        )
+        assertEquals(java.time.LocalDate.of(2026, 3, 31).toEpochDay(), mar31)
+
+        // Добавим данные другого профиля ("personal_other") в общие списки DAO для проверки строгой изоляции по budgetId
+        val otherAccount = AccountEntity(
+            id = "acc_other",
+            budgetId = "personal_other",
+            name = "Чужой счёт",
+            balance = 999_999.0,
+            type = "bank"
+        )
+        val otherTx = TransactionEntity(
+            id = "tx_other",
+            budgetId = "personal_other",
+            type = "income",
+            date = "2026-11-01",
+            category = "Зарплата",
+            subcategory = "Чужая зарплата",
+            amount = 500_000.0,
+            accountId = "acc_other"
+        )
+        val otherRecurring = com.example.data.db.RecurringPaymentEntity(
+            id = 999L,
+            budgetId = "personal_other",
+            title = "Чужая ипотека",
+            amount = 120_000.0,
+            isIncome = false,
+            categoryName = "Ипотека",
+            frequency = "MONTHLY",
+            nextDueDateEpochDay = d0 + 3L,
+            priority = "MANDATORY",
+            status = "ACTIVE"
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID,
+            transactionDao = createReadOnlyTransactionDao(dataset.transactions + otherTx),
+            categoryDao = createReadOnlyCategoryDao(dataset.categories),
+            goalDao = createReadOnlyGoalDao(dataset.goals),
+            accountDao = createReadOnlyAccountDao(dataset.accounts + otherAccount),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(
+                dataset.recurringPayments + otherRecurring,
+                dataset.executionLogs
+            ),
+            userSafetyFloorProvider = { dataset.mandatorySafetyFloorRub },
+            userEssentialDailyNormProvider = { dataset.essentialDailyNormRub },
+            todayEpochDayProvider = { d0 }
+        )
+
+        // 1. Инструмент 1: get_financial_overview
+        val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        assertEquals("ok", overview.getString("status"))
+        assertEquals(115_000L, overview.getLong("availableBalanceRub"))
+        assertEquals(144_500L, overview.getLong("earnedIncome30dRub"))
+        assertEquals(130_000L, overview.getLong("salaryIncome30dRub"))
+        assertEquals(14_500L, overview.getLong("otherEarnedIncome30dRub"))
+        assertEquals(5_000L, overview.getLong("debtReturned30dRub"))
+        assertEquals(97_828L, overview.getLong("regularExpense30dRub"))
+        assertEquals(18_500L, overview.getLong("debtRepayment30dRub"))
+        assertEquals(116_328L, overview.getLong("expense30dRub"))
+        assertEquals(28_172L, overview.getLong("netCashFlow30dRub"))
+        assertEquals(49_000L, overview.getLong("totalWeOweRub"))
+        assertEquals(20_000L, overview.getLong("totalOwesUsRub"))
+        assertEquals(237_000L, overview.getLong("lockedSavingsInGoalsRub"))
+
+        // 2. Инструмент 2: get_recurring_schedule
+        val schedule = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE,
+            JSONObject().put("horizonDays", 35)
+        )
+        assertEquals("ok", schedule.getString("status"))
+        assertEquals(8, schedule.getInt("activeRulesCount"))
+        assertEquals(1, schedule.getInt("pausedOrArchivedRulesCount"))
+        assertEquals(0, schedule.getInt("overdueExpensesCount"))
+        // Проверяем, что оплаченный сегодня (02.11.2026) интернет НЕ висит как неоплаченный на сегодня, а переведён на 02.12.2026 ("второго декабря")
+        val upcomingExpenses = schedule.getJSONArray("upcomingExpenses")
+        var foundRentNov5 = false
+        var foundDebtNov8 = false
+        var foundInternetDec2 = false
+        for (i in 0 until upcomingExpenses.length()) {
+            val item = upcomingExpenses.getJSONObject(i)
+            when (item.getString("title")) {
+                "Аренда квартиры" -> {
+                    assertEquals("2026-11-05", item.getString("nextDueDateIso"))
+                    assertEquals(3, item.getInt("daysUntilNextDue"))
+                    assertEquals(38_000.0, item.getDouble("amountRub"), 0.01)
+                    foundRentNov5 = true
+                }
+                "Долг: Долг брату Андрею" -> {
+                    assertEquals("2026-11-08", item.getString("nextDueDateIso"))
+                    assertEquals(6, item.getInt("daysUntilNextDue"))
+                    assertEquals(14_000.0, item.getDouble("amountRub"), 0.01)
+                    foundDebtNov8 = true
+                }
+                "Домашний интернет и мобильная связь" -> {
+                    assertEquals("2026-12-02", item.getString("nextDueDateIso"))
+                    assertEquals(30, item.getInt("daysUntilNextDue"))
+                    assertEquals("второго", item.getString("dayOrdinalGenitiveRu"))
+                    assertTrue(item.getString("nextDueDateSpokenRu").contains("второго декабря"))
+                    foundInternetDec2 = true
+                }
+            }
+        }
+        assertTrue(foundRentNov5)
+        assertTrue(foundDebtNov8)
+        assertTrue(foundInternetDec2)
+
+        // 3. Инструмент 3: get_safe_to_spend_forecast
+        val forecast = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, null)
+        assertEquals("ok", forecast.getString("status"))
+        assertEquals(115_000.0, forecast.getDouble("availableBalanceRub"), 0.01)
+        assertEquals(8, forecast.getInt("horizonDays"))
+        assertEquals("2026-11-10", forecast.getString("nextIncomeDateIso"))
+        // До зарплаты 10.11 резервируются Аренда (38 000 ₽ 05.11) + Долг брату Андрею (14 000 ₽ 08.11) = 52 000 ₽
+        assertEquals(0.0, forecast.getDouble("todayPendingObligationsRub"), 0.01)
+        assertEquals(52_000.0, forecast.getDouble("reservedFutureObligationsRub"), 0.01)
+        assertEquals(52_000.0, forecast.getDouble("obligationsReservedTotalRub"), 0.01)
+        assertEquals(63_000.0, forecast.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertEquals(15_000.0, forecast.getDouble("mandatorySafetyFloorRub"), 0.01)
+        assertEquals(237_000.0, forecast.getDouble("lockedSavingsExcludedRub"), 0.01)
+        val baseSafeToday = forecast.getDouble("safeToSpendTodayRub")
+        assertTrue("Safe-to-spend today must be positive", baseSafeToday > 0.0)
+
+        // 4. Инструмент 4: simulate_what_if (3 сценария: разовая покупка 5 000 ₽, задержка зарплаты на 5 дн., рост аренды на +4 000 ₽)
+        // 4a. Разовая трата 5 000 ₽
+        val whatIfSpend5k = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF,
+            JSONObject()
+                .put("scenarioType", "ONE_TIME_EXPENSE")
+                .put("amountRub", 5_000.0)
+                .put("title", "Покупка наушников")
+        )
+        assertEquals("ok", whatIfSpend5k.getString("status"))
+        assertFalse(whatIfSpend5k.getBoolean("dbMutated"))
+        assertEquals(63_000.0, whatIfSpend5k.getDouble("baseBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertEquals(58_000.0, whatIfSpend5k.getDouble("postBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertTrue(whatIfSpend5k.getDouble("simulatedSafeToSpendTodayRub") < baseSafeToday)
+
+        // 4b. Задержка зарплаты на 5 дней (с 10.11 на 15.11)
+        val whatIfSalaryDelay = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF,
+            JSONObject()
+                .put("scenarioType", "INCOME_DELAY")
+                .put("delayDays", 5)
+                .put("incomeTitle", "Основная зарплата")
+        )
+        assertEquals("ok", whatIfSalaryDelay.getString("status"))
+        assertFalse(whatIfSalaryDelay.getBoolean("dbMutated"))
+        assertEquals(8, whatIfSalaryDelay.getInt("baseHorizonDays"))
+        assertEquals(13, whatIfSalaryDelay.getInt("simulatedHorizonDays"))
+        assertTrue(whatIfSalaryDelay.getDouble("simulatedSafeToSpendTodayRub") < baseSafeToday)
+
+        // 4c. Увеличение обязательного платежа (Аренда квартиры +4 000 ₽ -> 42 000 ₽)
+        val whatIfMandatoryIncrease = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF,
+            JSONObject()
+                .put("scenarioType", "MANDATORY_PAYMENT_CHANGE")
+                .put("deltaAmountRub", 4_000.0)
+                .put("paymentTitle", "Аренда квартиры")
+        )
+        assertEquals("ok", whatIfMandatoryIncrease.getString("status"))
+        assertFalse(whatIfMandatoryIncrease.getBoolean("dbMutated"))
+        assertEquals(63_000.0, whatIfMandatoryIncrease.getDouble("baseBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertEquals(59_000.0, whatIfMandatoryIncrease.getDouble("postBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+
+        // 5. Инструмент 5: get_goals_and_debts
+        val goalsAndDebts = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_GOALS_AND_DEBTS, null)
+        assertEquals("ok", goalsAndDebts.getString("status"))
+        assertEquals(2, goalsAndDebts.getInt("goalsCount"))
+        assertEquals(4, goalsAndDebts.getInt("debtsCount"))
+        assertEquals(49_000L, goalsAndDebts.getLong("totalWeOweRub"))
+        assertEquals(20_000L, goalsAndDebts.getLong("totalOwesUsRub"))
+
+        // 6. Инструмент 6: get_category_spending
+        val categorySpending = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING, null)
+        assertEquals("ok", categorySpending.getString("status"))
+        assertEquals(97_828L, categorySpending.getLong("totalExpense30dRub"))
+        val catsArray = categorySpending.getJSONArray("categories")
+        val catMap = mutableMapOf<String, JSONObject>()
+        for (i in 0 until catsArray.length()) {
+            val obj = catsArray.getJSONObject(i)
+            catMap[obj.getString("category")] = obj
+        }
+        assertEquals(44_380L, catMap["ЖКХ и Аренда"]!!.getLong("spent30dRub"))
+        assertFalse(catMap["ЖКХ и Аренда"]!!.getBoolean("isLimitExceeded"))
+        assertEquals(19_840L, catMap["Продукты"]!!.getLong("spent30dRub"))
+        assertFalse(catMap["Продукты"]!!.getBoolean("isLimitExceeded"))
+        assertEquals(9_850L, catMap["Кафе и Доставка"]!!.getLong("spent30dRub"))
+        assertTrue(catMap["Кафе и Доставка"]!!.getBoolean("isLimitExceeded"))
+        assertEquals(8_400L, catMap["Развлечения"]!!.getLong("spent30dRub"))
+        assertTrue(catMap["Развлечения"]!!.getBoolean("isLimitExceeded"))
+
+        // 7. Инструмент 7: compare_spending_periods (7 дней и 30 дней)
+        val compare7d = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_COMPARE_PERIODS,
+            JSONObject().put("periodDays", 7)
+        )
+        assertEquals("ok", compare7d.getString("status"))
+        assertEquals(18_390L, compare7d.getLong("currentRegularExpenseRub"))
+        assertEquals(11_730L, compare7d.getLong("previousRegularExpenseRub"))
+        assertEquals(6_660L, compare7d.getLong("deltaRub"))
+        assertEquals(57, compare7d.getInt("deltaPercent"))
+
+        val compare30d = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_COMPARE_PERIODS,
+            JSONObject().put("periodDays", 30)
+        )
+        assertEquals("ok", compare30d.getString("status"))
+        assertEquals(97_828L, compare30d.getLong("currentRegularExpenseRub"))
+        assertEquals(83_328L, compare30d.getLong("previousRegularExpenseRub"))
+        assertEquals(14_500L, compare30d.getLong("deltaRub"))
+        assertEquals(17, compare30d.getInt("deltaPercent"))
+
+        // 8. Инструмент 8: get_recent_transactions
+        val recentTxs = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_RECENT_TRANSACTIONS,
+            JSONObject().put("limit", 5)
+        )
+        assertEquals("ok", recentTxs.getString("status"))
+        assertEquals(5, recentTxs.getInt("returnedCount"))
+        val txArray = recentTxs.getJSONArray("transactions")
+        assertEquals("2026-11-02", txArray.getJSONObject(0).getString("date"))
+        assertEquals("2026-11-02", txArray.getJSONObject(1).getString("date"))
+        assertEquals("2026-11-02", txArray.getJSONObject(2).getString("date"))
+        assertEquals("2026-11-01", txArray.getJSONObject(3).getString("date"))
+        assertEquals("2026-11-01", txArray.getJSONObject(4).getString("date"))
+
+        // 9. Проверка строгой изоляции профилей: переключение на "personal_other" не смешивает данные с "demo_2026_test"
+        provider.setBudgetId("personal_other")
+        val otherOverview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        assertEquals("personal_other", otherOverview.getString("budgetId"))
+        assertEquals(999_999L, otherOverview.getLong("availableBalanceRub"))
+        assertEquals(500_000L, otherOverview.getLong("earnedIncome30dRub"))
+        assertEquals(0L, otherOverview.getLong("regularExpense30dRub"))
+    }
 }

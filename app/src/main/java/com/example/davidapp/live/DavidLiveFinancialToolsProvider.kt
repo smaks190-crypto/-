@@ -14,6 +14,7 @@ import com.example.data.safetospend.ObligationPriority
 import com.example.data.safetospend.RecurringPaymentDomain
 import com.example.data.safetospend.RecurringScheduleCalculator
 import com.example.data.safetospend.RecurringStatus
+import com.example.data.safetospend.RussianDateVerbalizer
 import com.example.data.safetospend.SafeToSpendCalculator
 import com.example.data.safetospend.SafeToSpendInput
 import com.example.data.safetospend.SafeToSpendResult
@@ -188,7 +189,8 @@ class DavidLiveFinancialToolsProvider(
                         "Выполнить детерминированную What-If симуляцию без изменения БД: " +
                             "'Что будет, если я потрачу X рублей?' (HYPOTHETICAL_SPEND), " +
                             "'Хватит ли до зарплаты?' (RUNWAY_CHECK), " +
-                            "'Что изменится, если зарплата задержится на N дней?' (INCOME_DELAY)."
+                            "'Что изменится, если зарплата задержится на N дней?' (INCOME_DELAY), " +
+                            "'Что изменится, если обязательный платёж вырастет/изменится?' (MANDATORY_PAYMENT_CHANGE)."
                     )
                     put(
                         "parameters",
@@ -201,7 +203,7 @@ class DavidLiveFinancialToolsProvider(
                                         "scenarioType",
                                         JSONObject().apply {
                                             put("type", "STRING")
-                                            put("description", "Тип сценария: HYPOTHETICAL_SPEND, RUNWAY_CHECK или INCOME_DELAY")
+                                            put("description", "Тип сценария: HYPOTHETICAL_SPEND, RUNWAY_CHECK, INCOME_DELAY или MANDATORY_PAYMENT_CHANGE")
                                         }
                                     )
                                     put(
@@ -223,6 +225,27 @@ class DavidLiveFinancialToolsProvider(
                                         JSONObject().apply {
                                             put("type", "NUMBER")
                                             put("description", "Планируемые ежедневные необязательные траты в рублях (для RUNWAY_CHECK)")
+                                        }
+                                    )
+                                    put(
+                                        "deltaAmountRub",
+                                        JSONObject().apply {
+                                            put("type", "NUMBER")
+                                            put("description", "Изменение суммы обязательного платежа в рублях, например +5000 (для MANDATORY_PAYMENT_CHANGE)")
+                                        }
+                                    )
+                                    put(
+                                        "newAmountRub",
+                                        JSONObject().apply {
+                                            put("type", "NUMBER")
+                                            put("description", "Новая полная сумма обязательного платежа в рублях (для MANDATORY_PAYMENT_CHANGE)")
+                                        }
+                                    )
+                                    put(
+                                        "targetTitle",
+                                        JSONObject().apply {
+                                            put("type", "STRING")
+                                            put("description", "Название обязательного платежа для изменения, например 'Аренда' или 'ЖКХ'")
                                         }
                                     )
                                 }
@@ -501,6 +524,16 @@ class DavidLiveFinancialToolsProvider(
                     whatIfArgs.put("scenarioType", "HYPOTHETICAL_SPEND")
                     whatIfArgs.put("amountRub", whatIfRequest.amountRub)
                 }
+                is WhatIfScenarioRequest.MandatoryPaymentChange -> {
+                    whatIfArgs.put("scenarioType", "MANDATORY_PAYMENT_CHANGE")
+                    whatIfArgs.put("deltaAmountRub", whatIfRequest.deltaAmountRub)
+                    if (whatIfRequest.newAmountRub != null) {
+                        whatIfArgs.put("newAmountRub", whatIfRequest.newAmountRub)
+                    }
+                    if (!whatIfRequest.targetTitle.isNullOrBlank()) {
+                        whatIfArgs.put("targetTitle", whatIfRequest.targetTitle)
+                    }
+                }
                 null -> {
                     whatIfArgs.put("scenarioType", "RUNWAY_CHECK")
                 }
@@ -572,6 +605,21 @@ class DavidLiveFinancialToolsProvider(
         return parseIsoDateToMillis(tx.date)
     }
 
+    private fun referenceNowMillis(): Long {
+        val todayDay = todayEpochDayProvider()
+        val systemTodayDay = LocalDate.now().toEpochDay()
+        val endOfTodayMillis = LocalDate.ofEpochDay(todayDay)
+            .atTime(23, 59, 59)
+            .atZone(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        return if (todayDay == systemTodayDay) {
+            max(System.currentTimeMillis(), endOfTodayMillis)
+        } else {
+            endOfTodayMillis
+        }
+    }
+
     private fun isAllCoreDataSourcesUnavailable(): Boolean {
         return safeToSpendInputOverrideProvider?.invoke() == null &&
             transactionDao == null &&
@@ -616,14 +664,22 @@ class DavidLiveFinancialToolsProvider(
     private fun buildUpcomingObligationsJsonArray(sts: SafeToSpendResult, todayEpochDay: Long): JSONArray {
         return JSONArray().apply {
             sts.upcomingObligations.forEach { item ->
+                val dateObj = LocalDate.ofEpochDay(item.dueEpochDay)
+                val daysUntil = (item.dueEpochDay - todayEpochDay).toInt()
                 put(
                     JSONObject().apply {
                         put("sourceId", item.sourceId)
                         put("title", item.title)
                         put("amountRub", item.amountRub)
                         put("dueEpochDay", item.dueEpochDay)
-                        put("dueDateIso", LocalDate.ofEpochDay(item.dueEpochDay).toString())
-                        put("daysUntilDue", (item.dueEpochDay - todayEpochDay).toInt())
+                        put("dueDateIso", dateObj.toString())
+                        put("dueDateHumanRu", RussianDateVerbalizer.formatHumanDateRu(item.dueEpochDay))
+                        put("dueDateSpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(item.dueEpochDay))
+                        put("dayOfMonth", dateObj.dayOfMonth)
+                        put("dayOrdinalGenitiveRu", RussianDateVerbalizer.dayOrdinalGenitiveRu(dateObj.dayOfMonth))
+                        put("daysUntilDue", daysUntil)
+                        put("isDueToday", daysUntil == 0)
+                        put("whenSpokenRu", RussianDateVerbalizer.formatRelativeDueSpokenRu(item.dueEpochDay, todayEpochDay))
                         put("isOverdue", item.isOverdue)
                         put("isPriorityMandatory", item.isPriorityMandatory)
                         put("priority", if (item.isPriorityMandatory) "MANDATORY" else "DISCRETIONARY_SUBSCRIPTION")
@@ -637,6 +693,8 @@ class DavidLiveFinancialToolsProvider(
     private fun buildUpcomingIncomesJsonArray(sts: SafeToSpendResult, todayEpochDay: Long): JSONArray {
         return JSONArray().apply {
             sts.upcomingIncomes.forEach { item ->
+                val dateObj = LocalDate.ofEpochDay(item.dueEpochDay)
+                val daysUntil = (item.dueEpochDay - todayEpochDay).toInt()
                 put(
                     JSONObject().apply {
                         put("sourceId", item.sourceId)
@@ -644,8 +702,14 @@ class DavidLiveFinancialToolsProvider(
                         put("title", item.title)
                         put("amountRub", item.amountRub)
                         put("dueEpochDay", item.dueEpochDay)
-                        put("dueDateIso", LocalDate.ofEpochDay(item.dueEpochDay).toString())
-                        put("daysUntilDue", (item.dueEpochDay - todayEpochDay).toInt())
+                        put("dueDateIso", dateObj.toString())
+                        put("dueDateHumanRu", RussianDateVerbalizer.formatHumanDateRu(item.dueEpochDay))
+                        put("dueDateSpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(item.dueEpochDay))
+                        put("dayOfMonth", dateObj.dayOfMonth)
+                        put("dayOrdinalGenitiveRu", RussianDateVerbalizer.dayOrdinalGenitiveRu(dateObj.dayOfMonth))
+                        put("daysUntilDue", daysUntil)
+                        put("isDueToday", daysUntil == 0)
+                        put("whenSpokenRu", RussianDateVerbalizer.formatRelativeDueSpokenRu(item.dueEpochDay, todayEpochDay))
                         put("incomeCertainty", item.incomeCertainty.name)
                         put("categoryName", item.categoryName)
                         put("frequency", item.frequency.name)
@@ -689,7 +753,7 @@ class DavidLiveFinancialToolsProvider(
             "В текущем профиле бюджета ($activeProfileId) пока нет операций, счетов и регулярных платежей. " +
                 "Добавьте текущий баланс, регулярные доходы (зарплату) и обязательства (аренду, ЖКХ), чтобы рассчитать точный Safe-to-Spend 2.0."
         } else {
-            sts.toStructuredDavidSummary()
+            sts.toStructuredDavidSummary(input.todayEpochDay)
         }
 
         return JSONObject().apply {
@@ -698,6 +762,9 @@ class DavidLiveFinancialToolsProvider(
             put("hasData", hasAnyRecords)
             put("isDatabaseEmpty", !hasAnyRecords)
             put("budgetId", activeProfileId)
+            put("todayEpochDay", input.todayEpochDay)
+            put("todayIso", LocalDate.ofEpochDay(input.todayEpochDay).toString())
+            put("todaySpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(input.todayEpochDay))
             put("canSpendTodayDiscRub", sts.canSpendTodayDiscRub)
             put("canSpendTodayEssRub", sts.canSpendTodayEssRub)
             put("canSpendTodayTotalRub", sts.canSpendTodayTotalRub)
@@ -722,8 +789,17 @@ class DavidLiveFinancialToolsProvider(
             put("hypotheticalDebtReceivablesRub", sts.hypotheticalDebtReceivablesRub)
             put("horizonDays", sts.horizonDays)
             if (sts.nextIncomeEpochDay != null) {
+                val nextIncDate = LocalDate.ofEpochDay(sts.nextIncomeEpochDay)
+                val daysToInc = (sts.nextIncomeEpochDay - input.todayEpochDay).toInt()
                 put("nextIncomeEpochDay", sts.nextIncomeEpochDay)
                 put("nextIncomeDateIso", nextIncomeDateIso)
+                put("nextIncomeDateHumanRu", RussianDateVerbalizer.formatHumanDateRu(sts.nextIncomeEpochDay))
+                put("nextIncomeDateSpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(sts.nextIncomeEpochDay))
+                put("nextIncomeDayOfMonth", nextIncDate.dayOfMonth)
+                put("nextIncomeDayOrdinalGenitiveRu", RussianDateVerbalizer.dayOrdinalGenitiveRu(nextIncDate.dayOfMonth))
+                put("daysUntilNextIncome", daysToInc)
+                put("isNextIncomeDueToday", daysToInc == 0)
+                put("nextIncomeWhenSpokenRu", RussianDateVerbalizer.formatRelativeDueSpokenRu(sts.nextIncomeEpochDay, input.todayEpochDay))
             }
             put("bottleneckDayOffset", sts.bottleneckDayOffset)
             put("bottleneckReason", sts.bottleneckReason.name)
@@ -858,12 +934,19 @@ class DavidLiveFinancialToolsProvider(
                     }
             }
 
-            val startRange = if (rule.isIncome) d0 + 1L else min(rule.nextDueDateEpochDay, d0)
+            // Include d0 for both incomes and expenses so today-scheduled unexecuted incomes (nextDueDate == d0)
+            // are reported as due TODAY (daysUntilNextDue == 0) instead of jumping +1 month ahead.
+            val startRange = if (rule.isIncome) d0 else min(rule.nextDueDateEpochDay, d0)
             val generatedOccurrences = RecurringScheduleCalculator.generateOccurrencesInRange(
                 payment = rule,
                 rangeStartEpochDay = startRange,
                 rangeEndEpochDay = rangeEnd
             )
+
+            val todayLog = logsByRecurringAndDate[rule.id to d0]
+            val wasExecutedToday = todayLog != null && (
+                todayLog.status == ExecutionStatus.PAID || !todayLog.linkedTransactionId.isNullOrBlank()
+                )
 
             val activeFutureOccurrences = mutableListOf<Long>()
             for (occDay in generatedOccurrences) {
@@ -880,7 +963,7 @@ class DavidLiveFinancialToolsProvider(
                 }
                 if (!rule.isIncome && occDay < d0) {
                     ruleOverdueDays.add(occDay)
-                } else if ((rule.isIncome && occDay > d0) || (!rule.isIncome && occDay >= d0)) {
+                } else if (occDay >= d0) {
                     activeFutureOccurrences.add(occDay)
                 }
             }
@@ -890,7 +973,9 @@ class DavidLiveFinancialToolsProvider(
                 val log = logsByRecurringAndDate[rule.id to overdueDay]
                 val overdueAmount = log?.actualAmount ?: effectiveAmount
                 totalOverdueObligationsRub += overdueAmount
-                val overdueIso = LocalDate.ofEpochDay(overdueDay).toString()
+                val overdueDateObj = LocalDate.ofEpochDay(overdueDay)
+                val overdueIso = overdueDateObj.toString()
+                val overdueSpokenRu = RussianDateVerbalizer.formatSpokenDateGenitiveRu(overdueDay)
                 val overdueJson = JSONObject().apply {
                     put("id", rule.id)
                     put("title", rule.title)
@@ -905,7 +990,13 @@ class DavidLiveFinancialToolsProvider(
                     put("frequency", rule.frequency.name)
                     put("nextDueDateEpochDay", overdueDay)
                     put("nextDueDateIso", overdueIso)
+                    put("nextDueDateHumanRu", RussianDateVerbalizer.formatHumanDateRu(overdueDay))
+                    put("nextDueDateSpokenRu", overdueSpokenRu)
+                    put("dayOfMonth", overdueDateObj.dayOfMonth)
+                    put("dayOrdinalGenitiveRu", RussianDateVerbalizer.dayOrdinalGenitiveRu(overdueDateObj.dayOfMonth))
                     put("daysUntilNextDue", (overdueDay - d0).toInt())
+                    put("isDueToday", false)
+                    put("whenSpokenRu", RussianDateVerbalizer.formatRelativeDueSpokenRu(overdueDay, d0))
                     put("priority", rule.priority.name)
                     put("scheduleStatus", rule.status.name)
                     put("executionStatus", ExecutionStatus.OVERDUE.name)
@@ -915,7 +1006,7 @@ class DavidLiveFinancialToolsProvider(
                 overdueExpensesArray.put(overdueJson)
                 allItemsArray.put(overdueJson)
                 overdueSummaryLines.add(
-                    "${rule.title}: ${overdueAmount.roundToLong()} ₽ (просрочено с $overdueIso, категория: ${rule.categoryName})"
+                    "${rule.title}: ${overdueAmount.roundToLong()} ₽ (просрочено с $overdueSpokenRu [$overdueIso], категория: ${rule.categoryName})"
                 )
             }
 
@@ -924,10 +1015,17 @@ class DavidLiveFinancialToolsProvider(
             val firstNextOcc = activeFutureOccurrences.first()
             val firstLog = logsByRecurringAndDate[rule.id to firstNextOcc]
             val firstAmount = firstLog?.actualAmount ?: effectiveAmount
-            val nextIso = LocalDate.ofEpochDay(firstNextOcc).toString()
+            val firstDateObj = LocalDate.ofEpochDay(firstNextOcc)
+            val nextIso = firstDateObj.toString()
+            val nextHumanRu = RussianDateVerbalizer.formatHumanDateRu(firstNextOcc)
+            val nextSpokenRu = RussianDateVerbalizer.formatSpokenDateGenitiveRu(firstNextOcc)
+            val whenRelativeSpokenRu = RussianDateVerbalizer.formatRelativeDueSpokenRu(firstNextOcc, d0)
             val daysUntilNext = (firstNextOcc - d0).toInt()
             val occIsoArray = JSONArray().apply {
                 activeFutureOccurrences.forEach { occ -> put(LocalDate.ofEpochDay(occ).toString()) }
+            }
+            val occSpokenArray = JSONArray().apply {
+                activeFutureOccurrences.forEach { occ -> put(RussianDateVerbalizer.formatSpokenDateGenitiveRu(occ)) }
             }
             val totalOccurrencesAmountInHorizon = activeFutureOccurrences.sumOf { occ ->
                 logsByRecurringAndDate[rule.id to occ]?.actualAmount ?: effectiveAmount
@@ -950,11 +1048,27 @@ class DavidLiveFinancialToolsProvider(
                 put("frequency", rule.frequency.name)
                 if (rule.anchorDayOfMonth != null) put("anchorDayOfMonth", rule.anchorDayOfMonth)
                 if (rule.anchorDayOfWeek != null) put("anchorDayOfWeek", rule.anchorDayOfWeek)
+                put("configuredNextDueDateEpochDay", rule.nextDueDateEpochDay)
+                put("configuredNextDueDateIso", LocalDate.ofEpochDay(rule.nextDueDateEpochDay).toString())
                 put("nextDueDateEpochDay", firstNextOcc)
                 put("nextDueDateIso", nextIso)
+                put("nextDueDateHumanRu", nextHumanRu)
+                put("nextDueDateSpokenRu", nextSpokenRu)
+                put("dayOfMonth", firstDateObj.dayOfMonth)
+                put("dayOrdinalGenitiveRu", RussianDateVerbalizer.dayOrdinalGenitiveRu(firstDateObj.dayOfMonth))
+                put("dayOrdinalNominativeRu", RussianDateVerbalizer.dayOrdinalNominativeRu(firstDateObj.dayOfMonth))
                 put("daysUntilNextDue", daysUntilNext)
+                put("isDueToday", daysUntilNext == 0)
+                put("executedToday", wasExecutedToday)
+                put("whenSpokenRu", whenRelativeSpokenRu)
+                if (activeFutureOccurrences.size >= 2) {
+                    val secondOcc = activeFutureOccurrences[1]
+                    put("followingCycleDueDateIso", LocalDate.ofEpochDay(secondOcc).toString())
+                    put("followingCycleDueDateSpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(secondOcc))
+                }
                 put("occurrencesCountInHorizon", activeFutureOccurrences.size)
                 put("occurrencesInHorizonDates", occIsoArray)
+                put("occurrencesInHorizonSpokenRu", occSpokenArray)
                 put("totalAmountInHorizonRub", totalOccurrencesAmountInHorizon)
                 put("incomeCertainty", if (rule.isIncome) rule.incomeCertainty.name else "N/A")
                 put("priority", if (!rule.isIncome) rule.priority.name else "N/A")
@@ -990,7 +1104,7 @@ class DavidLiveFinancialToolsProvider(
                     IncomeCertainty.HYPOTHETICAL -> "гипотетический (HYPOTHETICAL, не входит в прогноз ликвидности)"
                 }
                 incomeSummaryLines.add(
-                    "${rule.title}: ${firstAmount.roundToLong()} ₽, дата: $nextIso (через $daysUntilNext дн.), статус: $certaintyRu"
+                    "${rule.title}: ${firstAmount.roundToLong()} ₽, срок: $whenRelativeSpokenRu [$nextIso], статус: $certaintyRu"
                 )
             } else {
                 upcomingExpensesArray.put(itemJson)
@@ -1004,9 +1118,8 @@ class DavidLiveFinancialToolsProvider(
                 } else {
                     "подписка/регулярный расход (DISCRETIONARY_SUBSCRIPTION)"
                 }
-                val whenLabel = if (daysUntilNext == 0) "сегодня ($nextIso)" else "$nextIso (через $daysUntilNext дн.)"
                 expenseSummaryLines.add(
-                    "${rule.title}: ${firstAmount.roundToLong()} ₽, дата: $whenLabel, тип: $priorityRu, категория: ${rule.categoryName}"
+                    "${rule.title}: ${firstAmount.roundToLong()} ₽, срок: $whenRelativeSpokenRu [$nextIso], тип: $priorityRu, категория: ${rule.categoryName}"
                 )
             }
         }
@@ -1016,11 +1129,11 @@ class DavidLiveFinancialToolsProvider(
             if (allRules.isEmpty()) {
                 append("В профиле бюджета ($activeProfileId) пока нет настроенных регулярных доходов (зарплаты) и регулярных платежей (аренды, ЖКХ, подписок).")
             } else {
-                appendLine("=== РАСПИСАНИЕ РЕГУЛЯРНЫХ ДОХОДОВ И ОБЯЗАТЕЛЬСТВ (ГОРИЗОНТ $horizonDays ДН.) ===")
+                appendLine("=== РАСПИСАНИЕ РЕГУЛЯРНЫХ ДОХОДОВ И ОБЯЗАТЕЛЬСТВ (СЕГОДНЯ: ${RussianDateVerbalizer.formatSpokenDateGenitiveRu(d0)}, ГОРИЗОНТ $horizonDays ДН.) ===")
                 if (incomeSummaryLines.isEmpty()) {
-                    appendLine("• Плановые будущие доходы: активных записей по фильтру не найдено.")
+                    appendLine("• Плановые доходы: активных записей по фильтру не найдено.")
                 } else {
-                    appendLine("• Плановые будущие доходы (НЕ входят в текущий доступный баланс ${stsResult.availableBalanceRub.roundToLong()} ₽):")
+                    appendLine("• Плановые доходы (НЕ входят в текущий доступный баланс ${stsResult.availableBalanceRub.roundToLong()} ₽, пока не отмечены полученными):")
                     incomeSummaryLines.forEach { appendLine("  - $it") }
                 }
                 if (overdueSummaryLines.isNotEmpty()) {
@@ -1048,6 +1161,8 @@ class DavidLiveFinancialToolsProvider(
             put("budgetId", activeProfileId)
             put("todayEpochDay", d0)
             put("todayIso", LocalDate.ofEpochDay(d0).toString())
+            put("todayHumanRu", RussianDateVerbalizer.formatHumanDateRu(d0))
+            put("todaySpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(d0))
             put("horizonDays", horizonDays)
             put("filterType", filterType)
             put("activeRulesCount", activeRules.size)
@@ -1067,11 +1182,19 @@ class DavidLiveFinancialToolsProvider(
             put("totalDiscretionarySubscriptionsHorizonRub", totalDiscretionarySubscriptionsRub)
             put("totalOverdueObligationsRub", totalOverdueObligationsRub)
             if (nextGuaranteedIncomeEpochDay != null) {
+                val nextGuarDateObj = LocalDate.ofEpochDay(nextGuaranteedIncomeEpochDay!!)
+                val daysToGuar = (nextGuaranteedIncomeEpochDay!! - d0).toInt()
                 put("nextGuaranteedIncomeEpochDay", nextGuaranteedIncomeEpochDay)
-                put("nextGuaranteedIncomeDateIso", LocalDate.ofEpochDay(nextGuaranteedIncomeEpochDay!!).toString())
+                put("nextGuaranteedIncomeDateIso", nextGuarDateObj.toString())
+                put("nextGuaranteedIncomeDateHumanRu", RussianDateVerbalizer.formatHumanDateRu(nextGuaranteedIncomeEpochDay!!))
+                put("nextGuaranteedIncomeDateSpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(nextGuaranteedIncomeEpochDay!!))
+                put("nextGuaranteedIncomeDayOfMonth", nextGuarDateObj.dayOfMonth)
+                put("nextGuaranteedIncomeDayOrdinalGenitiveRu", RussianDateVerbalizer.dayOrdinalGenitiveRu(nextGuarDateObj.dayOfMonth))
                 put("nextGuaranteedIncomeTitle", nextGuaranteedIncomeTitle)
                 put("nextGuaranteedIncomeAmountRub", nextGuaranteedIncomeAmountRub)
-                put("daysUntilNextGuaranteedIncome", (nextGuaranteedIncomeEpochDay!! - d0).toInt())
+                put("daysUntilNextGuaranteedIncome", daysToGuar)
+                put("isNextGuaranteedIncomeDueToday", daysToGuar == 0)
+                put("nextGuaranteedIncomeWhenSpokenRu", RussianDateVerbalizer.formatRelativeDueSpokenRu(nextGuaranteedIncomeEpochDay!!, d0))
             }
             put("availableBalanceRub", stsResult.availableBalanceRub)
             put("obligationsReservedUntilSalaryRub", stsResult.obligationsReservedTotalRub)
@@ -1115,6 +1238,20 @@ class DavidLiveFinancialToolsProvider(
                     targetHorizonDays = targetHorizon
                 )
             }
+            "MANDATORY_PAYMENT_CHANGE" -> {
+                val delta = args?.optDouble("deltaAmountRub", 0.0)?.takeIf { !it.isNaN() } ?: 0.0
+                val newAmt = args?.optDouble("newAmountRub", Double.NaN)?.takeIf { !it.isNaN() && it >= 0.0 }
+                val targetId = args?.optLong("targetObligationId", -1L)?.takeIf { it > 0L }
+                val targetTitle = args?.optString("targetTitle", "")?.takeIf { it.isNotBlank() }
+                val dueInDays = args?.optInt("dueInDaysIfNew", 5)?.coerceIn(0, 60) ?: 5
+                WhatIfScenarioRequest.MandatoryPaymentChange(
+                    deltaAmountRub = delta,
+                    newAmountRub = newAmt,
+                    targetObligationId = targetId,
+                    targetTitle = targetTitle,
+                    dueInDaysIfNew = dueInDays
+                )
+            }
             else -> {
                 val amount = args?.optDouble("amountRub", 0.0)?.takeIf { !it.isNaN() } ?: 0.0
                 WhatIfScenarioRequest.HypotheticalSpend(amountRub = amount)
@@ -1130,6 +1267,7 @@ class DavidLiveFinancialToolsProvider(
                     put("amountRub", item.amountRub)
                     put("dueEpochDay", item.dueEpochDay)
                     put("dueDateIso", LocalDate.ofEpochDay(item.dueEpochDay).toString())
+                    put("dueDateSpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(item.dueEpochDay))
                 }
             )
         }
@@ -1146,15 +1284,19 @@ class DavidLiveFinancialToolsProvider(
             put("simulatedHorizonDays", sim.simulated.horizonDays)
             if (sim.baseline.nextIncomeEpochDay != null) {
                 put("baselineNextIncomeDateIso", LocalDate.ofEpochDay(sim.baseline.nextIncomeEpochDay).toString())
+                put("baselineNextIncomeDateSpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(sim.baseline.nextIncomeEpochDay))
             }
             if (sim.simulated.nextIncomeEpochDay != null) {
                 put("simulatedNextIncomeDateIso", LocalDate.ofEpochDay(sim.simulated.nextIncomeEpochDay).toString())
+                put("simulatedNextIncomeDateSpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(sim.simulated.nextIncomeEpochDay))
             }
             put("baselineCanSpendTodayRub", String.format(Locale.US, "%.2f", sim.baseline.canSpendTodayDiscRub).toDouble())
             put("simulatedCanSpendTodayRub", String.format(Locale.US, "%.2f", sim.simulated.canSpendTodayDiscRub).toDouble())
             put("deltaDailyBudgetRub", String.format(Locale.US, "%.2f", sim.deltaCanSpendTodayDiscRub).toDouble())
             put("simulatedFutureDailyRub", String.format(Locale.US, "%.2f", sim.simulated.dailyDiscretionarySpeedRub).toDouble())
             put("deltaFutureDailyRub", String.format(Locale.US, "%.2f", sim.deltaDailyDiscretionarySpeedRub).toDouble())
+            put("baselineObligationsReservedRub", sim.baseline.obligationsReservedTotalRub)
+            put("simulatedObligationsReservedRub", sim.simulated.obligationsReservedTotalRub)
             put("netBalanceAfterObligationsBeforeSalaryRub", sim.simulated.netBalanceAfterObligationsBeforeSalaryRub)
             put("newlyExposedObligationsCount", sim.newlyExposedObligations.size)
             put("newlyExposedObligations", exposedArray)
@@ -1186,12 +1328,15 @@ class DavidLiveFinancialToolsProvider(
         }
 
         val activeProfileId = budgetId
-        val now = System.currentTimeMillis()
+        val now = referenceNowMillis()
         val thirtyDaysAgo = now - 30L * 24L * 3600L * 1000L
         val allTransactions = transactionDao?.getTransactionsByBudgetId(activeProfileId)
             ?.firstOrNull()
             .orEmpty()
-        val transactions = allTransactions.filter { parseTransactionMillis(it) >= thirtyDaysAgo }
+        val transactions = allTransactions.filter {
+            val ts = parseTransactionMillis(it)
+            ts in thirtyDaysAgo..now
+        }
         val accounts = accountDao?.getAccountsByBudgetId(activeProfileId)?.firstOrNull().orEmpty()
         val recurring = recurringPaymentDao?.getRecurringPaymentsByBudgetId(activeProfileId)?.firstOrNull().orEmpty()
 
@@ -1213,9 +1358,9 @@ class DavidLiveFinancialToolsProvider(
         val netFlow = earnedIncome - totalExpense
         val dailyBurnRate = snapshot.regularExpenseRub / 30.0
 
-        val cal = Calendar.getInstance()
-        val maxDay = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-        val currentDay = cal.get(Calendar.DAY_OF_MONTH)
+        val refDate = LocalDate.ofEpochDay(stsInput.todayEpochDay)
+        val maxDay = refDate.lengthOfMonth()
+        val currentDay = refDate.dayOfMonth
         val remainingDaysInMonth = (maxDay - currentDay).coerceAtLeast(1)
         val projectedRemainingExpense = dailyBurnRate * remainingDaysInMonth
         val projectedEndOfMonthBalance = availableBalance - projectedRemainingExpense
@@ -1247,13 +1392,13 @@ class DavidLiveFinancialToolsProvider(
                 append("Мне должны (дебиторская задолженность): ${snapshot.totalOwesUsRub.roundToLong()} ₽, ")
                 if (sts.upcomingObligations.isNotEmpty()) {
                     val obls = sts.upcomingObligations.take(3).joinToString("; ") {
-                        "${it.title}: ${it.amountRub.roundToLong()} ₽ (${LocalDate.ofEpochDay(it.dueEpochDay)})"
+                        "${it.title}: ${it.amountRub.roundToLong()} ₽ (${RussianDateVerbalizer.formatRelativeDueSpokenRu(it.dueEpochDay, stsInput.todayEpochDay)})"
                     }
                     append("Ближайшие обязательства в горизонте ${sts.horizonDays} дн. (${sts.obligationsReservedTotalRub.roundToLong()} ₽): $obls, ")
                 }
                 if (sts.upcomingIncomes.isNotEmpty()) {
                     val incs = sts.upcomingIncomes.take(2).joinToString("; ") {
-                        "${it.title}: ${it.amountRub.roundToLong()} ₽ (${LocalDate.ofEpochDay(it.dueEpochDay)}, ${it.incomeCertainty})"
+                        "${it.title}: ${it.amountRub.roundToLong()} ₽ (${RussianDateVerbalizer.formatRelativeDueSpokenRu(it.dueEpochDay, stsInput.todayEpochDay)}, ${it.incomeCertainty})"
                     }
                     append("Плановые будущие доходы (не в балансе): $incs, ")
                 }
@@ -1268,6 +1413,9 @@ class DavidLiveFinancialToolsProvider(
             put("hasData", hasData)
             put("isDatabaseEmpty", !hasData)
             put("budgetId", activeProfileId)
+            put("todayEpochDay", stsInput.todayEpochDay)
+            put("todayIso", refDate.toString())
+            put("todaySpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(stsInput.todayEpochDay))
             put("totalBalanceRub", availableBalance.roundToLong())
             put("availableBalanceRub", availableBalance.roundToLong())
             put("canSpendTodayDiscRub", sts.canSpendTodayDiscRub)
@@ -1280,8 +1428,18 @@ class DavidLiveFinancialToolsProvider(
             put("obligationsReservedTotalRub", sts.obligationsReservedTotalRub)
             put("netBalanceAfterObligationsBeforeSalaryRub", sts.netBalanceAfterObligationsBeforeSalaryRub)
             put("mandatorySafetyFloorRub", sts.mandatorySafetyFloorRub)
-            if (nextIncomeDateIso != null) {
+            if (sts.nextIncomeEpochDay != null) {
+                val nextIncDate = LocalDate.ofEpochDay(sts.nextIncomeEpochDay)
+                val daysToInc = (sts.nextIncomeEpochDay - stsInput.todayEpochDay).toInt()
+                put("nextIncomeEpochDay", sts.nextIncomeEpochDay)
                 put("nextIncomeDateIso", nextIncomeDateIso)
+                put("nextIncomeDateHumanRu", RussianDateVerbalizer.formatHumanDateRu(sts.nextIncomeEpochDay))
+                put("nextIncomeDateSpokenRu", RussianDateVerbalizer.formatSpokenDateGenitiveRu(sts.nextIncomeEpochDay))
+                put("nextIncomeDayOfMonth", nextIncDate.dayOfMonth)
+                put("nextIncomeDayOrdinalGenitiveRu", RussianDateVerbalizer.dayOrdinalGenitiveRu(nextIncDate.dayOfMonth))
+                put("daysUntilNextIncome", daysToInc)
+                put("isNextIncomeDueToday", daysToInc == 0)
+                put("nextIncomeWhenSpokenRu", RussianDateVerbalizer.formatRelativeDueSpokenRu(sts.nextIncomeEpochDay, stsInput.todayEpochDay))
             }
             put("upcomingObligationsCount", sts.upcomingObligations.size)
             put("upcomingObligations", upcomingObligationsJson)
@@ -1321,10 +1479,13 @@ class DavidLiveFinancialToolsProvider(
         }
 
         val activeProfileId = budgetId
-        val now = System.currentTimeMillis()
+        val now = referenceNowMillis()
         val thirtyDaysAgo = now - 30L * 24L * 3600L * 1000L
         val allTransactions = transactionDao?.getTransactionsByBudgetId(activeProfileId)?.firstOrNull().orEmpty()
-        val transactions = allTransactions.filter { parseTransactionMillis(it) >= thirtyDaysAgo }
+        val transactions = allTransactions.filter {
+            val ts = parseTransactionMillis(it)
+            ts in thirtyDaysAgo..now
+        }
         val categories = categoryDao?.getCategoriesByBudgetId(activeProfileId)?.firstOrNull().orEmpty()
 
         val expensesByCat = transactions
@@ -1352,19 +1513,23 @@ class DavidLiveFinancialToolsProvider(
             if (spent <= 0.0 && limit <= 0.0) continue
 
             val usagePercent = if (limit > 0.0) ((spent / limit) * 100.0).roundToLong() else null
+            val remaining = if (limit > 0.0) (limit - spent).roundToLong() else null
+            val isExceeded = limit > 0.0 && spent > limit + 1e-6
             categoryArray.put(
                 JSONObject().apply {
                     put("category", catName)
                     put("spentRub", spent.roundToLong())
                     put("budgetLimitRub", limit.roundToLong())
-                    if (usagePercent != null) {
+                    if (usagePercent != null && remaining != null) {
                         put("limitUsagePercent", usagePercent)
-                        put("remainingLimitRub", (limit - spent).roundToLong())
+                        put("remainingLimitRub", remaining)
+                        put("isLimitExceeded", isExceeded)
                     }
                 }
             )
             val limitNote = if (limit > 0.0) {
-                " (лимит ${limit.roundToLong()} ₽, исчерпан на ${usagePercent}%)"
+                val statusStr = if (isExceeded) "превышен на ${(spent - limit).roundToLong()} ₽" else "остаток ${remaining} ₽"
+                " (лимит ${limit.roundToLong()} ₽, исчерпан на ${usagePercent}%, $statusStr)"
             } else {
                 ""
             }
@@ -1375,7 +1540,7 @@ class DavidLiveFinancialToolsProvider(
         val humanSummary = if (summaryParts.isEmpty()) {
             "По выбранным категориям расходов за последние 30 дней не найдено."
         } else {
-            "Расходы по категориям: " + summaryParts.take(6).joinToString("; ")
+            "Расходы по категориям: " + summaryParts.take(8).joinToString("; ")
         }
 
         return JSONObject().apply {
@@ -1457,7 +1622,7 @@ class DavidLiveFinancialToolsProvider(
             weOweArray.put(obj)
             debtsArray.put(obj)
             debtSummaryParts.add(
-                "Я должен '${debt.name}': остаток ${debt.remainingAmount.roundToLong()} ₽ (из ${debt.initialAmount.roundToLong()} ₽)"
+                "Я должен '${debt.name}': остаток ${debt.remainingAmount.roundToLong()} ₽ (из ${debt.initialAmount.roundToLong()} ₽, погашено ${debt.repaidAmount.roundToLong()} ₽)"
             )
         }
 
@@ -1474,7 +1639,7 @@ class DavidLiveFinancialToolsProvider(
             owesUsArray.put(obj)
             debtsArray.put(obj)
             debtSummaryParts.add(
-                "Мне должны '${debt.name}': остаток ${debt.remainingAmount.roundToLong()} ₽ (из ${debt.initialAmount.roundToLong()} ₽)"
+                "Мне должны '${debt.name}': остаток ${debt.remainingAmount.roundToLong()} ₽ (из ${debt.initialAmount.roundToLong()} ₽, возвращено ${debt.repaidAmount.roundToLong()} ₽)"
             )
         }
 
@@ -1523,7 +1688,7 @@ class DavidLiveFinancialToolsProvider(
         }
 
         val activeProfileId = budgetId
-        val now = System.currentTimeMillis()
+        val now = referenceNowMillis()
         val periodMs = days.toLong() * 24L * 3600L * 1000L
         val currentStart = now - periodMs
         val previousStart = currentStart - periodMs
@@ -1601,14 +1766,23 @@ class DavidLiveFinancialToolsProvider(
         }
 
         val activeProfileId = budgetId
+        val refNow = referenceNowMillis()
         val allTx = transactionDao.getTransactionsByBudgetId(activeProfileId).firstOrNull().orEmpty()
-        val recent = allTx.sortedByDescending { parseTransactionMillis(it) }.take(limit)
+        val recent = allTx
+            .filter { parseTransactionMillis(it) <= refNow }
+            .sortedWith(
+                compareByDescending<TransactionEntity> { parseIsoDateToMillis(it.date) }
+                    .thenByDescending { it.createdAt }
+                    .thenByDescending { it.id }
+            )
+            .take(limit)
         val items = JSONArray()
         val summaryParts = mutableListOf<String>()
 
         for (tx in recent) {
             items.put(
                 JSONObject().apply {
+                    put("id", tx.id)
                     put("type", tx.type)
                     put("category", tx.category)
                     put("subcategory", tx.subcategory)
@@ -1617,7 +1791,7 @@ class DavidLiveFinancialToolsProvider(
                 }
             )
             val sub = if (tx.subcategory.isNotBlank() && tx.subcategory != tx.category) " (${tx.subcategory})" else ""
-            summaryParts.add("${tx.category}$sub: ${tx.amount.roundToLong()} ₽")
+            summaryParts.add("${tx.category}$sub: ${tx.amount.roundToLong()} ₽ (${tx.date})")
         }
 
         return JSONObject().apply {

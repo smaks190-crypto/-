@@ -46,9 +46,9 @@ object WhatIfSimulator {
                     if (shouldDelay) {
                         val nextFutureOcc = RecurringScheduleCalculator.generateOccurrencesInRange(
                             payment = payment,
-                            rangeStartEpochDay = baseInput.todayEpochDay + 1L,
+                            rangeStartEpochDay = baseInput.todayEpochDay,
                             rangeEndEpochDay = baseInput.todayEpochDay + 90L
-                        ).firstOrNull() ?: max(payment.nextDueDateEpochDay, baseInput.todayEpochDay + 1L)
+                        ).firstOrNull() ?: max(payment.nextDueDateEpochDay, baseInput.todayEpochDay)
                         payment.copy(
                             nextDueDateEpochDay = nextFutureOcc + delay,
                             anchorDayOfMonth = null,
@@ -62,6 +62,56 @@ object WhatIfSimulator {
                     activeRecurringPayments = delayedPayments,
                     horizonDaysOverride = null
                 )
+            }
+            is WhatIfScenarioRequest.MandatoryPaymentChange -> {
+                val activeObligations = baseInput.activeRecurringPayments.filter {
+                    !it.isIncome && it.status == RecurringStatus.ACTIVE
+                }
+                val targetRule = when {
+                    request.targetObligationId != null ->
+                        activeObligations.firstOrNull { it.id == request.targetObligationId }
+                    !request.targetTitle.isNullOrBlank() ->
+                        activeObligations.firstOrNull {
+                            it.title.contains(request.targetTitle, ignoreCase = true) ||
+                                it.categoryName.contains(request.targetTitle, ignoreCase = true)
+                        }
+                    else ->
+                        activeObligations
+                            .filter { it.priority == ObligationPriority.MANDATORY }
+                            .minByOrNull { it.nextDueDateEpochDay }
+                            ?: activeObligations.minByOrNull { it.nextDueDateEpochDay }
+                }
+                if (targetRule != null) {
+                    val baseAmt = targetRule.effectiveReservedAmountRub
+                    val updatedAmt = max(0.0, request.newAmountRub ?: (baseAmt + request.deltaAmountRub))
+                    val modifiedPayments = baseInput.activeRecurringPayments.map { p ->
+                        if (p.id == targetRule.id && p.title == targetRule.title) {
+                            p.copy(
+                                amount = updatedAmt,
+                                estimatedMaxAmount = if (p.estimatedMaxAmount != null) updatedAmt else null
+                            )
+                        } else {
+                            p
+                        }
+                    }
+                    baseInput.copy(activeRecurringPayments = modifiedPayments)
+                } else {
+                    val newAmt = max(0.0, request.newAmountRub ?: request.deltaAmountRub)
+                    val syntheticObligation = RecurringPaymentDomain(
+                        id = -999L,
+                        title = request.targetTitle ?: "Гипотетический обязательный платёж",
+                        amount = newAmt,
+                        isIncome = false,
+                        categoryName = "Обязательные платежи",
+                        frequency = PaymentFrequency.MONTHLY,
+                        nextDueDateEpochDay = baseInput.todayEpochDay + max(0, request.dueInDaysIfNew).toLong(),
+                        priority = ObligationPriority.MANDATORY,
+                        status = RecurringStatus.ACTIVE
+                    )
+                    baseInput.copy(
+                        activeRecurringPayments = baseInput.activeRecurringPayments + syntheticObligation
+                    )
+                }
             }
         }
 
@@ -183,6 +233,13 @@ object WhatIfSimulator {
                     }
                 }
             }
+            is WhatIfScenarioRequest.MandatoryPaymentChange -> {
+                val targetDesc = request.targetTitle ?: "обязательного платежа"
+                appendLine("• Сценарий: Изменение $targetDesc (Δ ${request.deltaAmountRub.toLong()} ₽, новая сумма: ${request.newAmountRub?.toLong()?.toString() ?: "по дельте"})")
+                appendLine("• Резерв обязательств до зарплаты: было ${baseline.obligationsReservedTotalRub.toLong()} ₽ -> станет ${simulated.obligationsReservedTotalRub.toLong()} ₽")
+                appendLine("• Свободный лимит сегодня: было ${baseline.canSpendTodayDiscRub.toLong()} ₽ -> станет ${simulated.canSpendTodayDiscRub.toLong()} ₽ (Δ ${deltaTodayDisc.toLong()} ₽)")
+                appendLine("• Дневной бюджет на следующие дни: было ${baseline.dailyDiscretionarySpeedRub.toLong()} ₽/день -> станет ${simulated.dailyDiscretionarySpeedRub.toLong()} ₽/день (Δ ${deltaDailySpeed.toLong()} ₽/день)")
+            }
         }
         appendLine("• Вердикт симуляции: $verdict")
     }
@@ -204,7 +261,32 @@ object WhatIfSimulator {
             return WhatIfScenarioRequest.IncomeDelay(delayDays = delayDays)
         }
 
-        // 2. Hypothetical spend: "что будет, если я потрачу 3000", "если куплю за 5500", "могу ли потратить 4000"
+        // 2. Mandatory payment change: "аренда вырастет на 5000", "коммуналка увеличится на 2000", "обязательный платёж вырастет на 3000"
+        if ((lower.contains("аренд") || lower.contains("жкх") || lower.contains("коммунал") || lower.contains("обязательн") || lower.contains("платёж") || lower.contains("платеж")) &&
+            (lower.contains("выраст") || lower.contains("увелич") || lower.contains("подорож") || lower.contains("изменит") || lower.contains("станет"))
+        ) {
+            val amountMatch = Regex("""(\d+(?:[\s.,]\d+)?)\s*(тыс(?:яч)?|к|k)?\s*(?:руб(?:лей|ля|ль|\.)?|₽|р\b)?""").find(lower)
+            if (amountMatch != null) {
+                val baseVal = amountMatch.groupValues[1].replace(" ", "").replace(",", ".").toDoubleOrNull()
+                val mult = if (amountMatch.groupValues[2].isNotEmpty()) 1000.0 else 1.0
+                if (baseVal != null && baseVal * mult > 0.0) {
+                    val amt = baseVal * mult
+                    val isAbsoluteNew = lower.contains("станет") && !lower.contains("на ")
+                    val titleHint = when {
+                        lower.contains("аренд") -> "Аренда"
+                        lower.contains("жкх") || lower.contains("коммунал") -> "ЖКХ"
+                        else -> null
+                    }
+                    return if (isAbsoluteNew) {
+                        WhatIfScenarioRequest.MandatoryPaymentChange(newAmountRub = amt, targetTitle = titleHint)
+                    } else {
+                        WhatIfScenarioRequest.MandatoryPaymentChange(deltaAmountRub = amt, targetTitle = titleHint)
+                    }
+                }
+            }
+        }
+
+        // 3. Hypothetical spend: "что будет, если я потрачу 3000", "если куплю за 5500", "могу ли потратить 4000"
         if ((lower.contains("если") || lower.contains("что будет") || lower.contains("хватит ли если") || lower.contains("могу ли я потратить")) &&
             (lower.contains("потрач") || lower.contains("потратить") || lower.contains("купл") || lower.contains("купить") || lower.contains("возьму"))
         ) {
@@ -218,7 +300,7 @@ object WhatIfSimulator {
             }
         }
 
-        // 3. Runway check: "хватит ли до зарплаты", "доживу ли до зарплаты", "дотяну ли до зп"
+        // 4. Runway check: "хватит ли до зарплаты", "доживу ли до зарплаты", "дотяну ли до зп"
         if (lower.contains("хватит ли до зарплат") ||
             lower.contains("хватит ли мне до зарплат") ||
             lower.contains("хватит до зарплат") ||

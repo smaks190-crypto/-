@@ -246,8 +246,13 @@ object SafeToSpendCalculator {
 
         val maxIncomeLookaheadOffset = max(horizonDays, SAFETY_FLOOR_OBLIGATION_WINDOW_DAYS)
         val allUpcomingIncomes = schedule.upcomingIncomeItems
-            .filter { (it.dueEpochDay - d0).toInt() in 1..maxIncomeLookaheadOffset }
+            .filter { (it.dueEpochDay - d0).toInt() in 0..maxIncomeLookaheadOffset }
             .sortedBy { it.dueEpochDay }
+
+        val effectiveNextIncomeEpochDay = allUpcomingIncomes
+            .firstOrNull { it.incomeCertainty == IncomeCertainty.GUARANTEED }
+            ?.dueEpochDay
+            ?: earliestGuaranteedIncomeDay
 
         return SafeToSpendResult(
             canSpendTodayDiscRub = finalCanSpendDiscToday,
@@ -277,7 +282,7 @@ object SafeToSpendCalculator {
             expectedUnconfirmedIncomeHorizonRub = cumExpInflows,
             hypotheticalDebtReceivablesRub = schedule.hypotheticalReceivablesRub,
             horizonDays = horizonDays,
-            nextIncomeEpochDay = earliestGuaranteedIncomeDay,
+            nextIncomeEpochDay = effectiveNextIncomeEpochDay,
             bottleneckDayOffset = bottleneckOffset,
             bottleneckEpochDay = d0 + bottleneckOffset.toLong(),
             bottleneckReason = bottleneckReason,
@@ -437,10 +442,12 @@ object SafeToSpendCalculator {
                     }
                 }
             } else {
-                // Recurring Income (only future offsets t >= 1; today's income is only added when actually received into B_avail)
+                // Recurring Income: include today (offset == 0) in upcomingIncomeItems if not yet executed,
+                // while conservative trajectory inflows only add unreceived income at future offsets t >= 1
+                // (today's income enters B_avail once actually received/confirmed).
                 val occurrences = RecurringScheduleCalculator.generateOccurrencesInRange(
                     payment = rule,
-                    rangeStartEpochDay = d0 + 1L,
+                    rangeStartEpochDay = d0,
                     rangeEndEpochDay = rangeEnd
                 )
                 for (occDay in occurrences) {
@@ -450,7 +457,7 @@ object SafeToSpendCalculator {
                     }
                     val offset = (occDay - d0).toInt()
                     val occAmount = log?.actualAmount ?: effectiveAmount
-                    if (offset in 1..maxOffsetDays) {
+                    if (offset in 0..maxOffsetDays) {
                         upcomingIncomeItems.add(
                             ScheduledIncomeItem(
                                 sourceId = "inc_${rule.id}_$occDay",
@@ -463,17 +470,19 @@ object SafeToSpendCalculator {
                                 frequency = rule.frequency
                             )
                         )
-                        when (rule.incomeCertainty) {
-                            IncomeCertainty.GUARANTEED -> {
-                                guaranteedInflowByOffset[offset] =
-                                    (guaranteedInflowByOffset[offset] ?: 0.0) + occAmount
-                            }
-                            IncomeCertainty.EXPECTED -> {
-                                expectedInflowByOffset[offset] =
-                                    (expectedInflowByOffset[offset] ?: 0.0) + occAmount
-                            }
-                            IncomeCertainty.HYPOTHETICAL -> {
-                                hypotheticalReceivablesRub += occAmount
+                        if (offset >= 1) {
+                            when (rule.incomeCertainty) {
+                                IncomeCertainty.GUARANTEED -> {
+                                    guaranteedInflowByOffset[offset] =
+                                        (guaranteedInflowByOffset[offset] ?: 0.0) + occAmount
+                                }
+                                IncomeCertainty.EXPECTED -> {
+                                    expectedInflowByOffset[offset] =
+                                        (expectedInflowByOffset[offset] ?: 0.0) + occAmount
+                                }
+                                IncomeCertainty.HYPOTHETICAL -> {
+                                    hypotheticalReceivablesRub += occAmount
+                                }
                             }
                         }
                     }

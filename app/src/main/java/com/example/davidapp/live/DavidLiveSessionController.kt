@@ -62,6 +62,7 @@ class DavidLiveSessionController(
 
     private val pendingUserTranscript = StringBuilder()
     private val pendingDavidTranscript = StringBuilder()
+    private var hasOutputTranscriptionInCurrentTurn: Boolean = false
 
     init {
         financialToolsProvider.setConversationalUserMessagesProvider {
@@ -226,6 +227,7 @@ class DavidLiveSessionController(
         }
         pendingUserTranscript.clear()
         pendingDavidTranscript.clear()
+        hasOutputTranscriptionInCurrentTurn = false
     }
 
     /**
@@ -336,20 +338,27 @@ class DavidLiveSessionController(
                - Общий баланс, доходы/расходы за 30 дней, сводка -> `get_financial_overview`
                - Сколько можно/безопасно потратить сегодня, дневной лимит, остаток до зарплаты, кассовый разрыв, резерв -> `get_safe_to_spend_forecast`
                - Расписание регулярных доходов (зарплата, аванс: сумма, дата, статус достоверности) и регулярных платежей/обязательств (аренда, ЖКХ, подписки, кредиты) -> `get_recurring_schedule`
-               - Сценарии «Что будет, если я потрачу X ₽?», «Хватит ли до зарплаты?», «Что если зарплата задержится на N дней?» -> `simulate_what_if`
+               - Сценарии «Что будет, если я потрачу X ₽?», «Хватит ли до зарплаты?», «Что если зарплата задержится на N дней?», «Что если обязательный платёж вырастет?» -> `simulate_what_if`
                - Расходы и лимиты по категориям -> `get_category_spending`
                - Финансовые цели (копилки) и долги («Я должен» / «Мне должны») -> `get_goals_and_debts`
                - Сравнение динамики периодов (7 или 30 дней) -> `compare_spending_periods`
                - Последние совершенные операции -> `get_recent_transactions`
                - На комбинированные вопросы (например: «Сколько останется после аренды до зарплаты?», «Сколько безопасно потратить с учётом аренды и зарплаты?») вызывай ВСЕ релевантные инструменты (`get_recurring_schedule` + `get_safe_to_spend_forecast`, а для сценариев задержки/траты — ещё и `simulate_what_if`).
-            3. НИКОГДА не выдумывай суммы, даты, категории, проценты или операции, которых нет в ответах инструментов. Если `dataAvailable == false` или `isDatabaseEmpty == true` — честно скажи, что данные отсутствуют или пусты, и не выдавай `0 ₽` за подтверждённый факт.
+            3. НИКОГДА не выдумывай суммы, даты, категории, проценты или операции, которых нет в ответах инструментов. Если `dataAvailable == false` || `isDatabaseEmpty == true` — честно скажи, что данные отсутствуют или пусты, и не выдавай `0 ₽` за подтверждённый факт.
             4. Ты работаешь строго в режиме чтения: никогда не утверждай, что ты сам создал, изменил или удалил финансовую операцию без подтверждения пользователя.
             5. СТРОГОЕ РАЗДЕЛЕНИЕ ФИНАНСОВЫХ СУЩНОСТЕЙ И СТАТУСОВ ДОСТОВЕРНОСТИ:
                - Доступный остаток (`availableBalanceRub` / `totalBalanceRub`) — фактические деньги на руках сейчас. НИКОГДА не складывай текущий баланс с будущей зарплатой или с уже полученным доходом за 30 дней!
                - Заработанный доход за 30 дней (`earnedIncome30dRub` / `salaryIncome30dRub`) — уже полученные в прошлом деньги, они уже учтены в балансе.
-               - Плановый будущий доход из `get_recurring_schedule` (`upcomingIncomes`) — это ПРОГНОЗ будущего поступления (ещё НЕ на счету). Всегда различай `GUARANTEED` (гарантированная зарплата в базовом прогнозе), `EXPECTED` (ожидаемый неподтверждённый доход, показывается справочно) и `HYPOTHETICAL` (гипотетический доход, не учитывается в ликвидности).
+               - Плановый будущий доход из `get_recurring_schedule` (`upcomingIncomes`) — это ПРОГНОЗ поступления (ещё НЕ на счету). Всегда различай `GUARANTEED` (гарантированная зарплата в базовом прогнозе), `EXPECTED` (ожидаемый неподтверждённый доход, показывается справочно) и `HYPOTHETICAL` (гипотетический доход, не учитывается в ликвидности).
                - Остаток после обязательств до зарплаты (`netBalanceAfterObligationsBeforeSalaryRub`) и безопасный лимит на сегодня (`canSpendTodayDiscRub` + `canSpendTodayEssRub`) бери строго из расчёта `SafeToSpendCalculator` (`get_safe_to_spend_forecast` / `get_recurring_schedule`), не вычисляй их в уме приблизительно.
                - Мои долги («Я должен», `totalWeOweRub`) и дебиторская задолженность («Мне должны», `totalOwesUsRub`) никогда не смешивай с балансом и доходом.
+            6. ТОЧНОЕ ОЗВУЧИВАНИЕ ДАТ И ЧИСЕЛ МЕСЯЦА (100% СОВПАДЕНИЕ ГОЛОСА И СУБТИТРОВ):
+               - Если в ответе инструмента указано `isDueToday == true` или `daysUntilNextDue == 0` (либо `daysUntilDue == 0`), ОБЯЗАТЕЛЬНО сообщи, что доход или платёж запланирован на СЕГОДНЯ (на сегодняшнюю дату), а не через месяц.
+               - При произнесении дат ВСЕГДА используй вербализованные поля `nextDueDateSpokenRu`, `dueDateSpokenRu`, `whenSpokenRu` и `dayOrdinalGenitiveRu`:
+                 • 2-е число (`dayOfMonth = 2`) произноси строго «второго» / «второе число» (НИКОГДА не произноси «двадцать второго» вместо «второго»!);
+                 • 12-е число (`dayOfMonth = 12`) произноси строго «двенадцатого» / «двенадцатое число»;
+                 • 22-е число (`dayOfMonth = 22`) произноси строго «двадцать второго» / «двадцать второе число».
+               - Числа и даты в голосе и в тексте субтитров должны совпадать на 100%.
         """.trimIndent()
 
         return JSONObject().apply {
@@ -505,13 +514,14 @@ class DavidLiveSessionController(
         // User's live speech transcription
         val inputTranscription = serverContent.optJSONObject("inputTranscription")
             ?.optString("text")
-            ?.takeIf { it.isNotBlank() }
+            ?.takeIf { it.isNotEmpty() }
         if (inputTranscription != null) {
             if (pendingDavidTranscript.isNotEmpty()) {
                 recordTranscriptTurn(DavidLiveSpeaker.DAVID, pendingDavidTranscript.toString())
                 pendingDavidTranscript.clear()
+                hasOutputTranscriptionInCurrentTurn = false
             }
-            pendingUserTranscript.append(inputTranscription)
+            appendStreamingChunkPreservingSpaces(pendingUserTranscript, inputTranscription)
             val cleanedUserText = sanitizeSpokenSubtitle(pendingUserTranscript.toString())
             if (cleanedUserText.isNotBlank()) {
                 _liveSubtitle.value = cleanedUserText
@@ -521,13 +531,19 @@ class DavidLiveSessionController(
         // David's actual spoken voice transcription (outputTranscription)
         val outputTranscription = serverContent.optJSONObject("outputTranscription")
             ?.optString("text")
-            ?.takeIf { it.isNotBlank() }
+            ?.takeIf { it.isNotEmpty() }
         if (outputTranscription != null) {
             if (pendingUserTranscript.isNotEmpty()) {
                 recordTranscriptTurn(DavidLiveSpeaker.USER, pendingUserTranscript.toString())
                 pendingUserTranscript.clear()
             }
-            pendingDavidTranscript.append(outputTranscription)
+            // If modelTurn fallback text was buffered before outputTranscription arrived in this turn,
+            // replace it so the two channels never mix or duplicate numbers (e.g. "2" + "2" -> "22").
+            if (!hasOutputTranscriptionInCurrentTurn) {
+                pendingDavidTranscript.clear()
+                hasOutputTranscriptionInCurrentTurn = true
+            }
+            appendStreamingChunkPreservingSpaces(pendingDavidTranscript, outputTranscription)
             _connectionState.value = DavidLiveConnectionState.DAVID_SPEAKING
             val cleanedDavidText = sanitizeSpokenSubtitle(pendingDavidTranscript.toString())
             if (cleanedDavidText.isNotBlank()) {
@@ -545,13 +561,19 @@ class DavidLiveSessionController(
                 // send internal Chain-of-Thought reasoning in `modelTurn.parts[i].text` (often with `"thought": true`
                 // or English markdown headers like `**Crafting The Greeting**\nI'm working on...`),
                 // while the real Russian spoken response arrives via `serverContent.outputTranscription`.
-                // We must NEVER display internal thought parts in the user's subtitle bubble!
+                // We must NEVER display internal thought parts in the user's subtitle bubble, and never mix
+                // modelTurn text with outputTranscription in the same turn.
                 val isThoughtPart = isInternalThoughtPart(part)
                 val textPart = part.optString("text").takeIf { it.isNotBlank() }
-                if (!isThoughtPart && textPart != null && outputTranscription == null && ! part.has("inlineData")) {
+                if (!isThoughtPart &&
+                    textPart != null &&
+                    outputTranscription == null &&
+                    !hasOutputTranscriptionInCurrentTurn &&
+                    !part.has("inlineData")
+                ) {
                     val cleanedPart = sanitizeSpokenSubtitle(textPart)
                     if (cleanedPart.isNotBlank()) {
-                        pendingDavidTranscript.append(cleanedPart)
+                        appendDiscreteChunkWithSpace(pendingDavidTranscript, cleanedPart)
                         _liveSubtitle.value = sanitizeSpokenSubtitle(pendingDavidTranscript.toString())
                     }
                 }
@@ -589,6 +611,22 @@ class DavidLiveSessionController(
                 _liveSubtitle.value = "Говорите, я слушаю..."
             }
         }
+    }
+
+    private fun appendStreamingChunkPreservingSpaces(builder: StringBuilder, chunk: String) {
+        if (chunk.isEmpty()) return
+        builder.append(chunk)
+    }
+
+    private fun appendDiscreteChunkWithSpace(builder: StringBuilder, cleanedChunk: String) {
+        if (cleanedChunk.isEmpty()) return
+        if (builder.isNotEmpty() && !builder.last().isWhitespace() && !cleanedChunk.first().isWhitespace()) {
+            val firstChar = cleanedChunk.first()
+            if (firstChar !in listOf('.', ',', '!', '?', ':', ';', ')')) {
+                builder.append(' ')
+            }
+        }
+        builder.append(cleanedChunk)
     }
 
     /**
@@ -695,6 +733,7 @@ class DavidLiveSessionController(
             recordTranscriptTurn(DavidLiveSpeaker.DAVID, pendingDavidTranscript.toString())
             pendingDavidTranscript.clear()
         }
+        hasOutputTranscriptionInCurrentTurn = false
     }
 
     companion object {

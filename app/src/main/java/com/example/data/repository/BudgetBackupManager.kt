@@ -40,7 +40,8 @@ class BudgetBackupManager(
     private val allAccounts: Flow<List<AccountEntity>>,
     private val createProfile: suspend (String) -> BudgetProfileEntity,
     private val clearAllData: suspend () -> Unit,
-    private val initializeDefaultCategories: suspend (String) -> Unit
+    private val initializeDefaultCategories: suspend (String) -> Unit,
+    private val recurringPaymentDao: com.example.data.db.RecurringPaymentDao? = null
 ) {
     private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
     private val backupAdapter = moshi.adapter(BudgetBackup::class.java)
@@ -71,7 +72,34 @@ class BudgetBackupManager(
         } catch (_: Exception) {}
     }
 
+    suspend fun seedRealisticTestBudget2026(
+        budgetId: String = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID
+    ) = withContext(Dispatchers.IO) {
+        val dataset = com.example.data.safetospend.RealisticTestBudget2026Seeder.buildDataset(budgetId = budgetId)
+        transactionDao.deleteTransactionsByBudgetId(budgetId)
+        goalDao.deleteGoalsByBudgetId(budgetId)
+        categoryDao.deleteCategoriesByBudgetId(budgetId)
+        accountDao.deleteAccountsByBudgetId(budgetId)
+        recurringPaymentDao?.deleteExecutionLogsByBudgetId(budgetId)
+        recurringPaymentDao?.deleteRecurringPaymentsByBudgetId(budgetId)
+
+        accountDao.insertAccounts(dataset.accounts)
+        categoryDao.insertCategories(dataset.categories)
+        goalDao.insertGoals(dataset.goals)
+        transactionDao.insertTransactions(dataset.transactions)
+        if (recurringPaymentDao != null) {
+            recurringPaymentDao.insertRecurringPayments(dataset.recurringPayments)
+            dataset.executionLogs.forEach { log ->
+                recurringPaymentDao.insertExecutionLog(log)
+            }
+        }
+    }
+
     suspend fun loadDemoData(budgetId: String = "default") = withContext(Dispatchers.IO) {
+        if (budgetId == com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID) {
+            seedRealisticTestBudget2026(budgetId)
+            return@withContext
+        }
         try {
             val cal = Calendar.getInstance()
             val currentYear = cal.get(Calendar.YEAR)
