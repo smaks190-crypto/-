@@ -639,12 +639,33 @@ fun DavidLiveMeshSphereVisualizer(
             }
 
             else -> {
-                if (shouldApplyMutedVisualPalette(visualState, isMicMuted)) {
-                    CentralStatusBadge(
-                        badgeColor = MutedSlatePrimary,
-                        glowColor = MutedSlateGlow,
-                        icon = Icons.Default.MicOff,
-                        contentDescription = "Микрофон выключен"
+                // A compact microphone state indicator stays inside the sphere in both modes.
+                // The sphere itself remains the tap target, preserving existing mute callbacks.
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 68.dp, bottom = 68.dp)
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(ObsidianCoreDeep.copy(alpha = 0.92f))
+                        .border(
+                            width = 1.dp,
+                            color = if (isMicMuted) MutedSlatePrimary.copy(alpha = 0.86f)
+                            else animatedPrimaryColor.copy(alpha = 0.78f),
+                            shape = CircleShape
+                        )
+                        .testTag("david_live_sphere_mic_indicator"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isMicMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                        contentDescription = if (isMicMuted) {
+                            "Микрофон выключен"
+                        } else {
+                            "Микрофон включён"
+                        },
+                        tint = if (isMicMuted) MutedSlateSecondary else animatedPrimaryColor,
+                        modifier = Modifier.size(17.dp)
                     )
                 }
             }

@@ -352,6 +352,7 @@ class DavidLiveUiTest {
         assertEquals(DavidLiveVisualState.FINANCE_LOOKUP, selectedState)
         composeTestRule.onNodeWithTag("david_live_circular_visualizer").assertIsDisplayed()
         composeTestRule.onNodeWithTag("david_live_state_badge").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("david_live_sphere_mic_indicator").assertIsDisplayed()
     }
     @Test
     fun davidLiveSphereLongPressDragAttractsParticlesWithoutTriggeringTapAction() {
