@@ -26,6 +26,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.animateContentSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -1197,22 +1198,19 @@ fun DavidLiveSheet(
                                     .padding(horizontal = 16.dp, vertical = if (isEmbeddedInModalCard) 10.dp else 13.dp)
                                     .testTag("david_live_subtitle_bubble")
                             ) {
-                                AnimatedContent(
-                                    targetState = subtitleBubbleText,
-                                    transitionSpec = {
-                                        (slideInVertically(
-                                            initialOffsetY = { height -> height / 3 },
-                                            animationSpec = tween(220, easing = FastOutSlowInEasing)
-                                        ) + fadeIn(animationSpec = tween(220))) togetherWith
-                                            (slideOutVertically(
-                                                targetOffsetY = { height -> -height / 3 },
-                                                animationSpec = tween(170, easing = FastOutSlowInEasing)
-                                            ) + fadeOut(animationSpec = tween(170)))
-                                    },
-                                    label = "david_live_current_phrase"
-                                ) { currentPhrase ->
+                                // Keep the current text in place while streaming updates arrive.
+                                // Only the bubble's height animates; replacing the whole phrase with
+                                // AnimatedContent on every token caused visible flicker and jumps.
+                                Column(
+                                    modifier = Modifier.animateContentSize(
+                                        animationSpec = tween(
+                                            durationMillis = 260,
+                                            easing = FastOutSlowInEasing
+                                        )
+                                    )
+                                ) {
                                     Text(
-                                        text = currentPhrase,
+                                        text = subtitleBubbleText,
                                         color = when (effectiveVisualState) {
                                             DavidLiveVisualState.OFFLINE -> Color(0xFFFECACA)
                                             DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
