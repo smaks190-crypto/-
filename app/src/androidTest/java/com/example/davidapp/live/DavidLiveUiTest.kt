@@ -337,7 +337,9 @@ class DavidLiveUiTest {
             )
         }
 
-        // Переключаем в состояние FINANCE_LOOKUP через чип отладки
+        // Открываем отладочную панель переключения состояний и выбираем чип FINANCE_LOOKUP
+        composeTestRule.onNodeWithTag("david_live_debug_toggle_button").performClick()
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("david_live_debug_chip_FINANCE_LOOKUP").performClick()
         composeTestRule.waitForIdle()
 

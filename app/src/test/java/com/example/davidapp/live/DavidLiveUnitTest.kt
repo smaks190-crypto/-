@@ -1464,13 +1464,31 @@ class DavidLiveUnitTest {
         )
         assertEquals(DavidLiveVisualState.IDLE_LISTENING, idle)
 
-        // Debug override имеет приоритет над всеми событиями
+        // Debug override имеет приоритет над всеми событиями ТОЛЬКО в Debug-режиме
         val overridden = DavidLiveVisualStateResolver.resolve(
             connectionState = DavidLiveConnectionState.OFFLINE,
             activeSpeaker = DavidLiveSpeaker.NONE,
-            debugOverrideState = DavidLiveVisualState.FINANCE_LOOKUP
+            debugOverrideState = DavidLiveVisualState.FINANCE_LOOKUP,
+            isDebugModeEnabled = true
         )
         assertEquals(DavidLiveVisualState.FINANCE_LOOKUP, overridden)
+
+        // В Release-режиме (isDebugModeEnabled = false) debugOverrideState НЕ подменяет реальные состояния (Offline сохраняет приоритет)
+        val releaseNotOverridden = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.OFFLINE,
+            activeSpeaker = DavidLiveSpeaker.DAVID,
+            isToolLookupActive = true,
+            debugOverrideState = DavidLiveVisualState.FINANCE_LOOKUP,
+            isDebugModeEnabled = false
+        )
+        assertEquals(DavidLiveVisualState.OFFLINE, releaseNotOverridden)
+
+        // Все 13 состояний возвращают непустую пару цветов (Pair<Color, Color>) в resolveVisualStateColors
+        DavidLiveVisualState.values().forEach { state ->
+            val (primary, secondary) = resolveVisualStateColors(state, isMicMuted = false)
+            assertNotNull("Primary color must be defined for $state", primary)
+            assertNotNull("Secondary color must be defined for $state", secondary)
+        }
     }
 
     @Test

@@ -125,9 +125,10 @@ class DavidLiveSessionController(
 
     /**
      * Устанавливает или сбрасывает принудительное визуальное состояние для debug-режима и UI-тестов.
+     * В Release-сборках (`!BuildConfig.DEBUG`) принудительный override игнорируется, чтобы не подменять реальные состояния.
      */
     fun setDebugVisualStateOverride(overrideState: DavidLiveVisualState?) {
-        _debugOverrideVisualState.value = overrideState
+        _debugOverrideVisualState.value = if (com.example.BuildConfig.DEBUG) overrideState else null
         recomputeVisualState()
     }
 
@@ -171,7 +172,7 @@ class DavidLiveSessionController(
             isWithinDavidSpeechHold = audioEngine.isWithinDavidSpeechHold.value,
             isSuccessPulseActive = _isSuccessPulseActive.value,
             failureKind = _failureKind.value,
-            debugOverrideState = _debugOverrideVisualState.value
+            debugOverrideState = if (com.example.BuildConfig.DEBUG) _debugOverrideVisualState.value else null
         )
     }
 

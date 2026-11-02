@@ -155,9 +155,10 @@ object DavidLiveVisualStateResolver {
          isWithinDavidSpeechHold: Boolean = false,
         isSuccessPulseActive: Boolean = false,
         failureKind: DavidLiveConnectionFailureKind = DavidLiveConnectionFailureKind.NONE,
-        debugOverrideState: DavidLiveVisualState? = null
+        debugOverrideState: DavidLiveVisualState? = null,
+        isDebugModeEnabled: Boolean = com.example.BuildConfig.DEBUG
     ): DavidLiveVisualState {
-        if (debugOverrideState != null) {
+        if (isDebugModeEnabled && debugOverrideState != null) {
             return debugOverrideState
         }
 

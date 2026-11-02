@@ -71,11 +71,14 @@
 - `app/src/test/java/com/example/davidapp/live/DavidLiveUnitTest.kt`
 - `app/src/androidTest/java/com/example/davidapp/live/DavidLiveUiTest.kt`
 
-## 4. Состояние Git и ограничения среды
+## 4. Состояние Git и CI/CD (PR #84)
 - **Рабочая ветка**: `feat/issue-56-david-live-mesh-visualizer`
-- **Commit SHA**: `ac52177` (включает исправления метаданных `liveSubtitle` и обновлённый `DavidLiveUnitTest`)
-- **Сетевое ограничение**: Исходящий сетевой прокси песочницы Google AI Studio настроен только на `authorization` и `generativelanguage.googleapis.com`. Доступ к `github.com` заблокирован (HTTP 403 Forbidden). Поэтому push и создание PR должны быть выполнены владельцем репозитория из ветки `feat/issue-56-david-live-mesh-visualizer`.
-- **Локальная среда**: Java / Gradle не установлены в образе песочницы, поэтому сборка APK и запуск Robolectric производятся в стандартном workflow GitHub Actions (`.github/workflows/build.yml`).
+- **Pull Request**: [#84 (`https://github.com/smaks190-crypto/-/pull/84`)](https://github.com/smaks190-crypto/-/pull/84)
+- **Базовый коммит кода в PR #84**: `2cc202aad71ab7bd87a250a1d88edaadc4e6fc0f`
+- **Исправлено в PR #84 (после Run #319)**:
+  - Реализована функция `resolveVisualStateColors(visualState: DavidLiveVisualState, isMicMuted: Boolean): Pair<Color, Color>` в `DavidLiveSheet.kt` для всех 13 визуальных состояний (устраняет `Unresolved reference: resolveVisualStateColors` на строках 239, 366, 713, 1528 и каскадные ошибки деструктуризации `component1`/`component2`/`copy`);
+  - Добавлена строгая защита `isDebugModeEnabled = BuildConfig.DEBUG` в `DavidLiveVisualStateResolver.resolve`, `DavidLiveSessionController` и `DavidLiveSheet`, чтобы `debugOverrideState` никогда не подменял реальные состояния (включая приоритетный `OFFLINE`) в Release-сборках;
+  - В `.github/workflows/build.yml` добавлен автоматический запуск `gradle testDebugUnitTest compileDebugAndroidTestKotlin` для всех PR и ручных сборок.
 
 ## 5. Инструкция для ручной проверки на устройстве
 1. **Ожидание (Idle / Listening)**:

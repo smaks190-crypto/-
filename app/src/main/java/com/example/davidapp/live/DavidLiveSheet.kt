@@ -184,6 +184,37 @@ private fun resolveVisualStateIcon(visualState: DavidLiveVisualState, isMicMuted
 }
 
 /**
+ * Resolves the primary and secondary accent colors (`Pair<Color, Color>`) for all 13
+ * [DavidLiveVisualState] states across the full-screen sheet, compact capsule, and debug strip.
+ */
+internal fun resolveVisualStateColors(
+    visualState: DavidLiveVisualState,
+    isMicMuted: Boolean = false
+): Pair<Color, Color> {
+    return when (visualState) {
+        DavidLiveVisualState.IDLE_LISTENING -> {
+            if (isMicMuted) {
+                ErrorCrimson to IdleWaveSlate
+            } else {
+                EmeraldStatus to PeakMintWave
+            }
+        }
+        DavidLiveVisualState.USER_SPEAKING -> TurquoiseUser to CyanSpeaking
+        DavidLiveVisualState.THINKING -> CyanSpeaking to TurquoiseUser
+        DavidLiveVisualState.FINANCE_LOOKUP -> PeakMintWave to TurquoiseUser
+        DavidLiveVisualState.ANALYZING -> CyanSpeaking to EmeraldStatus
+        DavidLiveVisualState.PREPARING_RESPONSE -> TurquoiseUser to EmeraldStatus
+        DavidLiveVisualState.DAVID_SPEAKING -> EmeraldStatus to TurquoiseUser
+        DavidLiveVisualState.CONNECTING -> CyanSpeaking to TurquoiseUser
+        DavidLiveVisualState.RECONNECTING -> CyanSpeaking to TurquoiseUser
+        DavidLiveVisualState.OFFLINE -> ErrorCrimson to Color(0xFFF87171)
+        DavidLiveVisualState.API_MISSING -> GoldApiMissing to Color(0xFFFBBF24)
+        DavidLiveVisualState.ERROR -> PurpleCriticalError to Color(0xFFC084FC)
+        DavidLiveVisualState.SUCCESS -> GreenSuccess to PeakMintWave
+    }
+}
+
+/**
  * Horizontal multi-band spectral wave visualizer for the David Live morphing transition
  * and compact bottom voice capsule (`DavidLiveMinimizedCapsule`).
  */
@@ -659,7 +690,11 @@ fun DavidLiveSheet(
 
     // Local fallback override when tested standalone in Compose UI tests without a controller callback
     var localDebugOverride by remember { mutableStateOf<DavidLiveVisualState?>(null) }
-    val activeDebugOverride = debugOverrideVisualState ?: localDebugOverride
+    val activeDebugOverride = if (enableDebugStateSwitcher) {
+        debugOverrideVisualState ?: localDebugOverride
+    } else {
+        null
+    }
     var isDebugBarExpanded by remember { mutableStateOf(false) }
 
     val effectiveVisualState = remember(
