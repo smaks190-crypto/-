@@ -169,7 +169,8 @@ fun DavidChatScreen(
         }
     }
 
-    LaunchedEffect(messages.size, messages.lastOrNull()?.id, isTyping, stage) {
+    val lastMessageTextContent = (messages.lastOrNull()?.type as? ChatMessageType.Text)?.content
+    LaunchedEffect(messages.size, messages.lastOrNull()?.id, lastMessageTextContent, isTyping, stage) {
         if (messages.isNotEmpty()) {
             val totalItems = messages.size + if (isTyping) 1 else 0
             listState.animateScrollToItem(totalItems)

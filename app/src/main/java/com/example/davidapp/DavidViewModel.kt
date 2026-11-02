@@ -95,7 +95,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         },
         externalUserMessagesProvider = {
             sessionMessages
-                .filter { it.isUser }
+                .filter { it.isUser && !it.id.startsWith(LIVE_CHAT_MSG_PREFIX) }
                 .mapNotNull { msg -> (msg.type as? ChatMessageType.Text)?.content }
         }
     )
@@ -129,6 +129,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     val liveFailureKind: StateFlow<DavidLiveConnectionFailureKind> = liveSessionController.failureKind
     val liveActiveToolName: StateFlow<String?> = liveSessionController.activeToolName
     val liveDebugOverrideVisualState: StateFlow<DavidLiveVisualState?> = liveSessionController.debugOverrideVisualState
+    val liveTranscriptTurns: StateFlow<List<DavidLiveTranscriptTurn>> = liveSessionController.liveTranscriptTurns
 
     private val prefs: SharedPreferences =
         application.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
@@ -146,11 +147,15 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     private var notificationsJob: Job? = null
     private var currentNotifications: List<NotificationEntity> = emptyList()
     private val sessionMessages = mutableListOf<ChatMessage>()
+    private val activeLiveSessionChatMsgIds = mutableSetOf<String>()
 
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val isoFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
     init {
+        liveSessionController.onTranscriptTurnsChanged = { turns ->
+            syncLiveTranscriptTurnsToChat(turns)
+        }
         val migratedKey = resolveAndMigrateApiKey(
             legacyPrefs = prefs,
             securePrefs = obtainSecurePrefs()
@@ -176,6 +181,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
         if (isDifferentBudget || notificationsJob == null) {
             sessionMessages.clear()
+            activeLiveSessionChatMsgIds.clear()
             _stage.value = DavidStage.INITIAL
             observeNotifications()
         }
@@ -859,6 +865,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     fun resetSession(soundManager: SoundManager? = null) {
         soundManager?.playClick()
         sessionMessages.clear()
+        activeLiveSessionChatMsgIds.clear()
         _stage.value = DavidStage.INITIAL
         rebuildChronologicalMessages()
     }
@@ -878,6 +885,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
             expandDavidLive()
             return
         }
+        activeLiveSessionChatMsgIds.clear()
         if (activeAssistantAudioFocusRequest == null) {
             activeAssistantAudioFocusRequest =
                 DavidLiveAudioEngine.requestAssistantAudioFocus(getApplication())
@@ -948,17 +956,81 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         processCompletedLiveSession(turns, facts, soundManager)
     }
 
+    internal fun syncLiveTranscriptTurnsToChat(turns: List<DavidLiveTranscriptTurn>) {
+        if (turns.isEmpty() && activeLiveSessionChatMsgIds.isEmpty()) return
+        var modified = false
+        val currentTurnMsgIds = HashSet<String>(turns.size)
+
+        for (turn in turns) {
+            val cleanedText = turn.text.trim()
+            if (cleanedText.isBlank()) continue
+            val msgId = "$LIVE_CHAT_MSG_PREFIX${turn.id}"
+            currentTurnMsgIds.add(msgId)
+            activeLiveSessionChatMsgIds.add(msgId)
+
+            val isUser = turn.speaker == DavidLiveSpeaker.USER
+            val senderName = if (isUser) currentProfileName else "Давид Жабов 🐸"
+            val formattedTime = timeFormat.format(Date(turn.timestampMs))
+
+            val existingIndex = sessionMessages.indexOfFirst { it.id == msgId }
+            if (existingIndex >= 0) {
+                val existing = sessionMessages[existingIndex]
+                val existingText = (existing.type as? ChatMessageType.Text)?.content
+                if (existingText != cleanedText || existing.sender != senderName || existing.isUser != isUser) {
+                    sessionMessages[existingIndex] = existing.copy(
+                        sender = senderName,
+                        type = ChatMessageType.Text(cleanedText),
+                        isUser = isUser
+                    )
+                    modified = true
+                }
+            } else {
+                sessionMessages.add(
+                    ChatMessage(
+                        id = msgId,
+                        sender = senderName,
+                        type = ChatMessageType.Text(cleanedText),
+                        timestamp = formattedTime,
+                        isUser = isUser,
+                        timestampMillis = turn.timestampMs
+                    )
+                )
+                modified = true
+            }
+        }
+
+        val obsoleteIds = activeLiveSessionChatMsgIds.filter { it !in currentTurnMsgIds }
+        if (obsoleteIds.isNotEmpty()) {
+            val obsoleteSet = obsoleteIds.toSet()
+            if (sessionMessages.removeAll { it.id in obsoleteSet }) {
+                modified = true
+            }
+            activeLiveSessionChatMsgIds.removeAll(obsoleteSet)
+        }
+
+        if (modified) {
+            rebuildChronologicalMessages()
+        }
+    }
+
     internal fun processCompletedLiveSession(
         turns: List<DavidLiveTranscriptTurn>,
         facts: List<DavidLiveToolFact>,
         soundManager: SoundManager? = null
     ) {
+        if (turns.isNotEmpty()) {
+            syncLiveTranscriptTurnsToChat(turns)
+        }
+        activeLiveSessionChatMsgIds.clear()
+
         if (!liveSummaryGenerator.hasEnoughSubstanceForSummary(turns, facts)) {
-            // Слишком короткий или пустой вызов — завершаем аккуратно без засорения чата резюме
+            // Слишком короткий или пустой вызов — реплики диалога сохранены в чате, карточку резюме пропускаем
             return
         }
 
-        val summaryMsgId = "live_summary_${System.currentTimeMillis()}"
+        val lastTurnTs = turns.maxOfOrNull { it.timestampMs } ?: 0L
+        val summaryTimestampMs = maxOf(System.currentTimeMillis(), lastTurnTs + 1L)
+        val summaryMsgId = "live_summary_$summaryTimestampMs"
         val loadingMsg = ChatMessage(
             id = summaryMsgId,
             sender = "Давид Жабов 🐸",
@@ -971,7 +1043,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
             ),
             timestamp = currentTime(),
             isUser = false,
-            timestampMillis = System.currentTimeMillis()
+            timestampMillis = summaryTimestampMs
         )
         addSessionMessage(loadingMsg)
 
@@ -1077,6 +1149,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
+        internal const val LIVE_CHAT_MSG_PREFIX = "live_chat_"
         internal const val LEGACY_PREFS_NAME = "budget_prefs"
         internal const val SECURE_PREFS_NAME = "secure_prefs"
         internal const val KEY_GEMINI_API = "gemini_api_key"

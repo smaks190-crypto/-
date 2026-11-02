@@ -2304,6 +2304,78 @@ class DavidLiveUnitTest {
         assertTrue(isDefaultStatusSubtitlePlaceholder("Слушаю..."))
         assertFalse(isDefaultStatusSubtitlePlaceholder("Записал расход 450 рублей в категорию кафе."))
     }
+
+    @Test
+    fun `david live conversation duplicates user and david turns into chat in real time and preserves them after session ends`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val mirroredSnapshots = mutableListOf<List<DavidLiveTranscriptTurn>>()
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+        controller.onTranscriptTurnsChanged = { turns ->
+            mirroredSnapshots.add(turns)
+        }
+
+        // 1. Пользователь произносит фразу по частям (streaming inputTranscription)
+        controller.handleIncomingServerJson(
+            """{"serverContent":{"inputTranscription":{"text":"Давид, запиши кофе "}}}"""
+        )
+        assertTrue("Streaming user turn must be emitted immediately", controller.liveTranscriptTurns.value.isNotEmpty())
+        assertEquals(1, controller.liveTranscriptTurns.value.size)
+        assertEquals(DavidLiveSpeaker.USER, controller.liveTranscriptTurns.value[0].speaker)
+        assertEquals("Давид, запиши кофе", controller.liveTranscriptTurns.value[0].text)
+        assertFalse("Streaming user turn is not final yet", controller.liveTranscriptTurns.value[0].isFinal)
+        val firstUserTurnId = controller.liveTranscriptTurns.value[0].id
+
+        controller.handleIncomingServerJson(
+            """{"serverContent":{"inputTranscription":{"text":"за 350 рублей"}}}"""
+        )
+        assertEquals(1, controller.liveTranscriptTurns.value.size)
+        assertEquals(
+            "Streaming user turn must update in-place with the same turn id",
+            firstUserTurnId,
+            controller.liveTranscriptTurns.value[0].id
+        )
+        assertEquals("Давид, запиши кофе за 350 рублей", controller.liveTranscriptTurns.value[0].text)
+
+        // 2. Давид начинает отвечать — реплика пользователя фиксируется (isFinal = true), а реплика Давида стримится с единым ID
+        controller.handleIncomingServerJson(
+            """{"serverContent":{"outputTranscription":{"text":"Записал 350 рублей "}}}"""
+        )
+        assertEquals(2, controller.liveTranscriptTurns.value.size)
+        assertTrue("User turn must become final when David starts speaking", controller.liveTranscriptTurns.value[0].isFinal)
+        assertEquals(firstUserTurnId, controller.liveTranscriptTurns.value[0].id)
+        assertEquals(DavidLiveSpeaker.DAVID, controller.liveTranscriptTurns.value[1].speaker)
+        assertEquals("Записал 350 рублей", controller.liveTranscriptTurns.value[1].text)
+        assertFalse(controller.liveTranscriptTurns.value[1].isFinal)
+        val firstDavidTurnId = controller.liveTranscriptTurns.value[1].id
+
+        controller.handleIncomingServerJson(
+            """{"serverContent":{"outputTranscription":{"text":"в категорию Кафе!"},"turnComplete":true}}"""
+        )
+        assertEquals(2, controller.liveTranscriptTurns.value.size)
+        assertEquals(
+            "David turn must keep the same ID when finalized on turnComplete",
+            firstDavidTurnId,
+            controller.liveTranscriptTurns.value[1].id
+        )
+        assertEquals("Записал 350 рублей в категорию Кафе!", controller.liveTranscriptTurns.value[1].text)
+        assertTrue("David turn must be marked final on turnComplete", controller.liveTranscriptTurns.value[1].isFinal)
+
+        // 3. При завершении сессии обе реплики (пользователя и Давида) возвращаются с теми же стабильными ID и хронологией
+        val (completedTurns, _) = controller.endSession()
+        assertEquals(2, completedTurns.size)
+        assertEquals(firstUserTurnId, completedTurns[0].id)
+        assertEquals("Давид, запиши кофе за 350 рублей", completedTurns[0].text)
+        assertEquals(firstDavidTurnId, completedTurns[1].id)
+        assertEquals("Записал 350 рублей в категорию Кафе!", completedTurns[1].text)
+        assertTrue(completedTurns[0].timestampMs < completedTurns[1].timestampMs)
+        assertTrue("onTranscriptTurnsChanged listener must have been notified during the call", mirroredSnapshots.size >= 4)
+    }
 }
 
 

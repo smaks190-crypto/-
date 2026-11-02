@@ -18,6 +18,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Manages the official Gemini Live API (`BidiGenerateContent`) WebSocket session,
@@ -90,6 +91,18 @@ class DavidLiveSessionController(
     private val _transcriptTurns = mutableListOf<DavidLiveTranscriptTurn>()
     val transcriptTurns: List<DavidLiveTranscriptTurn>
         get() = synchronized(_transcriptTurns) { _transcriptTurns.toList() }
+
+    private val _liveTranscriptTurns = MutableStateFlow<List<DavidLiveTranscriptTurn>>(emptyList())
+    val liveTranscriptTurns: StateFlow<List<DavidLiveTranscriptTurn>> = _liveTranscriptTurns.asStateFlow()
+
+    var onTranscriptTurnsChanged: ((List<DavidLiveTranscriptTurn>) -> Unit)? = null
+
+    private val liveSessionEpoch = AtomicInteger(0)
+    private val liveTurnSequence = AtomicInteger(0)
+    private var activePendingUserTurnId: String? = null
+    private var activePendingUserTurnTimestampMs: Long = 0L
+    private var activePendingDavidTurnId: String? = null
+    private var activePendingDavidTurnTimestampMs: Long = 0L
 
     private val pendingUserTranscript = StringBuilder()
     private val pendingDavidTranscript = StringBuilder()
@@ -256,14 +269,20 @@ class DavidLiveSessionController(
         _startSessionCount++
         currentApiKey = userApiKey!!.trim()
         modelAttemptIndex = 0
+        liveSessionEpoch.incrementAndGet()
         synchronized(_transcriptTurns) {
             _transcriptTurns.clear()
+            activePendingUserTurnId = null
+            activePendingUserTurnTimestampMs = 0L
+            activePendingDavidTurnId = null
+            activePendingDavidTurnTimestampMs = 0L
         }
         pendingUserTranscript.clear()
         pendingDavidTranscript.clear()
         speechSyncTracker.reset()
         pendingServerTurnComplete.set(false)
         audioEngine.resetDavidTurnSampleCounters()
+        publishLiveTranscriptTurns()
         financialToolsProvider.clearVerifiedFacts()
         resetProcessingFlags()
         _failureKind.value = DavidLiveConnectionFailureKind.NONE
@@ -354,24 +373,43 @@ class DavidLiveSessionController(
     /**
      * Appends a transcript turn (also accessible for unit/UI tests to verify summary generation).
      */
-    fun recordTranscriptTurn(speaker: DavidLiveSpeaker, text: String) {
+    fun recordTranscriptTurn(
+        speaker: DavidLiveSpeaker,
+        text: String,
+        explicitId: String? = null,
+        explicitTimestampMs: Long? = null
+    ) {
         val clean = sanitizeSpokenSubtitle(text)
-        if (clean.isEmpty()) return
+        if (clean.isEmpty()) {
+            publishLiveTranscriptTurns()
+            return
+        }
+        val now = System.currentTimeMillis()
         synchronized(_transcriptTurns) {
             val last = _transcriptTurns.lastOrNull()
-            if (last != null && last.speaker == speaker && System.currentTimeMillis() - last.timestampMs < 3500L) {
+            if (last != null && last.speaker == speaker && now - last.timestampMs < 3500L) {
                 _transcriptTurns[_transcriptTurns.lastIndex] = last.copy(
-                    text = "${last.text} $clean".trim()
+                    text = "${last.text} $clean".trim(),
+                    isFinal = true
                 )
             } else {
+                val prevTs = last?.timestampMs ?: 0L
+                val resolvedId = explicitId
+                    ?: "live_turn_${liveSessionEpoch.get()}_${liveTurnSequence.incrementAndGet()}_${speaker.name.lowercase()}"
+                val resolvedTs = explicitTimestampMs?.takeIf { it > prevTs }
+                    ?: maxOf(now, prevTs + 1L)
                 _transcriptTurns.add(
                     DavidLiveTranscriptTurn(
+                        id = resolvedId,
                         speaker = speaker,
-                        text = clean
+                        text = clean,
+                        timestampMs = resolvedTs,
+                        isFinal = true
                     )
                 )
             }
         }
+        publishLiveTranscriptTurns()
     }
 
     /**
@@ -758,8 +796,7 @@ class DavidLiveSessionController(
             ?.takeIf { it.isNotBlank() }
         if (inputTranscription != null) {
             if (pendingDavidTranscript.isNotEmpty()) {
-                recordTranscriptTurn(DavidLiveSpeaker.DAVID, pendingDavidTranscript.toString())
-                pendingDavidTranscript.clear()
+                commitPendingDavidTranscript()
                 speechSyncTracker.reset()
                 pendingServerTurnComplete.set(false)
                 audioEngine.resetDavidTurnSampleCounters()
@@ -769,6 +806,7 @@ class DavidLiveSessionController(
             if (cleanedUserText.isNotBlank()) {
                 _liveSubtitle.value = cleanedUserText
             }
+            publishLiveTranscriptTurns()
             // Как только пользователь произнёс фразу, если не идёт поиск/речь Давида — активируем готовность к размышлению
             if (!_isToolLookupActive.value && !_isAnalyzingToolData.value) {
                 _isModelThinking.value = true
@@ -782,8 +820,7 @@ class DavidLiveSessionController(
             ?.takeIf { it.isNotBlank() }
         if (outputTranscription != null) {
             if (pendingUserTranscript.isNotEmpty()) {
-                recordTranscriptTurn(DavidLiveSpeaker.USER, pendingUserTranscript.toString())
-                pendingUserTranscript.clear()
+                commitPendingUserTranscript()
             }
             // Если предыдущая реплика Давида уже получила turnComplete и полностью отыграла, начинаем новую
             if (pendingServerTurnComplete.get() && audioEngine.isPlaybackCurrentlyDrained()) {
@@ -839,6 +876,9 @@ class DavidLiveSessionController(
                 if (!isThoughtPart && textPart != null && outputTranscription == null && !part.has("inlineData")) {
                     val cleanedPart = sanitizeSpokenSubtitle(textPart)
                     if (cleanedPart.isNotBlank()) {
+                        if (pendingUserTranscript.isNotEmpty()) {
+                            commitPendingUserTranscript()
+                        }
                         pendingDavidTranscript.append(cleanedPart)
                         val fullCleaned = sanitizeSpokenSubtitle(pendingDavidTranscript.toString())
                         speechSyncTracker.updateTranscript(
@@ -861,8 +901,7 @@ class DavidLiveSessionController(
                         }
                         if (pcmBytes != null && pcmBytes.isNotEmpty()) {
                             if (pendingUserTranscript.isNotEmpty()) {
-                                recordTranscriptTurn(DavidLiveSpeaker.USER, pendingUserTranscript.toString())
-                                pendingUserTranscript.clear()
+                                commitPendingUserTranscript()
                             }
                             _isToolLookupActive.value = false
                             _activeToolName.value = null
@@ -921,6 +960,7 @@ class DavidLiveSessionController(
 
         if (!shouldUseAudioSyncedSubtitles()) {
             _liveSubtitle.value = fullCleaned
+            publishLiveTranscriptTurns()
             return
         }
 
@@ -943,6 +983,7 @@ class DavidLiveSessionController(
             // Пока первые ~50 мс голоса Давида ещё находятся в буфере DAC, не показываем будущие слова заранее
             _liveSubtitle.value = "Давид отвечает..."
         }
+        publishLiveTranscriptTurns()
     }
 
     /**
@@ -1062,18 +1103,154 @@ class DavidLiveSessionController(
         )
     }
 
+    private fun commitPendingUserTranscript() {
+        val raw = pendingUserTranscript.toString()
+        val turnId = activePendingUserTurnId
+        val turnTs = activePendingUserTurnTimestampMs.takeIf { it > 0L }
+        pendingUserTranscript.clear()
+        activePendingUserTurnId = null
+        activePendingUserTurnTimestampMs = 0L
+        if (raw.isNotEmpty()) {
+            recordTranscriptTurn(
+                speaker = DavidLiveSpeaker.USER,
+                text = raw,
+                explicitId = turnId,
+                explicitTimestampMs = turnTs
+            )
+        } else {
+            publishLiveTranscriptTurns()
+        }
+    }
+
+    private fun commitPendingDavidTranscript() {
+        val raw = pendingDavidTranscript.toString()
+        val turnId = activePendingDavidTurnId
+        val turnTs = activePendingDavidTurnTimestampMs.takeIf { it > 0L }
+        pendingDavidTranscript.clear()
+        activePendingDavidTurnId = null
+        activePendingDavidTurnTimestampMs = 0L
+        if (raw.isNotEmpty()) {
+            recordTranscriptTurn(
+                speaker = DavidLiveSpeaker.DAVID,
+                text = raw,
+                explicitId = turnId,
+                explicitTimestampMs = turnTs
+            )
+        } else {
+            publishLiveTranscriptTurns()
+        }
+    }
+
     private fun flushPendingTranscripts() {
         if (pendingUserTranscript.isNotEmpty()) {
-            recordTranscriptTurn(DavidLiveSpeaker.USER, pendingUserTranscript.toString())
-            pendingUserTranscript.clear()
+            commitPendingUserTranscript()
         }
         if (pendingDavidTranscript.isNotEmpty()) {
-            recordTranscriptTurn(DavidLiveSpeaker.DAVID, pendingDavidTranscript.toString())
-            pendingDavidTranscript.clear()
+            commitPendingDavidTranscript()
         }
         speechSyncTracker.reset()
         pendingServerTurnComplete.set(false)
         audioEngine.resetDavidTurnSampleCounters()
+        publishLiveTranscriptTurns()
+    }
+
+    /**
+     * Формирует и публикует актуальный список реплик текущей сессии David Live
+     * (включая как завершённые реплики `isFinal = true`, так и текущую произносимую реплику `isFinal = false`),
+     * чтобы чат Давида в реальном времени дублировал разговор и сохранял всю историю после звонка.
+     */
+    internal fun publishLiveTranscriptTurns() {
+        val snapshot = synchronized(_transcriptTurns) {
+            val list = ArrayList<DavidLiveTranscriptTurn>(_transcriptTurns.size + 2)
+            list.addAll(_transcriptTurns)
+            val now = System.currentTimeMillis()
+
+            val cleanPendingUser = sanitizeSpokenSubtitle(pendingUserTranscript.toString())
+            if (cleanPendingUser.isNotBlank()) {
+                val lastFinal = list.lastOrNull()
+                if (lastFinal != null &&
+                    lastFinal.speaker == DavidLiveSpeaker.USER &&
+                    now - lastFinal.timestampMs < 3500L
+                ) {
+                    list[list.lastIndex] = lastFinal.copy(
+                        text = "${lastFinal.text} $cleanPendingUser".trim(),
+                        isFinal = false
+                    )
+                } else {
+                    val prevTs = lastFinal?.timestampMs ?: 0L
+                    val userId = activePendingUserTurnId ?: run {
+                        "live_turn_${liveSessionEpoch.get()}_${liveTurnSequence.incrementAndGet()}_user".also {
+                            activePendingUserTurnId = it
+                        }
+                    }
+                    val userTs = activePendingUserTurnTimestampMs.takeIf { it > prevTs } ?: run {
+                        maxOf(now, prevTs + 1L).also {
+                            activePendingUserTurnTimestampMs = it
+                        }
+                    }
+                    list.add(
+                        DavidLiveTranscriptTurn(
+                            id = userId,
+                            speaker = DavidLiveSpeaker.USER,
+                            text = cleanPendingUser,
+                            timestampMs = userTs,
+                            isFinal = false
+                        )
+                    )
+                }
+            }
+
+            val cleanPendingDavid = sanitizeSpokenSubtitle(pendingDavidTranscript.toString())
+            if (cleanPendingDavid.isNotBlank()) {
+                val visibleDavidText = if (shouldUseAudioSyncedSubtitles()) {
+                    val forceAll = pendingServerTurnComplete.get() &&
+                        (audioEngine.isPlaybackCurrentlyDrained() || audioEngine.enqueuedDavidTurnSamples.value == 0L)
+                    speechSyncTracker.resolveVisibleSubtitle(
+                        audibleSamples24k = audioEngine.audibleDavidTurnSamples.value,
+                        forceRevealAll = forceAll
+                    )
+                } else {
+                    cleanPendingDavid
+                }
+                if (visibleDavidText.isNotBlank()) {
+                    val lastItem = list.lastOrNull()
+                    if (lastItem != null &&
+                        lastItem.speaker == DavidLiveSpeaker.DAVID &&
+                        lastItem.isFinal &&
+                        now - lastItem.timestampMs < 3500L
+                    ) {
+                        list[list.lastIndex] = lastItem.copy(
+                            text = "${lastItem.text} $visibleDavidText".trim(),
+                            isFinal = false
+                        )
+                    } else {
+                        val prevTs = lastItem?.timestampMs ?: 0L
+                        val davidId = activePendingDavidTurnId ?: run {
+                            "live_turn_${liveSessionEpoch.get()}_${liveTurnSequence.incrementAndGet()}_david".also {
+                                activePendingDavidTurnId = it
+                            }
+                        }
+                        val davidTs = activePendingDavidTurnTimestampMs.takeIf { it > prevTs } ?: run {
+                            maxOf(now, prevTs + 1L).also {
+                                activePendingDavidTurnTimestampMs = it
+                            }
+                        }
+                        list.add(
+                            DavidLiveTranscriptTurn(
+                                id = davidId,
+                                speaker = DavidLiveSpeaker.DAVID,
+                                text = visibleDavidText,
+                                timestampMs = davidTs,
+                                isFinal = false
+                            )
+                        )
+                    }
+                }
+            }
+            list.toList()
+        }
+        _liveTranscriptTurns.value = snapshot
+        onTranscriptTurnsChanged?.invoke(snapshot)
     }
 
     companion object {
