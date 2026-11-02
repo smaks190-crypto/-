@@ -2342,7 +2342,7 @@ class DavidLiveUnitTest {
         engine.setExternalHeadsetConnectedForTest(false)
         engine.setSpeakerVolumeRatioForTest(0.85f)
 
-        var nowMs = 500_000L
+        var nowMs = System.currentTimeMillis()
         val pcmBytes24k = ByteArray(4800) { idx -> if (idx % 2 == 0) 0x24 else 0x12 }
         val b64Audio = android.util.Base64.encodeToString(pcmBytes24k, android.util.Base64.NO_WRAP)
 

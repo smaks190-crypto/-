@@ -83,7 +83,7 @@ class DavidLiveAudioEngine(
     private val activePlaybackWindowInProgress = AtomicBoolean(false)
     private val queuedPlaybackSamples = AtomicLong(0L)
     private val postBargeInForwardUntilEpochMs = AtomicLong(0L)
-    private val preBargeInRingBuffer = ArrayDeque<ShortArray>(PRE_BARGE_IN_RING_MAX_FRAMES)
+    private val preBargeInRingBuffer = mutableListOf<ShortArray>()
     private val preBargeInRingLock = Any()
     private val estimatedEchoCouplingBits = AtomicInteger(floatToIntBits(DEFAULT_ECHO_COUPLING_RATIO))
 
@@ -357,10 +357,10 @@ class DavidLiveAudioEngine(
         if (count <= 0) return
         val copy = pcmSamples.copyOf(count)
         synchronized(preBargeInRingLock) {
-            if (preBargeInRingBuffer.size >= PRE_BARGE_IN_RING_MAX_FRAMES) {
-                preBargeInRingBuffer.removeFirst()
+            while (preBargeInRingBuffer.size >= PRE_BARGE_IN_RING_MAX_FRAMES) {
+                preBargeInRingBuffer.removeAt(0)
             }
-            preBargeInRingBuffer.addLast(copy)
+            preBargeInRingBuffer.add(copy)
         }
     }
 
@@ -378,11 +378,11 @@ class DavidLiveAudioEngine(
             val priorFrames = if (buffered.size > 1) buffered.dropLast(1) else emptyList()
             if (priorFrames.isEmpty()) return emptyList()
             val silenceLen = currentFrameSampleCount.coerceAtLeast(1024)
-            return buildList(priorFrames.size + 2) {
-                add(ShortArray(silenceLen))
-                add(ShortArray(silenceLen))
-                addAll(priorFrames)
-            }
+            val result = ArrayList<ShortArray>(priorFrames.size + 2)
+            result.add(ShortArray(silenceLen))
+            result.add(ShortArray(silenceLen))
+            result.addAll(priorFrames)
+            return result
         }
     }
 
@@ -1121,7 +1121,8 @@ class DavidLiveAudioEngine(
                         val len = (samples.size - offset).coerceAtMost(step)
                         val window = samples.copyOfRange(offset, offset + len)
                         if (!isRunning.get() || generation != playbackGeneration.get()) break
-                        val writeStartMs = System.currentTimeMillis()
+                        val wallStartMs = System.currentTimeMillis()
+                        val writeStartMs = maxOf(wallStartMs, lastOutputChunkTimestamp.get())
                         val remainingInChunk = (samples.size - offset).coerceAtLeast(window.size).toLong()
                         val totalRemainingSamples = maxOf(remainingInChunk, queuedPlaybackSamples.get())
                         val remainingChunkMs = ((totalRemainingSamples * 1000L) / OUTPUT_SAMPLE_RATE_HZ).coerceAtLeast(16L)
@@ -1145,7 +1146,7 @@ class DavidLiveAudioEngine(
                         }
                         queuedPlaybackSamples.updateAndGet { maxOf(0L, it - len.toLong()) }
                         val windowDurationMs = ((window.size * 1000L) / OUTPUT_SAMPLE_RATE_HZ).coerceAtLeast(16L)
-                        val writeElapsedMs = System.currentTimeMillis() - writeStartMs
+                        val writeElapsedMs = System.currentTimeMillis() - wallStartMs
                         if (writeElapsedMs + 6L < windowDurationMs &&
                             generation == playbackGeneration.get() &&
                             isRunning.get()
