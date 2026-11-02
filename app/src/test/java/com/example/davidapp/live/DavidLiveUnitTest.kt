@@ -2206,6 +2206,85 @@ class DavidLiveUnitTest {
             controller.transcriptTurns.first().text
         )
     }
+
+    @Test
+    fun `david live horizontal wave visualizer responds vividly to conversational user microphone levels and preserves spoken slot snapshots`() {
+        val analyzer = DavidLiveSpectrumAnalyzer()
+        // Имитируем реальный тихий сигнал микрофона после аппаратного шумоподавления VOICE_COMMUNICATION (RMS ~ 0.032, 320 Гц голос)
+        val rawMicSamples = ShortArray(512) { idx ->
+            val t = idx.toDouble() / 16_000.0
+            (kotlin.math.sin(2.0 * Math.PI * 320.0 * t) * 1450.0).toInt().toShort()
+        }
+        val rawRms = analyzer.computeNormalizedRms(rawMicSamples, rawMicSamples.size)
+        assertTrue("Conversational VOICE_COMMUNICATION mic RMS should be in 0.015..0.06 range", rawRms in 0.015f..0.06f)
+
+        val boostedSamples = ShortArray(512)
+        DavidLiveAudioEngine.boostMicSamplesForVisualizer(
+            source = rawMicSamples,
+            destination = boostedSamples,
+            count = rawMicSamples.size,
+            rms = rawRms
+        )
+        val frame = analyzer.analyzePcm16(boostedSamples, boostedSamples.size, sampleRateHz = 16_000)
+        val boostedEnergy = DavidLiveAudioEngine.computeUserVisualizerEnergy(
+            fftEnergy = frame.overallEnergy,
+            micRms = rawRms
+        )
+        assertTrue(
+            "Boosted user visualizer energy ($boostedEnergy) must be vivid (> 0.42f) for conversational speech",
+            boostedEnergy > 0.42f
+        )
+
+        val totalBars = 29
+        val centerIndex = (totalBars - 1) / 2f
+        val radialEnvelope = FloatArray(totalBars) { index ->
+            val normDist = kotlin.math.abs(index - centerIndex) / centerIndex
+            val gaussian = kotlin.math.exp(-2.8 * normDist * normDist).toFloat()
+            (0.10f + 0.90f * gaussian).coerceIn(0.08f, 1f)
+        }
+
+        val idleCenterBar = computeHorizontalWaveBarTargetMagnitude(
+            barIndex = 14,
+            totalBars = totalBars,
+            rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.02f },
+            radialEnvelope = radialEnvelope,
+            overallEnergy = 0.02f,
+            wavePhaseRad = 0.8f,
+            visualState = DavidLiveVisualState.IDLE_LISTENING
+        )
+        val userSpeakingCenterBarPhaseA = computeHorizontalWaveBarTargetMagnitude(
+            barIndex = 14,
+            totalBars = totalBars,
+            rayMagnitudes = frame.rayMagnitudes,
+            radialEnvelope = radialEnvelope,
+            overallEnergy = boostedEnergy,
+            wavePhaseRad = 0.4f,
+            visualState = DavidLiveVisualState.USER_SPEAKING
+        )
+        val userSpeakingCenterBarPhaseB = computeHorizontalWaveBarTargetMagnitude(
+            barIndex = 14,
+            totalBars = totalBars,
+            rayMagnitudes = frame.rayMagnitudes,
+            radialEnvelope = radialEnvelope,
+            overallEnergy = boostedEnergy,
+            wavePhaseRad = 1.9f,
+            visualState = DavidLiveVisualState.USER_SPEAKING
+        )
+
+        assertTrue(
+            "User speaking center bar ($userSpeakingCenterBarPhaseA) must be significantly taller than idle ($idleCenterBar)",
+            userSpeakingCenterBarPhaseA > idleCenterBar * 2.2f && userSpeakingCenterBarPhaseA > 0.55f
+        )
+        assertTrue(
+            "Traveling wave phase must actively articulate bar height during user speech",
+            kotlin.math.abs(userSpeakingCenterBarPhaseA - userSpeakingCenterBarPhaseB) > 0.02f
+        )
+
+        assertTrue(isDefaultStatusSubtitlePlaceholder("Я здесь, слушаю тебя"))
+        assertTrue(isDefaultStatusSubtitlePlaceholder("Говорю..."))
+        assertTrue(isDefaultStatusSubtitlePlaceholder("Слушаю..."))
+        assertFalse(isDefaultStatusSubtitlePlaceholder("Записал расход 450 рублей в категорию кафе."))
+    }
 }
 
 

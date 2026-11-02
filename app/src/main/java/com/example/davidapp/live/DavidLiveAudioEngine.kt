@@ -358,15 +358,16 @@ class DavidLiveAudioEngine(
             try {
                 record.startRecording()
 
-                // 1024 samples @ 16 kHz = 64 ms chunk
-                val shortBuffer = ShortArray(1024)
+                // 512 samples @ 16 kHz = 32 ms chunk (~31.25 fps for responsive user voice visualization)
+                val shortBuffer = ShortArray(512)
+                val micVisualizerBuffer = ShortArray(512)
                 var consecutiveVoiceFrames = 0
                 var userBargedIn = false
 
                 while (isActive && isRunning.get()) {
                     val readCount = record.read(shortBuffer, 0, shortBuffer.size)
                     if (readCount <= 0) {
-                        delay(15L)
+                        delay(12L)
                         continue
                     }
 
@@ -419,12 +420,21 @@ class DavidLiveAudioEngine(
 
                     // Update visualizer from user's microphone when David is not currently speaking
                     if (!davidCurrentlyPlaying) {
+                        boostMicSamplesForVisualizer(
+                            source = shortBuffer,
+                            destination = micVisualizerBuffer,
+                            count = readCount,
+                            rms = rms
+                        )
                         _rayMagnitudes.value = spectrumAnalyzer.analyzePcmFrame(
-                            pcmSamples = shortBuffer,
+                            pcmSamples = micVisualizerBuffer,
                             sampleCount = readCount,
                             sampleRateHz = INPUT_SAMPLE_RATE_HZ
                         )
-                        _overallEnergy.value = spectrumAnalyzer.overallEnergy
+                        _overallEnergy.value = computeUserVisualizerEnergy(
+                            fftEnergy = spectrumAnalyzer.overallEnergy,
+                            micRms = rms
+                        )
                         if (rms > USER_SPEECH_RMS_THRESHOLD) {
                             lastUserSpeechDetectedMs.set(nowMs)
                             _activeSpeaker.value = DavidLiveSpeaker.USER
@@ -672,12 +682,57 @@ class DavidLiveAudioEngine(
         const val AUDIO_CONTENT_TYPE_SPEECH = AudioAttributes.CONTENT_TYPE_SPEECH
         private const val USER_SPEECH_RMS_THRESHOLD = 0.009f
         private const val BARGE_IN_RMS_THRESHOLD = 0.08f
-        private const val BARGE_IN_MIN_FRAMES = 4
+        private const val BARGE_IN_MIN_FRAMES = 6
         private const val PLAYBACK_ECHO_TAIL_MS = 320L
         internal const val BARGE_IN_TAIL_ECHO_SUPPRESS_MS = 220L
         internal const val AUDIO_TRACK_DAC_ONSET_MS = 100L
         internal const val AUDIO_TRACK_BUFFER_LEAD_SAMPLES = 4_800L // ~200ms of 24kHz AudioTrack ring buffer
         internal const val AUDIO_TRACK_DRAIN_TAIL_MS = 220L
+
+        /**
+         * Pre-amplifies microphone PCM16 samples exclusively for the spectrum visualizer (`spectrumAnalyzer`),
+         * compensating for Android `VOICE_COMMUNICATION` hardware DSP attenuation so user speech drives
+         * the under-sphere waveform as vividly as David's pre-mastered TTS audio.
+         * Never mutates the raw microphone stream sent to Gemini Live.
+         */
+        internal fun boostMicSamplesForVisualizer(
+            source: ShortArray,
+            destination: ShortArray,
+            count: Int,
+            rms: Float
+        ) {
+            val safeCount = count.coerceIn(0, minOf(source.size, destination.size))
+            if (rms < 0.0025f) {
+                for (i in 0 until safeCount) {
+                    destination[i] = source[i]
+                }
+                return
+            }
+            // Adaptive gain: stronger boost (up to 4.2x) for normal conversational mic levels (rms 0.01..0.045),
+            // tapering smoothly for loud speech to avoid harsh clipping.
+            val adaptiveGain = when {
+                rms < 0.025f -> 4.2f
+                rms < 0.065f -> 3.4f
+                else -> 2.4f
+            }
+            for (i in 0 until safeCount) {
+                val boosted = (source[i].toFloat() * adaptiveGain).toInt()
+                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                destination[i] = boosted.toShort()
+            }
+        }
+
+        /**
+         * Computes responsive visualizer energy `[0f..1f]` when the user is speaking into the microphone.
+         */
+        internal fun computeUserVisualizerEnergy(fftEnergy: Float, micRms: Float): Float {
+            if (micRms <= USER_SPEECH_RMS_THRESHOLD * 0.65f) {
+                return fftEnergy.coerceIn(0f, 1f)
+            }
+            val normalizedRms = ((micRms - USER_SPEECH_RMS_THRESHOLD * 0.65f) / 0.042f).coerceIn(0f, 1f)
+            val curvedRmsEnergy = kotlin.math.sqrt(normalizedRms)
+            return maxOf(fftEnergy, curvedRmsEnergy).coerceIn(0f, 1f)
+        }
 
         /**
          * Computes the number of 24 kHz PCM samples that have actually exited the speaker DAC

@@ -6,7 +6,10 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -18,6 +21,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -72,6 +77,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -98,6 +104,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -106,7 +114,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.components.BrandFrogAvatar
+import kotlinx.coroutines.delay
 import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -133,6 +143,10 @@ private val GoldApiMissing = Color(0xFFF59E0B)
 private val PurpleCriticalError = Color(0xFFA855F7)
 private val CrimsonMagentaError = Color(0xFFF43F5E)
 private val GreenSuccess = Color(0xFF22C55E)
+
+private val SmoothSubtitleEnterEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
+private val SmoothSubtitleExitEasing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)
+internal const val SPEECH_SUBTITLE_LINGER_MS = 680L
 
 /**
  * Resolves the human-readable Russian status label for the David Live session,
@@ -237,6 +251,88 @@ internal fun resolveVisualStateColors(
     }
 }
 
+internal fun isDefaultStatusSubtitlePlaceholder(text: String?): Boolean {
+    val trimmed = text?.trim().orEmpty()
+    return trimmed.isEmpty() ||
+        trimmed == "Я здесь, слушаю тебя" ||
+        trimmed == "Слушаю..." ||
+        trimmed == "Говорю..." ||
+        trimmed == "Говорите, я слушаю..." ||
+        trimmed == "Давид отвечает..." ||
+        trimmed == "Слушаю вас..." ||
+        trimmed == "Слушаю тебя..."
+}
+
+/**
+ * Вычисляет целевую амплитуду столбика `barIndex` горизонтального визуализатора под сферой.
+ * Обеспечивает высокую чувствительность и выразительное движение волн при речи пользователя (`USER_SPEAKING`),
+ * отображая центральные столбики на основной речевой диапазон частот (180 Гц – 2800 Гц).
+ */
+internal fun computeHorizontalWaveBarTargetMagnitude(
+    barIndex: Int,
+    totalBars: Int,
+    rayMagnitudes: List<Float>,
+    radialEnvelope: FloatArray,
+    overallEnergy: Float,
+    wavePhaseRad: Float,
+    waveActivity: Float,
+    isMicMuted: Boolean,
+    isUserSpeaking: Boolean,
+    isDavidSpeaking: Boolean,
+    isProcessing: Boolean,
+    isIdleListeningUnmuted: Boolean
+): Float {
+    if (isMicMuted && !isDavidSpeaking && !isProcessing) {
+        return 0.06f
+    }
+
+    val normPos = (barIndex + 0.5f) / totalBars.coerceAtLeast(1).toFloat()
+    val centerEnvelope = sin(PI * normPos.toDouble()).toFloat().pow(1.22f)
+    val distFromCenter = kotlin.math.abs(normPos - 0.5f) * 2f
+
+    val rayCount = DavidLiveSpectrumAnalyzer.RAY_COUNT
+    // Направляем центральные столбики на голосовые форманты (индексы 6..15 и 30..39 соответствуют 180–2800 Гц),
+    // где сосредоточена основная энергия живого голоса пользователя
+    val vocalRayIdx = (6 + (distFromCenter * 10f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
+    val highRayIdx = ((distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
+
+    val envVocal = radialEnvelope.getOrElse(vocalRayIdx) { 0.65f }.coerceAtLeast(0.38f)
+    val envHigh = radialEnvelope.getOrElse(highRayIdx) { 0.70f }.coerceAtLeast(0.38f)
+    val vocalRay = (rayMagnitudes.getOrElse(vocalRayIdx) { 0.06f } / envVocal).coerceIn(0f, 1f)
+    val highRay = (rayMagnitudes.getOrElse(highRayIdx) { 0.06f } / envHigh).coerceIn(0f, 1f)
+    val rawRay = (0.72f * vocalRay + 0.28f * highRay).coerceIn(0f, 1f)
+
+    var peakRay = 0f
+    var sumRay = 0f
+    for (r in rayMagnitudes) {
+        if (r > peakRay) peakRay = r
+        sumRay += r
+    }
+    val meanRay = if (rayMagnitudes.isNotEmpty()) sumRay / rayMagnitudes.size else 0f
+    val rawVoiceEnergy = maxOf(overallEnergy.coerceIn(0f, 1f), peakRay * 0.88f, meanRay * 1.45f).coerceIn(0f, 1f)
+
+    val isSpeakingActive = isUserSpeaking || isDavidSpeaking || (isIdleListeningUnmuted && rawVoiceEnergy > 0.045f)
+    if (isSpeakingActive) {
+        // Нелинейное усиление чувствительности для живого голоса (нормальная речь даёт 60%–96% амплитуды)
+        val curvedEnergy = rawVoiceEnergy.coerceAtLeast(0.06f).pow(0.56f).coerceIn(0.18f, 1f)
+        val combinedSignal = (0.50f * rawRay.pow(0.72f) + 0.50f * curvedEnergy).coerceIn(0.18f, 1f)
+
+        // Бегущая артикуляционная волна создаёт живое движение соседних столбиков в такт слогам речи
+        val waveA = ((sin(wavePhaseRad * 3.0 + barIndex * 0.78) + 1.0) * 0.5).toFloat()
+        val waveB = ((cos(wavePhaseRad * 5.0 - barIndex * 1.24) + 1.0) * 0.5).toFloat()
+        val dynamicArticulation = 0.64f + 0.58f * (0.62f * waveA + 0.38f * waveB)
+
+        val shaped = combinedSignal * dynamicArticulation * (0.34f + 0.78f * centerEnvelope) * waveActivity
+        return shaped.coerceIn(0.10f, 1f)
+    }
+
+    // Спокойное плавное дыхание волн в режиме ожидания (IDLE_LISTENING)
+    val idleBreathing = 0.55f + 0.45f * ((sin(wavePhaseRad * 1.0 + barIndex * 0.65) + 1.0) * 0.5).toFloat()
+    val idleContour = 0.10f + 0.24f * centerEnvelope * idleBreathing
+    val baseSignal = maxOf(rawRay * 0.65f, if (isIdleListeningUnmuted) idleContour else 0.08f)
+    return (baseSignal * (0.32f + 0.76f * centerEnvelope) * waveActivity).coerceIn(0.06f, 1f)
+}
+
 /**
  * Horizontal multi-band spectral wave visualizer for the full-screen under-sphere audio wave,
  * morphing transition, and compact bottom voice capsule (`DavidLiveMinimizedCapsule`).
@@ -265,7 +361,7 @@ fun DavidLiveHorizontalWaveVisualizer(
     val isUserSpeaking = !isMicMuted && (
         effectiveVisualState == DavidLiveVisualState.USER_SPEAKING ||
             activeSpeaker == DavidLiveSpeaker.USER ||
-            energyClamped > 0.16f
+            energyClamped > 0.08f
         )
     val isProcessing = effectiveVisualState == DavidLiveVisualState.THINKING ||
         effectiveVisualState == DavidLiveVisualState.FINANCE_LOOKUP ||
@@ -281,15 +377,27 @@ fun DavidLiveHorizontalWaveVisualizer(
     val waveActivity by animateFloatAsState(
         targetValue = when {
             isDavidSpeaking || isUserSpeaking -> 1f
-            isProcessing -> 0.48f
-            isIdleListeningUnmuted -> 0.42f
+            isProcessing -> 0.52f
+            isIdleListeningUnmuted -> 0.50f
             else -> 0.12f
         },
         animationSpec = tween(
-            durationMillis = if (isDavidSpeaking || isUserSpeaking) 95 else 380,
+            durationMillis = if (isDavidSpeaking || isUserSpeaking) 75 else 380,
             easing = FastOutSlowInEasing
         ),
         label = "horizontal_wave_activity"
+    )
+
+    // Continuous 60fps wave phase so the horizontal visualizer animates fluidly during speech
+    val infiniteTransition = rememberInfiniteTransition(label = "horizontal_wave_phase_transition")
+    val wavePhaseRad by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2.0 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1650, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "horizontal_wave_phase_rad"
     )
 
     val radialEnvelope = remember { DavidLiveSpectrumAnalyzer().getRadialSpatialEnvelope() }
@@ -322,30 +430,30 @@ fun DavidLiveHorizontalWaveVisualizer(
         val stepX = widthPx / (totalBars + 1).toFloat()
         val strokeWidth = (stepX * 0.48f).coerceIn(2.0.dp.toPx(), 4.0.dp.toPx())
         val minBarHalfHeight = (heightPx * 0.08f).coerceAtLeast(1.8.dp.toPx())
-        val maxBarHalfHeight = (heightPx * 0.45f).coerceAtLeast(minBarHalfHeight + 2f)
+        val maxBarHalfHeight = (heightPx * 0.47f).coerceAtLeast(minBarHalfHeight + 2f)
 
-        val rayCount = DavidLiveSpectrumAnalyzer.RAY_COUNT
         for (i in 0 until totalBars) {
             val normPos = (i + 0.5f) / totalBars.toFloat()
-            val centerEnvelope = sin(PI * normPos.toDouble()).toFloat().pow(1.36f)
+            val centerEnvelope = sin(PI * normPos.toDouble()).toFloat().pow(1.22f)
 
-            val distFromCenter = kotlin.math.abs(normPos - 0.5f) * 2f
-            val rayIdx = ((distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
-            val env = radialEnvelope.getOrElse(rayIdx) { 0.7f }.coerceAtLeast(0.38f)
-            val rawRay = (rayMagnitudes.getOrElse(rayIdx) { 0.08f } / env).coerceIn(0f, 1f)
+            val targetMagnitude = computeHorizontalWaveBarTargetMagnitude(
+                barIndex = i,
+                totalBars = totalBars,
+                rayMagnitudes = rayMagnitudes,
+                radialEnvelope = radialEnvelope,
+                overallEnergy = energyClamped,
+                wavePhaseRad = wavePhaseRad,
+                waveActivity = waveActivity,
+                isMicMuted = isMicMuted,
+                isUserSpeaking = isUserSpeaking,
+                isDavidSpeaking = isDavidSpeaking,
+                isProcessing = isProcessing,
+                isIdleListeningUnmuted = isIdleListeningUnmuted
+            )
 
-            // Gentle harmonic contour in idle listening so the waveform under the sphere looks alive
-            val idleContour = 0.14f + 0.42f * centerEnvelope * (0.55f + 0.45f * kotlin.math.abs(sin((i * 0.85f).toDouble())).toFloat())
-            val targetMagnitude = if (isMicMuted && !isDavidSpeaking && !isProcessing) {
-                0.06f
-            } else {
-                val baseSignal = rawRay.coerceAtLeast(if (isIdleListeningUnmuted) idleContour else 0.09f)
-                (baseSignal * (0.32f + 0.86f * centerEnvelope) * waveActivity).coerceIn(0.06f, 1f)
-            }
-
-            // Smooth per-bar temporal interpolation (fast attack, smooth decay)
+            // Fast elastic attack (0.58f) when speaking, smooth organic decay (0.24f)
             val prevMag = smoothedBarMagnitudes[i]
-            val smoothingFactor = if (targetMagnitude > prevMag) 0.42f else 0.22f
+            val smoothingFactor = if (targetMagnitude > prevMag) 0.58f else 0.24f
             val activeMagnitude = (prevMag + (targetMagnitude - prevMag) * smoothingFactor).coerceIn(0.06f, 1f)
             smoothedBarMagnitudes[i] = activeMagnitude
 
@@ -790,10 +898,12 @@ fun DavidLiveSheet(
         }
     }
 
-    // Синхронизация смены фраз в облачке речи с реальными сегментами и завершением озвучки Давида/пользователя
+    // Синхронизация смены фраз в облачке речи с реальными сегментами и плавным затуханием после озвучки
     var previousVisualStateForSpeech by remember { mutableStateOf(effectiveVisualState) }
+    var lastSpeakingVisualState by remember { mutableStateOf(DavidLiveVisualState.DAVID_SPEAKING) }
     var lastSpokenSubtitleWhileSpeaking by remember { mutableStateOf<String?>(null) }
     var lastCompletedSpokenSubtitle by remember { mutableStateOf<String?>(null) }
+    var isLingeringCompletedSpeech by remember { mutableStateOf(false) }
     var speechTurnEpoch by remember { mutableIntStateOf(0) }
 
     val isCurrentlySpeakingState = effectiveVisualState == DavidLiveVisualState.DAVID_SPEAKING ||
@@ -802,6 +912,10 @@ fun DavidLiveSheet(
         previousVisualStateForSpeech == DavidLiveVisualState.USER_SPEAKING
 
     if (isCurrentlySpeakingState) {
+        lastSpeakingVisualState = effectiveVisualState
+        if (isLingeringCompletedSpeech) {
+            isLingeringCompletedSpeech = false
+        }
         if (!wasPreviouslySpeakingState || previousVisualStateForSpeech != effectiveVisualState) {
             speechTurnEpoch++
         }
@@ -810,20 +924,42 @@ fun DavidLiveSheet(
             lastSpokenSubtitleWhileSpeaking = trimmedLive
         }
     } else if (wasPreviouslySpeakingState) {
-        // Речь завершилась: фиксируем отзвучавшую реплику, чтобы она плавно ушла вверх и не оставалась в облачке
-        lastCompletedSpokenSubtitle = lastSpokenSubtitleWhileSpeaking ?: liveSubtitle.trim()
+        val finishedPhrase = lastSpokenSubtitleWhileSpeaking ?: liveSubtitle.trim()
+        lastCompletedSpokenSubtitle = finishedPhrase
+        if (effectiveVisualState == DavidLiveVisualState.IDLE_LISTENING &&
+            finishedPhrase.isNotEmpty()
+        ) {
+            // Удерживаем завершённую фразу на короткую паузу чтения перед плавным исчезновением
+            isLingeringCompletedSpeech = true
+        } else {
+            isLingeringCompletedSpeech = false
+            speechTurnEpoch++
+        }
+    } else if (isLingeringCompletedSpeech && effectiveVisualState != DavidLiveVisualState.IDLE_LISTENING) {
+        isLingeringCompletedSpeech = false
         speechTurnEpoch++
     }
     if (previousVisualStateForSpeech != effectiveVisualState) {
         previousVisualStateForSpeech = effectiveVisualState
     }
 
+    LaunchedEffect(isLingeringCompletedSpeech, effectiveVisualState) {
+        if (isLingeringCompletedSpeech && effectiveVisualState == DavidLiveVisualState.IDLE_LISTENING) {
+            delay(SPEECH_SUBTITLE_LINGER_MS)
+            isLingeringCompletedSpeech = false
+            speechTurnEpoch++
+        }
+    }
+
     val effectiveLiveSubtitleForBubble = remember(
         effectiveVisualState,
         liveSubtitle,
-        lastCompletedSpokenSubtitle
+        lastCompletedSpokenSubtitle,
+        isLingeringCompletedSpeech
     ) {
-        if (shouldDismissCompletedSpokenSubtitle(
+        if (isLingeringCompletedSpeech && effectiveVisualState == DavidLiveVisualState.IDLE_LISTENING) {
+            lastSpokenSubtitleWhileSpeaking ?: liveSubtitle
+        } else if (shouldDismissCompletedSpokenSubtitle(
                 visualState = effectiveVisualState,
                 currentLiveSubtitle = liveSubtitle,
                 lastCompletedSpokenSubtitle = lastCompletedSpokenSubtitle
@@ -837,6 +973,14 @@ fun DavidLiveSheet(
 
     val activeSpeechSegment = remember(effectiveLiveSubtitleForBubble) {
         extractActiveSpeechBubbleSegment(effectiveLiveSubtitleForBubble.orEmpty())
+    }
+
+    val bubbleMetadataVisualState = if (
+        isLingeringCompletedSpeech && effectiveVisualState == DavidLiveVisualState.IDLE_LISTENING
+    ) {
+        lastSpeakingVisualState
+    } else {
+        effectiveVisualState
     }
 
     val visualMetadata = remember(
@@ -857,16 +1001,23 @@ fun DavidLiveSheet(
         )
     }
 
+    val hasActiveSpokenPhrase = activeSpeechSegment.activeText.isNotBlank()
     val speechPhraseSlotKey = remember(
         speechTurnEpoch,
-        effectiveVisualState,
+        bubbleMetadataVisualState,
         isMicMuted,
+        hasActiveSpokenPhrase,
         activeSpeechSegment.segmentIndex
     ) {
-        "$speechTurnEpoch:${effectiveVisualState.name}:$isMicMuted:${activeSpeechSegment.segmentIndex}"
+        "$speechTurnEpoch:${bubbleMetadataVisualState.name}:$isMicMuted:$hasActiveSpokenPhrase:${activeSpeechSegment.segmentIndex}"
     }
     val phraseSlotTexts = remember { mutableStateMapOf<String, String>() }
-    phraseSlotTexts[speechPhraseSlotKey] = visualMetadata.subtitle
+    val phraseSlotVisualStates = remember { mutableStateMapOf<String, DavidLiveVisualState>() }
+    val existingSlotText = phraseSlotTexts[speechPhraseSlotKey]
+    if (existingSlotText == null || hasActiveSpokenPhrase || !isDefaultStatusSubtitlePlaceholder(visualMetadata.subtitle)) {
+        phraseSlotTexts[speechPhraseSlotKey] = visualMetadata.subtitle
+    }
+    phraseSlotVisualStates[speechPhraseSlotKey] = bubbleMetadataVisualState
 
     val (targetStatePrimaryColor, targetStateSecondaryColor) = remember(effectiveVisualState, isMicMuted) {
         resolveVisualStateColors(effectiveVisualState, isMicMuted)
@@ -1346,6 +1497,12 @@ fun DavidLiveSheet(
                                     modifier = Modifier
                                         .fillMaxWidth(0.92f)
                                         .scale(cloudHighlightScale)
+                                        .animateContentSize(
+                                            animationSpec = tween(
+                                                durationMillis = 420,
+                                                easing = SmoothSubtitleEnterEasing
+                                            )
+                                        )
                                         .heightIn(min = 42.dp)
                                         .clip(RoundedCornerShape(16.dp))
                                         .background(
@@ -1381,46 +1538,131 @@ fun DavidLiveSheet(
                                             transitionSpec = {
                                                 (slideInVertically(
                                                     animationSpec = tween(
-                                                        durationMillis = 320,
-                                                        easing = FastOutSlowInEasing
+                                                        durationMillis = 520,
+                                                        delayMillis = 35,
+                                                        easing = SmoothSubtitleEnterEasing
                                                     ),
-                                                    initialOffsetY = { fullHeight -> fullHeight / 2 }
+                                                    initialOffsetY = { fullHeight -> (fullHeight * 0.36f).roundToInt() }
                                                 ) + fadeIn(
                                                     animationSpec = tween(
-                                                        durationMillis = 260,
-                                                        easing = FastOutSlowInEasing
+                                                        durationMillis = 480,
+                                                        delayMillis = 35,
+                                                        easing = SmoothSubtitleEnterEasing
+                                                    )
+                                                ) + scaleIn(
+                                                    initialScale = 0.96f,
+                                                    animationSpec = tween(
+                                                        durationMillis = 520,
+                                                        delayMillis = 35,
+                                                        easing = SmoothSubtitleEnterEasing
                                                     )
                                                 )).togetherWith(
                                                     slideOutVertically(
                                                         animationSpec = tween(
-                                                            durationMillis = 320,
-                                                            easing = FastOutSlowInEasing
+                                                            durationMillis = 460,
+                                                            easing = SmoothSubtitleExitEasing
                                                         ),
-                                                        targetOffsetY = { fullHeight -> -fullHeight }
+                                                        targetOffsetY = { fullHeight -> -(fullHeight * 0.38f).roundToInt() }
                                                     ) + fadeOut(
                                                         animationSpec = tween(
-                                                            durationMillis = 220,
-                                                            easing = FastOutSlowInEasing
+                                                            durationMillis = 420,
+                                                            easing = SmoothSubtitleExitEasing
                                                         )
+                                                    ) + scaleOut(
+                                                        targetScale = 0.96f,
+                                                        animationSpec = tween(
+                                                            durationMillis = 460,
+                                                            easing = SmoothSubtitleExitEasing
+                                                        )
+                                                    )
+                                                ).using(
+                                                    SizeTransform(
+                                                        clip = false,
+                                                        sizeAnimationSpec = { _, _ ->
+                                                            tween(
+                                                                durationMillis = 420,
+                                                                easing = SmoothSubtitleEnterEasing
+                                                            )
+                                                        }
                                                     )
                                                 )
                                             },
                                             label = "david_live_speech_phrase_transition"
                                         ) { slotKey ->
                                             val displayedPhrase = phraseSlotTexts[slotKey] ?: visualMetadata.subtitle
+                                            val slotVisualState = phraseSlotVisualStates[slotKey] ?: bubbleMetadataVisualState
+                                            val isSlotSpeaking = slotVisualState == DavidLiveVisualState.DAVID_SPEAKING ||
+                                                slotVisualState == DavidLiveVisualState.USER_SPEAKING
+                                            val isSlotAlert = slotVisualState == DavidLiveVisualState.OFFLINE ||
+                                                slotVisualState == DavidLiveVisualState.API_MISSING ||
+                                                slotVisualState == DavidLiveVisualState.ERROR
+                                            val baseTextColor = when (slotVisualState) {
+                                                DavidLiveVisualState.OFFLINE -> Color(0xFFFECACA)
+                                                DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
+                                                DavidLiveVisualState.ERROR -> Color(0xFFFBCFE8)
+                                                DavidLiveVisualState.SUCCESS -> Color(0xFFBBF7D0)
+                                                DavidLiveVisualState.DAVID_SPEAKING,
+                                                DavidLiveVisualState.USER_SPEAKING -> Color(0xFFF8FAFC)
+                                                else -> Color(0xFFE2E8F0)
+                                            }
+
+                                            // Плавное проявление новых слов внутри активной произносимой фразы
+                                            var committedPrefixLength by remember(slotKey) {
+                                                mutableIntStateOf(displayedPhrase.length)
+                                            }
+                                            var fadeStartIndex by remember(slotKey) {
+                                                mutableIntStateOf(displayedPhrase.length)
+                                            }
+                                            val latestWordAlphaAnim = remember(slotKey) { Animatable(1f) }
+                                            LaunchedEffect(displayedPhrase) {
+                                                if (displayedPhrase.length > committedPrefixLength) {
+                                                    fadeStartIndex = committedPrefixLength
+                                                    committedPrefixLength = displayedPhrase.length
+                                                    latestWordAlphaAnim.snapTo(0.18f)
+                                                    latestWordAlphaAnim.animateTo(
+                                                        targetValue = 1f,
+                                                        animationSpec = tween(
+                                                            durationMillis = 280,
+                                                            easing = SmoothSubtitleEnterEasing
+                                                        )
+                                                    )
+                                                } else {
+                                                    committedPrefixLength = displayedPhrase.length
+                                                    fadeStartIndex = displayedPhrase.length
+                                                    latestWordAlphaAnim.snapTo(1f)
+                                                }
+                                            }
+
+                                            val styledPhrase = remember(
+                                                displayedPhrase,
+                                                baseTextColor,
+                                                fadeStartIndex,
+                                                latestWordAlphaAnim.value
+                                            ) {
+                                                val safeSplit = fadeStartIndex.coerceIn(0, displayedPhrase.length)
+                                                buildAnnotatedString {
+                                                    if (safeSplit >= displayedPhrase.length || latestWordAlphaAnim.value >= 0.99f) {
+                                                        append(displayedPhrase)
+                                                    } else {
+                                                        append(displayedPhrase.substring(0, safeSplit))
+                                                        pushStyle(
+                                                            SpanStyle(
+                                                                color = baseTextColor.copy(
+                                                                    alpha = latestWordAlphaAnim.value.coerceIn(0.18f, 1f)
+                                                                )
+                                                            )
+                                                        )
+                                                        append(displayedPhrase.substring(safeSplit))
+                                                        pop()
+                                                    }
+                                                }
+                                            }
+
                                             Text(
-                                                text = displayedPhrase,
-                                                color = when (effectiveVisualState) {
-                                                    DavidLiveVisualState.OFFLINE -> Color(0xFFFECACA)
-                                                    DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
-                                                    DavidLiveVisualState.ERROR -> Color(0xFFFBCFE8)
-                                                    DavidLiveVisualState.SUCCESS -> Color(0xFFBBF7D0)
-                                                    DavidLiveVisualState.DAVID_SPEAKING,
-                                                    DavidLiveVisualState.USER_SPEAKING -> Color(0xFFF8FAFC)
-                                                    else -> Color(0xFFE2E8F0)
-                                                },
+                                                text = styledPhrase,
+                                                color = baseTextColor,
                                                 fontSize = 15.sp,
-                                                fontWeight = if (isCurrentlySpeakingState || isAlertState) {
+                                                fontWeight = if (isSlotSpeaking || isSlotAlert) {
                                                     FontWeight.Bold
                                                 } else {
                                                     FontWeight.SemiBold
