@@ -169,7 +169,7 @@ internal fun resolveSphereAngularSpeed(
     }
 }
 
-internal fun resolveSpherePalette(
+private fun resolveSpherePalette(
     state: DavidLiveVisualState,
     isMicMuted: Boolean = false
 ): SpherePalette {
