@@ -58,8 +58,8 @@ class ReleaseNotesTest(unittest.TestCase):
     def test_empty_template_section_falls_back(self):
         text = original("* feat: english only by @dev in https://github.com/owner/repo/pull/15")
         body = "## Заметки релиза\n<!-- Опишите по-русски -->\n\n## Тесты"
-        result = build(text, {"15": body})
-        self.assertNotIn("Технические изменения без отдельного описания", result)
+        with self.assertRaisesRegex(ValueError, "Не удалось сформировать заметку"):
+            build(text, {"15": body})
 
     def test_category_prefix_in_note(self):
         text = original("* feat: english by @dev in https://github.com/owner/repo/pull/16")
@@ -117,7 +117,10 @@ class ReleaseNotesTest(unittest.TestCase):
             "* feat: add voice picker by @dev in https://github.com/owner/repo/pull/50",
             "* fix: Исправлена загрузка by @dev in https://github.com/owner/repo/pull/51",
         )
-        result = build(text)
+        result = build(text, {
+            "50": "## Заметки релиза\nнет",
+            "51": "## Заметки релиза\n- Исправлена загрузка",
+        })
         self.assertNotIn("voice picker", result)
         self.assertIn("- Исправлена загрузка", result)
 
