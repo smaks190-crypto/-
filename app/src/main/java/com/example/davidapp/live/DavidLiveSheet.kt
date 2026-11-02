@@ -653,8 +653,8 @@ fun DavidLiveMinimizedCapsule(
  * - Centralized 13-state visual model ([DavidLiveVisualState] + [DavidLiveVisualMetadata]);
  * - Interactive 3D glowing Mesh Sphere ([DavidLiveCircularVisualizer]) with direct tap-to-reconnect
  *   in `OFFLINE` and tap-to-configure-API in `API_MISSING` / `INVALID_API_KEY`;
- * - Contextual status cloud (`david_live_subtitle_bubble`) showing only the current status
- *   or latest spoken phrase; context actions are represented inside the sphere;
+ * - Contextual status cloud (`david_live_subtitle_bubble`) with state badge, short title,
+ *   contextual explanation, and action pill (`"Повторить"`, `"Добавить API"`, `"Настроить API"`);
  * - Debug/Test state switcher (`enableDebugStateSwitcher`) to manually inspect all 13 visual states
  *   and transitions without a live Gemini connection.
  */
@@ -1348,7 +1348,7 @@ fun DavidLiveSheet(
 
                     Spacer(modifier = Modifier.weight(1f))
 
-                    // 3. Bottom Control Bar (persistent Chat and End Session actions only)
+                    // 3. Bottom Control Bar (Mute, Red End Call / Отменить, Minimize to Chat)
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier

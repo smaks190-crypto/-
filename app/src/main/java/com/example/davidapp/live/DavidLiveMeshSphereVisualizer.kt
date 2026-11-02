@@ -51,7 +51,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -434,27 +433,7 @@ fun DavidLiveMeshSphereVisualizer(
         label = "sphere_breathing"
     )
 
-    // Плавное вращение вокруг вертикальной оси Y (yaw)
-    val rotationYawDegrees by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = when (visualState) {
-                    DavidLiveVisualState.THINKING,
-                    DavidLiveVisualState.ANALYZING -> 4500
-                    DavidLiveVisualState.FINANCE_LOOKUP -> 6000
-                    DavidLiveVisualState.CONNECTING,
-                    DavidLiveVisualState.RECONNECTING -> 4000
-                    DavidLiveVisualState.OFFLINE -> 16000
-                    else -> 9000
-                },
-                easing = LinearEasing
-            ),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "sphere_yaw_rotation"
-    )
+    // The continuously accumulated yaw phase above is retained across visual-state changes.
 
     // Импульс сканирования / движения орбит
     val orbitProgress by infiniteTransition.animateFloat(
