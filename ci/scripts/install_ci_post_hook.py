@@ -86,7 +86,6 @@ def build_js_hook(upload_script_path: Optional[Path]) -> str:
         'INPUT_NAME': 'ci-error-report',
         'INPUT_PATH': mdPath + '\\n' + jsonPath,
         'INPUT_IF-NO-FILES-FOUND': 'warn',
-        'INPUT_RETENTION-DAYS': '14',
         'INPUT_COMPRESSION-LEVEL': '6',
         'INPUT_OVERWRITE': 'true',
         'INPUT_INCLUDE-HIDDEN-FILES': 'false'

@@ -13,15 +13,8 @@ import java.util.Properties
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
-import org.gradle.api.provider.Property
-import org.gradle.api.services.BuildService
-import org.gradle.api.services.BuildServiceParameters
-import org.gradle.build.event.BuildEventsListenerRegistry
-import org.gradle.tooling.Failure
-import org.gradle.tooling.events.FinishEvent
-import org.gradle.tooling.events.OperationCompletionListener
-import org.gradle.tooling.events.task.TaskFailureResult
-import org.gradle.tooling.events.task.TaskFinishEvent
+import org.gradle.api.Action
+import org.gradle.api.Task
 
 // ============================================================================
 // CI Error Report Diagnostics Collector (Stage A/B/C/D + Auto-Report Hook)
@@ -125,53 +118,29 @@ object CiDiagnosticsStore {
   }
 }
 
-abstract class CiDiagnosticsService :
-  BuildService<CiDiagnosticsService.Params>,
-  OperationCompletionListener,
-  AutoCloseable {
-
-  interface Params : BuildServiceParameters {
-    val rootDirPath: Property<String>
+fun collectThrowableMessages(err: Throwable?, out: MutableList<String>, depth: Int = 0) {
+  if (err == null || depth > 12) return
+  err.message?.trim()?.takeIf { it.isNotEmpty() }?.let { msg ->
+    if (!out.contains(msg)) out.add(msg)
   }
-
-  private fun collectFailureMessages(failures: List<Failure>?, out: MutableList<String>) {
-    if (failures == null) return
-    for (f in failures) {
-      f.message?.trim()?.takeIf { it.isNotEmpty() }?.let { if (!out.contains(it)) out.add(it) }
-      f.description?.trim()?.takeIf { it.isNotEmpty() }?.let { if (!out.contains(it)) out.add(it) }
-      collectFailureMessages(f.causes, out)
-    }
-  }
-
-  override fun onFinish(event: FinishEvent?) {
-    if (event is TaskFinishEvent) {
-      val path = event.descriptor.taskPath
-      val result = event.result
-      if (result is TaskFailureResult) {
-        CiDiagnosticsStore.taskOutcomes[path] = "FAILED"
-        val msgs = CiDiagnosticsStore.taskFailures.computeIfAbsent(path) { CopyOnWriteArrayList() }
-        collectFailureMessages(result.failures, msgs)
-        CiDiagnosticsStore.flushAndGenerateReport(File(parameters.rootDirPath.get()), forceOverwrite = true)
-      } else {
-        CiDiagnosticsStore.taskOutcomes.putIfAbsent(path, "SUCCESS")
-      }
-    }
-  }
-
-  override fun close() {
-    CiDiagnosticsStore.flushAndGenerateReport(File(parameters.rootDirPath.get()), forceOverwrite = true)
-  }
+  collectThrowableMessages(err.cause, out, depth + 1)
 }
 
-val ciDiagServiceProvider = gradle.sharedServices.registerIfAbsent(
-  "ciDiagnosticsService",
-  CiDiagnosticsService::class.java
-) {
-  parameters.rootDirPath.set(rootDir.absolutePath)
-}
-
-@Suppress("UnstableApiUsage")
-gradle.services.get(BuildEventsListenerRegistry::class.java).onTaskCompletion(ciDiagServiceProvider)
+@Suppress("DEPRECATION")
+gradle.taskGraph.afterTask(
+  Action<Task> {
+    val tPath = path
+    val failure = state.failure
+    if (failure != null) {
+      CiDiagnosticsStore.taskOutcomes[tPath] = "FAILED"
+      val msgs = CiDiagnosticsStore.taskFailures.computeIfAbsent(tPath) { CopyOnWriteArrayList() }
+      collectThrowableMessages(failure, msgs)
+      CiDiagnosticsStore.flushAndGenerateReport(rootDir, forceOverwrite = true)
+    } else {
+      CiDiagnosticsStore.taskOutcomes.putIfAbsent(tPath, "SUCCESS")
+    }
+  }
+)
 
 Runtime.getRuntime().addShutdownHook(
   Thread {

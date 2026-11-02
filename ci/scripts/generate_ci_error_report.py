@@ -596,17 +596,23 @@ def parse_task_logs_and_failures(
         extracted.extend(scan_lines_for_task(global_lines, raw_diagnostics.get("defaultTask", "unknown")))
 
     if not extracted and not raw_diagnostics.get("skipFilesystemScan"):
-        diag_pages_dir = Path("/home/runner/_diag/pages")
-        if diag_pages_dir.is_dir():
-            try:
-                log_files = sorted(diag_pages_dir.glob("*.log"), key=lambda f: f.stat().st_mtime)
-                runner_lines: List[str] = []
-                for lf in log_files[-6:]:
-                    runner_lines.extend(lf.read_text(encoding="utf-8", errors="replace").splitlines())
-                if runner_lines:
-                    extracted.extend(scan_lines_for_task(runner_lines, "unknown"))
-            except Exception:
-                pass
+        candidate_dirs = [Path("/home/runner/_diag/pages")]
+        runners_dir = Path("/home/runner/runners")
+        if runners_dir.is_dir():
+            candidate_dirs.extend(runners_dir.glob("*/_diag/pages"))
+        for diag_pages_dir in candidate_dirs:
+            if diag_pages_dir.is_dir():
+                try:
+                    log_files = sorted(diag_pages_dir.glob("*.log"), key=lambda f: f.stat().st_mtime)
+                    runner_lines: List[str] = []
+                    for lf in log_files[-6:]:
+                        runner_lines.extend(lf.read_text(encoding="utf-8", errors="replace").splitlines())
+                    if runner_lines:
+                        extracted.extend(scan_lines_for_task(runner_lines, "unknown"))
+                        if extracted:
+                            break
+                except Exception:
+                    pass
 
     # Fallback: if buildStatus is failure and no task-level errors were recorded, check top-level buildFailureMessages
     build_failures = raw_diagnostics.get("buildFailureMessages") or []
@@ -754,8 +760,24 @@ def resolve_git_metadata(repo_root: Path, overrides: Optional[Dict[str, Any]] = 
     branch_head_sha = overrides.get("commitSha") or os.environ.get("CI_REPORT_COMMIT_SHA") or ""
     if not branch_head_sha:
         if event_name == "pull_request":
-            second_parent = git_cmd("rev-parse", "HEAD^2")
-            branch_head_sha = second_parent if second_parent else workflow_sha
+            event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+            if event_path and Path(event_path).is_file():
+                try:
+                    ev = json.loads(Path(event_path).read_text(encoding="utf-8"))
+                    branch_head_sha = str(ev.get("pull_request", {}).get("head", {}).get("sha", "")).strip()
+                except Exception:
+                    pass
+            if not branch_head_sha:
+                second_parent = git_cmd("rev-parse", "HEAD^2")
+                if second_parent:
+                    branch_head_sha = second_parent
+            if not branch_head_sha:
+                head_subj = git_cmd("log", "-1", "--pretty=%s")
+                m_merge = re.match(r"^Merge\s+([0-9a-f]{40})\s+into\s+[0-9a-f]{40}", head_subj)
+                if m_merge:
+                    branch_head_sha = m_merge.group(1)
+            if not branch_head_sha:
+                branch_head_sha = workflow_sha
         else:
             branch_head_sha = git_cmd("rev-parse", "HEAD") or workflow_sha
 

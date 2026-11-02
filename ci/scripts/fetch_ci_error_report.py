@@ -119,7 +119,27 @@ def main() -> int:
         return 4
 
     download_url = target_artifact["archive_download_url"]
-    zip_bytes = github_api_get(download_url, token)
+    class NoAuthRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if new_req is not None and "Authorization" in new_req.unredirected_hdrs:
+                del new_req.unredirected_hdrs["Authorization"]
+            if new_req is not None and "Authorization" in new_req.headers:
+                del new_req.headers["Authorization"]
+            return new_req
+
+    opener = urllib.request.build_opener(NoAuthRedirectHandler())
+    dl_req = urllib.request.Request(
+        download_url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "Argon4-CI-Error-Report-Fetcher",
+        },
+    )
+    with opener.open(dl_req, timeout=30) as resp:
+        zip_bytes = resp.read()
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
