@@ -17,31 +17,34 @@ import java.util.Properties
 // ============================================================================
 fun detectCiChangedFiles(rootDir: File): List<String> {
   if (System.getenv("GITHUB_ACTIONS") != "true") return emptyList()
-  return try {
-    val eventName = System.getenv("GITHUB_EVENT_NAME") ?: ""
-    val baseRef = System.getenv("GITHUB_BASE_REF") ?: "main"
-    if (eventName == "pull_request" && baseRef.isNotBlank()) {
-      ProcessBuilder("git", "fetch", "origin", baseRef, "--depth=50")
-        .directory(rootDir)
-        .redirectErrorStream(true)
-        .start()
-        .waitFor()
-    }
-    val diffTarget = if (eventName == "pull_request" && baseRef.isNotBlank()) {
-      "origin/$baseRef...HEAD"
-    } else {
-      "HEAD~1...HEAD"
-    }
-    val proc = ProcessBuilder("git", "diff", "--name-only", diffTarget)
+  fun runGitDiff(vararg args: String): List<String> {
+    val proc = ProcessBuilder( listOf("git", "diff", "--name-only") + args.toList() )
       .directory(rootDir)
       .redirectErrorStream(true)
       .start()
     val output = proc.inputStream.bufferedReader().readText()
-    proc.waitFor()
-    output.lineSequence()
+    val code = proc.waitFor()
+    if (code != 0) return emptyList()
+    return output.lineSequence()
       .map { it.trim() }
       .filter { it.isNotEmpty() && !it.startsWith("fatal:") && !it.startsWith("warning:") }
       .toList()
+  }
+  return try {
+    val eventName = System.getenv("GITHUB_EVENT_NAME") ?: ""
+    val baseRef = (System.getenv("GITHUB_BASE_REF") ?: "main").ifBlank { "main" }
+    // On pull_request, actions/checkout creates a merge commit where HEAD^1 is the base branch commit
+    val fromMergeParent = runGitDiff("HEAD^1", "HEAD")
+    if (fromMergeParent.isNotEmpty()) {
+      fromMergeParent
+    } else {
+      ProcessBuilder(
+        "git", "fetch", "--no-tags", "--depth=50", "origin",
+        "+refs/heads/$baseRef:refs/remotes/origin/$baseRef"
+      ).directory(rootDir).redirectErrorStream(true).start().waitFor()
+      val fromOriginBase = runGitDiff("origin/$baseRef", "HEAD")
+      if (fromOriginBase.isNotEmpty()) fromOriginBase else runGitDiff("HEAD~1", "HEAD")
+    }
   } catch (_: Exception) {
     emptyList()
   }

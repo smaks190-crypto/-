@@ -255,9 +255,12 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
       ":core:database:bundleLibRuntimeToJarDebug",
       "compileDebugKotlin",
       "bundleDebugClassesToCompileJar",
-      "compileDebugUnitTestKotlin",
-      "testDebugUnitTest"
+      "compileDebugUnitTestKotlin"
     )
+  }
+
+  tasks.matching { it.name == "packageDebug" }.configureEach {
+    mustRunAfter("testDebugUnitTest")
   }
 
   tasks.matching { it.name == "testDebugUnitTest" }.configureEach {
