@@ -25,3 +25,14 @@ dependencies {
   implementation(libs.kotlinx.coroutines.core)
   "ksp"(libs.androidx.room.compiler)
 }
+
+// В CI пропускаем только финальную упаковку автономного .aar архива (bundleDebugAar),
+// сохраняя bundleLibCompileToJarDebug и bundleLibRuntimeToJarDebug для :app и Unit-тестов.
+if (System.getenv("GITHUB_ACTIONS") == "true") {
+  tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(":ciStageAFastChecks")
+  }
+  tasks.matching { it.name == "bundleDebugAar" }.configureEach {
+    enabled = false
+  }
+}

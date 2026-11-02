@@ -1,0 +1,129 @@
+# Оптимизированный многоступенчатый workflow (Этапы A -> B -> C -> D)
+# Готов к копированию в .github/workflows/build.yml токеном с правом `workflow`.
+name: Build Android APK & AAB
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  stage-a-fast-checks:
+    name: "Stage A: Fast Checks & Change Detection"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_run_android: ${{ steps.detect.outputs.should_run_android }}
+      change_scope: ${{ steps.detect.outputs.change_scope }}
+      early_compile_tasks: ${{ steps.detect.outputs.early_compile_tasks }}
+      needs_apk: ${{ steps.detect.outputs.needs_apk }}
+      needs_unit_tests: ${{ steps.detect.outputs.needs_unit_tests }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "Stage A1: Validate Gradle Config, Version & Release Scripts"
+        run: |
+          set -euo pipefail
+          ver=$(sed -n 's/^VERSION_CODE=//p' version.properties)
+          [[ "$ver" =~ ^[0-9]+$ ]] && (( ver > 0 ))
+          python3 .github/scripts/test_localize_release_notes.py
+
+      - name: "Stage A2: Detect Changed Files & Compute Targeted Gradle Tasks"
+        id: detect
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          CHANGED_FILES=""
+          if [[ "$EVENT_NAME" == "pull_request" && -n "$BASE_REF" ]]; then
+            git fetch origin "$BASE_REF" --depth=50 2>/dev/null || true
+            MERGE_BASE=$(git merge-base HEAD "origin/$BASE_REF" 2>/dev/null || echo "origin/$BASE_REF")
+            CHANGED_FILES=$(git diff --name-only "$MERGE_BASE" HEAD || true)
+          elif [[ "$EVENT_NAME" == "push" && -n "$BEFORE_SHA" ]]; then
+            CHANGED_FILES=$(git diff --name-only "$BEFORE_SHA" HEAD || true)
+          fi
+          python3 - "$CHANGED_FILES" <<'PY'
+          import os, sys
+          raw_files = [l.strip() for l in sys.argv[1].splitlines() if l.strip()]
+          is_doc = lambda f: f.endswith(".md") or f.startswith("docs/") or f in ("LICENSE", ".gitignore")
+          if raw_files and all(is_doc(f) for f in raw_files) and os.environ.get("EVENT_NAME") != "workflow_dispatch":
+              scope, run_android, apk, tests, tasks = "docs_only", "false", "false", "false", ""
+          elif raw_files and all(f.startswith("app/src/test/") or is_doc(f) for f in raw_files):
+              scope, run_android, apk, tests, tasks = "unit_test_only", "true", "false", "true", ":app:compileDebugUnitTestKotlin"
+          elif raw_files and not any(f.startswith("core/database/") or f.startswith("gradle/") or f.endswith(".gradle.kts") or f == "gradle.properties" for f in raw_files):
+              scope, run_android, apk, tests, tasks = "app_only", "true", "true", "true", ":app:compileDebugKotlin :app:compileDebugUnitTestKotlin"
+          else:
+              scope, run_android, apk, tests, tasks = "core_or_build", "true", "true", "true", ":core:database:compileDebugKotlin :app:compileDebugKotlin :app:compileDebugUnitTestKotlin"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"should_run_android={run_android}\nchange_scope={scope}\nearly_compile_tasks={tasks}\nneeds_apk={apk}\nneeds_unit_tests={tests}\n")
+          PY
+
+  build:
+    name: "Stages B-D: Compile, Assemble & Test"
+    needs: [stage-a-fast-checks]
+    if: needs.stage-a-fast-checks.outputs.should_run_android == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI_STAGED_PIPELINE: "true"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle with Intelligent Build Cache
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+          cache-read-only: false
+
+      - name: Generate debug keystore
+        if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')
+        run: |
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Create .env file
+        run: echo "${{ secrets.ENV_FILE }}" > .env
+
+      - name: "Stage B: Early Kotlin Compilation (Fail-Fast)"
+        if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')
+        run: gradle ${{ needs.stage-a-fast-checks.outputs.early_compile_tasks }} --build-cache --stacktrace
+
+      - name: "Stage C: Assemble Debug APK"
+        if: (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')) && needs.stage-a-fast-checks.outputs.needs_apk == 'true'
+        run: gradle :app:assembleDebug -x testDebugUnitTest --build-cache --stacktrace
+
+      - name: Upload APK artifact
+        if: (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')) && needs.stage-a-fast-checks.outputs.needs_apk == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: "Stage D: Run Unit Tests"
+        if: (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')) && needs.stage-a-fast-checks.outputs.needs_unit_tests == 'true'
+        run: gradle :app:testDebugUnitTest --build-cache --stacktrace
