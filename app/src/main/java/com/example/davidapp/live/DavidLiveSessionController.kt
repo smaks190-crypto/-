@@ -1158,10 +1158,11 @@ internal class DavidLiveSpeechSyncTracker {
 
             val totalEstimatedSpan = (cursorSamples - INITIAL_VOICE_ONSET_SAMPLES_24K).coerceAtLeast(1L)
             val targetAudioSpan = (enqueuedSamples24k - INITIAL_VOICE_ONSET_SAMPLES_24K).coerceAtLeast(0L)
-            // Если в очереди воспроизведения уже лежит больше аудио, чем базовая оценка по символам,
-            // растягиваем интервалы между словами пропорционально длительности реального аудио
-            val scaleFactor = if (targetAudioSpan > totalEstimatedSpan) {
-                (targetAudioSpan.toDouble() / totalEstimatedSpan.toDouble()).coerceIn(1.0, 2.25)
+            // Масштабируем интервалы между словами пропорционально длительности реально буферизованного аудио
+            // (как при более медленной речи с паузами, так и при более быстром темпе речи Давида),
+            // чтобы к моменту проигрывания enqueuedSamples24k все слова реплики гарантированно открылись вовремя.
+            val scaleFactor = if (targetAudioSpan > INITIAL_VOICE_ONSET_SAMPLES_24K) {
+                (targetAudioSpan.toDouble() / totalEstimatedSpan.toDouble()).coerceIn(0.45, 2.25)
             } else {
                 1.0
             }
