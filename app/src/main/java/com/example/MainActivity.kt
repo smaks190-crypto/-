@@ -618,7 +618,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             val currentBudgetProfile = budgetProfiles.find { it.id == selectedBudgetId }
             LaunchedEffect(selectedBudgetId, currentBudgetProfile?.name, apiKey) {
                 davidViewModel.bindProfile(
-                    budgetId = currentBudgetProfile?.id ?: "default",
+                    budgetId = selectedBudgetId?.takeIf { it.isNotBlank() } ?: currentBudgetProfile?.id ?: "default",
                     profileName = currentBudgetProfile?.name ?: "Максим",
                     apiKey = apiKey
                 )

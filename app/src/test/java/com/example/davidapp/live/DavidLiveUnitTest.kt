@@ -1352,4 +1352,723 @@ class DavidLiveUnitTest {
             db.close()
         }
     }
+
+    private fun createReadOnlyRecurringPaymentDao(
+        payments: List<com.example.data.db.RecurringPaymentEntity>,
+        logs: List<com.example.data.db.RecurringExecutionLogEntity> = emptyList()
+    ) = object : com.example.data.db.RecurringPaymentDao {
+        override fun getRecurringPaymentsByBudgetId(budgetId: String): Flow<List<com.example.data.db.RecurringPaymentEntity>> =
+            flowOf(payments.filter { it.budgetId == budgetId })
+        override fun getAllRecurringPayments(): Flow<List<com.example.data.db.RecurringPaymentEntity>> =
+            flowOf(payments)
+        override suspend fun getRecurringPaymentById(id: Long): com.example.data.db.RecurringPaymentEntity? =
+            payments.firstOrNull { it.id == id }
+        override suspend fun insertRecurringPayment(payment: com.example.data.db.RecurringPaymentEntity): Long =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun insertRecurringPayments(payments: List<com.example.data.db.RecurringPaymentEntity>) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun updateNextDueDate(id: Long, nextDueDateEpochDay: Long) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun updateStatus(id: Long, status: String) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun deleteRecurringPaymentById(id: Long) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun deleteRecurringPaymentsByBudgetId(budgetId: String) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun deleteAllRecurringPayments() =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override fun getExecutionLogsByBudgetId(budgetId: String): Flow<List<com.example.data.db.RecurringExecutionLogEntity>> =
+            flowOf(logs.filter { it.budgetId == budgetId })
+        override fun getAllExecutionLogs(): Flow<List<com.example.data.db.RecurringExecutionLogEntity>> =
+            flowOf(logs)
+        override suspend fun getExecutionLogByTransactionId(transactionId: String): com.example.data.db.RecurringExecutionLogEntity? =
+            logs.firstOrNull { it.linkedTransactionId == transactionId }
+        override suspend fun getExecutionLogBySchedule(recurringId: Long, scheduledEpochDay: Long): com.example.data.db.RecurringExecutionLogEntity? =
+            logs.firstOrNull { it.recurringId == recurringId && it.scheduledEpochDay == scheduledEpochDay }
+        override suspend fun insertExecutionLog(log: com.example.data.db.RecurringExecutionLogEntity): Long =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun deleteExecutionLogsByBudgetId(budgetId: String) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun deleteAllExecutionLogs() =
+            throw UnsupportedOperationException("Read-only in David Live")
+    }
+
+    @Test
+    fun `issue 60 - all 8 tool declarations match executeToolCall dispatch and return valid structured JSON`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 1).toEpochDay()
+        val now = System.currentTimeMillis()
+        val txs = listOf(
+            TransactionEntity(id = "t1", budgetId = "b1", type = "income", date = "2026-11-01", category = "Начальный баланс", subcategory = "Карта", amount = 80_000.0, createdAt = now - 50_000L),
+            TransactionEntity(id = "t2", budgetId = "b1", type = "expense", date = "2026-11-01", category = "Продукты", subcategory = "Супермаркет", amount = 2_000.0, createdAt = now - 10_000L)
+        )
+        val cats = listOf(CategoryEntity(id = "c1", budgetId = "b1", type = "expense", name = "Продукты", monthlyLimit = 20_000.0))
+        val goals = listOf(GoalEntity(id = "g1", budgetId = "b1", name = "Отпуск", targetAmount = 100_000.0, currentAmount = 25_000.0))
+        val accs = listOf(AccountEntity(id = "a1", budgetId = "b1", name = "Основная", balance = 78_000.0, type = "card"))
+        val recs = listOf(
+            com.example.data.db.RecurringPaymentEntity(
+                id = 1L,
+                budgetId = "b1",
+                title = "Зарплата",
+                amount = 120_000.0,
+                isIncome = true,
+                incomeCertainty = "GUARANTEED",
+                categoryName = "Зарплата",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 10L,
+                status = "ACTIVE"
+            )
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(cats),
+            goalDao = createReadOnlyGoalDao(goals),
+            accountDao = createReadOnlyAccountDao(accs),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recs),
+            todayEpochDayProvider = { d0 }
+        )
+
+        val declarations = provider.buildFunctionDeclarationsJson()
+        assertEquals(8, declarations.length())
+
+        val declaredNames = (0 until declarations.length()).map { idx ->
+            val decl = declarations.getJSONObject(idx)
+            assertTrue(decl.getString("description").isNotBlank())
+            assertEquals("OBJECT", decl.getJSONObject("parameters").getString("type"))
+            decl.getString("name")
+        }
+        assertEquals(DavidLiveFinancialToolsProvider.ALL_REGISTERED_TOOLS, declaredNames)
+
+        for (toolName in declaredNames) {
+            val res = provider.executeToolCall(toolName, JSONObject())
+            assertEquals("Tool $toolName must return status=ok", "ok", res.getString("status"))
+            assertTrue("Tool $toolName must return dataAvailable=true", res.getBoolean("dataAvailable"))
+            assertEquals("b1", res.getString("budgetId"))
+            assertTrue("Tool $toolName must provide non-blank humanSummary", res.getString("humanSummary").isNotBlank())
+        }
+
+        val unsupported = provider.executeToolCall("mutate_database_secretly", JSONObject())
+        assertEquals("unsupported_tool", unsupported.getString("status"))
+        assertFalse(unsupported.getBoolean("dataAvailable"))
+    }
+
+    @Test
+    fun `issue 60 - active recurring salary and rent schedule and safe to spend after rent before salary match SafeToSpendCalculator`() = runBlocking {
+        // Сегодня: 2026-11-01 (d0). Доступный баланс B_avail = 70 000 ₽.
+        // Аренда квартиры: 30 000 ₽ через 4 дня (d0 + 4, MANDATORY).
+        // Гарантированная зарплата: 100 000 ₽ через 10 дней (d0 + 10, GUARANTEED).
+        // Пользовательский норматив базовых расходов: 1 000 ₽/день (10 дней * 1 000 = 10 000 ₽).
+        // Защитный резерв R_floor = 10 000 ₽.
+        // Ожидаемый расчёт:
+        // - Остаток после аренды до зарплаты (netBalanceAfterObligationsBeforeSalaryRub) = 70 000 - 30 000 = 40 000 ₽.
+        // - Свободная ликвидность до зарплаты F_guar(9) = 70 000 - 10 000 (R_floor) - 30 000 (Аренда) - 10 000 (Базовая жизнь 10 дн.) = 20 000 ₽.
+        // - Дневная скорость необязательных трат на 10 дней = 20 000 / 10 = 2 000 ₽/день.
+        // - Суммарно можно потратить сегодня = 2 000 (свободные) + 1 000 (защищённые базовые) = 3 000 ₽.
+        val d0 = java.time.LocalDate.of(2026, 11, 1).toEpochDay()
+        val now = System.currentTimeMillis()
+        val txs = listOf(
+            TransactionEntity(
+                id = "tx_init",
+                budgetId = "b1",
+                type = "income",
+                date = "2026-10-20",
+                category = "Начальный баланс",
+                subcategory = "Карта",
+                amount = 70_000.0,
+                createdAt = now - 86_400_000L * 5
+            )
+        )
+        val recurringRules = listOf(
+            com.example.data.db.RecurringPaymentEntity(
+                id = 10L,
+                budgetId = "b1",
+                title = "Аренда квартиры",
+                amount = 30_000.0,
+                amountType = "FIXED",
+                isIncome = false,
+                incomeCertainty = "GUARANTEED",
+                categoryName = "Аренда",
+                frequency = "MONTHLY",
+                anchorDayOfMonth = 5,
+                nextDueDateEpochDay = d0 + 4L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            com.example.data.db.RecurringPaymentEntity(
+                id = 20L,
+                budgetId = "b1",
+                title = "Зарплата",
+                amount = 100_000.0,
+                amountType = "FIXED",
+                isIncome = true,
+                incomeCertainty = "GUARANTEED",
+                categoryName = "Зарплата",
+                frequency = "MONTHLY",
+                anchorDayOfMonth = 11,
+                nextDueDateEpochDay = d0 + 10L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            )
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recurringRules),
+            userSafetyFloorProvider = { 10_000.0 },
+            userLockedReserveProvider = { 0.0 },
+            userEssentialDailyNormProvider = { 1_000.0 },
+            todayEpochDayProvider = { d0 }
+        )
+
+        // 1. Проверка расписания регулярных доходов и расходов (get_recurring_schedule)
+        val scheduleJson = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, JSONObject())
+        assertEquals("ok", scheduleJson.getString("status"))
+        assertEquals(2, scheduleJson.getInt("activeRulesCount"))
+        assertEquals(1, scheduleJson.getInt("upcomingIncomesCount"))
+        assertEquals(1, scheduleJson.getInt("upcomingExpensesCount"))
+        assertEquals("2026-11-11", scheduleJson.getString("nextGuaranteedIncomeDateIso"))
+        assertEquals("Зарплата", scheduleJson.getString("nextGuaranteedIncomeTitle"))
+        assertEquals(100_000.0, scheduleJson.getDouble("nextGuaranteedIncomeAmountRub"), 0.01)
+        assertEquals(10, scheduleJson.getInt("daysUntilNextGuaranteedIncome"))
+
+        val incomeItem = scheduleJson.getJSONArray("upcomingIncomes").getJSONObject(0)
+        assertEquals("Зарплата", incomeItem.getString("title"))
+        assertEquals(100_000.0, incomeItem.getDouble("amountRub"), 0.01)
+        assertEquals("2026-11-11", incomeItem.getString("nextDueDateIso"))
+        assertEquals(10, incomeItem.getInt("daysUntilNextDue"))
+        assertEquals("GUARANTEED", incomeItem.getString("incomeCertainty"))
+        assertFalse("Future salary must NEVER be marked as already included in current balance", incomeItem.getBoolean("isAlreadyIncludedInCurrentBalance"))
+
+        val expenseItem = scheduleJson.getJSONArray("upcomingExpenses").getJSONObject(0)
+        assertEquals("Аренда квартиры", expenseItem.getString("title"))
+        assertEquals(30_000.0, expenseItem.getDouble("effectiveReservedAmountRub"), 0.01)
+        assertEquals("2026-11-05", expenseItem.getString("nextDueDateIso"))
+        assertEquals(4, expenseItem.getInt("daysUntilNextDue"))
+        assertEquals("MANDATORY", expenseItem.getString("priority"))
+
+        // 2. Проверка «Сколько останется после аренды до зарплаты?» и «Сколько безопасно потратить сейчас?»
+        val forecastJson = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, JSONObject())
+        assertEquals(70_000.0, forecastJson.getDouble("availableBalanceRub"), 0.01)
+        assertEquals(30_000.0, forecastJson.getDouble("reservedFutureObligationsRub"), 0.01)
+        assertEquals(40_000.0, forecastJson.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertEquals(10_000.0, forecastJson.getDouble("mandatorySafetyFloorRub"), 0.01)
+        assertEquals(10_000.0, forecastJson.getDouble("reservedEssentialLivingHorizonRub"), 0.01)
+        assertEquals(10, forecastJson.getInt("horizonDays"))
+        assertEquals(2_000.0, forecastJson.getDouble("canSpendTodayDiscRub"), 0.01)
+        assertEquals(1_000.0, forecastJson.getDouble("canSpendTodayEssRub"), 0.01)
+        assertEquals(3_000.0, forecastJson.getDouble("canSpendTodayTotalRub"), 0.01)
+        assertEquals(1, forecastJson.getJSONArray("upcomingObligations").length())
+        assertEquals(1, forecastJson.getJSONArray("upcomingIncomes").length())
+
+        // Сравнение с прямым вызовом эталонного SafeToSpendCalculator
+        val directSnapshot = com.example.data.safetospend.DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = txs,
+            accounts = emptyList(),
+            goals = emptyList(),
+            categories = emptyList(),
+            recurringPayments = recurringRules,
+            executionLogs = emptyList(),
+            todayEpochDay = d0,
+            userSafetyFloorRub = 10_000.0,
+            userLockedReserveRub = 0.0,
+            userEssentialDailyNormRub = 1_000.0
+        )
+        assertEquals(directSnapshot.safeToSpendResult.canSpendTodayDiscRub, forecastJson.getDouble("canSpendTodayDiscRub"), 0.001)
+        assertEquals(directSnapshot.safeToSpendResult.netBalanceAfterObligationsBeforeSalaryRub, forecastJson.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.001)
+
+        // 3. Проверка What-If: «Что будет, если зарплата задержится на 5 дней?»
+        // Горизонт увеличивается с 10 до 15 дней. Базовые расходы на 15 дней = 15 000 ₽.
+        // Свободная ликвидность на 15 дней = 70 000 - 10 000 (резерв) - 30 000 (аренда) - 15 000 (база 15 дн.) = 15 000 ₽.
+        // Новый свободный дневной лимит = 15 000 / 15 = 1 000 ₽/день (снижение на -1 000 ₽/день).
+        val whatIfDelayJson = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF,
+            JSONObject().apply {
+                put("scenarioType", "INCOME_DELAY")
+                put("delayDays", 5)
+            }
+        )
+        assertEquals("ok", whatIfDelayJson.getString("status"))
+        assertEquals(10, whatIfDelayJson.getInt("baselineHorizonDays"))
+        assertEquals(15, whatIfDelayJson.getInt("simulatedHorizonDays"))
+        assertEquals("2026-11-11", whatIfDelayJson.getString("baselineNextIncomeDateIso"))
+        assertEquals("2026-11-16", whatIfDelayJson.getString("simulatedNextIncomeDateIso"))
+        assertEquals(2_000.0, whatIfDelayJson.getDouble("baselineCanSpendTodayRub"), 0.01)
+        assertEquals(1_000.0, whatIfDelayJson.getDouble("simulatedCanSpendTodayRub"), 0.01)
+        assertEquals(-1_000.0, whatIfDelayJson.getDouble("deltaDailyBudgetRub"), 0.01)
+    }
+
+    @Test
+    fun `issue 60 - EXPECTED and HYPOTHETICAL recurring incomes are never mixed into guaranteed baseline or availableBalanceRub`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 1).toEpochDay()
+        val now = System.currentTimeMillis()
+        val txs = listOf(
+            TransactionEntity(
+                id = "tx_init",
+                budgetId = "b1",
+                type = "income",
+                date = "2026-10-25",
+                category = "Начальный баланс",
+                subcategory = "Карта",
+                amount = 30_000.0,
+                createdAt = now - 86_400_000L
+            )
+        )
+        val recurringRules = listOf(
+            com.example.data.db.RecurringPaymentEntity(
+                id = 101L,
+                budgetId = "b1",
+                title = "Фриланс-проект",
+                amount = 60_000.0,
+                isIncome = true,
+                incomeCertainty = "EXPECTED",
+                categoryName = "Фриланс",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 5L,
+                status = "ACTIVE"
+            ),
+            com.example.data.db.RecurringPaymentEntity(
+                id = 102L,
+                budgetId = "b1",
+                title = "Возможная премия",
+                amount = 40_000.0,
+                isIncome = true,
+                incomeCertainty = "HYPOTHETICAL",
+                categoryName = "Бонус",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 7L,
+                status = "ACTIVE"
+            )
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recurringRules),
+            userEssentialDailyNormProvider = { 500.0 },
+            todayEpochDayProvider = { d0 }
+        )
+
+        val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        // Текущий баланс остаётся 30 000 ₽, заработанный доход за 30 дней = 0 ₽ (будущие регулярные доходы не зачислены!)
+        assertEquals(30_000L, overview.getLong("availableBalanceRub"))
+        assertEquals(0L, overview.getLong("earnedIncome30dRub"))
+
+        val schedule = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, null)
+        assertEquals(0.0, schedule.getDouble("totalGuaranteedFutureIncomeHorizonRub"), 0.01)
+        assertEquals(60_000.0, schedule.getDouble("totalExpectedFutureIncomeHorizonRub"), 0.01)
+        assertEquals(40_000.0, schedule.getDouble("totalHypotheticalFutureIncomeHorizonRub"), 0.01)
+        assertFalse("No guaranteed income exists", schedule.has("nextGuaranteedIncomeDateIso"))
+
+        val forecast = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, null)
+        // Так как GUARANTEED дохода нет, горизонт равен числу дней до конца ноября (30 дней: с 1 по 30 ноября)
+        assertEquals(30, forecast.getInt("horizonDays"))
+        assertFalse(forecast.has("nextIncomeDateIso"))
+        // В гарантированном сценарии: 30 000 - 30 * 500 (база 15 000) = 15 000 ₽ -> 15 000 / 30 = 500 ₽/день
+        assertEquals(500.0, forecast.getDouble("canSpendTodayDiscRub"), 0.01)
+        // В справочном ожидаемом сценарии (с учётом EXPECTED 60 000 ₽ на 5-й день) бюджет выше, но показывается отдельно
+        assertEquals(60_000.0, forecast.getDouble("expectedUnconfirmedIncomeHorizonRub"), 0.01)
+        assertEquals(40_000.0, forecast.getDouble("hypotheticalDebtReceivablesRub"), 0.01)
+    }
+
+    @Test
+    fun `issue 60 - PAID RESCHEDULED SKIPPED OVERDUE PAUSED ARCHIVED recurring items and linked transactions avoid double counting`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 10).toEpochDay()
+        val now = System.currentTimeMillis()
+
+        // Доступный баланс: начальный 100 000 ₽ минус уже оплаченная аренда сегодня 25 000 ₽ = 75 000 ₽
+        val txs = listOf(
+            TransactionEntity(id = "tx_init", budgetId = "b1", type = "income", date = "2026-11-01", category = "Начальный баланс", subcategory = "Карта", amount = 100_000.0, createdAt = now - 86_400_000L * 5),
+            TransactionEntity(id = "tx_rent_paid", budgetId = "b1", type = "expense", date = "2026-11-10", category = "Аренда", subcategory = "Оплата аренды", amount = 25_000.0, createdAt = now - 1000L)
+        )
+
+        val recurringRules = listOf(
+            // 1. Уже оплаченная сегодня аренда (связана через linkedTransactionId = tx_rent_paid) -> НЕ должна резервироваться повторно!
+            com.example.data.db.RecurringPaymentEntity(
+                id = 1L,
+                budgetId = "b1",
+                title = "Аренда",
+                amount = 25_000.0,
+                isIncome = false,
+                categoryName = "Аренда",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            // 2. Пропущенная подписка (SKIPPED) -> НЕ должна резервироваться
+            com.example.data.db.RecurringPaymentEntity(
+                id = 2L,
+                budgetId = "b1",
+                title = "Подписка Кино",
+                amount = 1_000.0,
+                isIncome = false,
+                categoryName = "Подписки",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 2L,
+                priority = "DISCRETIONARY_SUBSCRIPTION",
+                status = "ACTIVE"
+            ),
+            // 3. Перенесённый платёж (RESCHEDULED на d0 + 3) -> старая дата d0 + 3 исключена
+            com.example.data.db.RecurringPaymentEntity(
+                id = 3L,
+                budgetId = "b1",
+                title = "Страховка",
+                amount = 4_000.0,
+                isIncome = false,
+                categoryName = "Страховка",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 3L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            // 4. Просроченный платёж ЖКХ (OVERDUE с d0 - 2) -> резервируется ровно 1 раз в overdueObligationsRub (5 000 ₽)
+            com.example.data.db.RecurringPaymentEntity(
+                id = 4L,
+                budgetId = "b1",
+                title = "ЖКХ",
+                amount = 5_000.0,
+                isIncome = false,
+                categoryName = "ЖКХ",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 28L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            // 5. Приостановленное правило (PAUSED) -> полностью исключено
+            com.example.data.db.RecurringPaymentEntity(
+                id = 5L,
+                budgetId = "b1",
+                title = "Спортзал на паузе",
+                amount = 8_000.0,
+                isIncome = false,
+                categoryName = "Спорт",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 4L,
+                priority = "DISCRETIONARY_SUBSCRIPTION",
+                status = "PAUSED"
+            ),
+            // 6. Архивное правило (ARCHIVED) -> полностью исключено
+            com.example.data.db.RecurringPaymentEntity(
+                id = 6L,
+                budgetId = "b1",
+                title = "Старый кредит",
+                amount = 15_000.0,
+                isIncome = false,
+                categoryName = "Кредиты",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 5L,
+                priority = "MANDATORY",
+                status = "ARCHIVED"
+            ),
+            // 7. Гарантированная зарплата через 10 дней (d0 + 10)
+            com.example.data.db.RecurringPaymentEntity(
+                id = 7L,
+                budgetId = "b1",
+                title = "Зарплата",
+                amount = 90_000.0,
+                isIncome = true,
+                incomeCertainty = "GUARANTEED",
+                categoryName = "Зарплата",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 10L,
+                status = "ACTIVE"
+            )
+        )
+
+        val logs = listOf(
+            // Аренда за d0 связана с реальной транзакцией tx_rent_paid
+            com.example.data.db.RecurringExecutionLogEntity(
+                id = 100L,
+                budgetId = "b1",
+                recurringId = 1L,
+                scheduledEpochDay = d0,
+                executedEpochDay = d0,
+                actualAmount = 25_000.0,
+                status = "PENDING", // Даже если статус остался PENDING, связь с существующей транзакцией делает его исполненным
+                linkedTransactionId = "tx_rent_paid"
+            ),
+            com.example.data.db.RecurringExecutionLogEntity(
+                id = 101L,
+                budgetId = "b1",
+                recurringId = 2L,
+                scheduledEpochDay = d0 + 2L,
+                status = "SKIPPED"
+            ),
+            com.example.data.db.RecurringExecutionLogEntity(
+                id = 102L,
+                budgetId = "b1",
+                recurringId = 3L,
+                scheduledEpochDay = d0 + 3L,
+                status = "RESCHEDULED"
+            ),
+            com.example.data.db.RecurringExecutionLogEntity(
+                id = 103L,
+                budgetId = "b1",
+                recurringId = 4L,
+                scheduledEpochDay = d0 - 2L,
+                actualAmount = 5_000.0,
+                status = "OVERDUE"
+            )
+        )
+
+        // Также добавим долговой счёт с таким же именем «ЖКХ», чтобы проверить дедупликацию между recurring и we_owe
+        val duplicateDebtAcc = AccountEntity(
+            id = "debt_jkh",
+            budgetId = "b1",
+            name = "Долг: ЖКХ",
+            balance = 5_000.0,
+            type = "we_owe",
+            accountNumber = "2026-11-08"
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(listOf(duplicateDebtAcc)),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recurringRules, logs),
+            userEssentialDailyNormProvider = { 1_000.0 },
+            todayEpochDayProvider = { d0 }
+        )
+
+        val schedule = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, JSONObject().put("horizonDays", 10))
+        assertEquals(5, schedule.getInt("activeRulesCount"))
+        assertEquals(2, schedule.getInt("pausedOrArchivedRulesCount"))
+        assertEquals(3, schedule.getInt("excludedExecutedOrSkippedOccurrencesCount"))
+        assertEquals(1, schedule.getInt("overdueExpensesCount"))
+        assertEquals(5_000.0, schedule.getDouble("totalOverdueObligationsRub"), 0.01)
+
+        val forecast = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, null)
+        // Доступный баланс = 75 000 ₽ (25 000 ₽ аренды уже списаны в tx_rent_paid)
+        assertEquals(75_000.0, forecast.getDouble("availableBalanceRub"), 0.01)
+        // Сегодняшние неоплаченные обязательства = 0 ₽ (аренда оплачена)
+        assertEquals(0.0, forecast.getDouble("todayPendingObligationsRub"), 0.01)
+        // Будущие обязательства в горизонте 10 дн. = 0 ₽ (Подписка SKIPPED, Страховка RESCHEDULED, Спортзал PAUSED, Кредит ARCHIVED)
+        assertEquals(0.0, forecast.getDouble("reservedFutureObligationsRub"), 0.01)
+        // Просроченные обязательства = ровно 5 000 ₽ (ЖКХ без двойного вычитания долгового счёта)
+        assertEquals(5_000.0, forecast.getDouble("overdueObligationsRub"), 0.01)
+        // Остаток после обязательств до зарплаты = 75 000 - 5 000 = 70 000 ₽
+        assertEquals(70_000.0, forecast.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+    }
+
+    @Test
+    fun `issue 60 - profile switching budgetId isolates recurring schedule safe to spend preferences and clears stale facts`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 1).toEpochDay()
+        val now = System.currentTimeMillis()
+
+        val txs = listOf(
+            TransactionEntity(id = "t_main", budgetId = "b_main", type = "income", date = "2026-10-25", category = "Начальный баланс", subcategory = "Карта", amount = 100_000.0, createdAt = now - 10_000L),
+            TransactionEntity(id = "t_family", budgetId = "b_family", type = "income", date = "2026-10-25", category = "Начальный баланс", subcategory = "Карта", amount = 40_000.0, createdAt = now - 10_000L)
+        )
+        val recs = listOf(
+            com.example.data.db.RecurringPaymentEntity(
+                id = 1L,
+                budgetId = "b_main",
+                title = "Аренда офиса",
+                amount = 20_000.0,
+                isIncome = false,
+                categoryName = "Аренда",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 5L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            com.example.data.db.RecurringPaymentEntity(
+                id = 2L,
+                budgetId = "b_family",
+                title = "Детский сад",
+                amount = 10_000.0,
+                isIncome = false,
+                categoryName = "Дети",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 3L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            )
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b_main",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recs),
+            userSafetyFloorProvider = { id -> if (id == "b_main") 15_000.0 else 5_000.0 },
+            userEssentialDailyNormProvider = { 1_000.0 },
+            todayEpochDayProvider = { d0 }
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+        controller.recordTranscriptTurn(DavidLiveSpeaker.USER, "Проверка профиля b_main")
+
+        // Профиль 1: b_main
+        val mainSched = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, null)
+        assertEquals("b_main", mainSched.getString("budgetId"))
+        assertEquals(1, mainSched.getInt("upcomingExpensesCount"))
+        assertEquals("Аренда офиса", mainSched.getJSONArray("upcomingExpenses").getJSONObject(0).getString("title"))
+        assertEquals(100_000.0, mainSched.getDouble("availableBalanceRub"), 0.01)
+        assertEquals(1, provider.verifiedFacts.size)
+
+        // Переключаем профиль на b_family через контроллер
+        controller.onBudgetProfileChanged("b_family")
+        assertEquals("b_family", provider.getBudgetId())
+        assertTrue("Verified facts from previous profile must be cleared on profile switch", provider.verifiedFacts.isEmpty())
+        assertTrue("Transcript turns from previous profile must be cleared on profile switch", controller.transcriptTurns.isEmpty())
+
+        // Профиль 2: b_family
+        val familySched = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, null)
+        val familyForecast = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, null)
+        assertEquals("b_family", familySched.getString("budgetId"))
+        assertEquals(1, familySched.getInt("upcomingExpensesCount"))
+        assertEquals("Детский сад", familySched.getJSONArray("upcomingExpenses").getJSONObject(0).getString("title"))
+        assertEquals(40_000.0, familySched.getDouble("availableBalanceRub"), 0.01)
+        assertEquals(5_000.0, familyForecast.getDouble("mandatorySafetyFloorRub"), 0.01)
+        assertEquals(30_000.0, familyForecast.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+    }
+
+    @Test
+    fun `issue 60 - empty database and DAO errors or null DAOs report transparent status without fabricating zero balance as confirmed fact`() = runBlocking {
+        // 1. Все DAO == null (источники данных отключены)
+        val disconnectedProvider = DavidLiveFinancialToolsProvider(
+            budgetId = "b_disconnected",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null,
+            recurringPaymentDao = null
+        )
+        for (toolName in DavidLiveFinancialToolsProvider.ALL_REGISTERED_TOOLS) {
+            val res = disconnectedProvider.executeToolCall(toolName, JSONObject())
+            assertEquals("Tool $toolName must return status=data_unavailable when DAOs are null", "data_unavailable", res.getString("status"))
+            assertFalse("Tool $toolName must report dataAvailable=false", res.getBoolean("dataAvailable"))
+            assertFalse("Tool $toolName must report hasData=false", res.getBoolean("hasData"))
+        }
+        assertTrue("Disconnected tools must never record fabricated verifiedFacts", disconnectedProvider.verifiedFacts.isEmpty())
+
+        // 2. DAO подключены, но база данных для профиля пуста
+        val emptyProvider = DavidLiveFinancialToolsProvider(
+            budgetId = "b_empty",
+            transactionDao = createReadOnlyTransactionDao(emptyList()),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(emptyList())
+        )
+        val emptyOverview = emptyProvider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        assertEquals("ok", emptyOverview.getString("status"))
+        assertTrue(emptyOverview.getBoolean("dataAvailable"))
+        assertFalse(emptyOverview.getBoolean("hasData"))
+        assertTrue(emptyOverview.getBoolean("isDatabaseEmpty"))
+        assertTrue(emptyOverview.getString("humanSummary").contains("пуста"))
+
+        val emptySchedule = emptyProvider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, null)
+        assertEquals("ok", emptySchedule.getString("status"))
+        assertFalse(emptySchedule.getBoolean("hasData"))
+        assertTrue(emptySchedule.getBoolean("isDatabaseEmpty"))
+
+        // 3. DAO выбрасывает исключение при чтении
+        val failingTxDao = object : TransactionDao {
+            override fun getAllTransactions(): Flow<List<TransactionEntity>> = throw IllegalStateException("SQLite disk I/O error")
+            override fun getTransactionsByBudgetId(budgetId: String): Flow<List<TransactionEntity>> = throw IllegalStateException("SQLite disk I/O error")
+            override suspend fun insertTransaction(transaction: TransactionEntity) {}
+            override suspend fun insertTransactions(transactions: List<TransactionEntity>) {}
+            override suspend fun getExpenseCountForDate(dateStr: String): Int = 0
+            override suspend fun getExpenseSumForDate(dateStr: String): Double = 0.0
+            override fun getExpenseCountForDateSync(dateStr: String): Int = 0
+            override suspend fun deleteTransactionById(id: String) {}
+            override suspend fun deleteTransactionsByBudgetId(budgetId: String) {}
+            override suspend fun deleteAllTransactions() {}
+        }
+        val failingProvider = DavidLiveFinancialToolsProvider(
+            budgetId = "b_fail",
+            transactionDao = failingTxDao,
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(emptyList())
+        )
+        val errorResult = failingProvider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        assertEquals("error", errorResult.getString("status"))
+        assertFalse(errorResult.getBoolean("dataAvailable"))
+        assertEquals("DAO_READ_ERROR", errorResult.getString("errorCode"))
+        assertTrue("Failed DAO call must not record verifiedFacts", failingProvider.verifiedFacts.isEmpty())
+    }
+
+    @Test
+    fun `issue 60 - combined multi-domain questions invoke all required tools and enrich DavidLiveSessionController tool responses`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 1).toEpochDay()
+        val now = System.currentTimeMillis()
+        val txs = listOf(
+            TransactionEntity(id = "tx1", budgetId = "b1", type = "income", date = "2026-10-25", category = "Начальный баланс", subcategory = "Карта", amount = 65_000.0, createdAt = now - 10_000L)
+        )
+        val recs = listOf(
+            com.example.data.db.RecurringPaymentEntity(
+                id = 1L,
+                budgetId = "b1",
+                title = "Аренда",
+                amount = 25_000.0,
+                isIncome = false,
+                categoryName = "Аренда",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 4L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            com.example.data.db.RecurringPaymentEntity(
+                id = 2L,
+                budgetId = "b1",
+                title = "Зарплата",
+                amount = 95_000.0,
+                isIncome = true,
+                incomeCertainty = "GUARANTEED",
+                categoryName = "Зарплата",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 10L,
+                status = "ACTIVE"
+            )
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recs),
+            userEssentialDailyNormProvider = { 1_000.0 },
+            todayEpochDayProvider = { d0 }
+        )
+
+        // 1. Маршрутизация вопроса «Сколько останется после аренды до зарплаты?»
+        val specsRentSalary = provider.resolveRequiredToolsForQuery("Сколько останется после аренды до зарплаты?")
+        val toolNamesRentSalary = specsRentSalary.map { it.toolName }
+        assertTrue(toolNamesRentSalary.contains(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE))
+        assertTrue(toolNamesRentSalary.contains(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST))
+
+        val executedRentSalary = provider.executeToolsForQuery("Сколько останется после аренды до зарплаты?")
+        assertEquals(2, executedRentSalary.size)
+        val scheduleOutput = executedRentSalary.first { it.first == DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE }.second
+        val forecastOutput = executedRentSalary.first { it.first == DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST }.second
+        assertEquals(40_000.0, scheduleOutput.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertEquals(40_000.0, forecastOutput.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+
+        // 2. Маршрутизация вопроса «Что будет, если зарплата задержится на 5 дней?»
+        val specsDelay = provider.resolveRequiredToolsForQuery("Что будет, если зарплата задержится на 5 дней?")
+        val toolNamesDelay = specsDelay.map { it.toolName }
+        assertTrue(toolNamesDelay.contains(DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF))
+        assertTrue(toolNamesDelay.contains(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST))
+        assertTrue(toolNamesDelay.contains(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE))
+        val whatIfSpec = specsDelay.first { it.toolName == DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF }
+        assertEquals("INCOME_DELAY", whatIfSpec.args.getString("scenarioType"))
+        assertEquals(5, whatIfSpec.args.getInt("delayDays"))
+    }
 }

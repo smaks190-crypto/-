@@ -44,7 +44,16 @@ object WhatIfSimulator {
                         payment.status == RecurringStatus.ACTIVE &&
                         (request.targetIncomeId == null || payment.id == request.targetIncomeId)
                     if (shouldDelay) {
-                        payment.copy(nextDueDateEpochDay = payment.nextDueDateEpochDay + delay)
+                        val nextFutureOcc = RecurringScheduleCalculator.generateOccurrencesInRange(
+                            payment = payment,
+                            rangeStartEpochDay = baseInput.todayEpochDay + 1L,
+                            rangeEndEpochDay = baseInput.todayEpochDay + 90L
+                        ).firstOrNull() ?: max(payment.nextDueDateEpochDay, baseInput.todayEpochDay + 1L)
+                        payment.copy(
+                            nextDueDateEpochDay = nextFutureOcc + delay,
+                            anchorDayOfMonth = null,
+                            anchorDayOfWeek = null
+                        )
                     } else {
                         payment
                     }

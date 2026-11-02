@@ -217,6 +217,18 @@ class DavidLiveSessionController(
     }
 
     /**
+     * Clears profile-bound transcripts and verified facts when the user switches the active budget profile.
+     */
+    fun onBudgetProfileChanged(newBudgetId: String) {
+        financialToolsProvider.setBudgetId(newBudgetId)
+        synchronized(_transcriptTurns) {
+            _transcriptTurns.clear()
+        }
+        pendingUserTranscript.clear()
+        pendingDavidTranscript.clear()
+    }
+
+    /**
      * Appends a transcript turn (also accessible for unit/UI tests to verify summary generation).
      */
     fun recordTranscriptTurn(speaker: DavidLiveSpeaker, text: String) {
@@ -320,15 +332,24 @@ class DavidLiveSessionController(
             Сейчас ты работаешь в голосовом режиме реального времени David Live.
             Правила общения в David Live:
             1. Всегда говори и отвечай ТОЛЬКО на русском языке. Отвечай живо, естественно и лаконично (2–4 предложения за реплику).
-            2. Для любых вопросов про баланс, расходы, доходы, категории, бюджеты, цели, долги, сравнение периодов или прогноз остатка бюджета ОБЯЗАТЕЛЬНО вызывай предоставленные инструменты (tools).
-            3. НИКОГДА не выдумывай суммы, категории, проценты или операции, которых нет в ответах инструментов. Если данных недостаточно — честно скажи об этом.
+            2. Для любых вопросов про финансы ОБЯЗАТЕЛЬНО вызывай соответствующие инструменты (tools) перед ответом:
+               - Общий баланс, доходы/расходы за 30 дней, сводка -> `get_financial_overview`
+               - Сколько можно/безопасно потратить сегодня, дневной лимит, остаток до зарплаты, кассовый разрыв, резерв -> `get_safe_to_spend_forecast`
+               - Расписание регулярных доходов (зарплата, аванс: сумма, дата, статус достоверности) и регулярных платежей/обязательств (аренда, ЖКХ, подписки, кредиты) -> `get_recurring_schedule`
+               - Сценарии «Что будет, если я потрачу X ₽?», «Хватит ли до зарплаты?», «Что если зарплата задержится на N дней?» -> `simulate_what_if`
+               - Расходы и лимиты по категориям -> `get_category_spending`
+               - Финансовые цели (копилки) и долги («Я должен» / «Мне должны») -> `get_goals_and_debts`
+               - Сравнение динамики периодов (7 или 30 дней) -> `compare_spending_periods`
+               - Последние совершенные операции -> `get_recent_transactions`
+               - На комбинированные вопросы (например: «Сколько останется после аренды до зарплаты?», «Сколько безопасно потратить с учётом аренды и зарплаты?») вызывай ВСЕ релевантные инструменты (`get_recurring_schedule` + `get_safe_to_spend_forecast`, а для сценариев задержки/траты — ещё и `simulate_what_if`).
+            3. НИКОГДА не выдумывай суммы, даты, категории, проценты или операции, которых нет в ответах инструментов. Если `dataAvailable == false` или `isDatabaseEmpty == true` — честно скажи, что данные отсутствуют или пусты, и не выдавай `0 ₽` за подтверждённый факт.
             4. Ты работаешь строго в режиме чтения: никогда не утверждай, что ты сам создал, изменил или удалил финансовую операцию без подтверждения пользователя.
-            5. СТРОГОЕ РАЗДЕЛЕНИЕ ФИНАНСОВЫХ СУЩНОСТЕЙ (ЗАПРЕТ СМЕШИВАНИЯ):
-               - Доступный остаток (текущий баланс `availableBalanceRub` / `totalBalanceRub`) — это фактические деньги на руках с учётом уже полученных доходов и совершённых расходов. НИКОГДА не складывай текущий баланс с зарплатой или доходом повторно!
-               - Заработанный доход за период (`earnedIncome30dRub` / `income30dRub`, включая зарплату `salaryIncome30dRub`) — это только поступления дохода за период.
-               - Мои долги («Я должен», `totalWeOweRub`) — это обязательства (пассив) пользователя. НИКОГДА не прибавляй их к доходу или к балансу!
-               - Должны мне («Мне должны», `totalOwesUsRub`) — это дебиторская задолженность (ожидаемый возврат). НИКОГДА не прибавляй её к текущему заработанному доходу или к доступному остатку!
-               - При ответе всегда называй эти статьи раздельно и своими именами: «Доступный остаток», «Доход за период (зарплата)», «Я должен» и «Мне должны».
+            5. СТРОГОЕ РАЗДЕЛЕНИЕ ФИНАНСОВЫХ СУЩНОСТЕЙ И СТАТУСОВ ДОСТОВЕРНОСТИ:
+               - Доступный остаток (`availableBalanceRub` / `totalBalanceRub`) — фактические деньги на руках сейчас. НИКОГДА не складывай текущий баланс с будущей зарплатой или с уже полученным доходом за 30 дней!
+               - Заработанный доход за 30 дней (`earnedIncome30dRub` / `salaryIncome30dRub`) — уже полученные в прошлом деньги, они уже учтены в балансе.
+               - Плановый будущий доход из `get_recurring_schedule` (`upcomingIncomes`) — это ПРОГНОЗ будущего поступления (ещё НЕ на счету). Всегда различай `GUARANTEED` (гарантированная зарплата в базовом прогнозе), `EXPECTED` (ожидаемый неподтверждённый доход, показывается справочно) и `HYPOTHETICAL` (гипотетический доход, не учитывается в ликвидности).
+               - Остаток после обязательств до зарплаты (`netBalanceAfterObligationsBeforeSalaryRub`) и безопасный лимит на сегодня (`canSpendTodayDiscRub` + `canSpendTodayEssRub`) бери строго из расчёта `SafeToSpendCalculator` (`get_safe_to_spend_forecast` / `get_recurring_schedule`), не вычисляй их в уме приблизительно.
+               - Мои долги («Я должен», `totalWeOweRub`) и дебиторская задолженность («Мне должны», `totalOwesUsRub`) никогда не смешивай с балансом и доходом.
         """.trimIndent()
 
         return JSONObject().apply {
@@ -411,6 +432,28 @@ class DavidLiveSessionController(
             if (functionCalls != null && functionCalls.length() > 0) {
                 _liveSubtitle.value = "Проверяю ваши финансовые данные..."
                 controllerScope.launch {
+                    val requestedToolNames = mutableSetOf<String>()
+                    for (i in 0 until functionCalls.length()) {
+                        val fn = functionCalls.optJSONObject(i)?.optString("name").orEmpty()
+                        if (fn.isNotBlank()) requestedToolNames.add(fn)
+                    }
+
+                    val latestUserQuery = pendingUserTranscript.toString().trim().ifEmpty {
+                        transcriptTurns.lastOrNull { it.speaker == DavidLiveSpeaker.USER }?.text.orEmpty()
+                    }
+                    val companionSpecs = if (latestUserQuery.isNotBlank()) {
+                        financialToolsProvider.resolveRequiredToolsForQuery(latestUserQuery)
+                            .filter { it.toolName !in requestedToolNames }
+                    } else {
+                        emptyList()
+                    }
+
+                    val companionOutputs = JSONObject()
+                    for (comp in companionSpecs) {
+                        val compRes = financialToolsProvider.executeToolCall(comp.toolName, comp.args)
+                        companionOutputs.put(comp.toolName, compRes)
+                    }
+
                     val responsesArray = JSONArray()
                     for (i in 0 until functionCalls.length()) {
                         val fc = functionCalls.optJSONObject(i) ?: continue
@@ -418,6 +461,9 @@ class DavidLiveSessionController(
                         val fnName = fc.optString("name")
                         val args = fc.optJSONObject("args")
                         val toolResult = financialToolsProvider.executeToolCall(fnName, args)
+                        if (i == 0 && companionOutputs.length() > 0) {
+                            toolResult.put("companionToolsOutput", companionOutputs)
+                        }
                         responsesArray.put(
                             JSONObject().apply {
                                 if (callId.isNotBlank()) put("id", callId)

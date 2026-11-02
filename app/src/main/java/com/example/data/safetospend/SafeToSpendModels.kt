@@ -156,6 +156,17 @@ data class ScheduledObligationItem(
     val categoryName: String
 )
 
+data class ScheduledIncomeItem(
+    val sourceId: String,
+    val recurringId: Long? = null,
+    val title: String,
+    val amountRub: Double,
+    val dueEpochDay: Long,
+    val incomeCertainty: IncomeCertainty,
+    val categoryName: String,
+    val frequency: PaymentFrequency = PaymentFrequency.MONTHLY
+)
+
 data class DayLiquidityPoint(
     val offsetDays: Int,
     val epochDay: Long,
@@ -242,10 +253,14 @@ data class SafeToSpendResult(
     val cashGapEpochDay: Long?,
     val cashGapAmountRub: Double,
     val trajectory: List<DayLiquidityPoint>,
-    val upcomingObligations: List<ScheduledObligationItem>
+    val upcomingObligations: List<ScheduledObligationItem>,
+    val upcomingIncomes: List<ScheduledIncomeItem> = emptyList()
 ) {
     val obligationsReservedTotalRub: Double
         get() = overdueObligationsRub + todayPendingObligationsRub + reservedFutureObligationsRub
+
+    val netBalanceAfterObligationsBeforeSalaryRub: Double
+        get() = availableBalanceRub - lockedGoalsAndReserveRub - obligationsReservedTotalRub
 
     fun toStructuredDavidSummary(): String = buildString {
         appendLine("=== SAFE-TO-SPEND 2.0 (ДЕТЕРМИНИРОВАННЫЙ ПРОГНОЗ ЛИКВИДНОСТИ) ===")
@@ -254,6 +269,7 @@ data class SafeToSpendResult(
         appendLine("• Суммарно доступно сегодня без нарушения обязательств: ${canSpendTodayTotalRub.toLong()} ₽")
         appendLine("• Расчётная дневная скорость на будущие дни горизонта: ${dailyDiscretionarySpeedRub.toLong()} ₽/день")
         appendLine("• Доступный баланс (B_avail): ${availableBalanceRub.toLong()} ₽")
+        appendLine("• Остаток после вычета всех обязательств до зарплаты (до вычета базовой жизни и защитного резерва): ${netBalanceAfterObligationsBeforeSalaryRub.toLong()} ₽")
         appendLine("• Потрачено сегодня: всего ${spentTodayTotalRub.toLong()} ₽ (обязательные: ${spentTodayMandatoryRub.toLong()} ₽, базовые: ${spentTodayEssentialRub.toLong()} ₽, свободные: ${spentTodayDiscretionaryRub.toLong()} ₽)")
         if (todayOverspendRub > 0.0) {
             appendLine("• Перерасход дневного лимита сегодня: ${todayOverspendRub.toLong()} ₽")
@@ -279,9 +295,16 @@ data class SafeToSpendResult(
         }
         if (upcomingObligations.isNotEmpty()) {
             appendLine("• Ближайшие обязательства:")
-            upcomingObligations.take(5).forEach { item ->
+            upcomingObligations.take(7).forEach { item ->
                 val statusLabel = if (item.isOverdue) "ПРОСРОЧЕНО" else LocalDate.ofEpochDay(item.dueEpochDay).toString()
                 appendLine("  - ${item.title}: ${item.amountRub.toLong()} ₽ ($statusLabel)")
+            }
+        }
+        if (upcomingIncomes.isNotEmpty()) {
+            appendLine("• Ближайшие плановые доходы (прогноз, НЕ входят в текущий доступный баланс B_avail):")
+            upcomingIncomes.take(7).forEach { item ->
+                val dateStr = LocalDate.ofEpochDay(item.dueEpochDay).toString()
+                appendLine("  - ${item.title}: ${item.amountRub.toLong()} ₽ ($dateStr, статус достоверности: ${item.incomeCertainty})")
             }
         }
     }
