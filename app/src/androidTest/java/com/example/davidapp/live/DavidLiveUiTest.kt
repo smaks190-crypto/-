@@ -347,6 +347,41 @@ class DavidLiveUiTest {
         composeTestRule.onNodeWithTag("david_live_circular_visualizer").assertIsDisplayed()
         composeTestRule.onNodeWithTag("david_live_state_badge").assertIsDisplayed()
     }
+    @Test
+    fun davidLiveSphereLongPressDragAttractsParticlesWithoutTriggeringTapAction() {
+        var tapCount = 0
+        var longPressStartCount = 0
+        var moveCount = 0
+        var endCount = 0
+
+        composeTestRule.setContent {
+            DavidLiveMeshSphereVisualizer(
+                visualState = DavidLiveVisualState.IDLE_LISTENING,
+                overallEnergy = 0.05f,
+                rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0f },
+                isMicMuted = false,
+                onSphereClick = { tapCount++ },
+                modifier = Modifier,
+                onLongPressStartForTest = { longPressStartCount++ },
+                onLongPressMoveForTest = { moveCount++ },
+                onLongPressEndForTest = { endCount++ }
+            )
+        }
+
+        composeTestRule.onNodeWithTag("david_live_circular_visualizer").performTouchInput {
+            down(center)
+            advanceEventTime(650L)
+            moveTo(center + androidx.compose.ui.geometry.Offset(18f, 12f), durationMillis = 100L)
+            up()
+        }
+        composeTestRule.waitForIdle()
+
+        assertEquals(0, tapCount)
+        assertEquals(1, longPressStartCount)
+        assertTrue(moveCount > 0)
+        assertEquals(1, endCount)
+    }
+
 }
 
 

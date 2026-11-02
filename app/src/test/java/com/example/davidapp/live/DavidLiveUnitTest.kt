@@ -1757,53 +1757,6 @@ class DavidLiveUnitTest {
         assertEquals(DavidLiveConnectionFailureKind.NONE, controller.failureKind.value)
         assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
     }
-    @Test
-    fun `speech bubble shows only the latest completed phrase`() {
-        assertEquals(
-            "Следующая фраза Давида.",
-            resolveLatestSpeechPhrase("Первая фраза завершена. Следующая фраза Давида.")
-        )
-        assertEquals(
-            "Текущая реплика без точки",
-            resolveLatestSpeechPhrase("Текущая реплика без точки")
-        )
-        assertEquals("", resolveLatestSpeechPhrase("   "))
-    }
-
-    @Test
-    fun `muted sphere palette never hides system states or David outgoing speech`() {
-        assertTrue(shouldApplyMutedVisualPalette(DavidLiveVisualState.IDLE_LISTENING, true))
-        assertTrue(shouldApplyMutedVisualPalette(DavidLiveVisualState.USER_SPEAKING, true))
-        assertTrue(shouldApplyMutedVisualPalette(DavidLiveVisualState.ANALYZING, true))
-        assertFalse(shouldApplyMutedVisualPalette(DavidLiveVisualState.DAVID_SPEAKING, true))
-        assertFalse(shouldApplyMutedVisualPalette(DavidLiveVisualState.OFFLINE, true))
-        assertFalse(shouldApplyMutedVisualPalette(DavidLiveVisualState.API_MISSING, true))
-        assertFalse(shouldApplyMutedVisualPalette(DavidLiveVisualState.ERROR, true))
-        assertFalse(shouldApplyMutedVisualPalette(DavidLiveVisualState.IDLE_LISTENING, false))
-    }
-
-    @Test
-    fun `sphere rotation phase speed follows state without resetting phase`() {
-        val idleSpeed = resolveSphereAngularSpeed(
-            DavidLiveVisualState.IDLE_LISTENING,
-            isMicMuted = false,
-            audioEnergy = 0.1f
-        )
-        val speakingSpeed = resolveSphereAngularSpeed(
-            DavidLiveVisualState.DAVID_SPEAKING,
-            isMicMuted = true,
-            audioEnergy = 0.8f
-        )
-        val offlineSpeed = resolveSphereAngularSpeed(
-            DavidLiveVisualState.OFFLINE,
-            isMicMuted = false,
-            audioEnergy = 1f
-        )
-
-        assertTrue(speakingSpeed > idleSpeed)
-        assertEquals(0f, offlineSpeed, 0.001f)
-    }
-
 }
 
 

@@ -50,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -313,7 +314,10 @@ fun DavidLiveMeshSphereVisualizer(
     onSphereClick: () -> Unit,
     modifier: Modifier = Modifier,
     visualizerSize: Dp = 276.dp,
-    activeToolName: String? = null
+    activeToolName: String? = null,
+    onLongPressStartForTest: (() -> Unit)? = null,
+    onLongPressMoveForTest: (() -> Unit)? = null,
+    onLongPressEndForTest: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -356,8 +360,8 @@ fun DavidLiveMeshSphereVisualizer(
     val currentAngularSpeed by rememberUpdatedState(animatedAngularSpeed)
     var rotationYawDegrees by remember { mutableFloatStateOf(0f) }
 
-    LaunchedEffect(lifecycleActive, reduceMotion) {
-        if (!lifecycleActive || reduceMotion) return@LaunchedEffect
+    LaunchedEffect(ambientMotionEnabled) {
+        if (!ambientMotionEnabled) return@LaunchedEffect
         var previousFrameMillis = 0L
         while (isActive) {
             withInfiniteAnimationFrameMillis { frameMillis ->
@@ -494,9 +498,16 @@ fun DavidLiveMeshSphereVisualizer(
                 onLongPressStart = { point ->
                     touchPosition = point
                     isTouchActive = true
+                    onLongPressStartForTest?.invoke()
                 },
-                onLongPressMove = { point -> touchPosition = point },
-                onLongPressEnd = { isTouchActive = false },
+                onLongPressMove = { point ->
+                    touchPosition = point
+                    onLongPressMoveForTest?.invoke()
+                },
+                onLongPressEnd = {
+                    isTouchActive = false
+                    onLongPressEndForTest?.invoke()
+                },
                 onLongPressCancel = { isTouchActive = false }
             )
             .testTag("david_live_circular_visualizer")
