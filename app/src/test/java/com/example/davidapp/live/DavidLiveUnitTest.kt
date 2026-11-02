@@ -2244,17 +2244,15 @@ class DavidLiveUnitTest {
 
         // Проверка переходов границ месяцев (31 января -> 28 февраля -> 31 марта)
         val jan31 = java.time.LocalDate.of(2026, 1, 31).toEpochDay()
-        val feb28 = com.example.data.safetospend.RecurringScheduleCalculator.advanceEpochDay(
-            currentEpochDay = jan31,
+        val feb28 = com.example.data.safetospend.RecurringScheduleCalculator.computeNextDueDate(
+            currentDueDateEpochDay = jan31,
             frequency = com.example.data.safetospend.PaymentFrequency.MONTHLY,
-            customIntervalDays = null,
             anchorDayOfMonth = 31
         )
         assertEquals(java.time.LocalDate.of(2026, 2, 28).toEpochDay(), feb28)
-        val mar31 = com.example.data.safetospend.RecurringScheduleCalculator.advanceEpochDay(
-            currentEpochDay = feb28,
+        val mar31 = com.example.data.safetospend.RecurringScheduleCalculator.computeNextDueDate(
+            currentDueDateEpochDay = feb28,
             frequency = com.example.data.safetospend.PaymentFrequency.MONTHLY,
-            customIntervalDays = null,
             anchorDayOfMonth = 31
         )
         assertEquals(java.time.LocalDate.of(2026, 3, 31).toEpochDay(), mar31)
