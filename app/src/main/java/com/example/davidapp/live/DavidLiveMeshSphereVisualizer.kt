@@ -585,7 +585,7 @@ private fun DrawScope.drawWireframeMeshSphere(
                 } else {
                     0.18f
                 }
-                val strokeWidth = if (isFront) 1.9f.dp.toPx() else 1.0f.dp.toPx()
+                val strokeWidth = if (isFront) 1.9.dp.toPx() else 1.0.dp.toPx()
                 val lineColor = if (latDeg == 0f) secondaryColor else primaryColor
 
                 drawLine(
@@ -637,7 +637,7 @@ private fun DrawScope.drawWireframeMeshSphere(
             if (!isFirst) {
                 val isFront = (z2 + prevZ) / 2f >= 0f
                 val strokeAlpha = if (isFront) 0.60f else 0.14f
-                val strokeWidth = if (isFront) 1.5f.dp.toPx() else 0.9f.dp.toPx()
+                val strokeWidth = if (isFront) 1.5.dp.toPx() else 0.9.dp.toPx()
 
                 drawLine(
                     color = primaryColor.copy(alpha = strokeAlpha),
@@ -687,7 +687,7 @@ private fun DrawScope.drawWireframeMeshSphere(
             val perspectiveK = cameraDistance / (cameraDistance - z2)
             val screenX = center.x + x1 * perspectiveK
             val screenY = center.y + y2 * perspectiveK
-            val nodeRadius = (2.4f.dp.toPx() * perspectiveK).coerceIn(1.8f.dp.toPx(), 4.5f.dp.toPx())
+            val nodeRadius = (2.4.dp.toPx() * perspectiveK).coerceIn(1.8.dp.toPx(), 4.5.dp.toPx())
 
             drawCircle(
                 color = secondaryColor.copy(alpha = 0.85f),
@@ -731,7 +731,7 @@ private fun DrawScope.drawPlanetaryFinanceRing(
             ),
             topLeft = Offset(center.x - ringRadiusX, center.y - ringRadiusY),
             size = Size(ringRadiusX * 2f, ringRadiusY * 2f),
-            style = Stroke(width = 3.2f.dp.toPx())
+            style = Stroke(width = 3.2.dp.toPx())
         )
 
         // Бегущий импульс сканирования по периметру кольца
@@ -741,12 +741,12 @@ private fun DrawScope.drawPlanetaryFinanceRing(
 
         drawCircle(
             color = goldColor.copy(alpha = 0.95f),
-            radius = 4.2f.dp.toPx(),
+            radius = 4.2.dp.toPx(),
             center = Offset(pulseX, pulseY)
         )
         drawCircle(
             color = accentColor.copy(alpha = 0.40f),
-            radius = 9.5f.dp.toPx(),
+            radius = 9.5.dp.toPx(),
             center = Offset(pulseX, pulseY)
         )
 
@@ -763,14 +763,14 @@ private fun DrawScope.drawPlanetaryFinanceRing(
 
             drawCircle(
                 color = ObsidianCoreDeep,
-                radius = 7.5f.dp.toPx(),
+                radius = 7.5.dp.toPx(),
                 center = Offset(posX, posY)
             )
             drawCircle(
                 color = goldColor.copy(alpha = 0.85f),
-                radius = 7.5f.dp.toPx(),
+                radius = 7.5.dp.toPx(),
                 center = Offset(posX, posY),
-                style = Stroke(width = 1.2f.dp.toPx())
+                style = Stroke(width = 1.2.dp.toPx())
             )
 
             // Микро-иконки в зависимости от квадранта:
@@ -781,13 +781,13 @@ private fun DrawScope.drawPlanetaryFinanceRing(
                         color = goldColor,
                         start = Offset(posX - 3.dp.toPx(), posY - 2.dp.toPx()),
                         end = Offset(posX + 3.dp.toPx(), posY - 2.dp.toPx()),
-                        strokeWidth = 1.1f.dp.toPx()
+                        strokeWidth = 1.1.dp.toPx()
                     )
                     drawLine(
                         color = goldColor,
                         start = Offset(posX - 3.dp.toPx(), posY + 1.dp.toPx()),
                         end = Offset(posX + 1.dp.toPx(), posY + 1.dp.toPx()),
-                        strokeWidth = 1.1f.dp.toPx()
+                        strokeWidth = 1.1.dp.toPx()
                     )
                 }
 
@@ -796,26 +796,26 @@ private fun DrawScope.drawPlanetaryFinanceRing(
                         color = accentColor,
                         start = Offset(posX - 3.dp.toPx(), posY + 3.dp.toPx()),
                         end = Offset(posX - 3.dp.toPx(), posY - 1.dp.toPx()),
-                        strokeWidth = 1.3f.dp.toPx()
+                        strokeWidth = 1.3.dp.toPx()
                     )
                     drawLine(
                         color = accentColor,
                         start = Offset(posX, posY + 3.dp.toPx()),
                         end = Offset(posX, posY - 3.dp.toPx()),
-                        strokeWidth = 1.3f.dp.toPx()
+                        strokeWidth = 1.3.dp.toPx()
                     )
                     drawLine(
                         color = accentColor,
                         start = Offset(posX + 3.dp.toPx(), posY + 3.dp.toPx()),
                         end = Offset(posX + 3.dp.toPx(), posY + 1.dp.toPx()),
-                        strokeWidth = 1.3f.dp.toPx()
+                        strokeWidth = 1.3.dp.toPx()
                     )
                 }
 
                 2 -> { // Монета
                     drawCircle(
                         color = goldColor,
-                        radius = 2.4f.dp.toPx(),
+                        radius = 2.4.dp.toPx(),
                         center = Offset(posX, posY)
                     )
                 }
@@ -823,9 +823,9 @@ private fun DrawScope.drawPlanetaryFinanceRing(
                 3 -> { // Календарь
                     drawRect(
                         color = accentColor,
-                        topLeft = Offset(posX - 2.5f.dp.toPx(), posY - 2.5f.dp.toPx()),
-                        size = Size(5f.dp.toPx(), 5f.dp.toPx()),
-                        style = Stroke(width = 1.0f.dp.toPx())
+                        topLeft = Offset(posX - 2.5.dp.toPx(), posY - 2.5.dp.toPx()),
+                        size = Size(5.dp.toPx(), 5.dp.toPx()),
+                        style = Stroke(width = 1.0.dp.toPx())
                     )
                 }
             }
@@ -852,14 +852,14 @@ private fun DrawScope.drawAnalyzingDualOrbits(
             color = cyanColor.copy(alpha = 0.35f),
             topLeft = Offset(center.x - orbitRadiusX, center.y - orbitRadiusY),
             size = Size(orbitRadiusX * 2f, orbitRadiusY * 2f),
-            style = Stroke(width = 1.6f.dp.toPx())
+            style = Stroke(width = 1.6.dp.toPx())
         )
         val ang1 = orbitProgress * 2f * PI.toFloat()
         val beacon1X = center.x + orbitRadiusX * cos(ang1)
         val beacon1Y = center.y + orbitRadiusY * sin(ang1)
         drawCircle(
             color = cyanColor,
-            radius = 3.8f.dp.toPx(),
+            radius = 3.8.dp.toPx(),
             center = Offset(beacon1X, beacon1Y)
         )
     }
@@ -870,14 +870,14 @@ private fun DrawScope.drawAnalyzingDualOrbits(
             color = emeraldColor.copy(alpha = 0.35f),
             topLeft = Offset(center.x - orbitRadiusX, center.y - orbitRadiusY),
             size = Size(orbitRadiusX * 2f, orbitRadiusY * 2f),
-            style = Stroke(width = 1.6f.dp.toPx())
+            style = Stroke(width = 1.6.dp.toPx())
         )
         val ang2 = (orbitProgress + 0.5f) * 2f * PI.toFloat()
         val beacon2X = center.x + orbitRadiusX * cos(ang2)
         val beacon2Y = center.y + orbitRadiusY * sin(ang2)
         drawCircle(
             color = emeraldColor,
-            radius = 3.8f.dp.toPx(),
+            radius = 3.8.dp.toPx(),
             center = Offset(beacon2X, beacon2Y)
         )
     }
@@ -909,7 +909,7 @@ private fun DrawScope.drawAcousticSoundwaveArcs(
             useCenter = false,
             topLeft = Offset(center.x - currentRadius, center.y - currentRadius),
             size = Size(currentRadius * 2f, currentRadius * 2f),
-            style = Stroke(width = 2.0f.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 2.0.dp.toPx(), cap = StrokeCap.Round)
         )
 
         // Правая акустическая дуга
@@ -920,7 +920,7 @@ private fun DrawScope.drawAcousticSoundwaveArcs(
             useCenter = false,
             topLeft = Offset(center.x - currentRadius, center.y - currentRadius),
             size = Size(currentRadius * 2f, currentRadius * 2f),
-            style = Stroke(width = 2.0f.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 2.0.dp.toPx(), cap = StrokeCap.Round)
         )
     }
 }
@@ -945,7 +945,7 @@ private fun DrawScope.drawConnectingHandshakeArcs(
             useCenter = false,
             topLeft = Offset(center.x - outerRadius, center.y - outerRadius),
             size = Size(outerRadius * 2f, outerRadius * 2f),
-            style = Stroke(width = 2.4f.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round)
         )
         drawArc(
             color = color.copy(alpha = 0.85f),
@@ -954,7 +954,7 @@ private fun DrawScope.drawConnectingHandshakeArcs(
             useCenter = false,
             topLeft = Offset(center.x - outerRadius, center.y - outerRadius),
             size = Size(outerRadius * 2f, outerRadius * 2f),
-            style = Stroke(width = 2.4f.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round)
         )
     }
 }
@@ -975,7 +975,7 @@ private fun DrawScope.drawSuccessExpansionRing(
         color = color.copy(alpha = ringAlpha),
         radius = ringR,
         center = center,
-        style = Stroke(width = 2.6f.dp.toPx())
+        style = Stroke(width = 2.6.dp.toPx())
     )
 }
 
@@ -1000,14 +1000,14 @@ private fun DrawScope.drawSpeechEqualizerBars(
         val rayIdx = (b * (DavidLiveSpectrumAnalyzer.RAY_COUNT / barCount)).coerceIn(0, rayMagnitudes.lastIndex)
         val rawMag = rayMagnitudes.getOrElse(rayIdx) { 0f }
         val centerFalloff = 1f - abs((b - barCount / 2f) / (barCount / 2f)) * 0.45f
-        val h = (maxBarHeight * rawMag * centerFalloff * (0.4f + energy * 0.6f)).coerceIn(2.5f.dp.toPx(), maxBarHeight)
+        val h = (maxBarHeight * rawMag * centerFalloff * (0.4f + energy * 0.6f)).coerceIn(2.5.dp.toPx(), maxBarHeight)
 
         val bx = startX + b * barSpacing
         drawLine(
             color = color.copy(alpha = 0.85f),
             start = Offset(bx, barY - h / 2f),
             end = Offset(bx, barY + h / 2f),
-            strokeWidth = 2.2f.dp.toPx(),
+            strokeWidth = 2.2.dp.toPx(),
             cap = StrokeCap.Round
         )
     }
