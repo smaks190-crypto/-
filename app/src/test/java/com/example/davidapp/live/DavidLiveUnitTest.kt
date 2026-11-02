@@ -1771,6 +1771,51 @@ class DavidLiveUnitTest {
     }
 
     @Test
+    fun `speech bubble reveal continues from the visible cursor when Gemini appends a fragment`() {
+        val previous = "Слушаю"
+        val next = "Слушаю тебя"
+
+        assertEquals(
+            4,
+            speechBubbleRevealStartIndex(
+                previousText = previous,
+                nextText = next,
+                currentlyRevealedLength = 4
+            )
+        )
+    }
+
+    @Test
+    fun `speech bubble reveal restarts only the corrected trailing word`() {
+        assertEquals(
+            "Я люблю ".length,
+            speechBubbleRevealStartIndex(
+                previousText = "Я люблю кофе",
+                nextText = "Я люблю чай",
+                currentlyRevealedLength = "Я люблю кофе".length
+            )
+        )
+    }
+
+    @Test
+    fun `speech bubble reveal safely restarts when an earlier word is corrected`() {
+        assertEquals(
+            0,
+            speechBubbleRevealStartIndex(
+                previousText = "Привет, мир",
+                nextText = "Здравствуйте, мир",
+                currentlyRevealedLength = "Привет, мир".length
+            )
+        )
+    }
+
+    @Test
+    fun `speech bubble reveal groups each word with following whitespace`() {
+        assertEquals(8, nextSpeechBubbleRevealEnd("Привет, мир!", 0))
+        assertEquals("Привет, мир!".length, nextSpeechBubbleRevealEnd("Привет, мир!", 8))
+    }
+
+    @Test
     fun `muted sphere palette never hides system states or David outgoing speech`() {
         assertTrue(shouldApplyMutedVisualPalette(DavidLiveVisualState.IDLE_LISTENING, true))
         assertTrue(shouldApplyMutedVisualPalette(DavidLiveVisualState.USER_SPEAKING, true))
