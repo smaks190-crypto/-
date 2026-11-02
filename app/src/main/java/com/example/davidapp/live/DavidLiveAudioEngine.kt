@@ -81,6 +81,10 @@ class DavidLiveAudioEngine(
     private val recentLoudPeakRmsBits = AtomicInteger(floatToIntBits(0f))
     private val lastLoudPlaybackOutputTimestamp = AtomicLong(0L)
     private val activePlaybackWindowInProgress = AtomicBoolean(false)
+    private val queuedPlaybackSamples = AtomicLong(0L)
+    private val postBargeInForwardUntilEpochMs = AtomicLong(0L)
+    private val preBargeInRingBuffer = ArrayDeque<ShortArray>(PRE_BARGE_IN_RING_MAX_FRAMES)
+    private val preBargeInRingLock = Any()
     private val estimatedEchoCouplingBits = AtomicInteger(floatToIntBits(DEFAULT_ECHO_COUPLING_RATIO))
 
     // Test overrides for deterministic unit verification of volume, headset routing, and AEC state
@@ -112,7 +116,8 @@ class DavidLiveAudioEngine(
         val davidCurrentlyPlaying: Boolean,
         val triggeredBargeIn: Boolean,
         val shouldForwardMicChunkToServer: Boolean,
-        val suppressedAsEcho: Boolean
+        val suppressedAsEcho: Boolean,
+        val preRollPcmFramesToForward: List<ShortArray> = emptyList()
     )
 
     /**
@@ -132,9 +137,18 @@ class DavidLiveAudioEngine(
      * prematurely opening the microphone to speaker echo.
      */
     fun setServerTurnSpeakingActive(active: Boolean) {
-        serverTurnSpeakingActive.set(active)
-        if (!active && playbackQueue.isEmpty()) {
-            // Allow natural acoustic tail decay after server turn completes
+        val wasActive = serverTurnSpeakingActive.getAndSet(active)
+        if (active && !wasActive && !userBargedInActive.get()) {
+            // Clear pre-turn user speech timestamp when David starts speaking so the user's
+            // prior question is never mistaken for a mid-turn barge-in.
+            lastConfirmedUserSpeechEpochMs.set(0L)
+        }
+        if (!active &&
+            playbackQueue.isEmpty() &&
+            !activePlaybackWindowInProgress.get() &&
+            queuedPlaybackSamples.get() <= 0L
+        ) {
+            // Allow natural acoustic tail decay after server turn and local playback both complete
             val now = System.currentTimeMillis()
             val currentEnd = estimatedPlayoutEndEpochMs.get()
             if (currentEnd > now + MAX_POST_TURN_BUFFER_DRAIN_MS) {
@@ -161,11 +175,14 @@ class DavidLiveAudioEngine(
     fun hasPendingOrActiveModelPlayback(nowMs: Long = System.currentTimeMillis()): Boolean {
         return playbackQueue.isNotEmpty() ||
             activePlaybackWindowInProgress.get() ||
+            queuedPlaybackSamples.get() > 0L ||
             nowMs <= estimatedPlayoutEndEpochMs.get()
     }
 
     fun hasQueuedPlaybackChunks(): Boolean {
-        return playbackQueue.isNotEmpty() || activePlaybackWindowInProgress.get()
+        return playbackQueue.isNotEmpty() ||
+            activePlaybackWindowInProgress.get() ||
+            queuedPlaybackSamples.get() > 0L
     }
 
     fun isEngineRunning(): Boolean = isRunning.get()
@@ -204,6 +221,9 @@ class DavidLiveAudioEngine(
 
     /**
      * Resolves the current output volume ratio (`0.0f..1.0f`) for the Assistant / media stream.
+     * Queries both the Assistant stream (`USAGE_ASSISTANT`) and `STREAM_MUSIC`, returning the higher ratio
+     * because on many Android devices `USAGE_ASSISTANT` maps to a separate stream index while actual
+     * loudspeaker amplification is controlled by `STREAM_MUSIC` (or vice versa).
      * Defaults to a conservative high-volume loudspeaker assumption (`0.80f`) when [AudioManager] is unavailable.
      */
     fun getEffectiveSpeakerVolumeRatio(): Float {
@@ -211,10 +231,16 @@ class DavidLiveAudioEngine(
         if (isExternalAudioOutputHeadsetConnected()) return 0.25f
         val am = audioManager ?: return DEFAULT_SPEAKER_VOLUME_RATIO
         return try {
-            val stream = getAssistantVolumeStreamType()
-            val maxVol = am.getStreamMaxVolume(stream).coerceAtLeast(1)
-            val curVol = am.getStreamVolume(stream).coerceIn(0, maxVol)
-            (curVol.toFloat() / maxVol.toFloat()).coerceIn(0f, 1f)
+            val assistantStream = getAssistantVolumeStreamType()
+            val assistantMax = am.getStreamMaxVolume(assistantStream).coerceAtLeast(1)
+            val assistantCur = am.getStreamVolume(assistantStream).coerceIn(0, assistantMax)
+            val assistantRatio = (assistantCur.toFloat() / assistantMax.toFloat()).coerceIn(0f, 1f)
+
+            val musicMax = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+            val musicCur = am.getStreamVolume(AudioManager.STREAM_MUSIC).coerceIn(0, musicMax)
+            val musicRatio = (musicCur.toFloat() / musicMax.toFloat()).coerceIn(0f, 1f)
+
+            maxOf(assistantRatio, musicRatio)
         } catch (_: Exception) {
             DEFAULT_SPEAKER_VOLUME_RATIO
         }
@@ -240,7 +266,7 @@ class DavidLiveAudioEngine(
     internal fun setSpeakerVolumeRatioForTest(ratio: Float?) {
         testSpeakerVolumeRatioOverride = ratio
         if (ratio != null) {
-            val seededCoupling = (0.34f + 0.26f * ratio.coerceIn(0f, 1f)).coerceIn(0.18f, 0.82f)
+            val seededCoupling = (0.34f + 0.26f * ratio.coerceIn(0f, 1f)).coerceIn(0.18f, 1.05f)
             setEstimatedEchoCouplingRatio(seededCoupling)
         } else {
             setEstimatedEchoCouplingRatio(DEFAULT_ECHO_COUPLING_RATIO)
@@ -265,6 +291,28 @@ class DavidLiveAudioEngine(
 
     private fun setRecentLoudPeakRms(value: Float) {
         recentLoudPeakRmsBits.set(floatToIntBits(value.coerceIn(0f, 1f)))
+    }
+
+    /**
+     * Returns the effective playback reference RMS accounting for the `AudioTrack` hardware buffer
+     * latency (~300–450 ms) and room reverberation tail (~250–300 ms) via [AUDIO_TRACK_ECHO_HOLD_MS].
+     * Used consistently across both [computeAdaptiveBargeInThresholdRms] and [evaluateCaptureFrame]
+     * so inter-word pauses written into the tail of `AudioTrack`'s buffer do not prematurely drop
+     * `refRms` while the previous loud word is still exiting the physical loudspeaker.
+     */
+    internal fun getEffectiveEchoReferenceRms(nowMs: Long = System.currentTimeMillis()): Float {
+        val rawRefRms = getPlaybackReferenceRms()
+        if (isExternalAudioOutputHeadsetConnected()) return rawRefRms
+        val volRatio = getEffectiveSpeakerVolumeRatio()
+        val inLoudEchoHoldWindow = isDavidPlaybackOrEchoTailActive(nowMs) &&
+            volRatio >= 0.65f &&
+            lastLoudPlaybackOutputTimestamp.get() > 0L &&
+            (nowMs - lastLoudPlaybackOutputTimestamp.get() in 0L..AUDIO_TRACK_ECHO_HOLD_MS)
+        return if (inLoudEchoHoldWindow) {
+            maxOf(rawRefRms, getRecentLoudPeakRms() * 0.74f)
+        } else {
+            rawRefRms
+        }
     }
 
     private fun updatePlaybackReferenceEnvelope(
@@ -295,7 +343,47 @@ class DavidLiveAudioEngine(
     internal fun getEstimatedEchoCouplingRatio(): Float = intBitsToFloat(estimatedEchoCouplingBits.get())
 
     private fun setEstimatedEchoCouplingRatio(value: Float) {
-        estimatedEchoCouplingBits.set(floatToIntBits(value.coerceIn(0.18f, 0.82f)))
+        estimatedEchoCouplingBits.set(floatToIntBits(value.coerceIn(0.18f, 1.05f)))
+    }
+
+    private fun clearPreBargeInRingBuffer() {
+        synchronized(preBargeInRingLock) {
+            preBargeInRingBuffer.clear()
+        }
+    }
+
+    private fun recordPreBargeInFrame(pcmSamples: ShortArray, sampleCount: Int) {
+        val count = sampleCount.coerceIn(0, pcmSamples.size)
+        if (count <= 0) return
+        val copy = pcmSamples.copyOf(count)
+        synchronized(preBargeInRingLock) {
+            if (preBargeInRingBuffer.size >= PRE_BARGE_IN_RING_MAX_FRAMES) {
+                preBargeInRingBuffer.removeFirst()
+            }
+            preBargeInRingBuffer.addLast(copy)
+        }
+    }
+
+    /**
+     * Drains the rolling pre-barge-in onset frames (excluding the current frame, which is sent
+     * immediately after) and prepends 2 frames (128 ms) of clean digital silence so Gemini Live's
+     * server-side VAD detects a crisp speech onset and transcribes the very first word of the user's
+     * interruption without clipping.
+     */
+    private fun drainPreBargeInFramesForServer(currentFrameSampleCount: Int): List<ShortArray> {
+        synchronized(preBargeInRingLock) {
+            if (preBargeInRingBuffer.isEmpty()) return emptyList()
+            val buffered = preBargeInRingBuffer.toList()
+            preBargeInRingBuffer.clear()
+            val priorFrames = if (buffered.size > 1) buffered.dropLast(1) else emptyList()
+            if (priorFrames.isEmpty()) return emptyList()
+            val silenceLen = currentFrameSampleCount.coerceAtLeast(1024)
+            return buildList(priorFrames.size + 2) {
+                add(ShortArray(silenceLen))
+                add(ShortArray(silenceLen))
+                addAll(priorFrames)
+            }
+        }
     }
 
     /**
@@ -324,6 +412,9 @@ class DavidLiveAudioEngine(
         playbackGeneration.incrementAndGet()
         spectrumAnalyzer.reset()
         playbackQueue.clear()
+        queuedPlaybackSamples.set(0L)
+        postBargeInForwardUntilEpochMs.set(0L)
+        clearPreBargeInRingBuffer()
         lastOutputChunkTimestamp.set(0L)
         estimatedPlayoutEndEpochMs.set(0L)
         playbackBurstStartEpochMs.set(0L)
@@ -367,20 +458,34 @@ class DavidLiveAudioEngine(
             samples[i] = ((high shl 8) or low).toShort()
             byteIdx += 2
         }
-        recordModelOutputActivity(samples, OUTPUT_SAMPLE_RATE_HZ, nowMs)
+        queuedPlaybackSamples.addAndGet(sampleCount.toLong())
+        // Seed the reference envelope immediately only when no playback reference is active yet;
+        // once startPlaybackWorker is actively writing windows to AudioTrack, the playback worker
+        // updates the reference envelope in real time so network pre-buffering never desynchronizes it.
+        val seedEnvelopeImmediate = !isRunning.get() || getPlaybackReferenceRms() <= 0.001f
+        recordModelOutputActivity(
+            samples = samples,
+            sampleRateHz = OUTPUT_SAMPLE_RATE_HZ,
+            nowMs = nowMs,
+            updateEnvelope = seedEnvelopeImmediate
+        )
         playbackQueue.offer(samples)
     }
 
     private fun recordModelOutputActivity(
         samples: ShortArray,
         sampleRateHz: Int,
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        updateEnvelope: Boolean = true
     ) {
         val prevEnd = estimatedPlayoutEndEpochMs.get()
         val wasIdle = prevEnd <= nowMs &&
             (lastOutputChunkTimestamp.get() == 0L || nowMs - lastOutputChunkTimestamp.get() > PLAYBACK_ECHO_TAIL_MS)
         if (wasIdle) {
             playbackBurstStartEpochMs.set(nowMs)
+            if (!userBargedInActive.get()) {
+                lastConfirmedUserSpeechEpochMs.set(0L)
+            }
         }
         lastOutputChunkTimestamp.set(nowMs)
         val safeRate = sampleRateHz.coerceAtLeast(8_000)
@@ -389,7 +494,9 @@ class DavidLiveAudioEngine(
         estimatedPlayoutEndEpochMs.set(
             (baseStart + durationMs).coerceAtMost(nowMs + MAX_BUFFERED_PLAYOUT_LOOKAHEAD_MS)
         )
-        updatePlaybackReferenceEnvelope(computePcmRms(samples, samples.size), nowMs)
+        if (updateEnvelope) {
+            updatePlaybackReferenceEnvelope(computePcmRms(samples, samples.size), nowMs)
+        }
     }
 
     /**
@@ -401,6 +508,7 @@ class DavidLiveAudioEngine(
     fun clearModelPlaybackQueue(nowMs: Long = System.currentTimeMillis()) {
         playbackGeneration.incrementAndGet()
         playbackQueue.clear()
+        queuedPlaybackSamples.set(0L)
         lastOutputChunkTimestamp.set(0L)
         estimatedPlayoutEndEpochMs.set(0L)
         playbackBurstStartEpochMs.set(0L)
@@ -439,7 +547,13 @@ class DavidLiveAudioEngine(
     internal fun getEstimatedPlayoutEndEpochMsForTest(): Long = estimatedPlayoutEndEpochMs.get()
 
     internal fun isDavidPlaybackOrEchoTailActive(nowMs: Long = System.currentTimeMillis()): Boolean {
-        if (playbackQueue.isNotEmpty() || serverTurnSpeakingActive.get()) return true
+        if (playbackQueue.isNotEmpty() ||
+            activePlaybackWindowInProgress.get() ||
+            queuedPlaybackSamples.get() > 0L ||
+            serverTurnSpeakingActive.get()
+        ) {
+            return true
+        }
         val playoutEnd = estimatedPlayoutEndEpochMs.get()
         if (playoutEnd > 0L && nowMs <= playoutEnd + PLAYBACK_ECHO_TAIL_MS) return true
         val lastChunk = lastOutputChunkTimestamp.get()
@@ -454,28 +568,21 @@ class DavidLiveAudioEngine(
         if (isExternalAudioOutputHeadsetConnected()) {
             return BASE_BARGE_IN_RMS_THRESHOLD
         }
-        val rawRefRms = getPlaybackReferenceRms()
         val volRatio = getEffectiveSpeakerVolumeRatio()
-        val inLoudEchoHoldWindow = isDavidPlaybackOrEchoTailActive(nowMs) &&
-            volRatio >= 0.65f &&
-            lastLoudPlaybackOutputTimestamp.get() > 0L &&
-            (nowMs - lastLoudPlaybackOutputTimestamp.get() in 0L..AUDIO_TRACK_ECHO_HOLD_MS)
-        val refRms = if (inLoudEchoHoldWindow) {
-            maxOf(rawRefRms, getRecentLoudPeakRms() * 0.58f)
-        } else {
-            rawRefRms
-        }
+        val refRms = getEffectiveEchoReferenceRms(nowMs)
         val coupling = getEstimatedEchoCouplingRatio()
         val expectedEchoRms = refRms * coupling
-        val aecMargin = if (isHardwareAecActive()) 1.38f else 1.58f
+        // On built-in loudspeaker at >=70% volume in MODE_NORMAL (USAGE_ASSISTANT), Android HAL AEC
+        // does not cancel full-scale loudspeaker bleed even when AcousticEchoCanceler reports enabled.
+        val aecMargin = if (isHardwareAecActive() && volRatio < 0.70f) 1.38f else 1.58f
         val highVolExtraFloor = if (volRatio >= 0.65f && refRms >= 0.055f) {
-            0.045f * ((volRatio - 0.50f) * 2f).coerceIn(0f, 1f)
+            0.055f * ((volRatio - 0.50f) * 2f).coerceIn(0f, 1f)
         } else {
             0f
         }
         val dynamicThreshold = maxOf(
             BASE_BARGE_IN_RMS_THRESHOLD + highVolExtraFloor,
-            expectedEchoRms * aecMargin + 0.028f
+            expectedEchoRms * aecMargin + 0.032f
         )
         val burstStart = playbackBurstStartEpochMs.get()
         val inOnsetGuard = isDavidPlaybackOrEchoTailActive(nowMs) &&
@@ -516,19 +623,23 @@ class DavidLiveAudioEngine(
             userBargedInActive.set(false)
             consecutiveBargeInFramesCount.set(0)
             consecutiveBargeInExcessFramesCount.set(0)
+            clearPreBargeInRingBuffer()
             setPlaybackReferenceRms(getPlaybackReferenceRms() * 0.72f)
         } else if (!wasPlaying) {
-            // Reset any pre-existing voice frame counts when David starts/resumes speaking
-            // so user speech before David's turn never carries over as a false barge-in.
+            // Reset any pre-existing voice frame counts and pre-turn speech timestamps when David
+            // starts/resumes speaking so user speech before David's turn never carries over as a false barge-in.
             userBargedInActive.set(false)
+            lastConfirmedUserSpeechEpochMs.set(0L)
+            postBargeInForwardUntilEpochMs.set(0L)
             consecutiveBargeInFramesCount.set(0)
             consecutiveBargeInExcessFramesCount.set(0)
+            clearPreBargeInRingBuffer()
             if (playbackBurstStartEpochMs.get() <= 0L) {
                 playbackBurstStartEpochMs.set(nowMs)
             }
         }
 
-        val refRms = getPlaybackReferenceRms()
+        val refRms = getEffectiveEchoReferenceRms(nowMs)
         val headset = isExternalAudioOutputHeadsetConnected()
         val volRatio = getEffectiveSpeakerVolumeRatio()
 
@@ -537,19 +648,21 @@ class DavidLiveAudioEngine(
             val curCoupling = getEstimatedEchoCouplingRatio()
             val burstStart = playbackBurstStartEpochMs.get()
             val inOnset = burstStart > 0L && (nowMs - burstStart in 0L..PLAYBACK_ONSET_GUARD_MS)
-            val looksLikeProportionalEcho = (inOnset && rms < 0.27f) ||
-                rms <= (refRms * curCoupling * 1.36f + 0.026f)
+            val looksLikeProportionalEcho = (inOnset && rms < 0.29f) ||
+                rms <= (refRms * curCoupling * 1.65f + 0.055f)
             if (looksLikeProportionalEcho && rms > 0.01f) {
-                val observedRatio = (rms / refRms).coerceIn(0.18f, 0.80f)
-                val alpha = if (inOnset) 0.26f else 0.14f
+                val observedRatio = (rms / refRms).coerceIn(0.18f, 1.05f)
+                val alpha = if (inOnset) 0.28f else 0.16f
                 setEstimatedEchoCouplingRatio(curCoupling * (1f - alpha) + observedRatio * alpha)
             }
         }
 
         val adaptiveThreshold = computeAdaptiveBargeInThresholdRms(nowMs)
         var triggeredBargeIn = false
+        var preRollFrames: List<ShortArray> = emptyList()
 
         if (davidCurrentlyPlaying && !userBargedInActive.get()) {
+            recordPreBargeInFrame(pcmSamples, sampleCount)
             if (rms > adaptiveThreshold) {
                 val frames = consecutiveBargeInFramesCount.incrementAndGet()
                 val isLowRefSyllableGapAllowed = if (!headset && volRatio >= 0.65f) {
@@ -558,7 +671,7 @@ class DavidLiveAudioEngine(
                     refRms < 0.055f
                 }
                 val isSyllableGapOrStrongNearField =
-                    isLowRefSyllableGapAllowed || rms >= adaptiveThreshold * 1.16f
+                    isLowRefSyllableGapAllowed || rms >= adaptiveThreshold * STRONG_NEAR_FIELD_EXCESS_MULTIPLIER
                 val excessFrames = if (isSyllableGapOrStrongNearField) {
                     consecutiveBargeInExcessFramesCount.incrementAndGet()
                 } else {
@@ -572,15 +685,20 @@ class DavidLiveAudioEngine(
                 if (frames >= requiredFrames) {
                     userBargedInActive.set(true)
                     lastConfirmedUserSpeechEpochMs.set(nowMs)
+                    postBargeInForwardUntilEpochMs.set(nowMs + POST_BARGE_IN_FORWARD_HOLD_MS)
                     consecutiveBargeInFramesCount.set(0)
                     consecutiveBargeInExcessFramesCount.set(0)
                     triggeredBargeIn = true
+                    preRollFrames = drainPreBargeInFramesForServer(sampleCount)
                     clearModelPlaybackQueue(nowMs)
                     onUserBargeIn()
                 }
             } else {
                 val expectedEchoRms = refRms * getEstimatedEchoCouplingRatio()
-                if (rms <= expectedEchoRms * 1.15f || rms < BASE_BARGE_IN_RMS_THRESHOLD) {
+                if (volRatio >= 0.65f || rms <= expectedEchoRms * 1.15f || rms < BASE_BARGE_IN_RMS_THRESHOLD) {
+                    // At high loudspeaker volume (>=65%), any frame that drops back below adaptiveThreshold
+                    // immediately resets the consecutive barge-in counters so isolated syllable peaks across
+                    // a 20–40 second answer can never ratchet up and self-interrupt David.
                     consecutiveBargeInFramesCount.set(0)
                     consecutiveBargeInExcessFramesCount.set(0)
                 } else {
@@ -596,8 +714,10 @@ class DavidLiveAudioEngine(
         }
 
         val lastSpeechMs = lastConfirmedUserSpeechEpochMs.get()
+        val inPostBargeInForwardWindow = nowMs <= postBargeInForwardUntilEpochMs.get()
         val isContinuingUserBargeInSpeech = userBargedInActive.get() ||
             triggeredBargeIn ||
+            inPostBargeInForwardWindow ||
             (lastSpeechMs > 0L && nowMs - lastSpeechMs in 0L..900L && rms >= USER_SPEECH_RMS_THRESHOLD)
 
         if (shouldSuppressTailEchoFrame(rms, nowMs) && !isContinuingUserBargeInSpeech) {
@@ -613,9 +733,18 @@ class DavidLiveAudioEngine(
         }
 
         val bargedIn = userBargedInActive.get() || triggeredBargeIn
-        val shouldForward = !davidCurrentlyPlaying || bargedIn
+        val shouldForward = !davidCurrentlyPlaying || bargedIn || inPostBargeInForwardWindow
         if (shouldForward && rms >= BASE_BARGE_IN_RMS_THRESHOLD) {
             lastConfirmedUserSpeechEpochMs.set(nowMs)
+            if (inPostBargeInForwardWindow || bargedIn) {
+                postBargeInForwardUntilEpochMs.set(
+                    maxOf(postBargeInForwardUntilEpochMs.get(), nowMs + POST_BARGE_IN_SPEECH_EXTENSION_MS)
+                )
+            }
+        } else if (shouldForward && inPostBargeInForwardWindow && rms >= USER_SPEECH_RMS_THRESHOLD) {
+            postBargeInForwardUntilEpochMs.set(
+                maxOf(postBargeInForwardUntilEpochMs.get(), nowMs + POST_BARGE_IN_SPEECH_EXTENSION_MS)
+            )
         }
 
         return CaptureFrameDecision(
@@ -625,7 +754,8 @@ class DavidLiveAudioEngine(
             davidCurrentlyPlaying = davidCurrentlyPlaying && !triggeredBargeIn,
             triggeredBargeIn = triggeredBargeIn,
             shouldForwardMicChunkToServer = shouldForward,
-            suppressedAsEcho = !shouldForward
+            suppressedAsEcho = !shouldForward,
+            preRollPcmFramesToForward = preRollFrames
         )
     }
 
@@ -639,7 +769,7 @@ class DavidLiveAudioEngine(
         nowMs: Long = System.currentTimeMillis()
     ) {
         if (speaker == DavidLiveSpeaker.DAVID) {
-            recordModelOutputActivity(samples, sampleRateHz, nowMs)
+            recordModelOutputActivity(samples, sampleRateHz, nowMs, updateEnvelope = true)
         }
         _activeSpeaker.value = speaker
         _rayMagnitudes.value = spectrumAnalyzer.analyzePcmFrame(samples, samples.size, sampleRateHz)
@@ -654,6 +784,9 @@ class DavidLiveAudioEngine(
         val wasRunning = isRunning.getAndSet(false)
         playbackGeneration.incrementAndGet()
         playbackQueue.clear()
+        queuedPlaybackSamples.set(0L)
+        postBargeInForwardUntilEpochMs.set(0L)
+        clearPreBargeInRingBuffer()
         lastOutputChunkTimestamp.set(0L)
         estimatedPlayoutEndEpochMs.set(0L)
         playbackBurstStartEpochMs.set(0L)
@@ -702,6 +835,19 @@ class DavidLiveAudioEngine(
         _activeSpeaker.value = DavidLiveSpeaker.NONE
         _rayMagnitudes.value = defaultRestingRays()
         _overallEnergy.value = 0.14f
+    }
+
+    private fun encodeShortArrayToPcm16LeBytes(samples: ShortArray, sampleCount: Int = samples.size): ByteArray {
+        val count = sampleCount.coerceIn(0, samples.size)
+        val pcmBytes = ByteArray(count * 2)
+        var bIdx = 0
+        for (i in 0 until count) {
+            val s = samples[i].toInt()
+            pcmBytes[bIdx] = (s and 0xFF).toByte()
+            pcmBytes[bIdx + 1] = ((s shr 8) and 0xFF).toByte()
+            bIdx += 2
+        }
+        return pcmBytes
     }
 
     @SuppressLint("MissingPermission")
@@ -807,15 +953,17 @@ class DavidLiveAudioEngine(
 
                     if (!decision.shouldForwardMicChunkToServer) continue
 
-                    // Convert ShortArray to little-endian PCM16 ByteArray and stream to Gemini Live
-                    val pcmBytes = ByteArray(readCount * 2)
-                    var bIdx = 0
-                    for (i in 0 until readCount) {
-                        val s = shortBuffer[i].toInt()
-                        pcmBytes[bIdx] = (s and 0xFF).toByte()
-                        pcmBytes[bIdx + 1] = ((s shr 8) and 0xFF).toByte()
-                        bIdx += 2
+                    // If this frame confirmed a user barge-in, flush the pre-roll onset frames first
+                    // so the beginning of the user's interrupting utterance is preserved on the server.
+                    if (decision.preRollPcmFramesToForward.isNotEmpty() && isRunning.get()) {
+                        for (preFrame in decision.preRollPcmFramesToForward) {
+                            if (!isRunning.get()) break
+                            onMicPcmChunk(encodeShortArrayToPcm16LeBytes(preFrame, preFrame.size))
+                        }
                     }
+
+                    // Convert ShortArray to little-endian PCM16 ByteArray and stream to Gemini Live
+                    val pcmBytes = encodeShortArrayToPcm16LeBytes(shortBuffer, readCount)
                     if (isRunning.get()) {
                         onMicPcmChunk(pcmBytes)
                     }
@@ -946,6 +1094,7 @@ class DavidLiveAudioEngine(
                     val samples = playbackQueue.poll()
                     if (samples == null) {
                         activePlaybackWindowInProgress.set(false)
+                        queuedPlaybackSamples.set(0L)
                         val now = System.currentTimeMillis()
                         val playoutFinished = now > estimatedPlayoutEndEpochMs.get() + 120L &&
                             now - lastOutputChunkTimestamp.get() > 220L
@@ -973,9 +1122,10 @@ class DavidLiveAudioEngine(
                         val window = samples.copyOfRange(offset, offset + len)
                         if (!isRunning.get() || generation != playbackGeneration.get()) break
                         val writeStartMs = System.currentTimeMillis()
-                        val remainingSamples = (samples.size - offset).coerceAtLeast(window.size)
-                        val remainingChunkMs = ((remainingSamples * 1000L) / OUTPUT_SAMPLE_RATE_HZ).coerceAtLeast(16L)
-                        val minPlayoutEnd = writeStartMs + remainingChunkMs + 180L
+                        val remainingInChunk = (samples.size - offset).coerceAtLeast(window.size).toLong()
+                        val totalRemainingSamples = maxOf(remainingInChunk, queuedPlaybackSamples.get())
+                        val remainingChunkMs = ((totalRemainingSamples * 1000L) / OUTPUT_SAMPLE_RATE_HZ).coerceAtLeast(16L)
+                        val minPlayoutEnd = writeStartMs + remainingChunkMs + 260L
                         estimatedPlayoutEndEpochMs.updateAndGet { maxOf(it, minPlayoutEnd) }
                         lastOutputChunkTimestamp.set(writeStartMs)
                         updatePlaybackReferenceEnvelope(computePcmRms(window, window.size), writeStartMs)
@@ -993,6 +1143,7 @@ class DavidLiveAudioEngine(
                             }
                         } catch (_: Exception) {
                         }
+                        queuedPlaybackSamples.updateAndGet { maxOf(0L, it - len.toLong()) }
                         val windowDurationMs = ((window.size * 1000L) / OUTPUT_SAMPLE_RATE_HZ).coerceAtLeast(16L)
                         val writeElapsedMs = System.currentTimeMillis() - writeStartMs
                         if (writeElapsedMs + 6L < windowDurationMs &&
@@ -1033,17 +1184,21 @@ class DavidLiveAudioEngine(
         private const val USER_SPEECH_RMS_THRESHOLD = 0.009f
         internal const val BARGE_IN_RMS_THRESHOLD = 0.08f
         internal const val BASE_BARGE_IN_RMS_THRESHOLD = 0.08f
-        internal const val MAX_ADAPTIVE_BARGE_IN_RMS_THRESHOLD = 0.32f
+        internal const val MAX_ADAPTIVE_BARGE_IN_RMS_THRESHOLD = 0.30f
+        internal const val STRONG_NEAR_FIELD_EXCESS_MULTIPLIER = 1.12f
         internal const val ONSET_HIGH_VOLUME_GUARD_RMS = 0.23f
         internal const val BARGE_IN_MIN_FRAMES = 4
         internal const val HIGH_VOLUME_BARGE_IN_MIN_FRAMES = 5
+        internal const val PRE_BARGE_IN_RING_MAX_FRAMES = 6
         internal const val DEFAULT_ECHO_COUPLING_RATIO = 0.52f
         internal const val DEFAULT_SPEAKER_VOLUME_RATIO = 0.80f
         internal const val PLAYBACK_ONSET_GUARD_MS = 220L
-        internal const val AUDIO_TRACK_ECHO_HOLD_MS = 380L
+        internal const val AUDIO_TRACK_ECHO_HOLD_MS = 780L
         internal const val PLAYBACK_ECHO_TAIL_MS = 480L
         internal const val BARGE_IN_TAIL_ECHO_SUPPRESS_MS = 320L
-        private const val MAX_BUFFERED_PLAYOUT_LOOKAHEAD_MS = 15_000L
+        private const val POST_BARGE_IN_FORWARD_HOLD_MS = 4_500L
+        private const val POST_BARGE_IN_SPEECH_EXTENSION_MS = 2_200L
+        private const val MAX_BUFFERED_PLAYOUT_LOOKAHEAD_MS = 60_000L
         private const val MAX_POST_TURN_BUFFER_DRAIN_MS = 650L
 
         internal fun computePcmRms(pcmSamples: ShortArray, sampleCount: Int = pcmSamples.size): Float {

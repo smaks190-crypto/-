@@ -113,7 +113,11 @@ class DavidLiveSessionController(
     private var lastResumedTurnSignature: String = ""
     private val executedToolCallIds = ConcurrentHashMap.newKeySet<String>()
     private val userInterruptedCurrentModelTurn = AtomicBoolean(false)
+    private val unclosedServerPcmTurnActive = AtomicBoolean(false)
+    private val awaitingInterruptedServerTurnClose = AtomicBoolean(false)
+    private val bargeInPendingNewResponse = AtomicBoolean(false)
     private val localBargeInEpochMs = AtomicLong(0L)
+    private var bargeInFollowUpWatchdogJob: Job? = null
 
     private val _displayMode = MutableStateFlow(DavidLiveDisplayMode.HIDDEN)
     val displayMode: StateFlow<DavidLiveDisplayMode> = _displayMode.asStateFlow()
@@ -148,6 +152,9 @@ class DavidLiveSessionController(
 
     private fun hasPendingUserTranscript(): Boolean =
         synchronized(_transcriptTurns) { pendingUserTranscript.isNotEmpty() }
+
+    private fun peekPendingUserTranscript(): String =
+        synchronized(_transcriptTurns) { pendingUserTranscript.toString() }
 
     private fun hasPendingDavidTranscript(): Boolean =
         synchronized(_transcriptTurns) { pendingDavidTranscript.isNotEmpty() }
@@ -196,11 +203,18 @@ class DavidLiveSessionController(
         }
     }
 
-    private fun isModelTurnSuppressedByLocalBargeIn(nowMs: Long = System.currentTimeMillis()): Boolean {
-        if (!userInterruptedCurrentModelTurn.get()) return false
+    internal fun isModelTurnSuppressedByLocalBargeIn(nowMs: Long = System.currentTimeMillis()): Boolean {
+        if (!userInterruptedCurrentModelTurn.get() && !awaitingInterruptedServerTurnClose.get()) return false
         val bargeMs = localBargeInEpochMs.get()
-        if (bargeMs > 0L && nowMs - bargeMs > LOCAL_BARGE_IN_SUPPRESS_WINDOW_MS) {
+        val suppressWindowMs = if (awaitingInterruptedServerTurnClose.get()) {
+            LOCAL_BARGE_IN_UNCLOSED_PCM_SUPPRESS_WINDOW_MS
+        } else {
+            LOCAL_BARGE_IN_SUPPRESS_WINDOW_MS
+        }
+        if (bargeMs > 0L && nowMs - bargeMs > suppressWindowMs) {
             userInterruptedCurrentModelTurn.set(false)
+            awaitingInterruptedServerTurnClose.set(false)
+            unclosedServerPcmTurnActive.set(false)
             localBargeInEpochMs.set(0L)
             return false
         }
@@ -296,6 +310,8 @@ class DavidLiveSessionController(
         reconnectJob = null
         readyFlashJob?.cancel()
         readyFlashJob = null
+        bargeInFollowUpWatchdogJob?.cancel()
+        bargeInFollowUpWatchdogJob = null
         _isReadyFlashActive.value = false
         _isWaitingForNetwork.value = false
         isManualReconnectInProgress = false
@@ -319,6 +335,9 @@ class DavidLiveSessionController(
         lastResumedTurnSignature = ""
         executedToolCallIds.clear()
         userInterruptedCurrentModelTurn.set(false)
+        unclosedServerPcmTurnActive.set(false)
+        awaitingInterruptedServerTurnClose.set(false)
+        bargeInPendingNewResponse.set(false)
         localBargeInEpochMs.set(0L)
         synchronized(_transcriptTurns) {
             _transcriptTurns.clear()
@@ -558,6 +577,13 @@ class DavidLiveSessionController(
         reconnectJob = null
         readyFlashJob?.cancel()
         readyFlashJob = null
+        bargeInFollowUpWatchdogJob?.cancel()
+        bargeInFollowUpWatchdogJob = null
+        userInterruptedCurrentModelTurn.set(false)
+        unclosedServerPcmTurnActive.set(false)
+        awaitingInterruptedServerTurnClose.set(false)
+        bargeInPendingNewResponse.set(false)
+        localBargeInEpochMs.set(0L)
         _isReadyFlashActive.value = false
         _isWaitingForNetwork.value = false
         isManualReconnectInProgress = false
@@ -740,7 +766,12 @@ class DavidLiveSessionController(
 
         setupCompleted.set(false)
         userInterruptedCurrentModelTurn.set(false)
+        unclosedServerPcmTurnActive.set(false)
+        awaitingInterruptedServerTurnClose.set(false)
+        bargeInPendingNewResponse.set(false)
         localBargeInEpochMs.set(0L)
+        bargeInFollowUpWatchdogJob?.cancel()
+        bargeInFollowUpWatchdogJob = null
         audioEngine.setServerTurnSpeakingActive(false)
         readyFlashJob?.cancel()
         readyFlashJob = null
@@ -767,6 +798,8 @@ class DavidLiveSessionController(
         reconnectJob = null
         readyFlashJob?.cancel()
         readyFlashJob = null
+        bargeInFollowUpWatchdogJob?.cancel()
+        bargeInFollowUpWatchdogJob = null
         _isReadyFlashActive.value = false
         _isWaitingForNetwork.value = false
         intentionalClose.set(false)
@@ -996,6 +1029,7 @@ class DavidLiveSessionController(
                - Мои долги («Я должен», `totalWeOweRub`) — это обязательства (пассив) пользователя. НИКОГДА не прибавляй их к доходу или к балансу!
                - Должны мне («Мне должны», `totalOwesUsRub`) — это дебиторская задолженность (ожидаемый возврат). НИКОГДА не прибавляй её к текущему заработанному доходу или к доступному остатку!
                - При ответе всегда называй эти статьи раздельно и своими именами: «Доступный остаток», «Доход за период (зарплата)», «Я должен» и «Мне должны».
+            6. ПРАВИЛО ПЕРЕБИВАНИЯ (BARGE-IN): Если пользователь перебил тебя во время твоего ответа и задал новый вопрос или сменил тему, НЕМЕДЛЕННО и ПОЛНОСТЬЮ прекрати предыдущий ответ. НЕ договаривай и НЕ резюмируй прерванную реплику — сразу отвечай ТОЛЬКО на новый запрос пользователя.
         """.trimIndent()
 
         val savedTurns = transcriptTurns
@@ -1220,6 +1254,13 @@ class DavidLiveSessionController(
         if (toolCall != null) {
             val functionCalls = toolCall.optJSONArray("functionCalls")
             if (functionCalls != null && functionCalls.length() > 0) {
+                unclosedServerPcmTurnActive.set(false)
+                awaitingInterruptedServerTurnClose.set(false)
+                userInterruptedCurrentModelTurn.set(false)
+                bargeInPendingNewResponse.set(false)
+                localBargeInEpochMs.set(0L)
+                bargeInFollowUpWatchdogJob?.cancel()
+                bargeInFollowUpWatchdogJob = null
                 _isReadyFlashActive.value = false
                 _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
                 _connectionState.value = DavidLiveConnectionState.DAVID_THINKING
@@ -1269,9 +1310,11 @@ class DavidLiveSessionController(
         val serverContent = root.optJSONObject("serverContent") ?: return
 
         if (serverContent.optBoolean("interrupted", false)) {
-            audioEngine.setServerTurnSpeakingActive(false)
+            val wasAlreadyLocallyBargedIn = userInterruptedCurrentModelTurn.get() ||
+                awaitingInterruptedServerTurnClose.get() ||
+                bargeInPendingNewResponse.get()
             val isFalseEchoInterrupt = audioEngine.hasPendingOrActiveModelPlayback() &&
-                !userInterruptedCurrentModelTurn.get() &&
+                !wasAlreadyLocallyBargedIn &&
                 !audioEngine.hasRecentConfirmedUserSpeech()
             if (isFalseEchoInterrupt) {
                 GlobalConsoleLogger.w(
@@ -1280,10 +1323,24 @@ class DavidLiveSessionController(
                 )
                 return
             }
+            audioEngine.setServerTurnSpeakingActive(false)
+            unclosedServerPcmTurnActive.set(false)
+            awaitingInterruptedServerTurnClose.set(false)
             userInterruptedCurrentModelTurn.set(false)
             localBargeInEpochMs.set(0L)
-            audioEngine.clearModelPlaybackQueue()
-            flushPendingTranscripts(markDavidInterrupted = false)
+            needsContinuationOnResume = false
+            interruptedDavidPartialText = null
+            if (!wasAlreadyLocallyBargedIn) {
+                audioEngine.clearModelPlaybackQueue()
+            }
+            val davidPending = takeAndClearPendingDavidTranscript()
+            if (davidPending.isNotEmpty()) {
+                recordTranscriptTurn(
+                    speaker = DavidLiveSpeaker.DAVID,
+                    text = davidPending,
+                    wasInterrupted = true
+                )
+            }
             _isReadyFlashActive.value = false
             _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
             _connectionState.value = if (_isMicMuted.value) {
@@ -1291,7 +1348,14 @@ class DavidLiveSessionController(
             } else {
                 DavidLiveConnectionState.LISTENING
             }
-            _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Слушаю вас..."
+            if (_isMicMuted.value) {
+                _liveSubtitle.value = "Микрофон отключён"
+            } else if (!hasPendingUserTranscript()) {
+                _liveSubtitle.value = "Слушаю вас..."
+            }
+            if (ws != null && bargeInPendingNewResponse.get() && hasPendingUserTranscript()) {
+                scheduleBargeInFollowUpWatchdog(ws, connectionGen)
+            }
             return
         }
 
@@ -1300,19 +1364,30 @@ class DavidLiveSessionController(
             ?.optString("text")
             ?.takeIf { it.isNotBlank() }
         if (inputTranscription != null) {
-            userInterruptedCurrentModelTurn.set(false)
-            localBargeInEpochMs.set(0L)
+            if (!awaitingInterruptedServerTurnClose.get()) {
+                userInterruptedCurrentModelTurn.set(false)
+                localBargeInEpochMs.set(0L)
+            }
             _isReadyFlashActive.value = false
             _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
             val completedDavidTurn = takeAndClearPendingDavidTranscript()
             if (completedDavidTurn.isNotEmpty()) {
-                recordTranscriptTurn(DavidLiveSpeaker.DAVID, completedDavidTurn)
+                recordTranscriptTurn(
+                    speaker = DavidLiveSpeaker.DAVID,
+                    text = completedDavidTurn,
+                    wasInterrupted = awaitingInterruptedServerTurnClose.get() || bargeInPendingNewResponse.get()
+                )
             }
             val currentUserText = appendPendingUserTranscript(inputTranscription)
-            needsContinuationOnResume = true
+            if (!bargeInPendingNewResponse.get()) {
+                needsContinuationOnResume = true
+            }
             val cleanedUserText = sanitizeSpokenSubtitle(currentUserText)
             if (cleanedUserText.isNotBlank()) {
                 _liveSubtitle.value = cleanedUserText
+            }
+            if (ws != null && bargeInPendingNewResponse.get() && !awaitingInterruptedServerTurnClose.get()) {
+                scheduleBargeInFollowUpWatchdog(ws, connectionGen)
             }
         }
 
@@ -1321,6 +1396,9 @@ class DavidLiveSessionController(
             ?.optString("text")
             ?.takeIf { it.isNotBlank() }
         if (outputTranscription != null && !isModelTurnSuppressedByLocalBargeIn()) {
+            bargeInPendingNewResponse.set(false)
+            bargeInFollowUpWatchdogJob?.cancel()
+            bargeInFollowUpWatchdogJob = null
             audioEngine.setServerTurnSpeakingActive(true)
             _isReadyFlashActive.value = false
             _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
@@ -1347,6 +1425,10 @@ class DavidLiveSessionController(
                 if (!isThoughtPart && textPart != null && outputTranscription == null && !part.has("inlineData")) {
                     val cleanedPart = sanitizeSpokenSubtitle(textPart)
                     if (cleanedPart.isNotBlank()) {
+                        unclosedServerPcmTurnActive.set(true)
+                        bargeInPendingNewResponse.set(false)
+                        bargeInFollowUpWatchdogJob?.cancel()
+                        bargeInFollowUpWatchdogJob = null
                         audioEngine.setServerTurnSpeakingActive(true)
                         _isReadyFlashActive.value = false
                         _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
@@ -1366,6 +1448,10 @@ class DavidLiveSessionController(
                             null
                         }
                         if (pcmBytes != null && pcmBytes.isNotEmpty()) {
+                            unclosedServerPcmTurnActive.set(true)
+                            bargeInPendingNewResponse.set(false)
+                            bargeInFollowUpWatchdogJob?.cancel()
+                            bargeInFollowUpWatchdogJob = null
                             audioEngine.setServerTurnSpeakingActive(true)
                             _isReadyFlashActive.value = false
                             _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
@@ -1385,24 +1471,118 @@ class DavidLiveSessionController(
         }
 
         if (serverContent.optBoolean("turnComplete", false)) {
+            val wasClosingInterruptedTurn = awaitingInterruptedServerTurnClose.get() ||
+                userInterruptedCurrentModelTurn.get()
             audioEngine.setServerTurnSpeakingActive(false)
+            unclosedServerPcmTurnActive.set(false)
+            awaitingInterruptedServerTurnClose.set(false)
             userInterruptedCurrentModelTurn.set(false)
             localBargeInEpochMs.set(0L)
-            flushPendingTranscripts(markDavidInterrupted = false)
             needsContinuationOnResume = false
             interruptedDavidPartialText = null
             _isReadyFlashActive.value = false
             _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
-            if (!audioEngine.hasQueuedPlaybackChunks()) {
+
+            if (wasClosingInterruptedTurn) {
+                val davidPending = takeAndClearPendingDavidTranscript()
+                if (davidPending.isNotEmpty()) {
+                    recordTranscriptTurn(
+                        speaker = DavidLiveSpeaker.DAVID,
+                        text = davidPending,
+                        wasInterrupted = true
+                    )
+                }
                 _connectionState.value = if (_isMicMuted.value) {
                     DavidLiveConnectionState.MUTED
                 } else {
                     DavidLiveConnectionState.LISTENING
                 }
-                if (!_isMicMuted.value && _liveSubtitle.value.isBlank()) {
-                    _liveSubtitle.value = "Говорите, я слушаю..."
+                if (!_isMicMuted.value && !hasPendingUserTranscript() && _liveSubtitle.value.isBlank()) {
+                    _liveSubtitle.value = "Слушаю вас..."
+                }
+                if (ws != null && bargeInPendingNewResponse.get() && hasPendingUserTranscript()) {
+                    scheduleBargeInFollowUpWatchdog(ws, connectionGen)
+                }
+            } else {
+                flushPendingTranscripts(markDavidInterrupted = false)
+                if (!audioEngine.hasQueuedPlaybackChunks()) {
+                    _connectionState.value = if (_isMicMuted.value) {
+                        DavidLiveConnectionState.MUTED
+                    } else {
+                        DavidLiveConnectionState.LISTENING
+                    }
+                    if (!_isMicMuted.value && _liveSubtitle.value.isBlank()) {
+                        _liveSubtitle.value = "Говорите, я слушаю..."
+                    }
                 }
             }
+        }
+    }
+
+    /**
+     * Builds an explicit `clientContent` (`turnComplete: true`) payload for the user's new utterance
+     * after a barge-in interruption if the Gemini Live server closed the interrupted turn without
+     * automatically starting a new response turn.
+     */
+    internal fun buildBargeInFollowUpClientContentJson(newUserRequestText: String): JSONObject {
+        val cleaned = newUserRequestText.trim()
+        val promptText = "[Пользователь перебил предыдущий ответ Давида и задал новый запрос]\n" +
+            "Запрос пользователя: «$cleaned»\n" +
+            "Ответь сразу и ТОЛЬКО на этот новый запрос пользователя, НЕ продолжая и НЕ повторяя предыдущий прерванный ответ."
+        return JSONObject().apply {
+            put(
+                "clientContent",
+                JSONObject().apply {
+                    put(
+                        "turns",
+                        JSONArray().put(
+                            JSONObject().apply {
+                                put("role", "user")
+                                put(
+                                    "parts",
+                                    JSONArray().put(
+                                        JSONObject().apply {
+                                            put("text", promptText)
+                                        }
+                                    )
+                                )
+                            }
+                        )
+                    )
+                    put("turnComplete", true)
+                }
+            )
+        }
+    }
+
+    private fun scheduleBargeInFollowUpWatchdog(ws: WebSocket, connectionGen: Int) {
+        bargeInFollowUpWatchdogJob?.cancel()
+        bargeInFollowUpWatchdogJob = controllerScope.launch {
+            delay(BARGE_IN_NEW_TURN_WATCHDOG_MS)
+            var waitLoops = 0
+            while (waitLoops < 16 &&
+                !isStaleCallback(ws, connectionGen) &&
+                bargeInPendingNewResponse.get() &&
+                audioEngine.hasRecentConfirmedUserSpeech(windowMs = 700L)
+            ) {
+                delay(250L)
+                waitLoops++
+            }
+            if (isStaleCallback(ws, connectionGen)) return@launch
+            if (!bargeInPendingNewResponse.get() || awaitingInterruptedServerTurnClose.get()) return@launch
+            if (_connectionState.value != DavidLiveConnectionState.LISTENING) return@launch
+            val pendingUser = sanitizeSpokenSubtitle(peekPendingUserTranscript()).trim()
+            if (pendingUser.isBlank()) return@launch
+            if (!bargeInPendingNewResponse.compareAndSet(true, false)) return@launch
+
+            val committedUser = takeAndClearPendingUserTranscript()
+            if (committedUser.isNotEmpty()) {
+                recordTranscriptTurn(DavidLiveSpeaker.USER, committedUser, wasInterrupted = false)
+            }
+            _connectionState.value = DavidLiveConnectionState.DAVID_THINKING
+            val payload = buildBargeInFollowUpClientContentJson(pendingUser)
+            ws.send(payload.toString())
+            GlobalConsoleLogger.i("LIVE", "Отправлен триггер нового запроса после перебивания Давида")
         }
     }
 
@@ -1513,10 +1693,24 @@ class DavidLiveSessionController(
     }
 
     internal fun handleConfirmedUserBargeIn(nowMs: Long = System.currentTimeMillis()) {
+        val hadUnclosedServerPcm = unclosedServerPcmTurnActive.get() || audioEngine.hasQueuedPlaybackChunks()
         userInterruptedCurrentModelTurn.set(true)
+        awaitingInterruptedServerTurnClose.set(hadUnclosedServerPcm)
+        bargeInPendingNewResponse.set(true)
         localBargeInEpochMs.set(nowMs)
+        needsContinuationOnResume = false
+        interruptedDavidPartialText = null
+        bargeInFollowUpWatchdogJob?.cancel()
+        bargeInFollowUpWatchdogJob = null
         audioEngine.setServerTurnSpeakingActive(false)
-        flushPendingTranscripts(markDavidInterrupted = false)
+        val davidPending = takeAndClearPendingDavidTranscript()
+        if (davidPending.isNotEmpty()) {
+            recordTranscriptTurn(
+                speaker = DavidLiveSpeaker.DAVID,
+                text = davidPending,
+                wasInterrupted = true
+            )
+        }
         _isReadyFlashActive.value = false
         _visualPhase.value = DavidLiveVisualPhase.CONVERSATION_ACTIVE
         _connectionState.value = if (_isMicMuted.value) {
@@ -1524,7 +1718,11 @@ class DavidLiveSessionController(
         } else {
             DavidLiveConnectionState.LISTENING
         }
-        _liveSubtitle.value = if (_isMicMuted.value) "Микрофон отключён" else "Слушаю вас..."
+        if (_isMicMuted.value) {
+            _liveSubtitle.value = "Микрофон отключён"
+        } else if (!hasPendingUserTranscript()) {
+            _liveSubtitle.value = "Слушаю вас..."
+        }
     }
 
     private fun flushPendingTranscripts(markDavidInterrupted: Boolean = false) {
@@ -1560,6 +1758,8 @@ class DavidLiveSessionController(
         const val DEFAULT_AUTO_RECONNECT_DELAY_MS = 900L
         const val DEFAULT_READY_FLASH_DURATION_MS = 900L
         internal const val LOCAL_BARGE_IN_SUPPRESS_WINDOW_MS = 1_500L
+        internal const val LOCAL_BARGE_IN_UNCLOSED_PCM_SUPPRESS_WINDOW_MS = 12_000L
+        internal const val BARGE_IN_NEW_TURN_WATCHDOG_MS = 1_200L
 
         val LIVE_MODELS = listOf(
             "models/gemini-2.5-flash-native-audio-preview-12-2025",

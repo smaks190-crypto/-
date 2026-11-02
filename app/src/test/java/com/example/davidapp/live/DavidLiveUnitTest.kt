@@ -2226,6 +2226,225 @@ class DavidLiveUnitTest {
         controller.endSession()
     }
 
+    @Test
+    fun `long high-volume 80-100 percent answer with 700ms AudioTrack echo delay and nominal HAL AEC never self-interrupts`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L,
+            readyFlashDurationMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val socket = fakeFactory.entries[0]
+        socket.simulateOpen()
+        socket.simulateServerText("""{"setupComplete": {}}""")
+
+        val engine = controller.audioEngine
+        engine.setExternalHeadsetConnectedForTest(false)
+        // Даже если HAL формально сообщает echoCanceler.enabled == true, на громкости 80-100% в MODE_NORMAL
+        // акустическая защита не должна занижать запас порога
+        engine.setHardwareAecEnabledForTest(true)
+        engine.setSpeakerVolumeRatioForTest(0.95f)
+
+        var nowMs = System.currentTimeMillis()
+        // 1. Пользователь громко задал вопрос перед ответом Давида
+        val userQuestionFrame = createTonePcmFrame(rmsTarget = 0.25f, sampleCount = 1024, sampleRateHz = 16_000)
+        repeat(4) {
+            engine.evaluateCaptureFrame(pcmSamples = userQuestionFrame, nowMs = nowMs)
+            nowMs += 64L
+        }
+        assertTrue(engine.hasRecentConfirmedUserSpeech(nowMs))
+
+        // 2. Давид начинает длинный ответ (аудио + текст). Метка прежней речи пользователя должна сброситься,
+        // чтобы в первые 1.8 с ответа ложный серверный interrupted=true не прервал Давида.
+        val pcmBytes24k = ByteArray(9600) { idx -> if (idx % 2 == 0) 0x30 else 0x18 }
+        val b64Audio = android.util.Base64.encodeToString(pcmBytes24k, android.util.Base64.NO_WRAP)
+        socket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Начинаю полный разбор всех твоих расходов, доходов и обязательств за месяц."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
+        )
+        assertFalse(
+            "Pre-turn user speech timestamp must be cleared when David starts speaking",
+            engine.hasRecentConfirmedUserSpeech(nowMs)
+        )
+
+        // Ложный серверный interrupted=true через 300 мс после старта ответа Давида подавляется
+        socket.simulateServerText("""{"serverContent":{"interrupted":true}}""")
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+
+        // 3. Симулируем длинный (25 секунд) ответ Давида на громкости 95% с паузами между фразами по 640 мс (10 кадров),
+        // во время которых из буфера AudioTrack (латентность ~350-650 мс) продолжает звучать громкое эхо предыдущих слов (RMS 0.20f)
+        val loudWord24k = createTonePcmFrame(rmsTarget = 0.28f, sampleCount = 1024, sampleRateHz = 24_000)
+        val silencePause24k = createTonePcmFrame(rmsTarget = 0.008f, sampleCount = 1024, sampleRateHz = 24_000)
+        val delayedLoudEcho16k = createTonePcmFrame(rmsTarget = 0.20f, sampleCount = 1024, sampleRateHz = 16_000)
+
+        var falseBargeIns = 0
+        repeat(60) { frameIdx ->
+            val phase = frameIdx % 15
+            val davidOut = if (phase < 5) loudWord24k else silencePause24k
+            engine.feedTestPcmFrame(
+                samples = davidOut,
+                sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+                speaker = DavidLiveSpeaker.DAVID,
+                nowMs = nowMs
+            )
+            val decision = engine.evaluateCaptureFrame(
+                pcmSamples = delayedLoudEcho16k,
+                nowMs = nowMs + 10L,
+                onUserBargeIn = { falseBargeIns++ }
+            )
+            assertFalse(
+                "Delayed AudioTrack loudspeaker echo at frame=$frameIdx (phase=$phase, refRms=${decision.playbackReferenceRms}, threshold=${decision.adaptiveBargeInThresholdRms}) must never self-interrupt David",
+                decision.triggeredBargeIn
+            )
+            assertFalse(decision.shouldForwardMicChunkToServer)
+            nowMs += 64L
+        }
+        assertEquals(0, falseBargeIns)
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+
+        controller.endSession()
+    }
+
+    @Test
+    fun `barge-in during modelTurn PCM drops all delayed old-turn chunks after inputTranscription and answers only the new user request`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L,
+            readyFlashDurationMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val socket = fakeFactory.entries[0]
+        socket.simulateOpen()
+        socket.simulateServerText("""{"setupComplete": {}}""")
+
+        val engine = controller.audioEngine
+        engine.setExternalHeadsetConnectedForTest(false)
+        engine.setSpeakerVolumeRatioForTest(0.85f)
+
+        var nowMs = 500_000L
+        val pcmBytes24k = ByteArray(4800) { idx -> if (idx % 2 == 0) 0x24 else 0x12 }
+        val b64Audio = android.util.Base64.encodeToString(pcmBytes24k, android.util.Base64.NO_WRAP)
+
+        // 1. Давид начинает длинный ответ (Turn #1) с реальными modelTurn PCM пакетами
+        socket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"За прошлый месяц твои расходы составили 84 тысячи рублей."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
+        )
+        val davidWord = createTonePcmFrame(rmsTarget = 0.22f, sampleCount = 1024, sampleRateHz = 24_000)
+        engine.feedTestPcmFrame(
+            samples = davidWord,
+            sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+            speaker = DavidLiveSpeaker.DAVID,
+            nowMs = nowMs
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+
+        // 2. Пользователь перебивает Давида в середине ответа ("Стоп, а сколько я потратил на такси?")
+        val userStrongSpeech = createTonePcmFrame(rmsTarget = 0.34f, sampleCount = 1024, sampleRateHz = 16_000)
+        var confirmDecision: DavidLiveAudioEngine.CaptureFrameDecision? = null
+        repeat(4) {
+            confirmDecision = engine.evaluateCaptureFrame(
+                pcmSamples = userStrongSpeech,
+                nowMs = nowMs,
+                onUserBargeIn = { controller.handleConfirmedUserBargeIn(nowMs) }
+            )
+            nowMs += 64L
+        }
+        assertNotNull(confirmDecision)
+        assertTrue("4th frame of strong user speech must trigger barge-in", confirmDecision!!.triggeredBargeIn)
+        assertTrue(
+            "Pre-roll buffer must preserve the initial 3 speech frames + 2 silence lead-in frames so the beginning of user's utterance is not clipped",
+            confirmDecision!!.preRollPcmFramesToForward.size >= 5
+        )
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // 3. Приходит первый фрагмент распознавания новой речи пользователя (inputTranscription) ДО того,
+        // как сервер успел прислать interrupted=true или turnComplete=true для старого ответа Давида
+        socket.simulateServerText(
+            """{"serverContent":{"inputTranscription":{"text":"Стоп, а сколько я потратил"}}}"""
+        )
+        assertEquals("Стоп, а сколько я потратил", controller.liveSubtitle.value)
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // 4. Через 900 мс и через 2 100 мс (позже прежнего лимита 1 500 мс!) по сети приходят запоздавшие
+        // пакеты modelTurn PCM и outputTranscription от СТАРОГО прерванного ответа Давида (Turn #1).
+        // Они ОБЯЗАНЫ быть полностью отброшены и не должны ни возобновлять речь Давида, ни закрывать микрофон!
+        assertTrue(controller.isModelTurnSuppressedByLocalBargeIn(nowMs + 2_100L))
+        socket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":" Продолжаю старый прерванный ответ про супермаркеты и подписки."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
+        )
+        assertEquals(
+            "Delayed modelTurn PCM from the old interrupted turn must NEVER flip state back to DAVID_SPEAKING",
+            DavidLiveConnectionState.LISTENING,
+            controller.connectionState.value
+        )
+        assertFalse(
+            "Delayed modelTurn PCM from the old interrupted turn must NEVER be enqueued into AudioTrack",
+            engine.hasQueuedPlaybackChunks()
+        )
+        assertEquals(
+            "Live subtitle must remain on the user's new utterance, not the old David answer",
+            "Стоп, а сколько я потратил",
+            controller.liveSubtitle.value
+        )
+
+        // Микрофон остаётся открытым для окончания фразы пользователя и финальной паузы
+        val userNextFrameDecision = engine.evaluateCaptureFrame(
+            pcmSamples = createTonePcmFrame(rmsTarget = 0.14f, sampleCount = 1024, sampleRateHz = 16_000),
+            nowMs = nowMs + 600L
+        )
+        assertTrue("Microphone must stay open for the rest of user's new utterance", userNextFrameDecision.shouldForwardMicChunkToServer)
+
+        // 5. Пользователь договаривает вопрос, после чего сервер закрывает старый прерванный ход (interrupted=true)
+        socket.simulateServerText(
+            """{"serverContent":{"inputTranscription":{"text":" на такси?"}}}"""
+        )
+        assertEquals("Стоп, а сколько я потратил на такси?", controller.liveSubtitle.value)
+
+        socket.simulateServerText("""{"serverContent":{"interrupted":true}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertEquals(
+            "Server interrupted=true for the old turn must preserve the user's new subtitle",
+            "Стоп, а сколько я потратил на такси?",
+            controller.liveSubtitle.value
+        )
+
+        // 6. Теперь сервер начинает НОВЫЙ ответ Давида (Turn #2) строго по новому запросу пользователя
+        socket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"На такси в этом месяце ты потратил 3 400 рублей."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertEquals("На такси в этом месяце ты потратил 3 400 рублей.", controller.liveSubtitle.value)
+
+        socket.simulateServerText("""{"serverContent":{"turnComplete":true}}""")
+        val (turns, _) = controller.endSession()
+        val userTurns = turns.filter { it.speaker == DavidLiveSpeaker.USER }
+        assertTrue(
+            "Full new user request after barge-in must be recorded as a single intact turn",
+            userTurns.any { it.text.contains("Стоп, а сколько я потратил на такси?") }
+        )
+    }
+
     private fun createTonePcmFrame(
         rmsTarget: Float,
         sampleCount: Int = 1024,
