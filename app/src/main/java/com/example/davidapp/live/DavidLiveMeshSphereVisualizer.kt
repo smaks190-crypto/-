@@ -314,10 +314,7 @@ fun DavidLiveMeshSphereVisualizer(
     onSphereClick: () -> Unit,
     modifier: Modifier = Modifier,
     visualizerSize: Dp = 276.dp,
-    activeToolName: String? = null,
-    onLongPressStartForTest: (() -> Unit)? = null,
-    onLongPressMoveForTest: (() -> Unit)? = null,
-    onLongPressEndForTest: (() -> Unit)? = null
+    activeToolName: String? = null
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -498,16 +495,9 @@ fun DavidLiveMeshSphereVisualizer(
                 onLongPressStart = { point ->
                     touchPosition = point
                     isTouchActive = true
-                    onLongPressStartForTest?.invoke()
                 },
-                onLongPressMove = { point ->
-                    touchPosition = point
-                    onLongPressMoveForTest?.invoke()
-                },
-                onLongPressEnd = {
-                    isTouchActive = false
-                    onLongPressEndForTest?.invoke()
-                },
+                onLongPressMove = { point -> touchPosition = point },
+                onLongPressEnd = { isTouchActive = false },
                 onLongPressCancel = { isTouchActive = false }
             )
             .testTag("david_live_circular_visualizer")
