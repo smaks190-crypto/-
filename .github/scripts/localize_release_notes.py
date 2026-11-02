@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 SECTIONS = ["Добавлено", "Изменено", "Исправлено", "Документация и сборка"]
-EMPTY_TEXT = "В этом выпуске нет автоматически описанных изменений."
+EMPTY_TEXT = "В этом выпуске нет пользовательских изменений."
 
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 PATTERNS = [
@@ -173,7 +173,6 @@ def fetch_commits(repo, compare_ref):
 
 def build_notes(original, repo="", pr_body_loader=fetch_pr_body, commit_loader=fetch_commits):
     sections = {name: [] for name in SECTIONS}
-    fallback = {name: 0 for name in SECTIONS}
     seen = set()
 
     def add(section, text):
