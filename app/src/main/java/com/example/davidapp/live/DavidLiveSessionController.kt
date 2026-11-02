@@ -137,6 +137,7 @@ class DavidLiveSessionController(
      * после чего автоматически возвращает сферу в актуальное состояние.
      */
     fun triggerSuccessPulse(durationMs: Long = DavidLiveVisualStateResolver.SUCCESS_PULSE_DURATION_MS) {
+        resetProcessingFlags()
         _isSuccessPulseActive.value = true
         recomputeVisualState()
         controllerScope.launch {
@@ -667,52 +668,54 @@ class DavidLiveSessionController(
                 _liveSubtitle.value = "Проверяю ваши финансовые данные..."
                 recomputeVisualState()
 
-                controllerScope.launch {
-                    val responsesArray = JSONArray()
-                    for (i in 0 until functionCalls.length()) {
-                        val fc = functionCalls.optJSONObject(i) ?: continue
-                        val callId = fc.optString("id")
-                        val fnName = fc.optString("name")
-                        if (fnName.isNotBlank()) {
-                            _activeToolName.value = fnName
+                if (ws != null) {
+                    controllerScope.launch {
+                        val responsesArray = JSONArray()
+                        for (i in 0 until functionCalls.length()) {
+                            val fc = functionCalls.optJSONObject(i) ?: continue
+                            val callId = fc.optString("id")
+                            val fnName = fc.optString("name")
+                            if (fnName.isNotBlank()) {
+                                _activeToolName.value = fnName
+                                recomputeVisualState()
+                            }
+                            val args = fc.optJSONObject("args")
+                            val toolResult = financialToolsProvider.executeToolCall(fnName, args)
+                            responsesArray.put(
+                                JSONObject().apply {
+                                    if (callId.isNotBlank()) put("id", callId)
+                                    put("name", fnName)
+                                    put(
+                                        "response",
+                                        JSONObject().apply {
+                                            put("output", toolResult)
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                        // Поиск в БД завершён — переходим в фазу аналитического сопоставления (ANALYZING)
+                        _isToolLookupActive.value = false
+                        _activeToolName.value = null
+                        if (_connectionState.value != DavidLiveConnectionState.ERROR &&
+                            _connectionState.value != DavidLiveConnectionState.OFFLINE &&
+                            _connectionState.value != DavidLiveConnectionState.ENDED
+                        ) {
+                            _isAnalyzingToolData.value = true
+                            _liveSubtitle.value = "Проверяю цифры и составляю выводы..."
                             recomputeVisualState()
                         }
-                        val args = fc.optJSONObject("args")
-                        val toolResult = financialToolsProvider.executeToolCall(fnName, args)
-                        responsesArray.put(
-                            JSONObject().apply {
-                                if (callId.isNotBlank()) put("id", callId)
-                                put("name", fnName)
-                                put(
-                                    "response",
-                                    JSONObject().apply {
-                                        put("output", toolResult)
-                                    }
-                                )
-                            }
-                        )
-                    }
-                    // Поиск в БД завершён — переходим в фазу аналитического сопоставления (ANALYZING)
-                    _isToolLookupActive.value = false
-                    _activeToolName.value = null
-                    if (_connectionState.value != DavidLiveConnectionState.ERROR &&
-                        _connectionState.value != DavidLiveConnectionState.OFFLINE &&
-                        _connectionState.value != DavidLiveConnectionState.ENDED
-                    ) {
-                        _isAnalyzingToolData.value = true
-                        _liveSubtitle.value = "Проверяю цифры и составляю выводы..."
-                        recomputeVisualState()
-                    }
 
-                    val toolResponseMsg = JSONObject().apply {
-                        put(
-                            "toolResponse",
-                            JSONObject().apply {
-                                put("functionResponses", responsesArray)
-                            }
-                        )
+                        val toolResponseMsg = JSONObject().apply {
+                            put(
+                                "toolResponse",
+                                JSONObject().apply {
+                                    put("functionResponses", responsesArray)
+                                }
+                            )
+                        }
+                        ws.send(toolResponseMsg.toString())
                     }
-                    ws?.send(toolResponseMsg.toString())
                 }
             }
             return
