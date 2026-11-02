@@ -1572,5 +1572,175 @@ class DavidLiveUnitTest {
         assertTrue(controller.isSuccessPulseActive.value)
         assertEquals(DavidLiveVisualState.SUCCESS, controller.visualState.value)
     }
+
+    @Test
+    fun `mandatory transitions - User Speaking to Idle and David Speaking to Idle preserve smooth speech hold and playback drain`() {
+        val engine = DavidLiveAudioEngine()
+
+        // 1. Подаём активный голосовой сигнал пользователя (440 Гц тон высокой энергии)
+        val speechFrame = ShortArray(1024) { idx ->
+            (sin(2.0 * PI * 440.0 * idx / 16_000.0) * 19_000).toInt().toShort()
+        }
+        engine.feedTestPcmFrame(
+            pcm = speechFrame,
+            sampleCount = speechFrame.size,
+            sampleRate = 16_000,
+            speaker = DavidLiveSpeaker.USER
+        )
+        assertEquals(DavidLiveSpeaker.USER, engine.activeSpeaker.value)
+        assertTrue("User speech hold must be active during speech", engine.isWithinUserSpeechHold.value)
+
+        // Во время речи резолвер выдаёт USER_SPEAKING
+        assertEquals(
+            DavidLiveVisualState.USER_SPEAKING,
+            DavidLiveVisualStateResolver.resolve(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                activeSpeaker = engine.activeSpeaker.value,
+                overallEnergy = engine.overallEnergy.value,
+                isWithinUserSpeechHold = engine.isWithinUserSpeechHold.value
+            )
+        )
+
+        // 2. Короткая пауза между словами (тихий кадр сразу после речи):
+        // окно удержания (420 мс) не позволяет сфере мгновенно сбросить анимацию USER_SPEAKING
+        val quietFrame = ShortArray(1024) { 0 }
+        engine.feedTestPcmFrame(
+            pcm = quietFrame,
+            sampleCount = quietFrame.size,
+            sampleRate = 16_000,
+            speaker = DavidLiveSpeaker.NONE
+        )
+        assertTrue(
+            "Short pause right after user speech must stay within hold window",
+            engine.isWithinUserSpeechHold.value
+        )
+        assertEquals(
+            DavidLiveVisualState.USER_SPEAKING,
+            DavidLiveVisualStateResolver.resolve(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                activeSpeaker = DavidLiveSpeaker.NONE,
+                overallEnergy = 0.02f,
+                isWithinUserSpeechHold = engine.isWithinUserSpeechHold.value
+            )
+        )
+
+        // 3. После истечения окна удержания сфера плавно возвращается в IDLE_LISTENING
+        assertEquals(
+            DavidLiveVisualState.IDLE_LISTENING,
+            DavidLiveVisualStateResolver.resolve(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                activeSpeaker = DavidLiveSpeaker.NONE,
+                overallEnergy = 0.01f,
+                isWithinUserSpeechHold = false
+            )
+        )
+
+        // 4. David Speaking -> Idle: пока очередь воспроизведения не опустошена (isPlaybackDrained == false),
+        // состояние остаётся DAVID_SPEAKING; после полного воспроизведения (isPlaybackDrained == true)
+        // и завершения hold-окна переходит в IDLE_LISTENING без резкого обрыва.
+        assertEquals(
+            DavidLiveVisualState.DAVID_SPEAKING,
+            DavidLiveVisualStateResolver.resolve(
+                connectionState = DavidLiveConnectionState.DAVID_SPEAKING,
+                activeSpeaker = DavidLiveSpeaker.DAVID,
+                isPlaybackDrained = false,
+                isWithinDavidSpeechHold = true
+            )
+        )
+        assertEquals(
+            DavidLiveVisualState.IDLE_LISTENING,
+            DavidLiveVisualStateResolver.resolve(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                activeSpeaker = DavidLiveSpeaker.NONE,
+                isPlaybackDrained = true,
+                isWithinDavidSpeechHold = false
+            )
+        )
+    }
+
+    @Test
+    fun `mandatory transitions - full pipeline Thinking to Finance Lookup to Analyzing to Preparing Response to David Speaking and Offline recovery`() = runBlocking {
+        val fakeAccounts = listOf(
+            AccountEntity(id = "a1", budgetId = "b1", name = "Основная", balance = 150_000.0, type = "card")
+        )
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(emptyList()),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(fakeAccounts)
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+
+        // 1. SetupComplete подтверждает готовность сессии и переводит CONNECTING -> IDLE_LISTENING
+        controller.processServerMessageForTest("""{"setupComplete": {}}""")
+        assertTrue(controller.isSessionReady.value)
+        assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
+
+        // 2. Пользователь произнёс фразу -> модель переходит к осмыслению (THINKING)
+        controller.processServerMessageForTest(
+            """{"serverContent": {"inputTranscription": {"text": "Сколько у меня денег на счетах?"}}}"""
+        )
+        assertEquals(DavidLiveVisualState.THINKING, controller.visualState.value)
+
+        // 3. Модель вызывает финансовый инструмент -> мгновенный переход в FINANCE_LOOKUP
+        controller.processServerMessageForTest(
+            """
+            {
+              "toolCall": {
+                "functionCalls": [
+                  {"id": "c1", "name": "${DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW}", "args": {}}
+                ]
+              }
+            }
+            """.trimIndent()
+        )
+        assertEquals(DavidLiveVisualState.FINANCE_LOOKUP, controller.visualState.value)
+
+        // 4. После получения данных инструмента при приходе внутренней мысли модель переходит в ANALYZING -> PREPARING_RESPONSE
+        val analyzingResolved = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isAnalyzingToolData = true
+        )
+        assertEquals(DavidLiveVisualState.ANALYZING, analyzingResolved)
+
+        val preparingResolved = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isPreparingResponse = true
+        )
+        assertEquals(DavidLiveVisualState.PREPARING_RESPONSE, preparingResolved)
+
+        // 5. Начинается голосовой ответ Давида -> DAVID_SPEAKING
+        controller.processServerMessageForTest(
+            """{"serverContent": {"outputTranscription": {"text": "На твоём счёте 150 тысяч рублей."}}}"""
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+
+        // 6. Обрыв сети во время анализа или речи Давида немедленно переводит сферу в OFFLINE (приоритет Offline!)
+        controller.simulateFailureForTest(
+            errorMessage = "Unable to resolve host generativelanguage.googleapis.com",
+            httpCode = null
+        )
+        assertEquals(DavidLiveConnectionFailureKind.NETWORK_OFFLINE, controller.failureKind.value)
+        assertEquals(DavidLiveConnectionState.OFFLINE, controller.connectionState.value)
+        assertEquals(DavidLiveVisualState.OFFLINE, controller.visualState.value)
+
+        // 7. Ошибка 403 Invalid API key переводит в отдельное состояние ERROR (а не OFFLINE)
+        controller.simulateFailureForTest(
+            errorMessage = "API key not valid. Please pass a valid API key.",
+            httpCode = 403
+        )
+        assertEquals(DavidLiveConnectionFailureKind.INVALID_API_KEY, controller.failureKind.value)
+        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
+        assertEquals(DavidLiveVisualState.ERROR, controller.visualState.value)
+
+        // 8. Повторный setupComplete восстанавливает рабочее состояние IDLE_LISTENING
+        controller.processServerMessageForTest("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionFailureKind.NONE, controller.failureKind.value)
+        assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
+    }
 }
+
 

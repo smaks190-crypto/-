@@ -388,6 +388,7 @@ object DavidLiveVisualStateResolver {
                 visualState = visualState,
                 title = "Связь прервалась",
                 subtitle = errorMessage?.takeIf { it.isNotBlank() }
+                    ?: liveSubtitle?.takeIf { it.isNotBlank() && it != "Говорите, я слушаю..." }
                     ?: "Проверь интернет и нажми на сферу или кнопку ниже",
                 badgeText = "OFFLINE",
                 actionType = DavidLiveVisualActionType.RECONNECT,
@@ -418,6 +419,7 @@ object DavidLiveVisualStateResolver {
                     visualState = visualState,
                     title = if (isInvalidKey) "Неверный API-ключ" else "Ошибка",
                     subtitle = errorMessage?.takeIf { it.isNotBlank() }
+                        ?: liveSubtitle?.takeIf { it.isNotBlank() && it != "Говорите, я слушаю..." }
                         ?: "Что-то пошло не так. Попробуй ещё раз.",
                     badgeText = "ERROR",
                     actionType = if (isInvalidKey) {
