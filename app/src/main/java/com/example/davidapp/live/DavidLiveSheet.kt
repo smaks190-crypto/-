@@ -1209,8 +1209,15 @@ fun DavidLiveSheet(
                                         )
                                     )
                                 ) {
-                                    Text(
+                                    DavidLiveStreamingText(
                                         text = subtitleBubbleText,
+                                        streamKey = when (effectiveVisualState) {
+                                            DavidLiveVisualState.USER_SPEAKING -> "user"
+                                            DavidLiveVisualState.DAVID_SPEAKING -> "david"
+                                            else -> "status-${effectiveVisualState.name}"
+                                        },
+                                        isStreaming = effectiveVisualState == DavidLiveVisualState.USER_SPEAKING ||
+                                            effectiveVisualState == DavidLiveVisualState.DAVID_SPEAKING,
                                         color = when (effectiveVisualState) {
                                             DavidLiveVisualState.OFFLINE -> Color(0xFFFECACA)
                                             DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
