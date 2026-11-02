@@ -74,7 +74,7 @@
 ## 4. Состояние Git и CI/CD (PR #84)
 - **Рабочая ветка**: `feat/issue-56-david-live-mesh-visualizer`
 - **Pull Request**: [#84 (`https://github.com/smaks190-crypto/-/pull/84`)](https://github.com/smaks190-crypto/-/pull/84)
-- **Базовый коммит исправления кода в PR #84**: `7992c60e1ca7786a119eb6eaaeb2606e2c0ef807`
+- **Базовый коммит исправления кода в PR #84**: `f744a8a2a88dae7c6a17044433bf4dedb2635ae6`
 - **Исправлено в PR #84 (после Run #319)**:
   - Реализована функция `resolveVisualStateColors(visualState: DavidLiveVisualState, isMicMuted: Boolean): Pair<Color, Color>` в `DavidLiveSheet.kt` для всех 13 визуальных состояний (устраняет `Unresolved reference: resolveVisualStateColors` на строках 239, 366, 713, 1528 и каскадные ошибки деструктуризации `component1`/`component2`/`copy`);
   - Добавлена строгая защита `isDebugModeEnabled = BuildConfig.DEBUG` в `DavidLiveVisualStateResolver.resolve`, `DavidLiveSessionController` и `DavidLiveSheet`, чтобы `debugOverrideState` никогда не подменял реальные состояния (включая приоритетный `OFFLINE`) в Release-сборках;

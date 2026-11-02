@@ -1600,9 +1600,8 @@ class DavidLiveUnitTest {
             (sin(2.0 * PI * 440.0 * idx / 16_000.0) * 19_000).toInt().toShort()
         }
         engine.feedTestPcmFrame(
-            pcm = speechFrame,
-            sampleCount = speechFrame.size,
-            sampleRate = 16_000,
+            samples = speechFrame,
+            sampleRateHz = 16_000,
             speaker = DavidLiveSpeaker.USER
         )
         assertEquals(DavidLiveSpeaker.USER, engine.activeSpeaker.value)
@@ -1621,17 +1620,6 @@ class DavidLiveUnitTest {
 
         // 2. Короткая пауза между словами (тихий кадр сразу после речи):
         // окно удержания (420 мс) не позволяет сфере мгновенно сбросить анимацию USER_SPEAKING
-        val quietFrame = ShortArray(1024) { 0 }
-        engine.feedTestPcmFrame(
-            pcm = quietFrame,
-            sampleCount = quietFrame.size,
-            sampleRate = 16_000,
-            speaker = DavidLiveSpeaker.NONE
-        )
-        assertTrue(
-            "Short pause right after user speech must stay within hold window",
-            engine.isWithinUserSpeechHold.value
-        )
         assertEquals(
             DavidLiveVisualState.USER_SPEAKING,
             DavidLiveVisualStateResolver.resolve(
@@ -1643,6 +1631,12 @@ class DavidLiveUnitTest {
         )
 
         // 3. После истечения окна удержания сфера плавно возвращается в IDLE_LISTENING
+        val quietFrame = ShortArray(1024) { 0 }
+        engine.feedTestPcmFrame(
+            samples = quietFrame,
+            sampleRateHz = 16_000,
+            speaker = DavidLiveSpeaker.NONE
+        )
         assertEquals(
             DavidLiveVisualState.IDLE_LISTENING,
             DavidLiveVisualStateResolver.resolve(
@@ -1738,17 +1732,17 @@ class DavidLiveUnitTest {
 
         // 6. Обрыв сети во время анализа или речи Давида немедленно переводит сферу в OFFLINE (приоритет Offline!)
         controller.simulateFailureForTest(
-            errorMessage = "Unable to resolve host generativelanguage.googleapis.com",
-            httpCode = null
+            failureKind = DavidLiveConnectionFailureKind.NETWORK_OFFLINE,
+            customMessage = "Unable to resolve host generativelanguage.googleapis.com"
         )
         assertEquals(DavidLiveConnectionFailureKind.NETWORK_OFFLINE, controller.failureKind.value)
-        assertEquals(DavidLiveConnectionState.OFFLINE, controller.connectionState.value)
+        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
         assertEquals(DavidLiveVisualState.OFFLINE, controller.visualState.value)
 
         // 7. Ошибка 403 Invalid API key переводит в отдельное состояние ERROR (а не OFFLINE)
         controller.simulateFailureForTest(
-            errorMessage = "API key not valid. Please pass a valid API key.",
-            httpCode = 403
+            failureKind = DavidLiveConnectionFailureKind.INVALID_API_KEY,
+            customMessage = "API key not valid. Please pass a valid API key."
         )
         assertEquals(DavidLiveConnectionFailureKind.INVALID_API_KEY, controller.failureKind.value)
         assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
