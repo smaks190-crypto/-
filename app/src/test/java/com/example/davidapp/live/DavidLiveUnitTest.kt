@@ -2082,7 +2082,132 @@ class DavidLiveUnitTest {
         }
         assertTrue("Releasing finger must softly disperse touch attraction back toward 0", dispersed < 0.08f)
     }
+
+    @Test
+    fun `david live speech sync tracker and session controller synchronize subtitle text with audible 24kHz audio playback`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+
+        // 1. Проверка компенсации буфера AudioTrack (200 мс) и старта ЦАП (100 мс) в computeAudibleSamplesAt
+        val startMs = 10_000L
+        // В момент t = startMs + 50ms (до завершения 100 мс старта ЦАП) реально услышанных сэмплов ещё 0
+        val beforeDacOnset = DavidLiveAudioEngine.computeAudibleSamplesAt(
+            writtenSamples24k = 24_000L,
+            turnStartWallMs = startMs,
+            lastWriteWallMs = startMs + 50L,
+            nowWallMs = startMs + 50L,
+            hasMoreQueuedAudio = true
+        )
+        assertEquals(0L, beforeDacOnset)
+
+        // В момент t = startMs + 600ms (500 мс реального звучания = 12 000 сэмплов @ 24 кГц),
+        // даже если в буфер уже записано 48 000 сэмплов, прозвучало ровно 12 000 сэмплов
+        val at500msAudible = DavidLiveAudioEngine.computeAudibleSamplesAt(
+            writtenSamples24k = 48_000L,
+            turnStartWallMs = startMs,
+            lastWriteWallMs = startMs + 600L,
+            nowWallMs = startMs + 600L,
+            hasMoreQueuedAudio = true
+        )
+        assertEquals(12_000L, at500msAudible)
+
+        // 2. Сервер Gemini Live присылает сразу два предложения в outputTranscription и 3.5 секунды аудио (84 000 сэмплов),
+        // плюс преждевременный turnComplete, пока AudioTrack только начинает озвучивать первое слово.
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = 0L,
+            isDrained = false
+        )
+
+        controller.processServerMessageForTest(
+            """
+            {
+              "serverContent": {
+                "outputTranscription": {
+                  "text": "Привет! Я проверил твой бюджет за октябрь. Сейчас расскажу про подписки."
+                },
+                "turnComplete": true
+              }
+            }
+            """.trimIndent()
+        )
+
+        // Пока audibleSamples24k == 0 (звук ещё не вышел из динамика), текст следующих предложений НЕ появляется заранее,
+        // а состояние остаётся DAVID_SPEAKING несмотря на пришедший с сервера turnComplete!
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertEquals("Давид отвечает...", controller.liveSubtitle.value)
+        assertFalse(controller.liveSubtitle.value.contains("подписки"))
+
+        val scheduled = controller.speechSyncTracker.getScheduledWordsForTest()
+        assertTrue(scheduled.size >= 9)
+        val firstWordSample = scheduled.first().revealAtSample24k
+        val secondSentenceWord = scheduled.first { it.word.startsWith("Я") }
+        val thirdSentenceWord = scheduled.first { it.word.startsWith("Сейчас") }
+
+        // 3. Давид произносит первое слово («Привет!») -> в облачке появляется только «Привет!»
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = firstWordSample + 100L,
+            isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
+        assertEquals("Привет!", controller.liveSubtitle.value)
+        assertEquals("Привет!", extractActiveSpeechBubbleSegment(controller.liveSubtitle.value).activeText)
+
+        // 4. Давид произносит второе предложение («Я проверил твой бюджет за октябрь.») ->
+        // в облачке отображается второе предложение, а третье («Сейчас расскажу про подписки.») ещё НЕ появилось!
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = thirdSentenceWord.revealAtSample24k - 500L,
+            isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
+        assertTrue(controller.liveSubtitle.value.contains("Я проверил твой бюджет за октябрь."))
+        assertFalse(
+            "Third sentence must NOT appear in subtitle bubble before David's voice reaches it",
+            controller.liveSubtitle.value.contains("Сейчас")
+        )
+        assertEquals(
+            "Я проверил твой бюджет за октябрь.",
+            extractActiveSpeechBubbleSegment(controller.liveSubtitle.value).activeText
+        )
+        assertTrue(secondSentenceWord.revealAtSample24k < thirdSentenceWord.revealAtSample24k)
+
+        // 5. Голос Давида доходит до третьего предложения («Сейчас расскажу про подписки.») ->
+        // облачко синхронно переключается на третье предложение!
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = 84_000L,
+            isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
+        assertEquals(
+            "Сейчас расскажу про подписки.",
+            extractActiveSpeechBubbleSegment(controller.liveSubtitle.value).activeText
+        )
+
+        // 6. Когда воспроизведение аудио реально завершилось (isDrained = true), реплика фиксируется в истории и режим переходит в LISTENING
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = 84_000L,
+            isDrained = true
+        )
+        controller.completeDavidTurnAfterPlaybackDrain()
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertEquals(1, controller.transcriptTurns.size)
+        assertEquals(
+            "Привет! Я проверил твой бюджет за октябрь. Сейчас расскажу про подписки.",
+            controller.transcriptTurns.first().text
+        )
+    }
 }
+
 
 
 

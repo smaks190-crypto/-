@@ -87,8 +87,31 @@ class DavidLiveAudioEngine(
     private val _isWithinDavidSpeechHold = MutableStateFlow(false)
     val isWithinDavidSpeechHold: StateFlow<Boolean> = _isWithinDavidSpeechHold.asStateFlow()
 
+    private val enqueuedDavidTurnSamplesCount = AtomicLong(0L)
+    private val writtenDavidTurnSamplesCount = AtomicLong(0L)
+    private val turnPlaybackStartWallClockMs = AtomicLong(0L)
+
+    private val _enqueuedDavidTurnSamples = MutableStateFlow(0L)
+    val enqueuedDavidTurnSamples: StateFlow<Long> = _enqueuedDavidTurnSamples.asStateFlow()
+
+    private val _audibleDavidTurnSamples = MutableStateFlow(0L)
+    val audibleDavidTurnSamples: StateFlow<Long> = _audibleDavidTurnSamples.asStateFlow()
+
     private val lastUserSpeechDetectedMs = AtomicLong(0L)
     private val lastDavidPlaybackActiveMs = AtomicLong(0L)
+
+    fun isEngineRunning(): Boolean = isRunning.get()
+
+    /**
+     * Resets the 24 kHz turn sample counters at the start of a new David response turn or upon interruption.
+     */
+    fun resetDavidTurnSampleCounters() {
+        enqueuedDavidTurnSamplesCount.set(0L)
+        writtenDavidTurnSamplesCount.set(0L)
+        turnPlaybackStartWallClockMs.set(0L)
+        _enqueuedDavidTurnSamples.value = 0L
+        _audibleDavidTurnSamples.value = 0L
+    }
 
     /**
      * Builds the official Android [AudioAttributes] for AI / Voice Assistants (`USAGE_ASSISTANT`).
@@ -114,6 +137,7 @@ class DavidLiveAudioEngine(
         if (isRunning.getAndSet(true)) return
         spectrumAnalyzer.reset()
         playbackQueue.clear()
+        resetDavidTurnSampleCounters()
         bargeInEchoSuppressUntilMs.set(0L)
         _isPlaybackDrained.value = true
         _isWithinUserSpeechHold.value = false
@@ -149,6 +173,8 @@ class DavidLiveAudioEngine(
             samples[i] = ((high shl 8) or low).toShort()
             byteIdx += 2
         }
+        val updatedEnqueued = enqueuedDavidTurnSamplesCount.addAndGet(sampleCount.toLong())
+        _enqueuedDavidTurnSamples.value = updatedEnqueued
         _isPlaybackDrained.value = false
         playbackQueue.offer(samples)
     }
@@ -163,6 +189,7 @@ class DavidLiveAudioEngine(
         val now = System.currentTimeMillis()
         playbackGeneration.incrementAndGet()
         playbackQueue.clear()
+        resetDavidTurnSampleCounters()
         lastOutputChunkTimestamp.set(0L)
         lastDavidPlaybackActiveMs.set(0L)
         _isPlaybackDrained.value = true
@@ -198,6 +225,24 @@ class DavidLiveAudioEngine(
     }
 
     /**
+     * Allows unit tests to deterministically simulate buffered and audible 24 kHz audio progress
+     * for verifying voice-to-subtitle synchronization without hardware AudioTrack.
+     */
+    internal fun simulateEnqueuedAndAudibleSamplesForTest(
+        enqueuedSamples24k: Long,
+        audibleSamples24k: Long,
+        isDrained: Boolean = audibleSamples24k >= enqueuedSamples24k && enqueuedSamples24k > 0L
+    ) {
+        enqueuedDavidTurnSamplesCount.set(enqueuedSamples24k)
+        writtenDavidTurnSamplesCount.set(audibleSamples24k)
+        _enqueuedDavidTurnSamples.value = enqueuedSamples24k
+        _audibleDavidTurnSamples.value = audibleSamples24k
+        _isPlaybackDrained.value = isDrained
+        _activeSpeaker.value = if (isDrained) DavidLiveSpeaker.NONE else DavidLiveSpeaker.DAVID
+        _isWithinDavidSpeechHold.value = !isDrained
+    }
+
+    /**
      * Allows unit/UI tests to feed a synthetic PCM frame directly into the spectrum analyzer.
      */
     fun feedTestPcmFrame(
@@ -214,6 +259,12 @@ class DavidLiveAudioEngine(
             lastDavidPlaybackActiveMs.set(now)
             _isPlaybackDrained.value = false
             _isWithinDavidSpeechHold.value = true
+            val totalWritten = writtenDavidTurnSamplesCount.addAndGet(samples.size.toLong())
+            if (enqueuedDavidTurnSamplesCount.get() < totalWritten) {
+                enqueuedDavidTurnSamplesCount.set(totalWritten)
+                _enqueuedDavidTurnSamples.value = totalWritten
+            }
+            _audibleDavidTurnSamples.value = totalWritten
         } else {
             _isWithinUserSpeechHold.value = false
             _isWithinDavidSpeechHold.value = false
@@ -231,6 +282,7 @@ class DavidLiveAudioEngine(
         playbackJob?.cancel()
         engineScope.coroutineContext.cancelChildren()
         playbackQueue.clear()
+        resetDavidTurnSampleCounters()
         bargeInEchoSuppressUntilMs.set(0L)
 
         releaseAudioEffects()
@@ -527,12 +579,28 @@ class DavidLiveAudioEngine(
                     if (samples == null) {
                         val now = System.currentTimeMillis()
                         val elapsedSinceOutput = now - lastOutputChunkTimestamp.get()
-                        if (elapsedSinceOutput > 220L) {
+                        val totalWritten = writtenDavidTurnSamplesCount.get()
+                        if (totalWritten > 0L) {
+                            if (elapsedSinceOutput <= AUDIO_TRACK_DRAIN_TAIL_MS) {
+                                _audibleDavidTurnSamples.value = computeAudibleSamplesAt(
+                                    writtenSamples24k = totalWritten,
+                                    turnStartWallMs = turnPlaybackStartWallClockMs.get(),
+                                    lastWriteWallMs = lastOutputChunkTimestamp.get(),
+                                    nowWallMs = now,
+                                    hasMoreQueuedAudio = false
+                                )
+                            } else {
+                                _audibleDavidTurnSamples.value = totalWritten
+                            }
+                        }
+                        if (elapsedSinceOutput > AUDIO_TRACK_DRAIN_TAIL_MS) {
                             _isPlaybackDrained.value = true
                             val withinHold = lastDavidPlaybackActiveMs.get() > 0L &&
                                 now - lastDavidPlaybackActiveMs.get() <= DavidLiveVisualStateResolver.SPEECH_PAUSE_HOLD_MS
                             _isWithinDavidSpeechHold.value = withinHold
-                            if (!withinHold && _activeSpeaker.value == DavidLiveSpeaker.DAVID) {
+                            if (!withinHold && _activeSpeaker.value == DavidLiveSpeaker.NONE) {
+                                _activeSpeaker.value = DavidLiveSpeaker.NONE
+                            } else if (!withinHold && _activeSpeaker.value == DavidLiveSpeaker.DAVID) {
                                 _activeSpeaker.value = DavidLiveSpeaker.NONE
                             }
                         }
@@ -547,6 +615,7 @@ class DavidLiveAudioEngine(
                         val len = (samples.size - offset).coerceAtMost(step)
                         val window = samples.copyOfRange(offset, offset + len)
                         val now = System.currentTimeMillis()
+                        turnPlaybackStartWallClockMs.compareAndSet(0L, now)
                         lastOutputChunkTimestamp.set(now)
                         lastDavidPlaybackActiveMs.set(now)
                         _isPlaybackDrained.value = false
@@ -565,6 +634,16 @@ class DavidLiveAudioEngine(
                             }
                         } catch (_: Exception) {
                         }
+                        val afterWriteMs = System.currentTimeMillis()
+                        val totalWritten = writtenDavidTurnSamplesCount.addAndGet(len.toLong())
+                        val hasMoreQueued = (offset + len < samples.size) || playbackQueue.isNotEmpty()
+                        _audibleDavidTurnSamples.value = computeAudibleSamplesAt(
+                            writtenSamples24k = totalWritten,
+                            turnStartWallMs = turnPlaybackStartWallClockMs.get(),
+                            lastWriteWallMs = afterWriteMs,
+                            nowWallMs = afterWriteMs,
+                            hasMoreQueuedAudio = hasMoreQueued
+                        )
                         offset += len
                     }
                 }
@@ -596,6 +675,36 @@ class DavidLiveAudioEngine(
         private const val BARGE_IN_MIN_FRAMES = 4
         private const val PLAYBACK_ECHO_TAIL_MS = 320L
         internal const val BARGE_IN_TAIL_ECHO_SUPPRESS_MS = 220L
+        internal const val AUDIO_TRACK_DAC_ONSET_MS = 100L
+        internal const val AUDIO_TRACK_BUFFER_LEAD_SAMPLES = 4_800L // ~200ms of 24kHz AudioTrack ring buffer
+        internal const val AUDIO_TRACK_DRAIN_TAIL_MS = 220L
+
+        /**
+         * Computes the number of 24 kHz PCM samples that have actually exited the speaker DAC
+         * at [nowWallMs], accounting for [AudioTrack]'s internal ring buffer lead (~200 ms)
+         * and hardware DAC onset latency (~100 ms) so subtitle text never races ahead of David's voice.
+         */
+        internal fun computeAudibleSamplesAt(
+            writtenSamples24k: Long,
+            turnStartWallMs: Long,
+            lastWriteWallMs: Long,
+            nowWallMs: Long,
+            hasMoreQueuedAudio: Boolean
+        ): Long {
+            if (writtenSamples24k <= 0L || turnStartWallMs <= 0L) return 0L
+            val elapsedSinceStartMs = (nowWallMs - turnStartWallMs - AUDIO_TRACK_DAC_ONSET_MS).coerceAtLeast(0L)
+            val wallClockPlayedSamples = (elapsedSinceStartMs * OUTPUT_SAMPLE_RATE_HZ) / 1000L
+            return if (hasMoreQueuedAudio) {
+                val bufferCompensated = (writtenSamples24k - AUDIO_TRACK_BUFFER_LEAD_SAMPLES).coerceAtLeast(0L)
+                minOf(wallClockPlayedSamples, bufferCompensated.coerceAtLeast(minOf(writtenSamples24k, 1_200L)))
+            } else {
+                val drainElapsedMs = (nowWallMs - lastWriteWallMs).coerceIn(0L, AUDIO_TRACK_DRAIN_TAIL_MS)
+                val remainingLead = ((AUDIO_TRACK_BUFFER_LEAD_SAMPLES * (AUDIO_TRACK_DRAIN_TAIL_MS - drainElapsedMs)) / AUDIO_TRACK_DRAIN_TAIL_MS)
+                    .coerceAtLeast(0L)
+                val drainedSamples = (writtenSamples24k - remainingLead).coerceIn(0L, writtenSamples24k)
+                minOf(writtenSamples24k, maxOf(wallClockPlayedSamples.coerceAtMost(writtenSamples24k), drainedSamples))
+            }
+        }
 
         /**
          * Builds the [AudioAttributes] tied to the AI Assistant / Neural Network volume channel

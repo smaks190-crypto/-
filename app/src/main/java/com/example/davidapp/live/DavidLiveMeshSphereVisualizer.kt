@@ -527,51 +527,51 @@ private class GyroRibbonSpec(
 )
 
 private val DefaultGyroRibbonSpecs = arrayOf(
-    // 1. Главная диагональная 3D-лента (широкий плазменный шлейф)
+    // 1. Внутренняя диагональная 3D-лента плазмы внутри объёма сферы
     GyroRibbonSpec(
         baseTiltXDeg = 68f,
         baseTiltZDeg = -22f,
         precessionRate = 0.18f,
-        radiusRatio = 1.28f,
+        radiusRatio = 0.88f,
         speedMultiplier = 1.0f,
         phaseOffsetRad = 0.15f,
-        ribbonThicknessDp = 3.2f,
+        ribbonThicknessDp = 3.0f,
         waveHarmonic = 2,
         useSecondaryColor = false
     ),
-    // 2. Встречная перекрёстная 3D-лента (создаёт глубокую стерео-перспективу)
+    // 2. Встречная перекрёстная внутренняя 3D-лента (глубокая стерео-перспектива внутри шара)
     GyroRibbonSpec(
         baseTiltXDeg = 63f,
         baseTiltZDeg = 29f,
         precessionRate = -0.14f,
-        radiusRatio = 1.20f,
+        radiusRatio = 0.80f,
         speedMultiplier = -0.82f,
         phaseOffsetRad = 2.15f,
-        ribbonThicknessDp = 2.5f,
+        ribbonThicknessDp = 2.4f,
         waveHarmonic = 3,
         useSecondaryColor = true
     ),
-    // 3. Крутая меридиональная 3D-орбита близко к оболочке ядра
+    // 3. Меридиональная 3D-струя близко к ядру сферы
     GyroRibbonSpec(
         baseTiltXDeg = 74f,
         baseTiltZDeg = -56f,
         precessionRate = 0.22f,
-        radiusRatio = 1.12f,
+        radiusRatio = 0.70f,
         speedMultiplier = 1.24f,
         phaseOffsetRad = 4.10f,
         ribbonThicknessDp = 2.0f,
         waveHarmonic = 2,
         useSecondaryColor = false
     ),
-    // 4. Экваториальная парящая волна света
+    // 4. Экваториальная внутренняя волна света под куполом сферы
     GyroRibbonSpec(
         baseTiltXDeg = 78f,
         baseTiltZDeg = 8f,
         precessionRate = -0.11f,
-        radiusRatio = 1.34f,
+        radiusRatio = 0.91f,
         speedMultiplier = 0.64f,
         phaseOffsetRad = 1.05f,
-        ribbonThicknessDp = 1.7f,
+        ribbonThicknessDp = 1.8f,
         waveHarmonic = 4,
         useSecondaryColor = true
     )
@@ -734,7 +734,7 @@ fun DavidLiveMeshSphereVisualizer(
     isMicMuted: Boolean,
     onSphereClick: () -> Unit,
     modifier: Modifier = Modifier,
-    visualizerSize: Dp = 276.dp,
+    visualizerSize: Dp = 308.dp,
     activeToolName: String? = null
 ) {
     val context = LocalContext.current
@@ -985,7 +985,7 @@ fun DavidLiveMeshSphereVisualizer(
 
                     fun updateTouchTargetFromScreen(pos: Offset) {
                         val boxCenter = Offset(size.width / 2f, size.height / 2f)
-                        val approxSphereRadius = (min(size.width, size.height) / 2f) * 0.60f
+                        val approxSphereRadius = (min(size.width, size.height) / 2f) * 0.84f
                         val projected = projectTouchTo3DSphere(
                             touchOffset = pos,
                             sphereCenter = boxCenter,
@@ -1068,12 +1068,13 @@ fun DavidLiveMeshSphereVisualizer(
     ) {
         Canvas(modifier = Modifier.size(visualizerSize)) {
             val center = Offset(size.width / 2f, size.height / 2f)
-            val baseRadius = (size.minDimension / 2f) * 0.60f
-            val dynamicRadius = baseRadius * (
+            val maxCanvasRadius = size.minDimension / 2f
+            val baseRadius = maxCanvasRadius * 0.84f
+            val dynamicRadius = (baseRadius * (
                 1f +
-                    0.022f * sin(breathProgress * PI.toFloat()) +
-                    smoothedEnergy * 0.075f
-                )
+                    0.018f * sin(breathProgress * PI.toFloat()) +
+                    smoothedEnergy * 0.055f
+                )).coerceAtMost(maxCanvasRadius * 0.90f)
 
             val activeTouch3D = if (touchAttractionStrength > 0.004f) {
                 projectTouchTo3DSphere(
@@ -1088,7 +1089,7 @@ fun DavidLiveMeshSphereVisualizer(
                 null
             }
 
-            // ЭТАП 1. Глубокая атмосферная корона вокруг 3D-сферы и объёмное поле микрочастиц
+            // ЭТАП 1. Мягкая атмосферная корона вокруг увеличенной 3D-сферы (без внешних орбитальных дуг/колец)
             drawVolumetricOuterCoronaAndParticles(
                 center = center,
                 sphereRadius = dynamicRadius,
@@ -1103,21 +1104,7 @@ fun DavidLiveMeshSphereVisualizer(
                 touchAttractionStrength = touchAttractionStrength
             )
 
-            // ЭТАП 2. ЗАДНЯЯ ПОЛУСФЕРА (z < 0) шелковистых гироскопических 3D-лент (проходят ПОЗАДИ сферы)
-            drawGyroscopic3DSilkRibbons(
-                center = center,
-                sphereRadius = dynamicRadius,
-                phaseRad = continuousOrbitPhaseRad,
-                energy = smoothedEnergy,
-                primaryColor = animatedPrimaryColor,
-                secondaryColor = animatedSecondaryColor,
-                intensity = orbitIntensity,
-                touchPoint3D = activeTouch3D,
-                touchAttractionStrength = touchAttractionStrength,
-                drawFrontHemisphere = false
-            )
-
-            // Подготавливаем сферическую область отсечения для внутренних 3D-слоёв шара
+            // Подготавливаем сферическую область отсечения для всех внутренних 3D-слоёв шара
             reusableSphereClipPath.reset()
             reusableSphereClipPath.addOval(
                 Rect(
@@ -1129,7 +1116,7 @@ fun DavidLiveMeshSphereVisualizer(
             )
 
             clipPath(reusableSphereClipPath) {
-                // ЭТАП 3. 3D-затенение шара (Lambertian + Subsurface Scattering) и 5 объёмных 3D-облаков текучей плазмы
+                // ЭТАП 2. 3D-затенение шара (Lambertian + Subsurface Scattering) и 5 объёмных 3D-облаков текучей плазмы
                 draw3DSphereShadedBodyAndOrganicPlasmaNebula(
                     center = center,
                     radius = dynamicRadius,
@@ -1149,7 +1136,7 @@ fun DavidLiveMeshSphereVisualizer(
                     reusablePath = reusablePlasmaPath
                 )
 
-                // ЭТАП 4. ЗАДНЯЯ ПОЛУСФЕРА (z < 0) спиральных 3D-потоков и кометных сгустков плазмы
+                // ЭТАП 3. ЗАДНЯЯ ПОЛУСФЕРА (z < 0) спиральных 3D-потоков и кометных сгустков (без орбитальных дуг)
                 draw3DSpiralVortexCurrents(
                     center = center,
                     sphereRadius = dynamicRadius,
@@ -1177,7 +1164,7 @@ fun DavidLiveMeshSphereVisualizer(
                     drawFrontHemisphere = false
                 )
 
-                // ЭТАП 5. Преломляющее 3D-ядро в центре сферы (частично перекрывает задние потоки z < 0, создавая глубокий 3D-параллакс)
+                // ЭТАП 4. Преломляющее 3D-ядро в центре сферы (частично перекрывает задние потоки z < 0, создавая глубокий 3D-параллакс)
                 draw3DRefractiveCoreNucleus(
                     center = center,
                     radius = dynamicRadius,
@@ -1192,7 +1179,7 @@ fun DavidLiveMeshSphereVisualizer(
                     touchAttractionStrength = touchAttractionStrength
                 )
 
-                // ЭТАП 6. ПЕРЕДНЯЯ ПОЛУСФЕРА (z >= 0) спиральных 3D-потоков и кометных сгустков плазмы
+                // ЭТАП 5. ПЕРЕДНЯЯ ПОЛУСФЕРА (z >= 0) спиральных 3D-потоков и кометных сгустков (без орбитальных дуг)
                 draw3DSpiralVortexCurrents(
                     center = center,
                     sphereRadius = dynamicRadius,
@@ -1220,7 +1207,7 @@ fun DavidLiveMeshSphereVisualizer(
                     drawFrontHemisphere = true
                 )
 
-                // ЭТАП 7. Выпуклая 3D-оптика (мягкое внутреннее свечение Френеля, купольный блик и 3D-вихрь под пальцем)
+                // ЭТАП 6. Выпуклая 3D-оптика (мягкое внутреннее свечение Френеля, купольный блик и 3D-вихрь под пальцем)
                 draw3DSphericalLensAndTouchVortex(
                     center = center,
                     radius = dynamicRadius,
@@ -1235,13 +1222,13 @@ fun DavidLiveMeshSphereVisualizer(
                 )
             }
 
-            // Мягкая светящаяся атмосфера вдоль сферического лимба (без жёсткого плоского Stroke-кольца!)
+            // Мягкая светящаяся атмосфера вдоль сферического лимба (без внешних дуг и без плоского Stroke-кольца!)
             drawCircle(
                 brush = Brush.radialGradient(
                     0.0f to Color.Transparent,
-                    0.82f to Color.Transparent,
-                    0.95f to animatedPrimaryColor.copy(alpha = (0.28f + 0.14f * smoothedEnergy) * orbitIntensity),
-                    0.99f to animatedSecondaryColor.copy(alpha = (0.42f + 0.18f * smoothedEnergy) * orbitIntensity),
+                    0.84f to Color.Transparent,
+                    0.96f to animatedPrimaryColor.copy(alpha = (0.26f + 0.14f * smoothedEnergy) * orbitIntensity),
+                    0.99f to animatedSecondaryColor.copy(alpha = (0.38f + 0.16f * smoothedEnergy) * orbitIntensity),
                     1.0f to Color.Transparent,
                     center = center,
                     radius = dynamicRadius * 1.035f
@@ -1250,74 +1237,6 @@ fun DavidLiveMeshSphereVisualizer(
                 center = center,
                 blendMode = BlendMode.Plus
             )
-
-            // ЭТАП 8. ПЕРЕДНЯЯ ПОЛУСФЕРА (z >= 0) шелковистых гироскопических 3D-лент (огибают сферу СПЕРЕДИ)
-            drawGyroscopic3DSilkRibbons(
-                center = center,
-                sphereRadius = dynamicRadius,
-                phaseRad = continuousOrbitPhaseRad,
-                energy = smoothedEnergy,
-                primaryColor = animatedPrimaryColor,
-                secondaryColor = animatedSecondaryColor,
-                intensity = orbitIntensity,
-                touchPoint3D = activeTouch3D,
-                touchAttractionStrength = touchAttractionStrength,
-                drawFrontHemisphere = true
-            )
-
-            // ЭТАП 9. Трёхмерные сигнатуры специальных состояний David Live
-            when (visualState) {
-                DavidLiveVisualState.FINANCE_LOOKUP -> {
-                    drawPlanetaryFinanceRing(
-                        center = center,
-                        radius = dynamicRadius,
-                        orbitProgress = orbitProgressNormalized,
-                        accentColor = animatedPrimaryColor,
-                        goldColor = GoldApiGlow
-                    )
-                }
-
-                DavidLiveVisualState.ANALYZING -> {
-                    drawAnalyzingDualOrbits(
-                        center = center,
-                        radius = dynamicRadius,
-                        orbitProgress = orbitProgressNormalized,
-                        cyanColor = animatedPrimaryColor,
-                        emeraldColor = animatedSecondaryColor
-                    )
-                }
-
-                DavidLiveVisualState.DAVID_SPEAKING -> {
-                    drawAcousticSoundwaveArcs(
-                        center = center,
-                        radius = dynamicRadius,
-                        energy = smoothedEnergy,
-                        breathProgress = breathProgress,
-                        color = animatedPrimaryColor
-                    )
-                }
-
-                DavidLiveVisualState.CONNECTING,
-                DavidLiveVisualState.RECONNECTING -> {
-                    drawConnectingHandshakeArcs(
-                        center = center,
-                        radius = dynamicRadius,
-                        orbitProgress = orbitProgressNormalized,
-                        color = animatedPrimaryColor
-                    )
-                }
-
-                DavidLiveVisualState.SUCCESS -> {
-                    drawSuccessExpansionRing(
-                        center = center,
-                        radius = dynamicRadius,
-                        orbitProgress = orbitProgressNormalized,
-                        color = animatedPrimaryColor
-                    )
-                }
-
-                else -> Unit
-            }
         }
 
         // Голографическая 3D-эмблема действия внутри ядра (для Mute, Offline, API Missing, Error, Success),
@@ -1328,7 +1247,7 @@ fun DavidLiveMeshSphereVisualizer(
             Box(
                 modifier = Modifier
                     .offset { IntOffset(parallaxX, parallaxY) }
-                    .size(46.dp)
+                    .size(48.dp)
                     .alpha((0.86f - 0.30f * touchAttractionStrength).coerceIn(0.45f, 0.90f))
                     .clip(CircleShape)
                     .background(
@@ -1346,7 +1265,7 @@ fun DavidLiveMeshSphereVisualizer(
                     imageVector = centerStateEmblemIcon,
                     contentDescription = null,
                     tint = Color.White.copy(alpha = 0.92f),
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }
@@ -1354,7 +1273,7 @@ fun DavidLiveMeshSphereVisualizer(
 }
 
 /**
- * Отрисовка глубокой многослойной внешней короны и 3D-частиц вокруг сферы.
+ * Отрисовка глубокой многослойной внешней короны вокруг увеличенной 3D-сферы (без внешних орбитальных колец и дуг).
  */
 private fun DrawScope.drawVolumetricOuterCoronaAndParticles(
     center: Offset,
@@ -1369,11 +1288,11 @@ private fun DrawScope.drawVolumetricOuterCoronaAndParticles(
     touchPoint3D: SphereTouchPoint3D?,
     touchAttractionStrength: Float
 ) {
-    val outerBloomRadius = sphereRadius * (1.62f + 0.08f * breathProgress + energy * 0.20f)
+    val outerBloomRadius = sphereRadius * (1.18f + 0.04f * breathProgress + energy * 0.08f)
     val bloomShift = if (touchPoint3D != null && touchAttractionStrength > 0.01f) {
         Offset(
-            x = center.x + touchPoint3D.worldX * 0.22f * touchAttractionStrength,
-            y = center.y + touchPoint3D.worldY * 0.22f * touchAttractionStrength
+            x = center.x + touchPoint3D.worldX * 0.16f * touchAttractionStrength,
+            y = center.y + touchPoint3D.worldY * 0.16f * touchAttractionStrength
         )
     } else {
         center
@@ -1382,8 +1301,8 @@ private fun DrawScope.drawVolumetricOuterCoronaAndParticles(
     drawCircle(
         brush = Brush.radialGradient(
             0.0f to haloColor.copy(alpha = (haloColor.alpha * 1.25f).coerceAtMost(0.68f)),
-            0.42f to primaryColor.copy(alpha = (0.22f + 0.14f * energy) * intensity),
-            0.72f to secondaryColor.copy(alpha = 0.08f * intensity),
+            0.68f to primaryColor.copy(alpha = (0.24f + 0.14f * energy) * intensity),
+            0.88f to secondaryColor.copy(alpha = 0.10f * intensity),
             1.0f to Color.Transparent,
             center = bloomShift,
             radius = outerBloomRadius
@@ -1391,36 +1310,6 @@ private fun DrawScope.drawVolumetricOuterCoronaAndParticles(
         radius = outerBloomRadius,
         center = center
     )
-
-    // Фоновые 3D-частицы энергетического поля вокруг сферы
-    val particleCount = 12
-    for (i in 0 until particleCount) {
-        val angle = (i * (2.0 * PI / particleCount)).toFloat() +
-            phaseRad * (if (i % 2 == 0) 0.20f else -0.16f)
-        val elevation = sin(phaseRad * 0.6f + i * 1.1f)
-        val orbitR = sphereRadius * (1.14f + (i % 3) * 0.09f + 0.04f * elevation)
-        val px = center.x + orbitR * cos(angle)
-        val py = center.y + orbitR * 0.78f * sin(angle)
-        val twinkle = ((sin(phaseRad * 1.5f + i * 1.9f) + 1f) * 0.5f)
-        val alpha = (0.12f + 0.34f * twinkle) * intensity
-        val pColor = if (i % 2 == 0) secondaryColor else primaryColor
-        val rPx = (1.4.dp.toPx() + 1.4.dp.toPx() * twinkle)
-
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    Color.White.copy(alpha = (alpha * 0.9f).coerceIn(0f, 0.75f)),
-                    pColor.copy(alpha = (alpha * 0.55f).coerceIn(0f, 0.55f)),
-                    Color.Transparent
-                ),
-                center = Offset(px, py),
-                radius = rPx * 2.4f
-            ),
-            radius = rPx * 2.4f,
-            center = Offset(px, py),
-            blendMode = BlendMode.Plus
-        )
-    }
 }
 
 /**

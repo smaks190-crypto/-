@@ -1255,7 +1255,7 @@ fun DavidLiveSheet(
                                     activeSpeaker = activeSpeaker,
                                     isMicMuted = isMicMuted,
                                     onToggleMicMute = onToggleMicMute,
-                                    visualizerSize = if (isEmbeddedInModalCard) 236.dp else 268.dp,
+                                    visualizerSize = if (isEmbeddedInModalCard) 268.dp else 308.dp,
                                     visualState = effectiveVisualState,
                                     failureKind = effectiveFailureKind,
                                     activeToolName = activeToolName,
