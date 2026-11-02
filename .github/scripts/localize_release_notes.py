@@ -33,7 +33,7 @@ PREFIX_RE = re.compile(
     re.I,
 )
 NOTE_HEADING_RE = re.compile(
-    r"^#{1,6}\s*(заметки релиза|release notes(?:\s*\(ru\))?|что изменилось для пользователей?)\s*:?\s*$",
+    r"^#{1,6}\s*(заметки релиза|release notes(?:\s*\(ru\))?|что изменено|что изменилось для пользователей?)\s*:?\s*$",
     re.I,
 )
 HEADING_RE = re.compile(r"^#{1,6}\s")

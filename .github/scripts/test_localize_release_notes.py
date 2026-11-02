@@ -61,6 +61,28 @@ class ReleaseNotesTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Не удалось сформировать заметку"):
             build(text, {"15": body})
 
+    def test_legacy_what_changed_heading_from_merged_pr_is_used(self):
+        text = original(
+            "* fix(release): generate trustworthy Russian release notes by @dev "
+            "in https://github.com/owner/repo/pull/92"
+        )
+        body = """## Что изменено
+- Убраны фиктивные счётчики технических изменений из публичных заметок.
+- Если пользовательское изменение нельзя описать по-русски из PR notes / Release-Note, генератор завершает работу с понятной ошибкой.
+- Внутренние изменения без пользовательского эффекта не попадают в changelog; явное `нет` означает отсутствие пользовательской заметки.
+- Заметки генерируются и проверяются до создания GitHub Release. APK/AAB публикуются только после успешной проверки.
+- Добавлен запуск unit-тестов генератора заметок в GitHub Actions.
+
+## Проверка
+GitHub Actions должен выполнить unit-тесты и Android PR build.
+"""
+        result = build(text, {"92": body})
+        self.assertIn("### Исправлено", result)
+        self.assertIn("Убраны фиктивные счётчики технических изменений", result)
+        self.assertIn("Заметки генерируются и проверяются до создания GitHub Release", result)
+        self.assertNotIn("GitHub Actions должен выполнить", result)
+        self.assertNotIn("Не удалось сформировать заметку", result)
+
     def test_category_prefix_in_note(self):
         text = original("* feat: english by @dev in https://github.com/owner/repo/pull/16")
         result = build(text, {"16": "## Заметки релиза\n- Исправлено: Давид больше не зависает"})
