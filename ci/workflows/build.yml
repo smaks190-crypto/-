@@ -127,3 +127,35 @@ jobs:
       - name: "Stage D: Run Unit Tests"
         if: (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')) && needs.stage-a-fast-checks.outputs.needs_unit_tests == 'true'
         run: gradle :app:testDebugUnitTest --build-cache --stacktrace
+
+      - name: "Generate CI Error Report"
+        if: always()
+        continue-on-error: true
+        run: |
+          STATUS="${{ job.status }}"
+          if [[ -f build/ci-diagnostics/raw-gradle-diagnostics.json ]]; then
+            python3 ci/scripts/generate_ci_error_report.py \
+              --repo-root . \
+              --input build/ci-diagnostics/raw-gradle-diagnostics.json \
+              --output-md ci-error-report.md \
+              --output-json ci-error-report.json \
+              --status "$STATUS"
+          else
+            python3 ci/scripts/generate_ci_error_report.py \
+              --repo-root . \
+              --output-md ci-error-report.md \
+              --output-json ci-error-report.json \
+              --status "$STATUS"
+          fi
+
+      - name: "Upload CI Error Report Artifact"
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-error-report
+          path: |
+            ci-error-report.md
+            ci-error-report.json
+          retention-days: 14
+          if-no-files-found: warn

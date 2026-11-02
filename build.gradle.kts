@@ -8,9 +8,188 @@ plugins {
   alias(libs.plugins.secrets) apply false
 }
 
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Properties
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
+import org.gradle.api.provider.Property
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
+import org.gradle.build.event.BuildEventsListenerRegistry
+import org.gradle.tooling.Failure
+import org.gradle.tooling.events.FinishEvent
+import org.gradle.tooling.events.OperationCompletionListener
+import org.gradle.tooling.events.task.TaskFailureResult
+import org.gradle.tooling.events.task.TaskFinishEvent
+
+// ============================================================================
+// CI Error Report Diagnostics Collector (Stage A/B/C/D + Auto-Report Hook)
+// ============================================================================
+object CiDiagnosticsStore {
+  val taskLogs = ConcurrentHashMap<String, MutableList<String>>()
+  val taskOutcomes = ConcurrentHashMap<String, String>()
+  val taskFailures = ConcurrentHashMap<String, MutableList<String>>()
+  val reportGenerated = AtomicBoolean(false)
+
+  fun appendLog(taskPath: String, chunk: CharSequence) {
+    val lines = chunk.toString().lines()
+    val list = taskLogs.computeIfAbsent(taskPath) { CopyOnWriteArrayList() }
+    for (line in lines) {
+      val trimmed = line.trimEnd()
+      if (trimmed.isNotEmpty() && list.size < 500) {
+        list.add(trimmed)
+      }
+    }
+  }
+
+  private fun jsonEscape(raw: String): String = buildString(raw.length + 16) {
+    for (ch in raw) {
+      when (ch) {
+        '\\' -> append("\\\\")
+        '"' -> append("\\\"")
+        '\n' -> append("\\n")
+        '\r' -> append("\\r")
+        '\t' -> append("\\t")
+        else -> if (ch.code < 0x20) append("\\u%04x".format(ch.code)) else append(ch)
+      }
+    }
+  }
+
+  @Synchronized
+  fun flushAndGenerateReport(projectRoot: File, forceOverwrite: Boolean = false) {
+    if (!forceOverwrite && !reportGenerated.compareAndSet(false, true)) return
+    reportGenerated.set(true)
+    try {
+      val hasFailedTask = taskOutcomes.values.any { it == "FAILED" }
+      val buildStatus = if (hasFailedTask) "failure" else "success"
+      val allPaths = (taskOutcomes.keys + taskLogs.keys + taskFailures.keys).toSortedSet()
+
+      val diagDir = File(projectRoot, "build/ci-diagnostics")
+      diagDir.mkdirs()
+      val rawFile = File(diagDir, "raw-gradle-diagnostics.json")
+
+      val jsonText = buildString {
+        appendLine("{")
+        appendLine("  \"status\": \"${jsonEscape(buildStatus)}\",")
+        appendLine("  \"tasks\": [")
+        allPaths.forEachIndexed { idx, path ->
+          val outcome = taskOutcomes[path] ?: "UNKNOWN"
+          val logs = taskLogs[path] ?: emptyList<String>()
+          val fails = taskFailures[path] ?: emptyList<String>()
+          appendLine("    {")
+          appendLine("      \"path\": \"${jsonEscape(path)}\",")
+          appendLine("      \"outcome\": \"${jsonEscape(outcome)}\",")
+          append("      \"failureMessages\": [")
+          fails.forEachIndexed { fIdx, msg ->
+            if (fIdx > 0) append(", ")
+            append("\"${jsonEscape(msg)}\"")
+          }
+          appendLine("],")
+          append("      \"logLines\": [")
+          logs.forEachIndexed { lIdx, ln ->
+            if (lIdx > 0) append(", ")
+            append("\"${jsonEscape(ln)}\"")
+          }
+          appendLine("]")
+          append("    }")
+          if (idx < allPaths.size - 1) appendLine(",") else appendLine()
+        }
+        appendLine("  ]")
+        appendLine("}")
+      }
+      rawFile.writeText(jsonText, Charsets.UTF_8)
+
+      val genScript = File(projectRoot, "ci/scripts/generate_ci_error_report.py")
+      if (genScript.isFile) {
+        val mdOut = File(projectRoot, "ci-error-report.md")
+        val jsonOut = File(projectRoot, "ci-error-report.json")
+        ProcessBuilder(
+          "python3",
+          genScript.absolutePath,
+          "--repo-root", projectRoot.absolutePath,
+          "--input", rawFile.absolutePath,
+          "--output-md", mdOut.absolutePath,
+          "--output-json", jsonOut.absolutePath,
+          "--status", buildStatus,
+          "--no-step-summary"
+        )
+          .directory(projectRoot)
+          .redirectErrorStream(true)
+          .start()
+          .waitFor()
+      }
+    } catch (e: Exception) {
+      System.err.println("::warning::CiDiagnosticsStore flush warning: ${e.message}")
+    }
+  }
+}
+
+abstract class CiDiagnosticsService :
+  BuildService<CiDiagnosticsService.Params>,
+  OperationCompletionListener,
+  AutoCloseable {
+
+  interface Params : BuildServiceParameters {
+    val rootDirPath: Property<String>
+  }
+
+  private fun collectFailureMessages(failures: List<Failure>?, out: MutableList<String>) {
+    if (failures == null) return
+    for (f in failures) {
+      f.message?.trim()?.takeIf { it.isNotEmpty() }?.let { if (!out.contains(it)) out.add(it) }
+      f.description?.trim()?.takeIf { it.isNotEmpty() }?.let { if (!out.contains(it)) out.add(it) }
+      collectFailureMessages(f.causes, out)
+    }
+  }
+
+  override fun onFinish(event: FinishEvent?) {
+    if (event is TaskFinishEvent) {
+      val path = event.descriptor.taskPath
+      val result = event.result
+      if (result is TaskFailureResult) {
+        CiDiagnosticsStore.taskOutcomes[path] = "FAILED"
+        val msgs = CiDiagnosticsStore.taskFailures.computeIfAbsent(path) { CopyOnWriteArrayList() }
+        collectFailureMessages(result.failures, msgs)
+        CiDiagnosticsStore.flushAndGenerateReport(File(parameters.rootDirPath.get()), forceOverwrite = true)
+      } else {
+        CiDiagnosticsStore.taskOutcomes.putIfAbsent(path, "SUCCESS")
+      }
+    }
+  }
+
+  override fun close() {
+    CiDiagnosticsStore.flushAndGenerateReport(File(parameters.rootDirPath.get()), forceOverwrite = true)
+  }
+}
+
+val ciDiagServiceProvider = gradle.sharedServices.registerIfAbsent(
+  "ciDiagnosticsService",
+  CiDiagnosticsService::class.java
+) {
+  parameters.rootDirPath.set(rootDir.absolutePath)
+}
+
+@Suppress("UnstableApiUsage")
+gradle.services.get(BuildEventsListenerRegistry::class.java).onTaskCompletion(ciDiagServiceProvider)
+
+Runtime.getRuntime().addShutdownHook(
+  Thread {
+    CiDiagnosticsStore.flushAndGenerateReport(rootDir)
+  }
+)
+
+allprojects {
+  tasks.configureEach {
+    val tPath = path
+    logging.addStandardOutputListener { text ->
+      CiDiagnosticsStore.appendLog(tPath, text)
+    }
+    logging.addStandardErrorListener { text ->
+      CiDiagnosticsStore.appendLog(tPath, text)
+    }
+  }
+}
 
 // ============================================================================
 // ЭТАП A: Быстрые проверки конфигурации и определение затронутых файлов (CI)
@@ -18,7 +197,7 @@ import java.util.Properties
 fun detectCiChangedFiles(rootDir: File): List<String> {
   if (System.getenv("GITHUB_ACTIONS") != "true") return emptyList()
   fun runGitDiff(vararg args: String): List<String> {
-    val proc = ProcessBuilder( listOf("git", "diff", "--name-only") + args.toList() )
+    val proc = ProcessBuilder(listOf("git", "diff", "--name-only") + args.toList())
       .directory(rootDir)
       .redirectErrorStream(true)
       .start()
@@ -30,10 +209,9 @@ fun detectCiChangedFiles(rootDir: File): List<String> {
       .filter { it.isNotEmpty() && !it.startsWith("fatal:") && !it.startsWith("warning:") }
       .toList()
   }
+
   return try {
-    val eventName = System.getenv("GITHUB_EVENT_NAME") ?: ""
     val baseRef = (System.getenv("GITHUB_BASE_REF") ?: "main").ifBlank { "main" }
-    // On pull_request, actions/checkout creates a merge commit where HEAD^1 is the base branch commit
     val fromMergeParent = runGitDiff("HEAD^1", "HEAD")
     if (fromMergeParent.isNotEmpty()) {
       fromMergeParent
@@ -87,6 +265,7 @@ fun classifyCiChangeScope(changedFiles: List<String>): String {
 val ciChangedFiles = detectCiChangedFiles(rootDir)
 val ciChangeScope = classifyCiChangeScope(ciChangedFiles)
 val ciHasAndroidTestChanges = ciChangedFiles.any { it.startsWith("app/src/androidTest/") }
+
 extra["ciChangedFiles"] = ciChangedFiles
 extra["ciChangeScope"] = ciChangeScope
 extra["ciHasAndroidTestChanges"] = ciHasAndroidTestChanges
@@ -96,6 +275,15 @@ tasks.register("ciStageAFastChecks") {
   description = "Stage A: Fast configuration validation, script unit tests, and change scope analysis."
   doLast {
     println("=== [Stage A: Fast Checks] Validating project configuration & scripts ===")
+    val hookInstaller = file("${rootDir}/ci/scripts/install_ci_post_hook.py")
+    if (hookInstaller.isFile && System.getenv("GITHUB_ACTIONS") == "true") {
+      ProcessBuilder("python3", hookInstaller.absolutePath)
+        .directory(rootDir)
+        .redirectErrorStream(true)
+        .start()
+        .waitFor()
+    }
+
     val versionFile = file("${rootDir}/version.properties")
     check(versionFile.isFile && versionFile.length() > 0L) {
       "Missing or empty version.properties"
@@ -138,6 +326,19 @@ tasks.register("ciStageAFastChecks") {
       }
     }
 
+    val ciReportTestScript = file("${rootDir}/ci/scripts/test_generate_ci_error_report.py")
+    if (ciReportTestScript.isFile) {
+      val proc = ProcessBuilder("python3", ciReportTestScript.absolutePath)
+        .directory(rootDir)
+        .redirectErrorStream(true)
+        .start()
+      val out = proc.inputStream.bufferedReader().readText()
+      val exit = proc.waitFor()
+      if (exit != 0) {
+        throw GradleException("CI Error Report generator unit tests failed:\n$out")
+      }
+    }
+
     println("=== [Stage A: Change Detection] Scope=$ciChangeScope, ChangedFiles=${ciChangedFiles.size} ===")
     ciChangedFiles.forEach { println("  - $it") }
 
@@ -151,11 +352,12 @@ tasks.register("ciStageAFastChecks") {
           appendLine("|---|---|")
           appendLine("| **Detected Change Scope** | `$ciChangeScope` |")
           appendLine("| **Changed Files Count** | `${ciChangedFiles.size}` |")
-          appendLine("| **Stage A (Fast Checks)** | `PASSED` (`version.properties`, `libs.versions.toml`, `.kts`, Python tests) |")
+          appendLine("| **Stage A (Fast Checks)** | `PASSED` (`version.properties`, `libs.versions.toml`, `.kts`, Python & CI Report tests) |")
           appendLine("| **Stage B (Early Kotlin Compile)** | `:core:database:compileDebugKotlin`, `:app:compileDebugKotlin`, `:app:compileDebugUnitTestKotlin`" +
             (if (ciHasAndroidTestChanges) ", `:app:compileDebugAndroidTestKotlin`" else "") + " |")
           appendLine("| **Stage C (APK Packaging)** | `:app:assembleDebug` (skipping unused `:core:database:bundleDebugAar`) |")
           appendLine("| **Stage D (Unit Testing)** | `${if (ciChangeScope == "docs_only" || ciChangeScope == "android_test_only") "SKIPPED (not affected)" else ":app:testDebugUnitTest (parallel forks)"}` |")
+          appendLine("| **CI Error Report Artifact** | `ci-error-report` (`ci-error-report.md` + `ci-error-report.json`) |")
           if (ciChangedFiles.isNotEmpty()) {
             appendLine()
             appendLine("<details><summary>Изменённые файлы (${ciChangedFiles.size})</summary>")
