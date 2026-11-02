@@ -3,7 +3,6 @@ package com.example.data.safetospend
 import com.example.data.db.AccountEntity
 import com.example.data.db.BudgetProfileEntity
 import com.example.data.db.CategoryEntity
-import com.example.data.db.CategoryRuleEntity
 import com.example.data.db.GoalEntity
 import com.example.data.db.RecurringExecutionLogEntity
 import com.example.data.db.RecurringPaymentEntity
@@ -16,14 +15,18 @@ data class RealisticTestBudgetDataset(
     val profile: BudgetProfileEntity,
     val referenceTodayEpochDay: Long,
     val referenceTodayIso: String,
+    val mandatorySafetyFloorRub: Double = 15_000.0,
+    val essentialDailyNormRub: Double = 1_200.0,
     val accounts: List<AccountEntity>,
     val categories: List<CategoryEntity>,
     val goals: List<GoalEntity>,
     val recurringPayments: List<RecurringPaymentEntity>,
-    val recurringExecutionLogs: List<RecurringExecutionLogEntity>,
-    val transactions: List<TransactionEntity>,
-    val rules: List<CategoryRuleEntity>
-)
+    val executionLogs: List<RecurringExecutionLogEntity>,
+    val transactions: List<TransactionEntity>
+) {
+    val recurringExecutionLogs: List<RecurringExecutionLogEntity>
+        get() = executionLogs
+}
 
 /**
  * Generates an isolated, realistic, deterministic personal finance dataset covering
@@ -35,7 +38,8 @@ data class RealisticTestBudgetDataset(
 object RealisticTestBudget2026Seeder {
 
     const val TEST_BUDGET_ID = "demo_2026_test"
-    const val TEST_BUDGET_NAME = "Тест 2026 (01.01–02.11)"
+    const val TEST_PROFILE_NAME = "Тест 2026 (01.01–02.11)"
+    const val TEST_BUDGET_NAME = TEST_PROFILE_NAME
     val REFERENCE_TODAY_DATE: LocalDate = LocalDate.of(2026, 11, 2)
     val REFERENCE_TODAY_EPOCH_DAY: Long = REFERENCE_TODAY_DATE.toEpochDay()
     const val REFERENCE_TODAY_ISO: String = "2026-11-02"
@@ -43,18 +47,15 @@ object RealisticTestBudget2026Seeder {
     fun buildDataset(budgetId: String = TEST_BUDGET_ID): RealisticTestBudgetDataset {
         val profile = BudgetProfileEntity(
             id = budgetId,
-            name = if (budgetId == TEST_BUDGET_ID) TEST_BUDGET_NAME else "Демо-бюджет 2026",
-            iconName = "AccountBalanceWallet",
-            isDefault = budgetId == "default"
+            name = if (budgetId == TEST_BUDGET_ID) TEST_PROFILE_NAME else "Демо-бюджет 2026"
         )
 
         val accounts = buildAccounts(budgetId)
         val categories = buildCategories(budgetId)
         val goals = buildGoals(budgetId)
         val recurringPayments = buildRecurringPayments(budgetId)
-        val recurringExecutionLogs = buildRecurringExecutionLogs(budgetId)
+        val executionLogs = buildRecurringExecutionLogs(budgetId)
         val transactions = buildTransactions(budgetId)
-        val rules = buildRules()
 
         return RealisticTestBudgetDataset(
             profile = profile,
@@ -64,9 +65,8 @@ object RealisticTestBudget2026Seeder {
             categories = categories,
             goals = goals,
             recurringPayments = recurringPayments,
-            recurringExecutionLogs = recurringExecutionLogs,
-            transactions = transactions,
-            rules = rules
+            executionLogs = executionLogs,
+            transactions = transactions
         )
     }
 
@@ -87,103 +87,59 @@ object RealisticTestBudget2026Seeder {
                 budgetId = budgetId,
                 name = "Основная карта Т-Банк",
                 balance = 68450.0,
-                iconName = "CreditCard",
-                colorHex = "#10B981",
-                isDefault = true,
                 type = "card",
-                currency = "RUB"
+                accountNumber = "•• 4821"
             ),
             AccountEntity(
                 id = "${p}acc_reserve_savings",
                 budgetId = budgetId,
                 name = "Накопительный счёт Сбер",
                 balance = 42300.0,
-                iconName = "Savings",
-                colorHex = "#3B82F6",
-                isDefault = false,
                 type = "savings",
-                currency = "RUB"
+                accountNumber = "•• 9104"
             ),
             AccountEntity(
                 id = "${p}acc_cash_wallet",
                 budgetId = budgetId,
                 name = "Наличные в кошельке",
                 balance = 4250.0,
-                iconName = "AccountBalanceWallet",
-                colorHex = "#F59E0B",
-                isDefault = false,
                 type = "cash",
-                currency = "RUB"
+                accountNumber = ""
             ),
             // Debts — «Я должен» (we_owe): remaining 35,000 + 14,000 = 49,000 ₽
+            // FinancialSemanticsCalculator computes remaining = balance - repaid(txs linked by accountId)
             AccountEntity(
                 id = "${p}debt_we_owe_installment",
                 budgetId = budgetId,
                 name = "Рассрочка за ноутбук",
-                balance = 35000.0,
-                iconName = "Laptop",
-                colorHex = "#EF4444",
-                isDefault = false,
-                type = "debt",
-                debtType = "we_owe",
-                initialAmount = 60000.0,
-                dueDate = isoToEpochMillis("2026-11-20", 10, 0),
-                creditorOrDebtor = "М.Видео Рассрочка",
-                note = "Ежемесячный платёж, 2 взноса по 12 500 ₽ уже погашены",
-                isClosed = false,
-                currency = "RUB"
+                balance = 60000.0, // 2 repayments of 12,500 ₽ -> remaining 35,000 ₽
+                type = "we_owe",
+                accountNumber = "2026-11-20"
             ),
             AccountEntity(
                 id = "${p}debt_we_owe_brother",
                 budgetId = budgetId,
-                name = "Долг брату Андрею (на ремонт)",
-                balance = 14000.0,
-                iconName = "Person",
-                colorHex = "#F97316",
-                isDefault = false,
-                type = "debt",
-                debtType = "we_owe",
-                initialAmount = 20000.0,
-                dueDate = isoToEpochMillis("2026-11-08", 10, 0),
-                creditorOrDebtor = "Андрей",
-                note = "6 000 ₽ возвращено 08.10.2026, остаток 14 000 ₽ к 08.11.2026",
-                isClosed = false,
-                currency = "RUB"
+                name = "Долг брату Андрею",
+                balance = 20000.0, // 1 repayment of 6,000 ₽ -> remaining 14,000 ₽ due 2026-11-08
+                type = "we_owe",
+                accountNumber = "2026-11-08"
             ),
             // Debts — «Мне должны» (owes_us): remaining 13,000 + 7,000 = 20,000 ₽
             AccountEntity(
                 id = "${p}debt_owes_us_alexey",
                 budgetId = budgetId,
                 name = "Алексей (коллега)",
-                balance = 13000.0,
-                iconName = "PersonOutline",
-                colorHex = "#06B6D4",
-                isDefault = false,
-                type = "debt",
-                debtType = "owes_us",
-                initialAmount = 18000.0,
-                dueDate = isoToEpochMillis("2026-11-15", 10, 0),
-                creditorOrDebtor = "Алексей",
-                note = "5 000 ₽ вернул 15.10.2026, остаток 13 000 ₽",
-                isClosed = false,
-                currency = "RUB"
+                balance = 18000.0, // 1 return of 5,000 ₽ -> remaining 13,000 ₽
+                type = "owes_us",
+                accountNumber = "2026-11-15"
             ),
             AccountEntity(
                 id = "${p}debt_owes_us_dmitry",
                 budgetId = budgetId,
                 name = "Дмитрий (сосед)",
-                balance = 7000.0,
-                iconName = "PersonOutline",
-                colorHex = "#8B5CF6",
-                isDefault = false,
-                type = "debt",
-                debtType = "owes_us",
-                initialAmount = 9500.0,
-                dueDate = isoToEpochMillis("2026-11-28", 10, 0),
-                creditorOrDebtor = "Дмитрий",
-                note = "2 500 ₽ вернул 28.09.2026, остаток 7 000 ₽",
-                isClosed = false,
-                currency = "RUB"
+                balance = 9500.0, // 1 return of 2,500 ₽ -> remaining 7,000 ₽
+                type = "owes_us",
+                accountNumber = "2026-11-28"
             )
         )
     }
@@ -195,24 +151,18 @@ object RealisticTestBudget2026Seeder {
                 budgetId = budgetId,
                 name = "Зарплата",
                 type = "income",
-                iconName = "Payments",
-                subcategoriesJson = """["Основная работа","Аванс"]""",
                 monthlyLimit = 0.0
             ),
             CategoryEntity(
                 budgetId = budgetId,
                 name = "Подработка",
                 type = "income",
-                iconName = "Work",
-                subcategoriesJson = """["Аудит отчётности","Консалтинг"]""",
                 monthlyLimit = 0.0
             ),
             CategoryEntity(
                 budgetId = budgetId,
                 name = "Возврат долга",
                 type = "income",
-                iconName = "Handshake",
-                subcategoriesJson = """["Алексей (коллега)","Дмитрий (сосед)"]""",
                 monthlyLimit = 0.0
             ),
             // Expense categories with limits (some with remaining buffer, some exceeded)
@@ -220,80 +170,60 @@ object RealisticTestBudget2026Seeder {
                 budgetId = budgetId,
                 name = "Продукты",
                 type = "expense",
-                iconName = "ShoppingCart",
-                subcategoriesJson = """["Супермаркет","Гипермаркет","Пекарня и молоко"]""",
                 monthlyLimit = 28000.0 // 30d spent: 19,840 ₽ (remaining: +8,160 ₽, 71%)
             ),
             CategoryEntity(
                 budgetId = budgetId,
                 name = "ЖКХ и Аренда",
                 type = "expense",
-                iconName = "Home",
-                subcategoriesJson = """["Аренда квартиры","Квитанция ЖКХ"]""",
                 monthlyLimit = 46000.0 // 30d spent: 44,380 ₽ (remaining: +1,620 ₽, 96%)
             ),
             CategoryEntity(
                 budgetId = budgetId,
                 name = "Транспорт",
                 type = "expense",
-                iconName = "DirectionsTransit",
-                subcategoriesJson = """["Метро и Тройка","Такси","Каршеринг"]""",
                 monthlyLimit = 6000.0 // 30d spent: 3,920 ₽ (remaining: +2,080 ₽, 65%)
             ),
             CategoryEntity(
                 budgetId = budgetId,
                 name = "Здоровье и Аптека",
                 type = "expense",
-                iconName = "LocalPharmacy",
-                subcategoriesJson = """["Лекарства","Стоматология","Витамины"]""",
                 monthlyLimit = 5000.0 // 30d spent: 2,860 ₽ (remaining: +2,140 ₽, 57%)
             ),
             CategoryEntity(
                 budgetId = budgetId,
                 name = "Связь и Интернет",
                 type = "expense",
-                iconName = "Wifi",
-                subcategoriesJson = """["Тариф Семейный","Мобильная связь"]""",
                 monthlyLimit = 2500.0 // 30d spent: 1,390 ₽ (remaining: +1,110 ₽, 56%)
             ),
             CategoryEntity(
                 budgetId = budgetId,
                 name = "Подписки и Сервисы",
                 type = "expense",
-                iconName = "Subscriptions",
-                subcategoriesJson = """["Яндекс Плюс и Облако"]""",
                 monthlyLimit = 1500.0 // 30d spent: 698 ₽ (remaining: +802 ₽, 47%)
             ),
             CategoryEntity(
                 budgetId = budgetId,
                 name = "Кафе и Доставка",
                 type = "expense",
-                iconName = "Restaurant",
-                subcategoriesJson = """["Кофейня","Доставка еды","Рестораны"]""",
                 monthlyLimit = 8000.0 // 30d spent: 9,850 ₽ (EXCEEDED by 1,850 ₽, 123%)
             ),
             CategoryEntity(
                 budgetId = budgetId,
                 name = "Развлечения и Хобби",
                 type = "expense",
-                iconName = "TheaterComedy",
-                subcategoriesJson = """["Театр и Концерты","Кино и Выставки"]""",
                 monthlyLimit = 7000.0 // 30d spent: 8,400 ₽ (EXCEEDED by 1,400 ₽, 120%)
             ),
             CategoryEntity(
                 budgetId = budgetId,
                 name = "Одежда и Обувь",
                 type = "expense",
-                iconName = "Checkroom",
-                subcategoriesJson = """["Повседневная одежда","Обувь"]""",
                 monthlyLimit = 10000.0 // 30d spent: 6,490 ₽ (remaining: +3,510 ₽, 65%)
             ),
             CategoryEntity(
                 budgetId = budgetId,
                 name = "Погашение долга",
                 type = "expense",
-                iconName = "CreditScore",
-                subcategoriesJson = """["Рассрочка","Личный долг"]""",
                 monthlyLimit = 0.0
             )
         )
@@ -307,20 +237,14 @@ object RealisticTestBudget2026Seeder {
                 budgetId = budgetId,
                 name = "Финансовая подушка",
                 targetAmount = 300000.0,
-                currentAmount = 165000.0,
-                deadline = "2027-06-01",
-                iconName = "Shield",
-                colorHex = "#10B981"
+                currentAmount = 165000.0
             ),
             GoalEntity(
                 id = "${p}goal_altai_vacation",
                 budgetId = budgetId,
                 name = "Отпуск на Алтае",
                 targetAmount = 180000.0,
-                currentAmount = 72000.0,
-                deadline = "2027-07-15",
-                iconName = "FlightTakeoff",
-                colorHex = "#3B82F6"
+                currentAmount = 72000.0
             )
         )
     }
@@ -468,6 +392,26 @@ object RealisticTestBudget2026Seeder {
                 reminderDaysBefore = 1,
                 status = RecurringStatus.ACTIVE.name,
                 createdAtMillis = createdAt
+            ),
+            // 8. Paused rule (verifies pausedOrArchivedRulesCount == 1)
+            RecurringPaymentEntity(
+                id = 205L,
+                budgetId = budgetId,
+                title = "Абонемент в бассейн (на паузе)",
+                amount = 3200.0,
+                amountType = PaymentAmountType.FIXED.name,
+                isIncome = false,
+                incomeCertainty = IncomeCertainty.GUARANTEED.name,
+                categoryName = "Развлечения и Хобби",
+                subcategoryName = "Спорт",
+                frequency = PaymentFrequency.MONTHLY.name,
+                anchorDayOfMonth = 15,
+                nextDueDateEpochDay = LocalDate.of(2026, 11, 15).toEpochDay(),
+                priority = ObligationPriority.DISCRETIONARY_SUBSCRIPTION.name,
+                autoConfirm = false,
+                reminderDaysBefore = 2,
+                status = RecurringStatus.PAUSED.name,
+                createdAtMillis = createdAt
             )
         )
     }
@@ -571,10 +515,13 @@ object RealisticTestBudget2026Seeder {
 
     private fun buildTransactions(budgetId: String): List<TransactionEntity> {
         val p = "${budgetId}_"
-        val mainCard = "${p}acc_main_card"
-        val cashAcc = "${p}acc_cash_wallet"
         val list = mutableListOf<TransactionEntity>()
 
+        /**
+         * Note: In FinancialSemanticsCalculator, `isDebtTransaction(tx)` returns true whenever
+         * `!tx.accountId.isNullOrBlank()`. Thus, regular transactions MUST have `accountId = null`,
+         * and only debt repayment/return transactions set `accountId = debtAccountId`.
+         */
         fun addTx(
             idSuffix: String,
             type: String,
@@ -582,22 +529,21 @@ object RealisticTestBudget2026Seeder {
             category: String,
             subcategory: String,
             amount: Double,
-            accountId: String? = mainCard,
-            note: String = "",
+            accountId: String? = null,
+            @Suppress("UNUSED_PARAMETER") note: String = "",
             hour: Int = 13
         ) {
             list.add(
                 TransactionEntity(
                     id = "${p}$idSuffix",
                     budgetId = budgetId,
+                    accountId = accountId,
                     type = type,
                     date = date,
                     category = category,
                     subcategory = subcategory,
                     amount = amount,
-                    note = note,
-                    createdAt = isoToEpochMillis(date, hour, 15),
-                    accountId = accountId
+                    createdAt = isoToEpochMillis(date, hour, 15)
                 )
             )
         }
@@ -806,7 +752,7 @@ object RealisticTestBudget2026Seeder {
         addTx("tx_2026_10_18_groc5", "expense", "2026-10-18", "Продукты", "Гипермаркет", 4850.0, note = "Гипермаркет Окей (мясо, рыба, бакалея)")
         addTx("tx_2026_10_26_groc6", "expense", "2026-10-26", "Продукты", "Супермаркет", 1620.0, note = "ВкусВилл (фермерские продукты)")
         addTx("tx_2026_11_01_groc7", "expense", "2026-11-01", "Продукты", "Супермаркет", 1250.0, note = "Перекрёсток (продукты на выходные)", hour = 14)
-        addTx("tx_2026_11_02_groc8", "expense", "2026-11-02", "Продукты", "Пекарня и молоко", 480.0, accountId = cashAcc, note = "Пекарня и фермерское молоко у дома", hour = 9)
+        addTx("tx_2026_11_02_groc8", "expense", "2026-11-02", "Продукты", "Пекарня и молоко", 480.0, note = "Пекарня и фермерское молоко у дома", hour = 9)
 
         // 4. Транспорт in 30d window (3,920 ₽ / limit 6,000 ₽):
         addTx("tx_2026_10_06_tr1", "expense", "2026-10-06", "Транспорт", "Метро и Тройка", 1500.0, note = "Пополнение карты Тройка")
@@ -831,7 +777,7 @@ object RealisticTestBudget2026Seeder {
         addTx("tx_2026_10_21_cafe3", "expense", "2026-10-21", "Кафе и Доставка", "Доставка еды", 2350.0, note = "Пиццерия Папа Джонс")
         addTx("tx_2026_10_27_cafe4", "expense", "2026-10-27", "Кафе и Доставка", "Рестораны", 1900.0, note = "Бизнес-ланч и десерт")
         addTx("tx_2026_11_01_cafe5", "expense", "2026-11-01", "Кафе и Доставка", "Рестораны", 600.0, note = "Воскресный бранч в кафе", hour = 16)
-        addTx("tx_2026_11_02_cafe6", "expense", "2026-11-02", "Кафе и Доставка", "Кофейня", 350.0, accountId = cashAcc, note = "Утренний капучино по дороге в офис", hour = 12)
+        addTx("tx_2026_11_02_cafe6", "expense", "2026-11-02", "Кафе и Доставка", "Кофейня", 350.0, note = "Утренний капучино по дороге в офис", hour = 12)
 
         // 9. Развлечения и Хобби in 30d window (8,400 ₽ / limit 7,000 ₽ — EXCEEDED by 1,400 ₽ [120%]!):
         addTx("tx_2026_10_17_ent1", "expense", "2026-10-17", "Развлечения и Хобби", "Театр и Концерты", 5400.0, note = "Билеты в театр на двоих")
@@ -863,21 +809,5 @@ object RealisticTestBudget2026Seeder {
         )
 
         return list
-    }
-
-    private fun buildRules(): List<CategoryRuleEntity> {
-        return listOf(
-            CategoryRuleEntity(keyword = "пятерочка", category = "Продукты", subcategory = "Супермаркет"),
-            CategoryRuleEntity(keyword = "перекресток", category = "Продукты", subcategory = "Супермаркет"),
-            CategoryRuleEntity(keyword = "лента", category = "Продукты", subcategory = "Гипермаркет"),
-            CategoryRuleEntity(keyword = "вкусвилл", category = "Продукты", subcategory = "Супермаркет"),
-            CategoryRuleEntity(keyword = "метро", category = "Транспорт", subcategory = "Метро и Тройка"),
-            CategoryRuleEntity(keyword = "тройка", category = "Транспорт", subcategory = "Метро и Тройка"),
-            CategoryRuleEntity(keyword = "такси", category = "Транспорт", subcategory = "Такси"),
-            CategoryRuleEntity(keyword = "аптека", category = "Здоровье и Аптека", subcategory = "Лекарства"),
-            CategoryRuleEntity(keyword = "кофе", category = "Кафе и Доставка", subcategory = "Кофейня"),
-            CategoryRuleEntity(keyword = "аренда", category = "ЖКХ и Аренда", subcategory = "Аренда квартиры"),
-            CategoryRuleEntity(keyword = "жкх", category = "ЖКХ и Аренда", subcategory = "Квитанция ЖКХ")
-        )
     }
 }
