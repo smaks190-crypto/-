@@ -72,7 +72,10 @@ internal fun DavidLiveStreamingText(
 
     // The effect is keyed by the incoming transcript: a newer partial instantly cancels any
     // in-flight animation for stale text and resumes at the last fully revealed boundary.
-    LaunchedEffect(activeStreamKey, text, isStreaming) {
+    LaunchedEffect(activeStreamKey, streamKey, text, isStreaming) {
+        // Do not replace the outgoing phrase until its cross-fade has finished.
+        if (activeStreamKey != streamKey) return@LaunchedEffect
+
         renderedText = text
 
         if (!isStreaming) {
