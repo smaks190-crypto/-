@@ -74,11 +74,11 @@
 ## 4. Состояние Git и CI/CD (PR #84)
 - **Рабочая ветка**: `feat/issue-56-david-live-mesh-visualizer`
 - **Pull Request**: [#84 (`https://github.com/smaks190-crypto/-/pull/84`)](https://github.com/smaks190-crypto/-/pull/84)
-- **Базовый коммит кода в PR #84**: `2cc202aad71ab7bd87a250a1d88edaadc4e6fc0f`
+- **Базовый коммит исправления кода в PR #84**: `71f8c47278f80c3b10ad421e3c014b1ac7cc67bf`
 - **Исправлено в PR #84 (после Run #319)**:
   - Реализована функция `resolveVisualStateColors(visualState: DavidLiveVisualState, isMicMuted: Boolean): Pair<Color, Color>` в `DavidLiveSheet.kt` для всех 13 визуальных состояний (устраняет `Unresolved reference: resolveVisualStateColors` на строках 239, 366, 713, 1528 и каскадные ошибки деструктуризации `component1`/`component2`/`copy`);
   - Добавлена строгая защита `isDebugModeEnabled = BuildConfig.DEBUG` в `DavidLiveVisualStateResolver.resolve`, `DavidLiveSessionController` и `DavidLiveSheet`, чтобы `debugOverrideState` никогда не подменял реальные состояния (включая приоритетный `OFFLINE`) в Release-сборках;
-  - В `.github/workflows/build.yml` добавлен автоматический запуск `gradle testDebugUnitTest compileDebugAndroidTestKotlin` для всех PR и ручных сборок.
+  - Дополнены `DavidLiveUnitTest.kt` и `DavidLiveUiTest.kt` проверками цветов всех 13 состояний и защиты Release-режима.
 
 ## 5. Инструкция для ручной проверки на устройстве
 1. **Ожидание (Idle / Listening)**:
