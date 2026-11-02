@@ -379,7 +379,7 @@ class DavidLiveUiTest {
         composeTestRule.onNodeWithTag("david_live_sphere_gesture_test").performTouchInput {
             down(center)
             advanceEventTime(650L)
-            moveTo(center + Offset(18f, 12f), durationMillis = 100L)
+            moveTo(center + Offset(18f, 12f), delayMillis = 100L)
             up()
         }
         composeTestRule.waitForIdle()
