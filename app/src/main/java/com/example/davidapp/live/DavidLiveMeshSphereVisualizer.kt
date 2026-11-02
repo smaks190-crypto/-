@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -51,12 +52,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
@@ -71,6 +76,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -86,52 +92,53 @@ import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Цветовые токены премиальной дизайн-системы Obsidian Neo-Bank для David Live (Issue #56).
+ * Цветовые токены новой объёмной 3D-сферы David Live (Obsidian Quantum Plasma Orb, Issue #56).
  */
-private val ObsidianCoreDark = Color(0xFF040A14)
-private val ObsidianCoreDeep = Color(0xFF010409)
-private val ObsidianShadowPole = Color(0xFF010206)
+private val ObsidianVoidCore = Color(0xFF030710)
+private val ObsidianDeepShadow = Color(0xFF010308)
+private val ObsidianSubsurfaceDark = Color(0xFF06101E)
 
-// Изумрудная гамма (Ожидание — Медленное вращение)
+// Изумрудная гамма (Ожидание — Медленное медитативное 3D-вращение)
 private val EmeraldPrimary = Color(0xFF00E5A8)
-private val EmeraldMint = Color(0xFF00F5B8)
-private val EmeraldDeep = Color(0xFF059669)
+private val EmeraldMint = Color(0xFF34F5C5)
+private val EmeraldDeep = Color(0xFF047857)
 
-// Бирюзово-голубая гамма (Ты говоришь — Ускоренное вращение)
+// Бирюзово-голубая гамма (Ты говоришь — Ускоренное 3D-вращение)
 private val TurquoiseSpeech = Color(0xFF00D9F5)
 private val TurquoiseCyan = Color(0xFF00B4FF)
 private val SkyBlueGlow = Color(0xFF38BDF8)
 
-// Индиго-фиолетовая / электро-синяя гамма (Давид думает — Плавное вращение)
+// Индиго-фиолетовая / электро-синяя гамма (Давид думает / анализирует)
 private val ThinkingIndigo = Color(0xFF6366F1)
 private val ThinkingViolet = Color(0xFF8B5CF6)
 private val ThinkingCyan = Color(0xFF38BDF8)
 
-// Ярко-бирюзовая / изумрудная гамма (Давид отвечает — Активное вращение)
-private val DavidSpeakingTurquoise = Color(0xFF00F0D0)
+// Ярко-бирюзовая / изумрудная гамма (Давид отвечает — Активное живое вращение)
+private val DavidSpeakingTurquoise = Color(0xFF00F5D4)
 private val DavidSpeakingEmerald = Color(0xFF00E5A8)
 
-// Приглушённая серебристо-сланцевая гамма (Микрофон выключен — Приглушённая сфера)
+// Приглушённая серебристо-сланцевая гамма (Микрофон выключен — Приглушённая 3D-сфера)
 internal val MutedSlatePrimary = Color(0xFF94A3B8)
 internal val MutedSilverSecondary = Color(0xFFCBD5E1)
 private val MutedSlateGlow = Color(0xFF475569)
 private val MutedSlateCore = Color(0xFF334155)
 
-// Красная гамма (Нет интернета — Красная сфера)
+// Красная гамма (Нет интернета — Красная 3D-сфера)
 private val CrimsonOffline = Color(0xFFEF4444)
 private val CrimsonGlow = Color(0xFFDC2626)
 private val CrimsonLight = Color(0xFFF87171)
 
-// Золотисто-жёлтая гамма (API требуется — Жёлтая сфера)
+// Золотисто-янтарная гамма (API требуется — Золотая 3D-сфера)
 private val GoldApiAmber = Color(0xFFF59E0B)
 private val GoldApiGlow = Color(0xFFFBBF24)
 private val GoldApiWarm = Color(0xFFD97706)
 
-// Маджента-красно-фиолетовая гамма (Ошибка — Пульсирующая сфера)
+// Маджента-фиолетовая гамма (Ошибка — Пульсирующая 3D-сфера)
 private val VioletError = Color(0xFFA855F7)
 private val CrimsonMagentaError = Color(0xFFF43F5E)
 private val VioletGlow = Color(0xFF9333EA)
@@ -142,7 +149,7 @@ private val SuccessMint = Color(0xFF00F0A0)
 
 /**
  * Порог удержания пальца на сфере (в мс), после которого активируется
- * интерактивное 3D-притяжение световых сгустков вместо короткого нажатия (tap).
+ * интерактивное 3D-притяжение плазменных сгустков и потоков вместо короткого нажатия (tap).
  */
 internal const val SPHERE_TOUCH_HOLD_ACTIVATION_MS = 165L
 
@@ -151,7 +158,7 @@ internal const val SPHERE_TOUCH_HOLD_ACTIVATION_MS = 165L
  * - [SHORT_TAP_ACTION] — короткое нажатие без перетаскивания (выполняет штатное контекстное действие сферы:
  *   переключение микрофона, открытие настроек API-ключа или переподключение).
  * - [HOLD_OR_DRAG_ATTRACTION] — удержание или перемещение пальца по поверхности сферы
- *   (запускает притяжение 3D-сгустков энергии к точке касания без вызова tap-действия).
+ *   (запускает 3D-притяжение плазменных сгустков и потоков к точке касания без вызова tap-действия).
  * - [CANCELLED] — жест отменён системой или сворачиванием экрана.
  */
 internal enum class SphereTouchGestureOutcome {
@@ -229,15 +236,15 @@ internal fun projectTouchTo3DSphere(
     val worldY = normY * safeRadius * surfaceShellRatio
     val worldZ = normZ * safeRadius * surfaceShellRatio
 
-    val cameraDistance = safeRadius * 3.4f
-    val perspectiveScale = (cameraDistance / (cameraDistance - worldZ).coerceAtLeast(safeRadius * 0.8f))
-        .coerceIn(0.82f, 1.42f)
+    val cameraDistance = safeRadius * 3.1f
+    val perspectiveScale = (cameraDistance / (cameraDistance - worldZ).coerceAtLeast(safeRadius * 0.75f))
+        .coerceIn(0.82f, 1.46f)
 
     val projectedScreenOffset = Offset(
         x = sphereCenter.x + worldX * perspectiveScale,
         y = sphereCenter.y + worldY * perspectiveScale
     )
-    val limbForeshortening = (0.42f + 0.58f * normZ).coerceIn(0.42f, 1.0f)
+    val limbForeshortening = (0.40f + 0.60f * normZ).coerceIn(0.40f, 1.0f)
 
     return SphereTouchPoint3D(
         normX = normX,
@@ -271,13 +278,11 @@ internal fun advanceTouchAttractionStrength(
     if (deltaMs <= 0L) return clampedCurrent
     val dtSec = (deltaMs.coerceIn(1L, 64L)) / 1000f
     return if (isTouchActive) {
-        // Быстрое, но мягкое схождение сгустков к пальцу (~180–240 мс)
-        val riseRate = 6.2f
+        val riseRate = 6.5f
         val factor = 1f - exp(-dtSec * riseRate)
         (clampedCurrent + (1f - clampedCurrent) * factor).coerceIn(0f, 1f)
     } else {
-        // Плавное органическое рассеивание сгустков после отпускания пальца (~450–550 мс)
-        val decayRate = 3.6f
+        val decayRate = 3.8f
         val next = clampedCurrent * exp(-dtSec * decayRate)
         if (next < 0.004f) 0f else next.coerceIn(0f, 1f)
     }
@@ -294,7 +299,7 @@ internal fun interpolateTouchSurfaceCoordinate(
 ): Float {
     if (deltaMs <= 0L) return targetValue
     val dtSec = (deltaMs.coerceIn(1L, 64L)) / 1000f
-    val followRate = 32f
+    val followRate = 34f
     val alpha = (1f - exp(-dtSec * followRate)).coerceIn(0.15f, 1f)
     return currentValue + (targetValue - currentValue) * alpha
 }
@@ -335,10 +340,8 @@ internal fun shouldApplyMutedVisualPalette(
 }
 
 /**
- * Вычисляет целевую угловую скорость орбитального движения (рад/с) в зависимости от
- * реального состояния [DavidLiveVisualState], флага `isMicMuted` и входящей/исходящей аудиоэнергии.
- *
- * Используется для плавной инерционной интерполяции скорости без сброса фазы вращения.
+ * Вычисляет целевую угловую скорость 3D-вращения сферы и её энергетических лент (рад/с)
+ * в зависимости от реального состояния [DavidLiveVisualState], флага `isMicMuted` и аудиоэнергии.
  */
 internal fun resolveTargetOrbitAngularSpeed(
     visualState: DavidLiveVisualState,
@@ -411,56 +414,56 @@ internal fun resolveSpherePalette(
         DavidLiveVisualState.IDLE_LISTENING -> SpherePalette(
             primary = EmeraldPrimary,
             secondary = EmeraldMint,
-            haloGlow = EmeraldDeep.copy(alpha = 0.38f),
-            coreGlow = EmeraldPrimary.copy(alpha = 0.28f),
+            haloGlow = EmeraldDeep.copy(alpha = 0.42f),
+            coreGlow = EmeraldPrimary.copy(alpha = 0.32f),
             waveAccent = EmeraldMint
         )
 
         DavidLiveVisualState.USER_SPEAKING -> SpherePalette(
             primary = TurquoiseSpeech,
             secondary = TurquoiseCyan,
-            haloGlow = TurquoiseCyan.copy(alpha = 0.46f),
-            coreGlow = SkyBlueGlow.copy(alpha = 0.32f),
+            haloGlow = TurquoiseCyan.copy(alpha = 0.48f),
+            coreGlow = SkyBlueGlow.copy(alpha = 0.36f),
             waveAccent = TurquoiseSpeech
         )
 
         DavidLiveVisualState.THINKING -> SpherePalette(
             primary = ThinkingViolet,
             secondary = ThinkingCyan,
-            haloGlow = ThinkingIndigo.copy(alpha = 0.44f),
-            coreGlow = ThinkingViolet.copy(alpha = 0.30f),
+            haloGlow = ThinkingIndigo.copy(alpha = 0.46f),
+            coreGlow = ThinkingViolet.copy(alpha = 0.34f),
             waveAccent = ThinkingCyan
         )
 
         DavidLiveVisualState.FINANCE_LOOKUP -> SpherePalette(
             primary = EmeraldMint,
             secondary = TurquoiseSpeech,
-            haloGlow = EmeraldDeep.copy(alpha = 0.42f),
-            coreGlow = GoldApiAmber.copy(alpha = 0.25f),
+            haloGlow = EmeraldDeep.copy(alpha = 0.44f),
+            coreGlow = GoldApiAmber.copy(alpha = 0.28f),
             waveAccent = EmeraldMint
         )
 
         DavidLiveVisualState.ANALYZING -> SpherePalette(
             primary = ThinkingCyan,
             secondary = ThinkingViolet,
-            haloGlow = ThinkingIndigo.copy(alpha = 0.46f),
-            coreGlow = ThinkingCyan.copy(alpha = 0.30f),
+            haloGlow = ThinkingIndigo.copy(alpha = 0.48f),
+            coreGlow = ThinkingCyan.copy(alpha = 0.34f),
             waveAccent = EmeraldPrimary
         )
 
         DavidLiveVisualState.PREPARING_RESPONSE -> SpherePalette(
             primary = TurquoiseSpeech,
             secondary = EmeraldPrimary,
-            haloGlow = EmeraldDeep.copy(alpha = 0.40f),
-            coreGlow = TurquoiseSpeech.copy(alpha = 0.28f),
+            haloGlow = EmeraldDeep.copy(alpha = 0.42f),
+            coreGlow = TurquoiseSpeech.copy(alpha = 0.30f),
             waveAccent = EmeraldPrimary
         )
 
         DavidLiveVisualState.DAVID_SPEAKING -> SpherePalette(
             primary = DavidSpeakingTurquoise,
             secondary = DavidSpeakingEmerald,
-            haloGlow = EmeraldDeep.copy(alpha = 0.52f),
-            coreGlow = DavidSpeakingTurquoise.copy(alpha = 0.36f),
+            haloGlow = EmeraldDeep.copy(alpha = 0.54f),
+            coreGlow = DavidSpeakingTurquoise.copy(alpha = 0.40f),
             waveAccent = DavidSpeakingEmerald
         )
 
@@ -468,93 +471,114 @@ internal fun resolveSpherePalette(
         DavidLiveVisualState.RECONNECTING -> SpherePalette(
             primary = ThinkingCyan,
             secondary = TurquoiseSpeech,
-            haloGlow = ThinkingIndigo.copy(alpha = 0.36f),
-            coreGlow = ThinkingCyan.copy(alpha = 0.24f),
+            haloGlow = ThinkingIndigo.copy(alpha = 0.38f),
+            coreGlow = ThinkingCyan.copy(alpha = 0.26f),
             waveAccent = TurquoiseSpeech
         )
 
         DavidLiveVisualState.OFFLINE -> SpherePalette(
             primary = CrimsonOffline,
             secondary = CrimsonLight,
-            haloGlow = CrimsonGlow.copy(alpha = 0.44f),
-            coreGlow = CrimsonOffline.copy(alpha = 0.30f),
+            haloGlow = CrimsonGlow.copy(alpha = 0.46f),
+            coreGlow = CrimsonOffline.copy(alpha = 0.32f),
             waveAccent = CrimsonLight
         )
 
         DavidLiveVisualState.API_MISSING -> SpherePalette(
             primary = GoldApiAmber,
             secondary = GoldApiGlow,
-            haloGlow = GoldApiWarm.copy(alpha = 0.42f),
-            coreGlow = GoldApiAmber.copy(alpha = 0.28f),
+            haloGlow = GoldApiWarm.copy(alpha = 0.44f),
+            coreGlow = GoldApiAmber.copy(alpha = 0.30f),
             waveAccent = GoldApiGlow
         )
 
         DavidLiveVisualState.ERROR -> SpherePalette(
             primary = CrimsonMagentaError,
             secondary = VioletError,
-            haloGlow = VioletGlow.copy(alpha = 0.44f),
-            coreGlow = CrimsonMagentaError.copy(alpha = 0.30f),
+            haloGlow = VioletGlow.copy(alpha = 0.46f),
+            coreGlow = CrimsonMagentaError.copy(alpha = 0.32f),
             waveAccent = VioletError
         )
 
         DavidLiveVisualState.SUCCESS -> SpherePalette(
             primary = SuccessMint,
             secondary = SuccessGreen,
-            haloGlow = SuccessGreen.copy(alpha = 0.54f),
-            coreGlow = SuccessMint.copy(alpha = 0.36f),
+            haloGlow = SuccessGreen.copy(alpha = 0.56f),
+            coreGlow = SuccessMint.copy(alpha = 0.38f),
             waveAccent = SuccessMint
         )
     }
 }
 
 /**
- * Параметры отдельной 3D-орбиты вокруг живой энергетической сферы.
+ * Спецификация объёмной 3D гироскопической энергетической ленты (Silk Plasma Ribbon),
+ * огибающей сферу в трёхмерном пространстве (часть проходит позади ядра `z < 0`, часть — спереди `z >= 0`).
  */
-private class OrbitRingSpec(
-    val rollDegrees: Float,
-    val pitchDegrees: Float,
+private class GyroRibbonSpec(
+    val baseTiltXDeg: Float,
+    val baseTiltZDeg: Float,
+    val precessionRate: Float,
     val radiusRatio: Float,
     val speedMultiplier: Float,
     val phaseOffsetRad: Float,
-    val ribbonWidthDp: Float,
+    val ribbonThicknessDp: Float,
+    val waveHarmonic: Int,
     val useSecondaryColor: Boolean
 )
 
-private val DefaultOrbitSpecs = arrayOf(
-    // 1. Главная диагональная световая орбита
-    OrbitRingSpec(
-        rollDegrees = -21f,
-        pitchDegrees = 70f,
-        radiusRatio = 1.36f,
+private val DefaultGyroRibbonSpecs = arrayOf(
+    // 1. Главная диагональная 3D-лента (широкий плазменный шлейф)
+    GyroRibbonSpec(
+        baseTiltXDeg = 68f,
+        baseTiltZDeg = -22f,
+        precessionRate = 0.18f,
+        radiusRatio = 1.28f,
         speedMultiplier = 1.0f,
-        phaseOffsetRad = 0.2f,
-        ribbonWidthDp = 2.6f,
+        phaseOffsetRad = 0.15f,
+        ribbonThicknessDp = 3.2f,
+        waveHarmonic = 2,
         useSecondaryColor = false
     ),
-    // 2. Встречная наклонная орбита, создающая объёмное перекрестие в 3D
-    OrbitRingSpec(
-        rollDegrees = 26f,
-        pitchDegrees = 64f,
-        radiusRatio = 1.26f,
-        speedMultiplier = -0.76f,
-        phaseOffsetRad = 2.1f,
-        ribbonWidthDp = 2.0f,
+    // 2. Встречная перекрёстная 3D-лента (создаёт глубокую стерео-перспективу)
+    GyroRibbonSpec(
+        baseTiltXDeg = 63f,
+        baseTiltZDeg = 29f,
+        precessionRate = -0.14f,
+        radiusRatio = 1.20f,
+        speedMultiplier = -0.82f,
+        phaseOffsetRad = 2.15f,
+        ribbonThicknessDp = 2.5f,
+        waveHarmonic = 3,
         useSecondaryColor = true
     ),
-    // 3. Тонкая крутая орбита для ощущения многослойного энергетического поля
-    OrbitRingSpec(
-        rollDegrees = -52f,
-        pitchDegrees = 73f,
-        radiusRatio = 1.18f,
-        speedMultiplier = 1.28f,
-        phaseOffsetRad = 4.2f,
-        ribbonWidthDp = 1.5f,
+    // 3. Крутая меридиональная 3D-орбита близко к оболочке ядра
+    GyroRibbonSpec(
+        baseTiltXDeg = 74f,
+        baseTiltZDeg = -56f,
+        precessionRate = 0.22f,
+        radiusRatio = 1.12f,
+        speedMultiplier = 1.24f,
+        phaseOffsetRad = 4.10f,
+        ribbonThicknessDp = 2.0f,
+        waveHarmonic = 2,
         useSecondaryColor = false
+    ),
+    // 4. Экваториальная парящая волна света
+    GyroRibbonSpec(
+        baseTiltXDeg = 78f,
+        baseTiltZDeg = 8f,
+        precessionRate = -0.11f,
+        radiusRatio = 1.34f,
+        speedMultiplier = 0.64f,
+        phaseOffsetRad = 1.05f,
+        ribbonThicknessDp = 1.7f,
+        waveHarmonic = 4,
+        useSecondaryColor = true
     )
 )
 
 /**
- * Спецификация объёмного 3D-сгустка энергии, движущегося внутри и вдоль сферических оболочек ядра.
+ * Спецификация объёмного 3D-сгустка плазменной энергии, движущегося внутри и вдоль сферических оболочек ядра.
  */
 internal class VolumetricEnergyClusterSpec(
     val baseLatitudeDeg: Float,
@@ -567,22 +591,22 @@ internal class VolumetricEnergyClusterSpec(
 )
 
 internal val DefaultVolumetricClusters = arrayOf(
-    VolumetricEnergyClusterSpec(-48f, 0.0f, 0.84f, 0.92f, 1.4f, 4.2f, false),
-    VolumetricEnergyClusterSpec(-34f, 1.1f, 0.68f, -0.78f, 1.8f, 3.6f, true),
-    VolumetricEnergyClusterSpec(-22f, 2.3f, 0.90f, 1.12f, 1.2f, 4.8f, false),
-    VolumetricEnergyClusterSpec(-14f, 3.5f, 0.56f, 0.64f, 2.1f, 3.4f, true),
-    VolumetricEnergyClusterSpec(-6f, 4.7f, 0.88f, -1.04f, 1.5f, 4.4f, false),
-    VolumetricEnergyClusterSpec(0f, 0.6f, 0.74f, 0.86f, 1.7f, 5.0f, true),
-    VolumetricEnergyClusterSpec(8f, 1.9f, 0.92f, 1.18f, 1.3f, 4.0f, false),
-    VolumetricEnergyClusterSpec(16f, 3.1f, 0.62f, -0.72f, 1.9f, 3.8f, true),
-    VolumetricEnergyClusterSpec(24f, 4.2f, 0.86f, 0.96f, 1.6f, 4.6f, false),
-    VolumetricEnergyClusterSpec(35f, 5.4f, 0.72f, -0.88f, 1.4f, 3.9f, true),
-    VolumetricEnergyClusterSpec(46f, 0.9f, 0.82f, 0.76f, 1.5f, 4.1f, false),
-    VolumetricEnergyClusterSpec(-40f, 4.0f, 0.78f, 1.05f, 1.6f, 3.7f, true),
-    VolumetricEnergyClusterSpec(28f, 2.5f, 0.54f, -0.66f, 2.2f, 3.5f, false),
-    VolumetricEnergyClusterSpec(-10f, 5.8f, 0.80f, 1.22f, 1.3f, 4.5f, true),
-    VolumetricEnergyClusterSpec(52f, 3.7f, 0.76f, -0.94f, 1.7f, 3.6f, false),
-    VolumetricEnergyClusterSpec(-28f, 1.7f, 0.89f, 0.84f, 1.4f, 4.3f, true)
+    VolumetricEnergyClusterSpec(-50f, 0.0f, 0.82f, 0.94f, 1.4f, 5.8f, false),
+    VolumetricEnergyClusterSpec(-36f, 0.9f, 0.64f, -0.80f, 1.8f, 4.9f, true),
+    VolumetricEnergyClusterSpec(-24f, 1.8f, 0.88f, 1.14f, 1.2f, 6.4f, false),
+    VolumetricEnergyClusterSpec(-15f, 2.7f, 0.52f, 0.66f, 2.1f, 4.6f, true),
+    VolumetricEnergyClusterSpec(-6f, 3.6f, 0.86f, -1.06f, 1.5f, 6.0f, false),
+    VolumetricEnergyClusterSpec(0f, 4.5f, 0.72f, 0.88f, 1.7f, 6.8f, true),
+    VolumetricEnergyClusterSpec(9f, 5.4f, 0.90f, 1.20f, 1.3f, 5.4f, false),
+    VolumetricEnergyClusterSpec(18f, 0.5f, 0.58f, -0.74f, 1.9f, 5.1f, true),
+    VolumetricEnergyClusterSpec(27f, 1.4f, 0.84f, 0.98f, 1.6f, 6.2f, false),
+    VolumetricEnergyClusterSpec(37f, 2.3f, 0.70f, -0.90f, 1.4f, 5.3f, true),
+    VolumetricEnergyClusterSpec(48f, 3.2f, 0.80f, 0.78f, 1.5f, 5.6f, false),
+    VolumetricEnergyClusterSpec(-42f, 4.1f, 0.76f, 1.08f, 1.6f, 5.0f, true),
+    VolumetricEnergyClusterSpec(30f, 5.0f, 0.50f, -0.68f, 2.2f, 4.8f, false),
+    VolumetricEnergyClusterSpec(-12f, 5.9f, 0.78f, 1.24f, 1.3f, 6.1f, true),
+    VolumetricEnergyClusterSpec(54f, 1.1f, 0.74f, -0.96f, 1.7f, 4.9f, false),
+    VolumetricEnergyClusterSpec(-30f, 2.9f, 0.87f, 0.86f, 1.4f, 5.9f, true)
 )
 
 /**
@@ -613,10 +637,10 @@ internal fun computeVolumetricCluster3D(
 ): ProjectedCluster3D {
     val safeRadius = sphereRadius.coerceAtLeast(1f)
     val dynamicLongitude = spec.baseLongitudeRad + phaseRad * spec.orbitSpeedMultiplier
-    val latWaveDeg = 14f * sin(phaseRad * spec.verticalWaveFreq + clusterIndex * 0.7f)
+    val latWaveDeg = 16f * sin(phaseRad * spec.verticalWaveFreq + clusterIndex * 0.75f)
     val phiRad = ((spec.baseLatitudeDeg + latWaveDeg) * PI / 180.0).toFloat()
 
-    val radialPulse = 1f + energy * 0.08f * sin(phaseRad * 2.4f + clusterIndex)
+    val radialPulse = 1f + energy * 0.09f * sin(phaseRad * 2.3f + clusterIndex)
     val shellR = safeRadius * spec.shellRadiusRatio * radialPulse
 
     val cosPhi = cos(phiRad)
@@ -625,9 +649,9 @@ internal fun computeVolumetricCluster3D(
     val y0 = shellR * sinPhi
     val z0 = shellR * cosPhi * sin(dynamicLongitude)
 
-    // Наклон оси сферы (Pitch 20° и медленная прецессия Roll) для убедительного 3D-ракурса
-    val pitchRad = (20.0 * PI / 180.0).toFloat()
-    val rollRad = (10.0 * sin(phaseRad * 0.32f) * PI / 180.0).toFloat()
+    // Трёхмерный наклон оси сферы (Pitch 22° + плавная прецессия Roll) для глубокой 3D-перспективы
+    val pitchRad = (22.0 * PI / 180.0).toFloat()
+    val rollRad = (12.0 * sin(phaseRad * 0.28f) * PI / 180.0).toFloat()
     val cosPitch = cos(pitchRad)
     val sinPitch = sin(pitchRad)
     val cosRoll = cos(rollRad)
@@ -642,27 +666,26 @@ internal fun computeVolumetricCluster3D(
     var appliedPull = 0f
     val clampedTouchStrength = touchAttractionStrength.coerceIn(0f, 1f)
     if (touchPoint3D != null && clampedTouchStrength > 0.004f) {
-        // Локальное 3D-вращение сгустков вокруг точки касания, чтобы они формировали живой энергетический вихрь под пальцем
-        val swirlAngle = phaseRad * 2.8f + clusterIndex * (2f * PI.toFloat() / DefaultVolumetricClusters.size)
-        val swirlRadius = safeRadius * (0.06f + (clusterIndex % 4) * 0.032f)
+        // При удержании пальца сгустки плавно стягиваются по 3D-сфере в живой вихрь вокруг точки касания
+        val swirlAngle = phaseRad * 3.1f + clusterIndex * (2f * PI.toFloat() / DefaultVolumetricClusters.size)
+        val swirlRadius = safeRadius * (0.055f + (clusterIndex % 4) * 0.030f)
         val targetX = touchPoint3D.worldX + swirlRadius * cos(swirlAngle) * touchPoint3D.limbForeshortening
         val targetY = touchPoint3D.worldY + swirlRadius * sin(swirlAngle) * touchPoint3D.limbForeshortening
-        val targetZ = (touchPoint3D.worldZ + safeRadius * 0.05f * sin(swirlAngle * 1.5f))
-            .coerceAtLeast(safeRadius * 0.14f)
+        val targetZ = (touchPoint3D.worldZ + safeRadius * 0.05f * sin(swirlAngle * 1.4f))
+            .coerceAtLeast(safeRadius * 0.16f)
 
         val dx = targetX - worldX
         val dy = targetY - worldY
         val dz = targetZ - worldZ
         val dist3D = sqrt(dx * dx + dy * dy + dz * dz)
-        val proximityWeight = (1f - (dist3D / (safeRadius * 2.3f)).coerceIn(0f, 0.65f))
-        appliedPull = (clampedTouchStrength * (0.58f + 0.36f * proximityWeight)).coerceIn(0f, 0.94f)
+        val proximityWeight = (1f - (dist3D / (safeRadius * 2.2f)).coerceIn(0f, 0.62f))
+        appliedPull = (clampedTouchStrength * (0.62f + 0.34f * proximityWeight)).coerceIn(0f, 0.95f)
 
-        // Интерполируем в 3D и проецируем на сферический объём, чтобы сгустки огибали 3D-поверхность сферы
         val mixedX = worldX + dx * appliedPull
         val mixedY = worldY + dy * appliedPull
         val mixedZ = worldZ + dz * appliedPull
         val mixedMag = sqrt(mixedX * mixedX + mixedY * mixedY + mixedZ * mixedZ).coerceAtLeast(1f)
-        val desiredMag = shellR + (safeRadius * 0.88f - shellR) * appliedPull
+        val desiredMag = shellR + (safeRadius * 0.87f - shellR) * appliedPull
         val magScale = desiredMag / mixedMag
 
         worldX = mixedX * magScale
@@ -670,9 +693,9 @@ internal fun computeVolumetricCluster3D(
         worldZ = mixedZ * magScale
     }
 
-    val cameraDistance = safeRadius * 3.2f
-    val perspectiveScale = (cameraDistance / (cameraDistance - worldZ).coerceAtLeast(safeRadius * 0.75f))
-        .coerceIn(0.68f, 1.48f)
+    val cameraDistance = safeRadius * 2.95f
+    val perspectiveScale = (cameraDistance / (cameraDistance - worldZ).coerceAtLeast(safeRadius * 0.72f))
+        .coerceIn(0.64f, 1.54f)
 
     val screenOffset = Offset(
         x = center.x + worldX * perspectiveScale,
@@ -692,8 +715,16 @@ internal fun computeVolumetricCluster3D(
 }
 
 /**
- * Живая 3D энергетическая сфера **David Live** со световыми орбитами, внутренней плазменной
- * динамикой и интерактивным 3D-касанием (Issue #56 Redesign + Дополнение к ТЗ).
+ * Полностью переработанная живая 3D-сфера **David Live** (Obsidian 3D Quantum Plasma Sphere):
+ * - Никаких плоских 2D-колец по контуру, жёстких проволочных сеток или плоских кружков.
+ * - Настоящий трёхмерный объём с честным разделением задней (`z < 0`) и передней (`z >= 0`) полусфер,
+ *   внутренними многослойными плазменными вихрями (с аддитивным свечением `BlendMode.Plus`),
+ *   полупрозрачным преломляющим ядром, перекрывающим задний план, 3D-кометами энергии
+ *   и шелковистыми гироскопическими 3D-лентами.
+ * - Полная интерактивность при касании: при удержании и перемещении пальца вся 3D-плазма,
+ *   внутренние потоки и световые сгустки плавно притягиваются к точке касания на выпуклой
+ *   поверхности сферы и следуют за пальцем с учётом 3D-перспективы, а после отпускания
+ *   мягко расходятся обратно без сброса фазы вращения.
  */
 @Composable
 fun DavidLiveMeshSphereVisualizer(
@@ -724,7 +755,6 @@ fun DavidLiveMeshSphereVisualizer(
         }
     }
 
-    // Отслеживаем lifecycle: при сворачивании приложения останавливаем покадровый цикл и сбрасываем удержание касания
     var isLifecycleStarted by remember {
         mutableStateOf(
             lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
@@ -759,7 +789,6 @@ fun DavidLiveMeshSphereVisualizer(
         resolveSpherePalette(visualState, isMicMuted)
     }
 
-    // Плавная интерполяция цветов сферы и орбит за 400 мс (требование 300–500 мс)
     val animatedPrimaryColor by animateColorAsState(
         targetValue = targetPalette.primary,
         animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
@@ -781,7 +810,6 @@ fun DavidLiveMeshSphereVisualizer(
         label = "sphere_core_color"
     )
 
-    // Mute влияет ТОЛЬКО на входящую речь пользователя и НЕ подавляет исходящую речь Давида
     val isUserSpeechActive = visualState == DavidLiveVisualState.USER_SPEAKING && !isMicMuted
     val isDavidSpeechActive = visualState == DavidLiveVisualState.DAVID_SPEAKING
     val isSpeechActive = isUserSpeechActive || isDavidSpeechActive
@@ -792,17 +820,16 @@ fun DavidLiveMeshSphereVisualizer(
         0.03f
     }
 
-    // Плавное затухание амплитуды (380 мс) без резкого обрыва после окончания фразы
     val smoothedEnergy by animateFloatAsState(
         targetValue = targetAudioEnergy,
         animationSpec = tween(
-            durationMillis = if (isSpeechActive) 90 else 380,
+            durationMillis = if (isSpeechActive) 85 else 390,
             easing = FastOutSlowInEasing
         ),
         label = "sphere_energy_smoothing"
     )
 
-    // Реальные спектральные полосы из rayMagnitudes для модуляции внутренних слоёв плазмы
+    // Реальные частотные полосы спектра из rayMagnitudes для органической деформации 3D-плазмы
     val lowBandEnergy = remember(rayMagnitudes, smoothedEnergy) {
         if (rayMagnitudes.isEmpty()) smoothedEnergy
         else rayMagnitudes.take(8).average().toFloat().coerceIn(0f, 1f)
@@ -816,7 +843,6 @@ fun DavidLiveMeshSphereVisualizer(
         else rayMagnitudes.subList(24, min(48, rayMagnitudes.size)).average().toFloat().coerceIn(0f, 1f)
     }
 
-    // Целевая угловая скорость орбит с плавной инерционной интерполяцией (ease-in / ease-out)
     val targetOrbitSpeed = resolveTargetOrbitAngularSpeed(
         visualState = visualState,
         isMicMuted = isMicMuted,
@@ -829,7 +855,6 @@ fun DavidLiveMeshSphereVisualizer(
     )
     val currentOrbitSpeedState by rememberUpdatedState(smoothedOrbitSpeed)
 
-    // Состояние интерактивного 3D-касания и плавного следования за пальцем
     var targetTouchNormX by remember { mutableFloatStateOf(0f) }
     var targetTouchNormY by remember { mutableFloatStateOf(0f) }
     var smoothedTouchNormX by remember { mutableFloatStateOf(0f) }
@@ -839,7 +864,6 @@ fun DavidLiveMeshSphereVisualizer(
     val targetTouchNormXState by rememberUpdatedState(targetTouchNormX)
     val targetTouchNormYState by rememberUpdatedState(targetTouchNormY)
 
-    // Непрерывный аккумулятор фазы вращения — никогда не сбрасывается при смене visualState или после отпускания пальца
     var continuousOrbitPhaseRad by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(reduceMotion, isLifecycleStarted) {
@@ -885,14 +909,13 @@ fun DavidLiveMeshSphereVisualizer(
         }
     }
 
-    // Спокойное дыхание ядра и пульсация для состояния ERROR
     val infiniteTransition = rememberInfiniteTransition(label = "david_live_sphere_breathing")
     val breathProgress by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
             animation = tween(
-                durationMillis = if (visualState == DavidLiveVisualState.ERROR) 1600 else 3200,
+                durationMillis = if (visualState == DavidLiveVisualState.ERROR) 1500 else 3100,
                 easing = FastOutSlowInEasing
             ),
             repeatMode = RepeatMode.Reverse
@@ -900,15 +923,14 @@ fun DavidLiveMeshSphereVisualizer(
         label = "sphere_breathing_cycle"
     )
 
-    // Плавный коэффициент яркости орбит и внутренних слоёв (приглушается при Mute и Offline)
     val targetOrbitIntensity = when {
-        shouldApplyMutedVisualPalette(visualState, isMicMuted) -> 0.58f
-        visualState == DavidLiveVisualState.OFFLINE -> 0.74f
-        visualState == DavidLiveVisualState.API_MISSING -> 0.86f
-        visualState == DavidLiveVisualState.ERROR -> 0.82f + 0.16f * breathProgress
+        shouldApplyMutedVisualPalette(visualState, isMicMuted) -> 0.62f
+        visualState == DavidLiveVisualState.OFFLINE -> 0.78f
+        visualState == DavidLiveVisualState.API_MISSING -> 0.88f
+        visualState == DavidLiveVisualState.ERROR -> 0.84f + 0.16f * breathProgress
         visualState == DavidLiveVisualState.USER_SPEAKING ||
-            visualState == DavidLiveVisualState.DAVID_SPEAKING -> 0.94f + 0.06f * smoothedEnergy
-        else -> 0.88f
+            visualState == DavidLiveVisualState.DAVID_SPEAKING -> 0.95f + 0.05f * smoothedEnergy
+        else -> 0.90f
     }
     val orbitIntensity by animateFloatAsState(
         targetValue = targetOrbitIntensity,
@@ -917,9 +939,8 @@ fun DavidLiveMeshSphereVisualizer(
     )
 
     val orbitProgressNormalized = ((continuousOrbitPhaseRad / (2f * PI.toFloat())) % 1f + 1f) % 1f
-    val yawDegreesContinuous = ((continuousOrbitPhaseRad * 180f / PI.toFloat()) * 0.45f) % 360f
 
-    // Интерактивная иконка внутри ядра для состояний Mute, Offline, API Missing, Error и Success
+    // Интерактивная иконка внутри ядра для состояний, требующих действия пользователя
     val centerStateEmblemIcon = remember(visualState, isMicMuted) {
         when {
             shouldApplyMutedVisualPalette(visualState, isMicMuted) -> Icons.Default.MicOff
@@ -930,6 +951,10 @@ fun DavidLiveMeshSphereVisualizer(
             else -> null
         }
     }
+
+    val reusableSphereClipPath = remember { Path() }
+    val reusablePlasmaPath = remember { Path() }
+    val reusableStreamPath = remember { Path() }
 
     Box(
         modifier = modifier
@@ -960,7 +985,7 @@ fun DavidLiveMeshSphereVisualizer(
 
                     fun updateTouchTargetFromScreen(pos: Offset) {
                         val boxCenter = Offset(size.width / 2f, size.height / 2f)
-                        val approxSphereRadius = (min(size.width, size.height) / 2f) * 0.62f
+                        val approxSphereRadius = (min(size.width, size.height) / 2f) * 0.60f
                         val projected = projectTouchTo3DSphere(
                             touchOffset = pos,
                             sphereCenter = boxCenter,
@@ -985,11 +1010,7 @@ fun DavidLiveMeshSphereVisualizer(
                             val event = awaitPointerEvent()
                             val activeChange = event.changes.firstOrNull { it.id == down.id }
                                 ?: event.changes.firstOrNull()
-                            if (activeChange == null) {
-                                break
-                            }
-
-                            if (!activeChange.pressed) {
+                            if (activeChange == null || !activeChange.pressed) {
                                 break
                             }
 
@@ -1047,11 +1068,11 @@ fun DavidLiveMeshSphereVisualizer(
     ) {
         Canvas(modifier = Modifier.size(visualizerSize)) {
             val center = Offset(size.width / 2f, size.height / 2f)
-            val baseRadius = (size.minDimension / 2f) * 0.62f
+            val baseRadius = (size.minDimension / 2f) * 0.60f
             val dynamicRadius = baseRadius * (
                 1f +
-                    0.025f * sin(breathProgress * PI.toFloat()) +
-                    smoothedEnergy * 0.085f
+                    0.022f * sin(breathProgress * PI.toFloat()) +
+                    smoothedEnergy * 0.075f
                 )
 
             val activeTouch3D = if (touchAttractionStrength > 0.004f) {
@@ -1067,123 +1088,171 @@ fun DavidLiveMeshSphereVisualizer(
                 null
             }
 
-            // 1. Внешнее атмосферное свечение (Neon Halo) + микро-частицы в пространстве вокруг сферы
-            val haloRadius = dynamicRadius * (1.48f + 0.08f * breathProgress + smoothedEnergy * 0.16f)
+            // ЭТАП 1. Глубокая атмосферная корона вокруг 3D-сферы и объёмное поле микрочастиц
+            drawVolumetricOuterCoronaAndParticles(
+                center = center,
+                sphereRadius = dynamicRadius,
+                phaseRad = continuousOrbitPhaseRad,
+                breathProgress = breathProgress,
+                energy = smoothedEnergy,
+                primaryColor = animatedPrimaryColor,
+                secondaryColor = animatedSecondaryColor,
+                haloColor = animatedHaloColor,
+                intensity = orbitIntensity,
+                touchPoint3D = activeTouch3D,
+                touchAttractionStrength = touchAttractionStrength
+            )
+
+            // ЭТАП 2. ЗАДНЯЯ ПОЛУСФЕРА (z < 0) шелковистых гироскопических 3D-лент (проходят ПОЗАДИ сферы)
+            drawGyroscopic3DSilkRibbons(
+                center = center,
+                sphereRadius = dynamicRadius,
+                phaseRad = continuousOrbitPhaseRad,
+                energy = smoothedEnergy,
+                primaryColor = animatedPrimaryColor,
+                secondaryColor = animatedSecondaryColor,
+                intensity = orbitIntensity,
+                touchPoint3D = activeTouch3D,
+                touchAttractionStrength = touchAttractionStrength,
+                drawFrontHemisphere = false
+            )
+
+            // Подготавливаем сферическую область отсечения для внутренних 3D-слоёв шара
+            reusableSphereClipPath.reset()
+            reusableSphereClipPath.addOval(
+                Rect(
+                    left = center.x - dynamicRadius,
+                    top = center.y - dynamicRadius,
+                    right = center.x + dynamicRadius,
+                    bottom = center.y + dynamicRadius
+                )
+            )
+
+            clipPath(reusableSphereClipPath) {
+                // ЭТАП 3. 3D-затенение шара (Lambertian + Subsurface Scattering) и 5 объёмных 3D-облаков текучей плазмы
+                draw3DSphereShadedBodyAndOrganicPlasmaNebula(
+                    center = center,
+                    radius = dynamicRadius,
+                    phaseRad = continuousOrbitPhaseRad,
+                    breathProgress = breathProgress,
+                    energy = smoothedEnergy,
+                    lowBandEnergy = lowBandEnergy,
+                    midBandEnergy = midBandEnergy,
+                    highBandEnergy = highBandEnergy,
+                    primaryColor = animatedPrimaryColor,
+                    secondaryColor = animatedSecondaryColor,
+                    coreGlowColor = animatedCoreGlowColor,
+                    intensity = orbitIntensity,
+                    visualState = visualState,
+                    touchPoint3D = activeTouch3D,
+                    touchAttractionStrength = touchAttractionStrength,
+                    reusablePath = reusablePlasmaPath
+                )
+
+                // ЭТАП 4. ЗАДНЯЯ ПОЛУСФЕРА (z < 0) спиральных 3D-потоков и кометных сгустков плазмы
+                draw3DSpiralVortexCurrents(
+                    center = center,
+                    sphereRadius = dynamicRadius,
+                    phaseRad = continuousOrbitPhaseRad,
+                    energy = smoothedEnergy,
+                    primaryColor = animatedPrimaryColor,
+                    secondaryColor = animatedSecondaryColor,
+                    intensity = orbitIntensity,
+                    touchPoint3D = activeTouch3D,
+                    touchAttractionStrength = touchAttractionStrength,
+                    drawFrontHemisphere = false,
+                    reusablePath = reusableStreamPath
+                )
+
+                drawVolumetric3DPlasmaCometClusters(
+                    center = center,
+                    sphereRadius = dynamicRadius,
+                    phaseRad = continuousOrbitPhaseRad,
+                    energy = smoothedEnergy,
+                    primaryColor = animatedPrimaryColor,
+                    secondaryColor = animatedSecondaryColor,
+                    intensity = orbitIntensity,
+                    touchPoint3D = activeTouch3D,
+                    touchAttractionStrength = touchAttractionStrength,
+                    drawFrontHemisphere = false
+                )
+
+                // ЭТАП 5. Преломляющее 3D-ядро в центре сферы (частично перекрывает задние потоки z < 0, создавая глубокий 3D-параллакс)
+                draw3DRefractiveCoreNucleus(
+                    center = center,
+                    radius = dynamicRadius,
+                    phaseRad = continuousOrbitPhaseRad,
+                    breathProgress = breathProgress,
+                    energy = smoothedEnergy,
+                    primaryColor = animatedPrimaryColor,
+                    secondaryColor = animatedSecondaryColor,
+                    coreGlowColor = animatedCoreGlowColor,
+                    intensity = orbitIntensity,
+                    touchPoint3D = activeTouch3D,
+                    touchAttractionStrength = touchAttractionStrength
+                )
+
+                // ЭТАП 6. ПЕРЕДНЯЯ ПОЛУСФЕРА (z >= 0) спиральных 3D-потоков и кометных сгустков плазмы
+                draw3DSpiralVortexCurrents(
+                    center = center,
+                    sphereRadius = dynamicRadius,
+                    phaseRad = continuousOrbitPhaseRad,
+                    energy = smoothedEnergy,
+                    primaryColor = animatedPrimaryColor,
+                    secondaryColor = animatedSecondaryColor,
+                    intensity = orbitIntensity,
+                    touchPoint3D = activeTouch3D,
+                    touchAttractionStrength = touchAttractionStrength,
+                    drawFrontHemisphere = true,
+                    reusablePath = reusableStreamPath
+                )
+
+                drawVolumetric3DPlasmaCometClusters(
+                    center = center,
+                    sphereRadius = dynamicRadius,
+                    phaseRad = continuousOrbitPhaseRad,
+                    energy = smoothedEnergy,
+                    primaryColor = animatedPrimaryColor,
+                    secondaryColor = animatedSecondaryColor,
+                    intensity = orbitIntensity,
+                    touchPoint3D = activeTouch3D,
+                    touchAttractionStrength = touchAttractionStrength,
+                    drawFrontHemisphere = true
+                )
+
+                // ЭТАП 7. Выпуклая 3D-оптика (мягкое внутреннее свечение Френеля, купольный блик и 3D-вихрь под пальцем)
+                draw3DSphericalLensAndTouchVortex(
+                    center = center,
+                    radius = dynamicRadius,
+                    phaseRad = continuousOrbitPhaseRad,
+                    breathProgress = breathProgress,
+                    energy = smoothedEnergy,
+                    primaryColor = animatedPrimaryColor,
+                    secondaryColor = animatedSecondaryColor,
+                    intensity = orbitIntensity,
+                    touchPoint3D = activeTouch3D,
+                    touchAttractionStrength = touchAttractionStrength
+                )
+            }
+
+            // Мягкая светящаяся атмосфера вдоль сферического лимба (без жёсткого плоского Stroke-кольца!)
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(
-                        animatedHaloColor.copy(alpha = (animatedHaloColor.alpha * 1.18f).coerceAtMost(0.70f)),
-                        animatedHaloColor.copy(alpha = animatedHaloColor.alpha * 0.44f),
-                        Color.Transparent
-                    ),
+                    0.0f to Color.Transparent,
+                    0.82f to Color.Transparent,
+                    0.95f to animatedPrimaryColor.copy(alpha = (0.28f + 0.14f * smoothedEnergy) * orbitIntensity),
+                    0.99f to animatedSecondaryColor.copy(alpha = (0.42f + 0.18f * smoothedEnergy) * orbitIntensity),
+                    1.0f to Color.Transparent,
                     center = center,
-                    radius = haloRadius
+                    radius = dynamicRadius * 1.035f
                 ),
-                radius = haloRadius,
-                center = center
-            )
-
-            drawAmbientSpaceParticles(
+                radius = dynamicRadius * 1.035f,
                 center = center,
-                sphereRadius = dynamicRadius,
-                phaseRad = continuousOrbitPhaseRad,
-                primaryColor = animatedPrimaryColor,
-                secondaryColor = animatedSecondaryColor,
-                intensity = orbitIntensity
+                blendMode = BlendMode.Plus
             )
 
-            // 2. ЗАДНЯЯ ПОЛУСФЕРА 3D-орбит (z < 0) — проходит ЗА объёмным ядром сферы
-            drawThreeDimensionalOrbits(
-                center = center,
-                sphereRadius = dynamicRadius,
-                phaseRad = continuousOrbitPhaseRad,
-                energy = smoothedEnergy,
-                primaryColor = animatedPrimaryColor,
-                secondaryColor = animatedSecondaryColor,
-                intensity = orbitIntensity,
-                touchPoint3D = activeTouch3D,
-                touchAttractionStrength = touchAttractionStrength,
-                drawFrontHemisphere = false
-            )
-
-            // 3. Базовое 3D-затенение сферы и глубокие внутренние слои текучей плазмы
-            drawVolumetricSphereDeepBase(
-                center = center,
-                radius = dynamicRadius,
-                phaseRad = continuousOrbitPhaseRad,
-                breathProgress = breathProgress,
-                energy = smoothedEnergy,
-                lowBandEnergy = lowBandEnergy,
-                midBandEnergy = midBandEnergy,
-                highBandEnergy = highBandEnergy,
-                primaryColor = animatedPrimaryColor,
-                secondaryColor = animatedSecondaryColor,
-                coreGlowColor = animatedCoreGlowColor,
-                intensity = orbitIntensity,
-                visualState = visualState
-            )
-
-            // 4. ЗАДНЯЯ ПОЛУСФЕРА (z < 0) внутренних 3D-потоков и объёмных световых сгустков
-            // (визуально уходят за плотное преломляющее ядро сферы и частично скрываются им)
-            drawSubtleInnerEnergyMesh(
-                center = center,
-                radius = dynamicRadius * 0.94f,
-                breathProgress = breathProgress,
-                yawDegrees = yawDegreesContinuous,
-                energy = smoothedEnergy,
-                primaryColor = animatedPrimaryColor,
-                secondaryColor = animatedSecondaryColor,
-                intensity = orbitIntensity,
-                touchPoint3D = activeTouch3D,
-                touchAttractionStrength = touchAttractionStrength,
-                drawFrontHemisphere = false
-            )
-
-            drawVolumetric3DEnergyClusters(
-                center = center,
-                sphereRadius = dynamicRadius,
-                phaseRad = continuousOrbitPhaseRad,
-                energy = smoothedEnergy,
-                primaryColor = animatedPrimaryColor,
-                secondaryColor = animatedSecondaryColor,
-                intensity = orbitIntensity,
-                touchPoint3D = activeTouch3D,
-                touchAttractionStrength = touchAttractionStrength,
-                drawFrontHemisphere = false
-            )
-
-            // 5. Плотное преломляющее внутреннее ядро (частично перекрывает задние сгустки z < 0, создавая настоящую 3D-глубину)
-            drawRefractiveInnerCoreLayer(
-                center = center,
-                radius = dynamicRadius,
-                phaseRad = continuousOrbitPhaseRad,
-                breathProgress = breathProgress,
-                energy = smoothedEnergy,
-                primaryColor = animatedPrimaryColor,
-                secondaryColor = animatedSecondaryColor,
-                coreGlowColor = animatedCoreGlowColor,
-                intensity = orbitIntensity,
-                touchPoint3D = activeTouch3D,
-                touchAttractionStrength = touchAttractionStrength
-            )
-
-            // 6. ПЕРЕДНЯЯ ПОЛУСФЕРА (z >= 0) внутренних 3D-потоков и объёмных световых сгустков
-            // (проходят ПЕРЕД ядром в 3D-перспективе и собираются под пальцем при удержании)
-            drawSubtleInnerEnergyMesh(
-                center = center,
-                radius = dynamicRadius * 0.96f,
-                breathProgress = breathProgress,
-                yawDegrees = yawDegreesContinuous,
-                energy = smoothedEnergy,
-                primaryColor = animatedPrimaryColor,
-                secondaryColor = animatedSecondaryColor,
-                intensity = orbitIntensity,
-                touchPoint3D = activeTouch3D,
-                touchAttractionStrength = touchAttractionStrength,
-                drawFrontHemisphere = true
-            )
-
-            drawVolumetric3DEnergyClusters(
+            // ЭТАП 8. ПЕРЕДНЯЯ ПОЛУСФЕРА (z >= 0) шелковистых гироскопических 3D-лент (огибают сферу СПЕРЕДИ)
+            drawGyroscopic3DSilkRibbons(
                 center = center,
                 sphereRadius = dynamicRadius,
                 phaseRad = continuousOrbitPhaseRad,
@@ -1196,34 +1265,7 @@ fun DavidLiveMeshSphereVisualizer(
                 drawFrontHemisphere = true
             )
 
-            // 7. Выпуклая стеклянная оболочка 3D-сферы, преломления, каустика касания и Fresnel Rim
-            drawConvexGlassSurfaceAndTouchCaustics(
-                center = center,
-                radius = dynamicRadius,
-                phaseRad = continuousOrbitPhaseRad,
-                energy = smoothedEnergy,
-                primaryColor = animatedPrimaryColor,
-                secondaryColor = animatedSecondaryColor,
-                intensity = orbitIntensity,
-                touchPoint3D = activeTouch3D,
-                touchAttractionStrength = touchAttractionStrength
-            )
-
-            // 8. ПЕРЕДНЯЯ ПОЛУСФЕРА 3D-орбит (z >= 0) — огибает сферу СПЕРЕДИ с яркими световыми потоками
-            drawThreeDimensionalOrbits(
-                center = center,
-                sphereRadius = dynamicRadius,
-                phaseRad = continuousOrbitPhaseRad,
-                energy = smoothedEnergy,
-                primaryColor = animatedPrimaryColor,
-                secondaryColor = animatedSecondaryColor,
-                intensity = orbitIntensity,
-                touchPoint3D = activeTouch3D,
-                touchAttractionStrength = touchAttractionStrength,
-                drawFrontHemisphere = true
-            )
-
-            // 9. Специфические акценты состояний поверх орбит
+            // ЭТАП 9. Трёхмерные сигнатуры специальных состояний David Live
             when (visualState) {
                 DavidLiveVisualState.FINANCE_LOOKUP -> {
                     drawPlanetaryFinanceRing(
@@ -1278,33 +1320,32 @@ fun DavidLiveMeshSphereVisualizer(
             }
         }
 
-        // Интерактивный значок состояния внутри ядра сферы (для Mute, Offline, API Missing, Error, Success)
+        // Голографическая 3D-эмблема действия внутри ядра (для Mute, Offline, API Missing, Error, Success),
+        // которая плавно смещается с 3D-параллаксом при касании сферы
         if (centerStateEmblemIcon != null) {
+            val parallaxX = (smoothedTouchNormX * 8f * touchAttractionStrength).roundToInt()
+            val parallaxY = (smoothedTouchNormY * 8f * touchAttractionStrength).roundToInt()
             Box(
                 modifier = Modifier
-                    .size(48.dp)
-                    .alpha((0.88f - 0.35f * touchAttractionStrength).coerceIn(0.45f, 0.92f))
+                    .offset { IntOffset(parallaxX, parallaxY) }
+                    .size(46.dp)
+                    .alpha((0.86f - 0.30f * touchAttractionStrength).coerceIn(0.45f, 0.90f))
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
                             colors = listOf(
-                                ObsidianCoreDark.copy(alpha = 0.68f),
-                                animatedPrimaryColor.copy(alpha = 0.16f),
+                                animatedPrimaryColor.copy(alpha = 0.26f),
+                                ObsidianVoidCore.copy(alpha = 0.58f),
                                 Color.Transparent
                             )
                         )
-                    )
-                    .border(
-                        width = 1.dp,
-                        color = animatedPrimaryColor.copy(alpha = 0.45f),
-                        shape = CircleShape
                     ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = centerStateEmblemIcon,
                     contentDescription = null,
-                    tint = animatedSecondaryColor.copy(alpha = 0.92f),
+                    tint = Color.White.copy(alpha = 0.92f),
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -1313,10 +1354,81 @@ fun DavidLiveMeshSphereVisualizer(
 }
 
 /**
- * Базовое трёхмерное сферическое тело с теневым полюсом (terminator) и тремя независимыми
- * полупрозрачными внутренними слоями текучей плазмы, реагирующими на состояние и аудиоспектр.
+ * Отрисовка глубокой многослойной внешней короны и 3D-частиц вокруг сферы.
  */
-private fun DrawScope.drawVolumetricSphereDeepBase(
+private fun DrawScope.drawVolumetricOuterCoronaAndParticles(
+    center: Offset,
+    sphereRadius: Float,
+    phaseRad: Float,
+    breathProgress: Float,
+    energy: Float,
+    primaryColor: Color,
+    secondaryColor: Color,
+    haloColor: Color,
+    intensity: Float,
+    touchPoint3D: SphereTouchPoint3D?,
+    touchAttractionStrength: Float
+) {
+    val outerBloomRadius = sphereRadius * (1.62f + 0.08f * breathProgress + energy * 0.20f)
+    val bloomShift = if (touchPoint3D != null && touchAttractionStrength > 0.01f) {
+        Offset(
+            x = center.x + touchPoint3D.worldX * 0.22f * touchAttractionStrength,
+            y = center.y + touchPoint3D.worldY * 0.22f * touchAttractionStrength
+        )
+    } else {
+        center
+    }
+
+    drawCircle(
+        brush = Brush.radialGradient(
+            0.0f to haloColor.copy(alpha = (haloColor.alpha * 1.25f).coerceAtMost(0.68f)),
+            0.42f to primaryColor.copy(alpha = (0.22f + 0.14f * energy) * intensity),
+            0.72f to secondaryColor.copy(alpha = 0.08f * intensity),
+            1.0f to Color.Transparent,
+            center = bloomShift,
+            radius = outerBloomRadius
+        ),
+        radius = outerBloomRadius,
+        center = center
+    )
+
+    // Фоновые 3D-частицы энергетического поля вокруг сферы
+    val particleCount = 12
+    for (i in 0 until particleCount) {
+        val angle = (i * (2.0 * PI / particleCount)).toFloat() +
+            phaseRad * (if (i % 2 == 0) 0.20f else -0.16f)
+        val elevation = sin(phaseRad * 0.6f + i * 1.1f)
+        val orbitR = sphereRadius * (1.14f + (i % 3) * 0.09f + 0.04f * elevation)
+        val px = center.x + orbitR * cos(angle)
+        val py = center.y + orbitR * 0.78f * sin(angle)
+        val twinkle = ((sin(phaseRad * 1.5f + i * 1.9f) + 1f) * 0.5f)
+        val alpha = (0.12f + 0.34f * twinkle) * intensity
+        val pColor = if (i % 2 == 0) secondaryColor else primaryColor
+        val rPx = (1.4.dp.toPx() + 1.4.dp.toPx() * twinkle)
+
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = (alpha * 0.9f).coerceIn(0f, 0.75f)),
+                    pColor.copy(alpha = (alpha * 0.55f).coerceIn(0f, 0.55f)),
+                    Color.Transparent
+                ),
+                center = Offset(px, py),
+                radius = rPx * 2.4f
+            ),
+            radius = rPx * 2.4f,
+            center = Offset(px, py),
+            blendMode = BlendMode.Plus
+        )
+    }
+}
+
+/**
+ * Отрисовка объёмного 3D-тела сферы (с освещённым куполом сверху-слева и глубоким теневым
+ * терминатором снизу-справа) и 5 деформируемых 3D-облаков текучей плазмы внутри ядра,
+ * реагирующих на `lowBandEnergy`, `midBandEnergy` и `highBandEnergy` спектра голоса.
+ */
+private fun DrawScope.draw3DSphereShadedBodyAndOrganicPlasmaNebula(
     center: Offset,
     radius: Float,
     phaseRad: Float,
@@ -1329,103 +1441,129 @@ private fun DrawScope.drawVolumetricSphereDeepBase(
     secondaryColor: Color,
     coreGlowColor: Color,
     intensity: Float,
-    visualState: DavidLiveVisualState
+    visualState: DavidLiveVisualState,
+    touchPoint3D: SphereTouchPoint3D?,
+    touchAttractionStrength: Float,
+    reusablePath: Path
 ) {
-    // 1. Объёмная сферическая тень (источник света сверху-слева, глубокий теневой терминатор снизу-справа)
-    val shadowPoleCenter = Offset(center.x + radius * 0.24f, center.y + radius * 0.28f)
+    // 1. Трёхмерное сферическое тело с источником света в точке (-0.32R, -0.34R) и глубокой тенью в (+0.38R, +0.42R)
+    val lightFocalCenter = Offset(
+        x = center.x - radius * 0.30f,
+        y = center.y - radius * 0.32f
+    )
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(
-                ObsidianCoreDark.copy(alpha = 0.88f),
-                ObsidianCoreDeep.copy(alpha = 0.95f),
-                ObsidianShadowPole.copy(alpha = 0.99f)
-            ),
-            center = Offset(center.x - radius * 0.18f, center.y - radius * 0.20f),
-            radius = radius * 1.18f
+            0.0f to lerp(ObsidianSubsurfaceDark, primaryColor, 0.24f * intensity),
+            0.48f to ObsidianVoidCore.copy(alpha = 0.94f),
+            0.84f to ObsidianDeepShadow.copy(alpha = 0.98f),
+            1.0f to Color.Black,
+            center = lightFocalCenter,
+            radius = radius * 1.38f
         ),
         radius = radius,
         center = center
     )
 
-    // Внутреннее сферическое затенение по краям (Ambient Occlusion внутри толщи стекла)
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(
-                Color.Transparent,
-                ObsidianCoreDeep.copy(alpha = 0.42f),
-                ObsidianShadowPole.copy(alpha = 0.78f)
-            ),
-            center = Offset(center.x - radius * 0.10f, center.y - radius * 0.12f),
-            radius = radius
-        ),
-        radius = radius,
-        center = center
-    )
-
-    val stateFlowFactor = when (visualState) {
+    val stateFlowMultiplier = when (visualState) {
         DavidLiveVisualState.THINKING,
         DavidLiveVisualState.FINANCE_LOOKUP,
         DavidLiveVisualState.ANALYZING,
-        DavidLiveVisualState.PREPARING_RESPONSE -> 1.25f
+        DavidLiveVisualState.PREPARING_RESPONSE -> 1.28f
         DavidLiveVisualState.USER_SPEAKING,
-        DavidLiveVisualState.DAVID_SPEAKING -> 1.45f
+        DavidLiveVisualState.DAVID_SPEAKING -> 1.48f
         else -> 1.0f
     }
 
-    // 2. Слой плазмы №1 (Глубокое низкочастотное облако — движется по 3D-траектории Лиссажу)
-    val cloud1Center = Offset(
-        x = center.x + radius * (0.28f + 0.08f * lowBandEnergy) * cos(phaseRad * 0.58f * stateFlowFactor),
-        y = center.y - radius * (0.24f + 0.08f * lowBandEnergy) * sin(phaseRad * 0.44f * stateFlowFactor)
-    )
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(
-                secondaryColor.copy(alpha = (0.36f + 0.22f * lowBandEnergy + 0.10f * energy) * intensity),
-                primaryColor.copy(alpha = (0.24f + 0.14f * breathProgress) * intensity),
-                coreGlowColor.copy(alpha = 0.12f * intensity),
-                Color.Transparent
-            ),
-            center = cloud1Center,
-            radius = radius * (0.86f + 0.08f * lowBandEnergy)
-        ),
-        radius = radius,
-        center = center
-    )
+    // 2. Пять органических деформируемых 3D-лопастей плазмы (Plasma Nebula Lobes) на разной глубине внутри шара
+    val lobeCount = 5
+    val blobPoints = 24
+    val stepAngle = (2.0 * PI / blobPoints).toFloat()
 
-    // 3. Слой плазмы №2 (Встречное среднечастотное энергетическое течение на средней глубине)
-    val cloud2Center = Offset(
-        x = center.x - radius * 0.30f * sin(phaseRad * 0.72f * stateFlowFactor + 1.4f),
-        y = center.y + radius * 0.26f * cos(phaseRad * 0.52f * stateFlowFactor + 0.8f)
-    )
-    val blendedMidColor = lerp(primaryColor, secondaryColor, 0.5f + 0.5f * sin(phaseRad * 0.8f))
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(
-                blendedMidColor.copy(alpha = (0.32f + 0.22f * midBandEnergy) * intensity),
-                primaryColor.copy(alpha = (0.16f + 0.10f * energy) * intensity),
-                Color.Transparent
-            ),
-            center = cloud2Center,
-            radius = radius * (0.74f + 0.10f * midBandEnergy)
-        ),
-        radius = radius,
-        center = center
-    )
+    for (lobeIdx in 0 until lobeCount) {
+        val depthLayer = (lobeIdx - 2) / 2f // от -1.0 (дальняя глубина) до +1.0 (передний план)
+        val lobeDirection = if (lobeIdx % 2 == 0) 1f else -1f
+        val lobeSpeed = (0.42f + lobeIdx * 0.14f) * stateFlowMultiplier * lobeDirection
+        val lobePhase = phaseRad * lobeSpeed + lobeIdx * 1.35f
 
-    // 4. Слой плазмы №3 (Высокочастотная внутренняя волна / каустический перелив)
-    val cloud3Center = Offset(
-        x = shadowPoleCenter.x - radius * 0.22f * cos(phaseRad * 0.94f),
-        y = shadowPoleCenter.y - radius * 0.18f * sin(phaseRad * 0.82f)
-    )
+        val spectralBoost = when (lobeIdx % 3) {
+            0 -> lowBandEnergy
+            1 -> midBandEnergy
+            else -> highBandEnergy
+        }
+
+        // Трёхмерное движение центра плазменного облака внутри сферы
+        val orbitR = radius * (0.22f + 0.06f * (lobeIdx % 3))
+        var lobeCenterX = center.x + orbitR * cos(lobePhase) * (1f + 0.18f * spectralBoost)
+        var lobeCenterY = center.y + orbitR * sin(lobePhase * 0.82f + lobeIdx) * (1f + 0.18f * spectralBoost)
+
+        // При касании сферы внутренние плазменные облака мягко тянутся вслед за пальцем
+        if (touchPoint3D != null && touchAttractionStrength > 0.005f) {
+            val pullWeight = (0.34f + 0.12f * depthLayer) * touchAttractionStrength
+            lobeCenterX += (touchPoint3D.projectedScreenOffset.x - lobeCenterX) * pullWeight
+            lobeCenterY += (touchPoint3D.projectedScreenOffset.y - lobeCenterY) * pullWeight
+        }
+
+        val baseLobeRadius = radius * (0.52f + 0.05f * sin(breathProgress * PI.toFloat() + lobeIdx) + 0.12f * spectralBoost)
+        reusablePath.reset()
+
+        var firstX = 0f
+        var firstY = 0f
+        var prevX = 0f
+        var prevY = 0f
+
+        for (i in 0 until blobPoints) {
+            val theta = i * stepAngle
+            val wave1 = 0.14f * sin(theta * 3f + lobePhase * 1.7f)
+            val wave2 = (0.09f + 0.11f * spectralBoost) * cos(theta * 4f - lobePhase * 2.1f + lobeIdx)
+            val wave3 = 0.06f * energy * sin(theta * 6f + phaseRad * 3.0f)
+            val rDeformed = baseLobeRadius * (1f + wave1 + wave2 + wave3)
+
+            // Перспективное сжатие облака у краёв сферы для сохранения ощущения 3D-шара
+            val px = lobeCenterX + rDeformed * cos(theta)
+            val py = lobeCenterY + rDeformed * sin(theta)
+
+            if (i == 0) {
+                firstX = px
+                firstY = py
+                reusablePath.moveTo(px, py)
+            } else {
+                val midX = (prevX + px) * 0.5f
+                val midY = (prevY + py) * 0.5f
+                reusablePath.quadraticTo(prevX, prevY, midX, midY)
+            }
+            prevX = px
+            prevY = py
+        }
+        reusablePath.quadraticTo(prevX, prevY, (prevX + firstX) * 0.5f, (prevY + firstY) * 0.5f)
+        reusablePath.close()
+
+        val lobeColorA = if (lobeIdx % 2 == 0) primaryColor else secondaryColor
+        val lobeColorB = if (lobeIdx % 2 == 0) secondaryColor else coreGlowColor
+        val lobeAlpha = ((0.18f + 0.14f * spectralBoost + 0.08f * energy) * intensity).coerceIn(0.05f, 0.52f)
+
+        drawPath(
+            path = reusablePath,
+            brush = Brush.radialGradient(
+                0.0f to Color.White.copy(alpha = lobeAlpha * 0.42f),
+                0.35f to lobeColorA.copy(alpha = lobeAlpha),
+                0.72f to lobeColorB.copy(alpha = lobeAlpha * 0.48f),
+                1.0f to Color.Transparent,
+                center = Offset(lobeCenterX, lobeCenterY),
+                radius = baseLobeRadius * 1.25f
+            ),
+            blendMode = BlendMode.Plus
+        )
+    }
+
+    // 3. Глубокое 3D-затенение вдоль теневого серпа сферы (Terminator Crescent Shadow) для рельефного 3D-объёма
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(
-                secondaryColor.copy(alpha = (0.26f + 0.24f * highBandEnergy) * intensity),
-                coreGlowColor.copy(alpha = (0.15f + 0.12f * energy) * intensity),
-                Color.Transparent
-            ),
-            center = cloud3Center,
-            radius = radius * (0.64f + 0.12f * highBandEnergy)
+            0.0f to Color.Transparent,
+            0.56f to Color.Transparent,
+            0.84f to ObsidianVoidCore.copy(alpha = 0.54f),
+            1.0f to ObsidianDeepShadow.copy(alpha = 0.86f),
+            center = Offset(center.x - radius * 0.18f, center.y - radius * 0.20f),
+            radius = radius * 1.16f
         ),
         radius = radius,
         center = center
@@ -1433,10 +1571,121 @@ private fun DrawScope.drawVolumetricSphereDeepBase(
 }
 
 /**
- * Полупрозрачное плотное преломляющее ядро в центре сферы, которое частично перекрывает
- * заднюю полусферу (`z < 0`) сгустков и потоков, создавая ощущение реальной оптической толщи.
+ * Отрисовка трёхмерных спиральных геодезических энергетических потоков внутри сферы,
+ * которые струятся в 3D-пространстве по передней (`z >= 0`) и задней (`z < 0`) полусферам
+ * и изгибаются к пальцу при касании.
  */
-private fun DrawScope.drawRefractiveInnerCoreLayer(
+private fun DrawScope.draw3DSpiralVortexCurrents(
+    center: Offset,
+    sphereRadius: Float,
+    phaseRad: Float,
+    energy: Float,
+    primaryColor: Color,
+    secondaryColor: Color,
+    intensity: Float,
+    touchPoint3D: SphereTouchPoint3D?,
+    touchAttractionStrength: Float,
+    drawFrontHemisphere: Boolean,
+    reusablePath: Path
+) {
+    val streamCount = 6
+    val stepsPerStream = 28
+    val cameraDistance = sphereRadius * 3.0f
+    val pitchRad = (20.0 * PI / 180.0).toFloat()
+    val cosPitch = cos(pitchRad)
+    val sinPitch = sin(pitchRad)
+
+    for (streamIdx in 0 until streamCount) {
+        val baseAzimuth = streamIdx * (2f * PI.toFloat() / streamCount) + phaseRad * 0.55f
+        val shellRadius = sphereRadius * (0.70f + (streamIdx % 3) * 0.08f)
+        val streamColor = if (streamIdx % 2 == 0) secondaryColor else primaryColor
+
+        reusablePath.reset()
+        var isDrawingSegment = false
+        var prevScreenX = 0f
+        var prevScreenY = 0f
+
+        for (step in 0..stepsPerStream) {
+            val t = step.toFloat() / stepsPerStream.toFloat() // 0..1 от южного полюса к северному
+            val latRad = ((t - 0.5f) * PI * 0.82).toFloat()
+            val spiralTwist = (t - 0.5f) * 2.8f + 0.22f * (0.4f + energy) * sin(t * 6f + phaseRad * 1.8f + streamIdx)
+            val lonRad = baseAzimuth + spiralTwist
+
+            val cosLat = cos(latRad)
+            val sinLat = sin(latRad)
+            val x0 = shellRadius * cosLat * cos(lonRad)
+            val y0 = shellRadius * sinLat
+            val z0 = shellRadius * cosLat * sin(lonRad)
+
+            var worldX = x0
+            var worldY = y0 * cosPitch - z0 * sinPitch
+            var worldZ = y0 * sinPitch + z0 * cosPitch
+
+            if (touchPoint3D != null && touchAttractionStrength > 0.01f && worldZ > -sphereRadius * 0.25f) {
+                val dx = touchPoint3D.worldX - worldX
+                val dy = touchPoint3D.worldY - worldY
+                val dz = touchPoint3D.worldZ - worldZ
+                val dist = sqrt(dx * dx + dy * dy + dz * dz)
+                val pull = (1f - (dist / (sphereRadius * 1.65f)).coerceIn(0f, 1f)) *
+                    0.54f * touchAttractionStrength
+                worldX += dx * pull
+                worldY += dy * pull
+                worldZ += dz * pull
+            }
+
+            val isFront = worldZ >= 0f
+            val perspective = cameraDistance / (cameraDistance - worldZ).coerceAtLeast(sphereRadius * 0.75f)
+            val sx = center.x + worldX * perspective
+            val sy = center.y + worldY * perspective
+
+            if (isFront == drawFrontHemisphere) {
+                if (!isDrawingSegment) {
+                    reusablePath.moveTo(sx, sy)
+                    isDrawingSegment = true
+                } else {
+                    reusablePath.quadraticTo(prevScreenX, prevScreenY, (prevScreenX + sx) * 0.5f, (prevScreenY + sy) * 0.5f)
+                }
+            } else {
+                isDrawingSegment = false
+            }
+            prevScreenX = sx
+            prevScreenY = sy
+        }
+
+        val baseAlpha = if (drawFrontHemisphere) {
+            (0.20f + 0.16f * energy + 0.14f * touchAttractionStrength) * intensity
+        } else {
+            (0.07f + 0.05f * energy) * intensity
+        }
+
+        // Широкий мягкий ореол потока + тонкая яркая сердцевина
+        drawPath(
+            path = reusablePath,
+            color = streamColor.copy(alpha = (baseAlpha * 0.45f).coerceIn(0.02f, 0.36f)),
+            style = Stroke(
+                width = (if (drawFrontHemisphere) 4.2.dp else 2.6.dp).toPx(),
+                cap = StrokeCap.Round
+            ),
+            blendMode = BlendMode.Plus
+        )
+        drawPath(
+            path = reusablePath,
+            color = lerp(streamColor, Color.White, if (drawFrontHemisphere) 0.35f else 0.10f)
+                .copy(alpha = baseAlpha.coerceIn(0.03f, 0.58f)),
+            style = Stroke(
+                width = (if (drawFrontHemisphere) 1.4.dp else 0.9.dp).toPx(),
+                cap = StrokeCap.Round
+            ),
+            blendMode = BlendMode.Plus
+        )
+    }
+}
+
+/**
+ * Полупрозрачное 3D-преломляющее ядро в центре сферы, которое частично перекрывает
+ * заднюю полусферу (`z < 0`) потоков и сгустков, создавая явный оптический параллакс глубины.
+ */
+private fun DrawScope.draw3DRefractiveCoreNucleus(
     center: Offset,
     radius: Float,
     phaseRad: Float,
@@ -1449,56 +1698,52 @@ private fun DrawScope.drawRefractiveInnerCoreLayer(
     touchPoint3D: SphereTouchPoint3D?,
     touchAttractionStrength: Float
 ) {
-    val shiftX = if (touchPoint3D != null) touchPoint3D.worldX * 0.22f * touchAttractionStrength else 0f
-    val shiftY = if (touchPoint3D != null) touchPoint3D.worldY * 0.22f * touchAttractionStrength else 0f
+    val shiftX = if (touchPoint3D != null) touchPoint3D.worldX * 0.26f * touchAttractionStrength else 0f
+    val shiftY = if (touchPoint3D != null) touchPoint3D.worldY * 0.26f * touchAttractionStrength else 0f
     val nucleusCenter = Offset(
-        x = center.x + radius * 0.05f * cos(phaseRad * 0.7f) + shiftX,
-        y = center.y + radius * 0.05f * sin(phaseRad * 0.6f) + shiftY
+        x = center.x + radius * 0.04f * cos(phaseRad * 0.65f) + shiftX,
+        y = center.y + radius * 0.04f * sin(phaseRad * 0.55f) + shiftY
     )
-    val nucleusRadius = radius * (0.56f + 0.04f * breathProgress + 0.06f * energy)
+    val veilRadius = radius * (0.62f + 0.04f * breathProgress + 0.05f * energy)
 
-    // Мягкая оптическая вуаль ядра, приглушающая элементы, проходящие позади центра сферы (z < 0)
+    // 1. Оптическая поглощающая вуаль ядра, приглушающая заднюю полусферу (z < 0) для 3D-разделения планов
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(
-                ObsidianCoreDark.copy(alpha = 0.54f),
-                coreGlowColor.copy(alpha = (0.34f + 0.16f * energy) * intensity),
-                primaryColor.copy(alpha = (0.20f + 0.12f * breathProgress) * intensity),
-                Color.Transparent
-            ),
+            0.0f to ObsidianVoidCore.copy(alpha = 0.62f),
+            0.55f to ObsidianVoidCore.copy(alpha = 0.38f),
+            0.85f to coreGlowColor.copy(alpha = 0.18f * intensity),
+            1.0f to Color.Transparent,
             center = nucleusCenter,
-            radius = nucleusRadius
+            radius = veilRadius
         ),
-        radius = nucleusRadius,
+        radius = veilRadius,
         center = nucleusCenter
     )
 
-    // Светящийся энергетический центр ядра
-    val innerPulseRadius = radius * (0.34f + 0.05f * sin(phaseRad * 1.3f) + 0.08f * energy)
+    // 2. Внутреннее пульсирующее энергетическое сердце Давида
+    val heartRadius = radius * (0.38f + 0.05f * sin(phaseRad * 1.4f) + 0.10f * energy)
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(
-                Color.White.copy(alpha = (0.18f + 0.18f * energy + 0.14f * touchAttractionStrength) * intensity),
-                secondaryColor.copy(alpha = (0.32f + 0.18f * energy) * intensity),
-                primaryColor.copy(alpha = 0.16f * intensity),
-                Color.Transparent
-            ),
+            0.0f to Color.White.copy(alpha = (0.28f + 0.24f * energy + 0.18f * touchAttractionStrength) * intensity),
+            0.32f to secondaryColor.copy(alpha = (0.38f + 0.20f * energy) * intensity),
+            0.68f to primaryColor.copy(alpha = (0.22f + 0.12f * breathProgress) * intensity),
+            1.0f to Color.Transparent,
             center = nucleusCenter,
-            radius = innerPulseRadius
+            radius = heartRadius
         ),
-        radius = innerPulseRadius,
-        center = nucleusCenter
+        radius = heartRadius,
+        center = nucleusCenter,
+        blendMode = BlendMode.Plus
     )
 }
 
 /**
- * Отрисовка объёмных 3D-сгустков энергии, движущихся в трёх измерениях внутри и по поверхности сферы.
- * - При `drawFrontHemisphere == false` рисуются только сгустки задней полусферы (`z < 0`) — меньшего
- *   перспективного размера и мягкой яркости, уходящие за ядро.
- * - При `drawFrontHemisphere == true` рисуются сгустки передней полусферы (`z >= 0`) — крупнее,
- *   контрастнее и ярче, проходящие перед ядром и притягивающиеся к пальцу при удержании.
+ * Отрисовка объёмных 3D-кометных сгустков плазмы (`DefaultVolumetricClusters`) с шлейфами движения:
+ * - На задней полусфере (`z < 0`) сгустки меньше и мягче (в глубине за ядром).
+ * - На передней полусфере (`z >= 0`) сгустки крупнее и ярче за счёт 3D-перспективы,
+ *   а при касании пальцем стягиваются в яркий вихрь вокруг точки касания.
  */
-private fun DrawScope.drawVolumetric3DEnergyClusters(
+private fun DrawScope.drawVolumetric3DPlasmaCometClusters(
     center: Offset,
     sphereRadius: Float,
     phaseRad: Float,
@@ -1511,7 +1756,7 @@ private fun DrawScope.drawVolumetric3DEnergyClusters(
     drawFrontHemisphere: Boolean
 ) {
     for ((index, spec) in DefaultVolumetricClusters.withIndex()) {
-        val projected = computeVolumetricCluster3D(
+        val current = computeVolumetricCluster3D(
             clusterIndex = index,
             spec = spec,
             center = center,
@@ -1522,63 +1767,84 @@ private fun DrawScope.drawVolumetric3DEnergyClusters(
             touchAttractionStrength = touchAttractionStrength
         )
 
-        val isFront = projected.worldZ >= 0f
+        val isFront = current.worldZ >= 0f
         if (isFront != drawFrontHemisphere) continue
 
-        // Плавное затухание на границе экватора глубины (z ≈ 0), чтобы переход спереди/сзади был бесшовным
-        val horizonSmooth = (abs(projected.worldZ) / (sphereRadius * 0.18f)).coerceIn(0.25f, 1f)
-        val baseClusterColor = if (spec.useSecondaryColor) secondaryColor else primaryColor
-        val accentClusterColor = if (spec.useSecondaryColor) primaryColor else secondaryColor
+        // Вычисляем предыдущее положение сгустка по фазе для ориентации 3D-шлейфа кометы
+        val trailCluster = computeVolumetricCluster3D(
+            clusterIndex = index,
+            spec = spec,
+            center = center,
+            sphereRadius = sphereRadius,
+            phaseRad = phaseRad - 0.14f,
+            energy = energy,
+            touchPoint3D = touchPoint3D,
+            touchAttractionStrength = touchAttractionStrength
+        )
+
+        val horizonFade = (abs(current.worldZ) / (sphereRadius * 0.16f)).coerceIn(0.22f, 1f)
+        val baseColor = if (spec.useSecondaryColor) secondaryColor else primaryColor
+        val accentColor = if (spec.useSecondaryColor) primaryColor else secondaryColor
 
         val depthAlpha = if (isFront) {
-            (0.38f + 0.44f * projected.depthNormalized + 0.24f * projected.touchPullFactor + 0.14f * energy) *
-                intensity * horizonSmooth
+            (0.34f + 0.42f * current.depthNormalized + 0.26f * current.touchPullFactor + 0.14f * energy) *
+                intensity * horizonFade
         } else {
-            (0.12f + 0.18f * projected.depthNormalized) * intensity * horizonSmooth
+            (0.10f + 0.15f * current.depthNormalized) * intensity * horizonFade
         }
 
         val coreRadiusPx = spec.baseRadiusDp.dp.toPx() *
-            projected.perspectiveScale *
-            (if (isFront) 1.0f + 0.22f * energy + 0.28f * projected.touchPullFactor else 0.74f)
-        val auraRadiusPx = coreRadiusPx * (if (isFront) 3.4f + 0.8f * projected.touchPullFactor else 2.4f)
+            current.perspectiveScale *
+            (if (isFront) 1.0f + 0.24f * energy + 0.30f * current.touchPullFactor else 0.70f)
+        val nebulaRadiusPx = coreRadiusPx * (if (isFront) 3.8f + 0.9f * current.touchPullFactor else 2.6f)
 
-        // Мягкое объёмное свечение вокруг сгустка
+        // 1. Мягкий кометный шлейф за 3D-сгустком
+        val trailVec = current.screenOffset - trailCluster.screenOffset
+        if (trailVec.getDistanceSquared() > 1f) {
+            drawLine(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        baseColor.copy(alpha = (depthAlpha * 0.55f).coerceIn(0.02f, 0.65f)),
+                        Color.White.copy(alpha = (depthAlpha * 0.75f).coerceIn(0.04f, 0.85f))
+                    ),
+                    start = trailCluster.screenOffset,
+                    end = current.screenOffset
+                ),
+                start = trailCluster.screenOffset,
+                end = current.screenOffset,
+                strokeWidth = coreRadiusPx * 1.15f,
+                cap = StrokeCap.Round,
+                blendMode = BlendMode.Plus
+            )
+        }
+
+        // 2. Широкое туманное свечение плазменного сгустка
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(
-                    baseClusterColor.copy(alpha = (depthAlpha * 0.72f).coerceIn(0.04f, 0.82f)),
-                    accentClusterColor.copy(alpha = (depthAlpha * 0.28f).coerceIn(0.02f, 0.42f)),
-                    Color.Transparent
-                ),
-                center = projected.screenOffset,
-                radius = auraRadiusPx
+                0.0f to Color.White.copy(alpha = (depthAlpha * 0.82f).coerceIn(0.04f, 0.92f)),
+                0.28f to baseColor.copy(alpha = (depthAlpha * 0.68f).coerceIn(0.03f, 0.78f)),
+                0.65f to accentColor.copy(alpha = (depthAlpha * 0.26f).coerceIn(0.01f, 0.38f)),
+                1.0f to Color.Transparent,
+                center = current.screenOffset,
+                radius = nebulaRadiusPx
             ),
-            radius = auraRadiusPx,
-            center = projected.screenOffset
-        )
-
-        // Яркое ядро сгустка (на передней полусфере и при притяжении к пальцу приобретает бело-неоновый накал)
-        val coreColor = lerp(
-            baseClusterColor,
-            Color.White,
-            if (isFront) (0.38f + 0.45f * projected.touchPullFactor).coerceIn(0f, 0.85f) else 0.12f
-        )
-        drawCircle(
-            color = coreColor.copy(alpha = (depthAlpha * 1.15f).coerceIn(0.06f, 0.96f)),
-            radius = coreRadiusPx * 0.62f,
-            center = projected.screenOffset
+            radius = nebulaRadiusPx,
+            center = current.screenOffset,
+            blendMode = BlendMode.Plus
         )
     }
 }
 
 /**
- * Отрисовка выпуклой стеклянной поверхности 3D-сферы, краевого преломления (Fresnel Rim Light),
- * скользящих поверхностных бликов и локальной 3D-концентрации энергии под пальцем при касании.
+ * Отрисовка выпуклой 3D-линзы сферы (без плоской обводки!), внутреннего краевого свечения Френеля,
+ * купольного блика и локального 3D-энергетического вихря под пальцем при интерактивном касании.
  */
-private fun DrawScope.drawConvexGlassSurfaceAndTouchCaustics(
+private fun DrawScope.draw3DSphericalLensAndTouchVortex(
     center: Offset,
     radius: Float,
     phaseRad: Float,
+    breathProgress: Float,
     energy: Float,
     primaryColor: Color,
     secondaryColor: Color,
@@ -1586,147 +1852,104 @@ private fun DrawScope.drawConvexGlassSurfaceAndTouchCaustics(
     touchPoint3D: SphereTouchPoint3D?,
     touchAttractionStrength: Float
 ) {
-    // 1. Если активно удержание/перемещение пальца по сфере — рисуем 3D-концентрацию энергии на выпуклой поверхности
-    if (touchPoint3D != null && touchAttractionStrength > 0.005f) {
-        val touchSpot = touchPoint3D.projectedScreenOffset
-        val spotRadius = radius * (0.34f + 0.08f * sin(phaseRad * 3f)) * (0.65f + 0.35f * touchAttractionStrength)
+    // 1. Внутреннее объёмное свечение Френеля (Fresnel Rim Glow), подчёркивающее кривизну 3D-шара у краёв
+    drawCircle(
+        brush = Brush.radialGradient(
+            0.0f to Color.Transparent,
+            0.68f to Color.Transparent,
+            0.88f to primaryColor.copy(alpha = (0.18f + 0.10f * energy) * intensity),
+            0.96f to secondaryColor.copy(alpha = (0.38f + 0.14f * energy) * intensity),
+            1.0f to Color.White.copy(alpha = (0.28f + 0.12f * breathProgress) * intensity),
+            center = center,
+            radius = radius
+        ),
+        radius = radius,
+        center = center,
+        blendMode = BlendMode.Plus
+    )
 
-        // Объёмное подповерхностное свечение вокруг точки касания
+    // 2. Мягкий объёмный купольный блик (3D Dome Specular Sheen) в верхней левой зоне передней полусферы
+    val domeDriftX = radius * 0.04f * cos(phaseRad * 0.42f)
+    val domeDriftY = radius * 0.04f * sin(phaseRad * 0.42f)
+    val domeHighlightCenter = Offset(
+        x = center.x - radius * 0.34f + domeDriftX,
+        y = center.y - radius * 0.36f + domeDriftY
+    )
+    drawCircle(
+        brush = Brush.radialGradient(
+            0.0f to Color.White.copy(alpha = 0.34f * intensity),
+            0.38f to secondaryColor.copy(alpha = 0.18f * intensity),
+            0.75f to primaryColor.copy(alpha = 0.06f * intensity),
+            1.0f to Color.Transparent,
+            center = domeHighlightCenter,
+            radius = radius * 0.58f
+        ),
+        radius = radius,
+        center = center,
+        blendMode = BlendMode.Plus
+    )
+
+    // 3. Контровой подповерхностный рефлекс (Subsurface Rim Bounce) снизу-справа
+    val bounceCenter = Offset(center.x + radius * 0.38f, center.y + radius * 0.40f)
+    drawCircle(
+        brush = Brush.radialGradient(
+            0.0f to primaryColor.copy(alpha = (0.26f + 0.14f * energy) * intensity),
+            0.55f to secondaryColor.copy(alpha = 0.10f * intensity),
+            1.0f to Color.Transparent,
+            center = bounceCenter,
+            radius = radius * 0.56f
+        ),
+        radius = radius,
+        center = center,
+        blendMode = BlendMode.Plus
+    )
+
+    // 4. Интерактивный 3D-вихрь концентрации энергии под пальцем (при удержании или ведении пальцем по сфере)
+    if (touchPoint3D != null && touchAttractionStrength > 0.005f) {
+        val spot = touchPoint3D.projectedScreenOffset
+        val spotRadius = radius * (0.38f + 0.06f * sin(phaseRad * 3.4f)) * (0.60f + 0.40f * touchAttractionStrength)
+
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(
-                    Color.White.copy(alpha = 0.46f * touchAttractionStrength * intensity),
-                    secondaryColor.copy(alpha = 0.52f * touchAttractionStrength * intensity),
-                    primaryColor.copy(alpha = 0.28f * touchAttractionStrength * intensity),
-                    Color.Transparent
-                ),
-                center = touchSpot,
-                radius = spotRadius * 1.35f
+                0.0f to Color.White.copy(alpha = 0.62f * touchAttractionStrength * intensity),
+                0.28f to secondaryColor.copy(alpha = 0.54f * touchAttractionStrength * intensity),
+                0.64f to primaryColor.copy(alpha = 0.26f * touchAttractionStrength * intensity),
+                1.0f to Color.Transparent,
+                center = spot,
+                radius = spotRadius * 1.3f
             ),
             radius = radius,
-            center = center
+            center = center,
+            blendMode = BlendMode.Plus
         )
 
-        // Перспективно-сжатое 3D-кольцо преломления на поверхности сферы вокруг пальца
+        // Перспективно-сжатые 3D-волны на выпуклой поверхности сферы вокруг точки касания
         val normalAngleDeg = (atan2(touchPoint3D.normY, touchPoint3D.normX) * 180.0 / PI).toFloat()
-        val ringRx = radius * 0.22f * (0.75f + 0.25f * touchAttractionStrength)
-        val ringRy = ringRx * touchPoint3D.limbForeshortening
-        rotate(degrees = normalAngleDeg + 90f, pivot = touchSpot) {
-            drawOval(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.72f * touchAttractionStrength * intensity),
-                        secondaryColor.copy(alpha = 0.45f * touchAttractionStrength * intensity),
-                        Color.Transparent
-                    ),
-                    center = touchSpot,
-                    radius = ringRx * 1.2f
-                ),
-                topLeft = Offset(touchSpot.x - ringRx, touchSpot.y - ringRy),
-                size = Size(ringRx * 2f, ringRy * 2f),
-                style = Stroke(width = 2.0.dp.toPx())
-            )
+        for (waveIdx in 0..1) {
+            val wavePulse = ((phaseRad * 1.4f + waveIdx * 0.5f) % 1f + 1f) % 1f
+            val rx = radius * (0.12f + 0.22f * wavePulse) * (0.7f + 0.3f * touchAttractionStrength)
+            val ry = rx * touchPoint3D.limbForeshortening
+            val waveAlpha = (1f - wavePulse) * 0.58f * touchAttractionStrength * intensity
+
+            rotate(degrees = normalAngleDeg + 90f, pivot = spot) {
+                drawOval(
+                    color = lerp(secondaryColor, Color.White, 0.5f).copy(alpha = waveAlpha.coerceIn(0f, 0.75f)),
+                    topLeft = Offset(spot.x - rx, spot.y - ry),
+                    size = Size(rx * 2f, ry * 2f),
+                    style = Stroke(width = (2.2f - waveIdx * 0.6f).dp.toPx()),
+                    blendMode = BlendMode.Plus
+                )
+            }
         }
     }
-
-    // 2. Главный выпуклый стеклянный блик в верхней левой части сферы (плавно дышит и смещается по 3D-поверхности)
-    val specularDriftX = radius * 0.04f * cos(phaseRad * 0.45f)
-    val specularDriftY = radius * 0.04f * sin(phaseRad * 0.45f)
-    val highlightCenter = Offset(
-        x = center.x - radius * 0.32f + specularDriftX,
-        y = center.y - radius * 0.34f + specularDriftY
-    )
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(
-                Color.White.copy(alpha = 0.30f * intensity),
-                secondaryColor.copy(alpha = 0.20f * intensity),
-                Color.Transparent
-            ),
-            center = highlightCenter,
-            radius = radius * 0.54f
-        ),
-        radius = radius,
-        center = center
-    )
-
-    // Изогнутая дуга блика (caustic arc) вдоль выпуклой верхней левой грани 3D-сферы
-    val innerRimRadius = radius * 0.91f
-    drawArc(
-        brush = Brush.sweepGradient(
-            colors = listOf(
-                Color.Transparent,
-                Color.White.copy(alpha = 0.36f * intensity),
-                secondaryColor.copy(alpha = 0.22f * intensity),
-                Color.Transparent
-            ),
-            center = center
-        ),
-        startAngle = 196f,
-        sweepAngle = 68f,
-        useCenter = false,
-        topLeft = Offset(center.x - innerRimRadius, center.y - innerRimRadius),
-        size = Size(innerRimRadius * 2f, innerRimRadius * 2f),
-        style = Stroke(width = 3.2.dp.toPx(), cap = StrokeCap.Round)
-    )
-
-    // 3. Нижний правый контровой рефлекс (Sub-surface Rim Bounce) для подчёркивания 3D-шарообразности
-    val bounceCenter = Offset(center.x + radius * 0.36f, center.y + radius * 0.38f)
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(
-                primaryColor.copy(alpha = (0.28f + 0.14f * energy) * intensity),
-                secondaryColor.copy(alpha = 0.12f * intensity),
-                Color.Transparent
-            ),
-            center = bounceCenter,
-            radius = radius * 0.62f
-        ),
-        radius = radius,
-        center = center
-    )
-
-    // 4. Двухслойный стеклянный обод (Fresnel Rim Light) с ощущением толщины стенки сферы
-    val innerWallRadius = radius * 0.972f
-    drawCircle(
-        color = secondaryColor.copy(alpha = 0.20f * intensity),
-        radius = innerWallRadius,
-        center = center,
-        style = Stroke(width = 1.2.dp.toPx())
-    )
-
-    drawCircle(
-        brush = Brush.sweepGradient(
-            colors = listOf(
-                secondaryColor.copy(alpha = 0.86f * intensity),
-                primaryColor.copy(alpha = 0.36f * intensity),
-                Color.White.copy(alpha = 0.78f * intensity),
-                primaryColor.copy(alpha = 0.48f * intensity),
-                secondaryColor.copy(alpha = 0.86f * intensity)
-            ),
-            center = center
-        ),
-        radius = radius,
-        center = center,
-        style = Stroke(width = 2.2.dp.toPx())
-    )
-
-    // Мягкий внешний ореол непосредственно вокруг стеклянной кромки
-    drawCircle(
-        color = primaryColor.copy(alpha = (0.24f + 0.14f * energy) * intensity),
-        radius = radius * 1.02f,
-        center = center,
-        style = Stroke(width = 4.6.dp.toPx())
-    )
 }
 
 /**
- * Отрисовка трёхмерных наклонных эллиптических световых орбит с честной глубиной:
- * - При `drawFrontHemisphere == false` рисуются только сегменты, находящиеся ЗА сферой (`z < 0`).
- * - При `drawFrontHemisphere == true` рисуются сегменты ПЕРЕД сферой (`z >= 0`), включая
- *   движущиеся по орбите яркие энергетические сгустки (кометные шлейфы) и узлы свечения.
+ * Отрисовка шелковистых трёхмерных гироскопических энергетических лент (`DefaultGyroRibbonSpecs`)
+ * с перспективным изменением толщины, мягким неоновым свечением и разделением на заднюю (`z < 0`)
+ * и переднюю (`z >= 0`) полусферы.
  */
-private fun DrawScope.drawThreeDimensionalOrbits(
+private fun DrawScope.drawGyroscopic3DSilkRibbons(
     center: Offset,
     sphereRadius: Float,
     phaseRad: Float,
@@ -1738,22 +1961,26 @@ private fun DrawScope.drawThreeDimensionalOrbits(
     touchAttractionStrength: Float,
     drawFrontHemisphere: Boolean
 ) {
-    val segments = 64
+    val segments = 72
     val stepAngle = (2.0 * PI / segments).toFloat()
-    val cameraDistance = sphereRadius * 3.6f
+    val cameraDistance = sphereRadius * 3.3f
 
-    for ((orbitIndex, spec) in DefaultOrbitSpecs.withIndex()) {
-        val rollRad = (spec.rollDegrees * PI / 180.0).toFloat()
-        val pitchRad = (spec.pitchDegrees * PI / 180.0).toFloat()
-        val cosRoll = cos(rollRad)
-        val sinRoll = sin(rollRad)
+    for ((ribbonIndex, spec) in DefaultGyroRibbonSpecs.withIndex()) {
+        // Живая 3D-прецессия плоскости орбиты, чтобы ленты плавно покачивались в 3D-пространстве
+        val dynamicTiltXDeg = spec.baseTiltXDeg + 5.5f * sin(phaseRad * spec.precessionRate + ribbonIndex)
+        val dynamicTiltZDeg = spec.baseTiltZDeg + 6.5f * cos(phaseRad * spec.precessionRate * 0.85f + ribbonIndex)
+
+        val pitchRad = (dynamicTiltXDeg * PI / 180.0).toFloat()
+        val rollRad = (dynamicTiltZDeg * PI / 180.0).toFloat()
         val cosPitch = cos(pitchRad)
         val sinPitch = sin(pitchRad)
+        val cosRoll = cos(rollRad)
+        val sinRoll = sin(rollRad)
 
-        val orbitRadius = sphereRadius * spec.radiusRatio * (1f + energy * 0.04f)
+        val baseOrbitRadius = sphereRadius * spec.radiusRatio * (1f + energy * 0.045f)
         val baseColor = if (spec.useSecondaryColor) secondaryColor else primaryColor
         val accentColor = if (spec.useSecondaryColor) primaryColor else secondaryColor
-        val orbitDynamicPhase = phaseRad * spec.speedMultiplier + spec.phaseOffsetRad
+        val ribbonPhase = phaseRad * spec.speedMultiplier + spec.phaseOffsetRad
 
         var prevX = 0f
         var prevY = 0f
@@ -1762,37 +1989,34 @@ private fun DrawScope.drawThreeDimensionalOrbits(
 
         for (i in 0..segments) {
             val theta = i * stepAngle
-            val waveOffset = if (energy > 0.06f) {
-                sphereRadius * 0.028f * energy * sin(theta * 3f + orbitDynamicPhase * 2f)
-            } else {
-                0f
-            }
-            val r = orbitRadius + waveOffset
+            val harmonicWave = sphereRadius * (0.018f + 0.026f * energy) *
+                sin(theta * spec.waveHarmonic + ribbonPhase * 1.5f)
+            val r = baseOrbitRadius + harmonicWave
 
             val xLocal = r * cos(theta)
             val zLocal = r * sin(theta)
 
-            val yPitch = -zLocal * cosPitch
+            val yPitch = -zLocal * cosPitch + harmonicWave * 0.45f * cos(theta * 2f - ribbonPhase)
             val zPitch = zLocal * sinPitch
 
             var xWorld = xLocal * cosRoll - yPitch * sinRoll
             var yWorld = xLocal * sinRoll + yPitch * cosRoll
             var zWorld = zPitch
 
-            // Мягкое 3D-притяжение передней дуги орбиты к пальцу при удержании
+            // При удержании пальца передние дуги энергетических лент эластично изгибаются к точке касания
             if (touchPoint3D != null && touchAttractionStrength > 0.01f && zWorld > 0f) {
                 val dx = touchPoint3D.worldX - xWorld
                 val dy = touchPoint3D.worldY - yWorld
                 val dz = touchPoint3D.worldZ - zWorld
                 val dist = sqrt(dx * dx + dy * dy + dz * dz)
-                val pull = (1f - (dist / (sphereRadius * 1.8f)).coerceIn(0f, 1f)) *
-                    0.32f * touchAttractionStrength
+                val pull = (1f - (dist / (sphereRadius * 1.85f)).coerceIn(0f, 1f)) *
+                    0.36f * touchAttractionStrength
                 xWorld += dx * pull
                 yWorld += dy * pull
                 zWorld += dz * pull
             }
 
-            val perspective = cameraDistance / (cameraDistance - zWorld).coerceAtLeast(sphereRadius * 0.8f)
+            val perspective = cameraDistance / (cameraDistance - zWorld).coerceAtLeast(sphereRadius * 0.78f)
             val screenX = center.x + xWorld * perspective
             val screenY = center.y + yWorld * perspective
 
@@ -1800,42 +2024,49 @@ private fun DrawScope.drawThreeDimensionalOrbits(
                 val midZ = (zWorld + prevZ) * 0.5f
                 val isFront = midZ >= 0f
                 if (isFront == drawFrontHemisphere) {
-                    val depthFactor = ((midZ / orbitRadius) + 1f) * 0.5f
+                    val depthFactor = ((midZ / baseOrbitRadius) + 1f).coerceIn(0f, 2f) * 0.5f
                     val midTheta = theta - stepAngle * 0.5f
-                    val streamWave = ((cos(midTheta - orbitDynamicPhase) + 1f) * 0.5f)
-                    val streamHighlight = streamWave * streamWave * streamWave
 
-                    val baseAlpha = if (isFront) {
-                        (0.34f + 0.52f * streamHighlight + 0.14f * depthFactor) * intensity
+                    // Две бегущие световые волны вдоль каждой 3D-ленты
+                    val waveA = ((cos(midTheta - ribbonPhase) + 1f) * 0.5f)
+                    val waveB = ((cos(midTheta * 2f + ribbonPhase * 0.7f) + 1f) * 0.5f)
+                    val crestHighlight = (waveA * waveA * waveA * 0.78f + waveB * waveB * 0.22f).coerceIn(0f, 1f)
+
+                    val alpha = if (isFront) {
+                        (0.24f + 0.58f * crestHighlight + 0.16f * depthFactor) * intensity
                     } else {
-                        (0.08f + 0.14f * streamHighlight) * intensity
+                        (0.06f + 0.14f * crestHighlight) * intensity
                     }
 
-                    val strokePx = spec.ribbonWidthDp.dp.toPx() *
-                        (if (isFront) 0.88f + 0.58f * streamHighlight else 0.58f)
+                    val baseThicknessPx = spec.ribbonThicknessDp.dp.toPx() * perspective
+                    val coreStrokePx = baseThicknessPx *
+                        (if (isFront) 0.72f + 0.68f * crestHighlight else 0.48f)
 
-                    if (isFront && streamHighlight > 0.25f) {
+                    // 1. Широкое мягкое свечение шелковистой ленты (Outer Silk Glow)
+                    if (isFront || crestHighlight > 0.35f) {
                         drawLine(
-                            color = baseColor.copy(alpha = (baseAlpha * 0.34f).coerceIn(0f, 0.45f)),
+                            color = baseColor.copy(alpha = (alpha * (if (isFront) 0.32f else 0.18f)).coerceIn(0.01f, 0.42f)),
                             start = Offset(prevX, prevY),
                             end = Offset(screenX, screenY),
-                            strokeWidth = strokePx * 3.0f,
-                            cap = StrokeCap.Round
+                            strokeWidth = coreStrokePx * 3.4f,
+                            cap = StrokeCap.Round,
+                            blendMode = BlendMode.Plus
                         )
                     }
 
-                    val segmentColor = lerp(
+                    // 2. Яркая плазменная сердцевина ленты
+                    val coreColor = lerp(
                         baseColor,
                         Color.White,
-                        if (isFront) (streamHighlight * 0.48f).coerceIn(0f, 0.55f) else 0f
+                        if (isFront) (crestHighlight * 0.56f).coerceIn(0f, 0.68f) else 0.08f
                     )
-
                     drawLine(
-                        color = segmentColor.copy(alpha = baseAlpha.coerceIn(0.04f, 0.96f)),
+                        color = coreColor.copy(alpha = alpha.coerceIn(0.03f, 0.94f)),
                         start = Offset(prevX, prevY),
                         end = Offset(screenX, screenY),
-                        strokeWidth = strokePx,
-                        cap = StrokeCap.Round
+                        strokeWidth = coreStrokePx,
+                        cap = StrokeCap.Round,
+                        blendMode = BlendMode.Plus
                     )
                 }
             }
@@ -1846,10 +2077,10 @@ private fun DrawScope.drawThreeDimensionalOrbits(
             hasPrev = true
         }
 
-        // Светящаяся энергетическая частица (flare), бегущая по орбите в 3D
-        val headTheta = orbitDynamicPhase
-        val headXLocal = orbitRadius * cos(headTheta)
-        val headZLocal = orbitRadius * sin(headTheta)
+        // Светящийся энергетический импульс (photon node), скользящий вдоль 3D-ленты
+        val headTheta = ribbonPhase
+        val headXLocal = baseOrbitRadius * cos(headTheta)
+        val headZLocal = baseOrbitRadius * sin(headTheta)
         val headYPitch = -headZLocal * cosPitch
         val headZWorld = headZLocal * sinPitch
 
@@ -1859,165 +2090,33 @@ private fun DrawScope.drawThreeDimensionalOrbits(
             var effectiveHeadZ = headZWorld
 
             if (touchPoint3D != null && touchAttractionStrength > 0.01f && effectiveHeadZ > 0f) {
-                val pull = 0.38f * touchAttractionStrength
+                val pull = 0.40f * touchAttractionStrength
                 headXWorld += (touchPoint3D.worldX - headXWorld) * pull
                 headYWorld += (touchPoint3D.worldY - headYWorld) * pull
                 effectiveHeadZ += (touchPoint3D.worldZ - effectiveHeadZ) * pull
             }
 
-            val headPerspective = cameraDistance / (cameraDistance - effectiveHeadZ).coerceAtLeast(sphereRadius * 0.8f)
+            val headPerspective = cameraDistance / (cameraDistance - effectiveHeadZ).coerceAtLeast(sphereRadius * 0.78f)
             val headPos = Offset(
                 center.x + headXWorld * headPerspective,
                 center.y + headYWorld * headPerspective
             )
-            val flareAlpha = (if (drawFrontHemisphere) 0.92f else 0.24f) * intensity
-            val flareRadius = (if (orbitIndex == 0) 3.5.dp else 2.6.dp).toPx() * headPerspective
+            val flareAlpha = (if (drawFrontHemisphere) 0.92f else 0.22f) * intensity
+            val flareRadius = (if (ribbonIndex == 0) 3.8.dp else 2.8.dp).toPx() * headPerspective
 
             drawCircle(
-                color = accentColor.copy(alpha = flareAlpha * 0.44f),
-                radius = flareRadius * 2.8f,
-                center = headPos
-            )
-            drawCircle(
-                color = Color.White.copy(alpha = flareAlpha),
-                radius = flareRadius * 0.85f,
-                center = headPos
+                brush = Brush.radialGradient(
+                    0.0f to Color.White.copy(alpha = flareAlpha),
+                    0.35f to accentColor.copy(alpha = flareAlpha * 0.65f),
+                    1.0f to Color.Transparent,
+                    center = headPos,
+                    radius = flareRadius * 3.2f
+                ),
+                radius = flareRadius * 3.2f,
+                center = headPos,
+                blendMode = BlendMode.Plus
             )
         }
-    }
-}
-
-/**
- * Отрисовка внутренних 3D-линий энергетического потока по сферической поверхности с честным
- * разделением задней (`z < 0`) и передней (`z >= 0`) полусфер и реакцией на 3D-касание.
- */
-private fun DrawScope.drawSubtleInnerEnergyMesh(
-    center: Offset,
-    radius: Float,
-    breathProgress: Float,
-    yawDegrees: Float,
-    energy: Float,
-    primaryColor: Color,
-    secondaryColor: Color,
-    intensity: Float,
-    touchPoint3D: SphereTouchPoint3D?,
-    touchAttractionStrength: Float,
-    drawFrontHemisphere: Boolean
-) {
-    val pitchRadians = (22.0 * PI / 180.0).toFloat()
-    val yawRadians = (yawDegrees * PI / 180.0).toFloat()
-    val cosPitch = cos(pitchRadians)
-    val sinPitch = sin(pitchRadians)
-    val cosYaw = cos(yawRadians)
-    val sinYaw = sin(yawRadians)
-
-    val breathingRadius = radius * (1f + 0.02f * sin(breathProgress * 2f * PI.toFloat()))
-    val cameraDistance = breathingRadius * 3.3f
-
-    val latitudeAngles = floatArrayOf(-42f, -14f, 14f, 42f)
-    val stepTheta = (PI * 2.0 / 32.0).toFloat()
-
-    for ((latIdx, latDeg) in latitudeAngles.withIndex()) {
-        val phi = (latDeg * PI / 180.0).toFloat()
-        val cosPhi = cos(phi)
-        val sinPhi = sin(phi)
-        val latRadius = breathingRadius * cosPhi
-        val y0 = breathingRadius * sinPhi
-
-        var prevScreenX = 0f
-        var prevScreenY = 0f
-        var prevZ = 0f
-        var isFirst = true
-
-        for (i in 0..32) {
-            val theta = i * stepTheta
-            val waveDeform = 0.036f * (0.35f + energy) * sin(theta * 3f + phi * 2f + yawRadians)
-            val rCurrent = latRadius * (1f + waveDeform)
-
-            val x0 = rCurrent * cos(theta)
-            val z0 = rCurrent * sin(theta)
-
-            val x1 = x0 * cosYaw + z0 * sinYaw
-            val z1 = -x0 * sinYaw + z0 * cosYaw
-
-            var x2 = x1
-            var y2 = y0 * cosPitch - z1 * sinPitch
-            var z2 = y0 * sinPitch + z1 * cosPitch
-
-            // При удержании пальца внутренние энергетические нити плавно изгибаются к 3D-точке касания
-            if (touchPoint3D != null && touchAttractionStrength > 0.01f && z2 > -breathingRadius * 0.2f) {
-                val dx = touchPoint3D.worldX - x2
-                val dy = touchPoint3D.worldY - y2
-                val dz = touchPoint3D.worldZ - z2
-                val dist = sqrt(dx * dx + dy * dy + dz * dz)
-                val pull = (1f - (dist / (breathingRadius * 1.6f)).coerceIn(0f, 1f)) *
-                    0.46f * touchAttractionStrength
-                x2 += dx * pull
-                y2 += dy * pull
-                z2 += dz * pull
-            }
-
-            val perspectiveK = cameraDistance / (cameraDistance - z2).coerceAtLeast(breathingRadius * 0.75f)
-            val screenX = center.x + x2 * perspectiveK
-            val screenY = center.y + y2 * perspectiveK
-
-            if (!isFirst) {
-                val midZ = (z2 + prevZ) * 0.5f
-                val isFront = midZ >= 0f
-                if (isFront == drawFrontHemisphere) {
-                    val flowPulse = ((cos(theta * 2f - yawRadians * 1.6f + latIdx) + 1f) * 0.5f)
-                    val strokeAlpha = if (isFront) {
-                        (0.12f + 0.18f * flowPulse + 0.12f * touchAttractionStrength) * intensity
-                    } else {
-                        (0.04f + 0.06f * flowPulse) * intensity
-                    }
-                    val lineColor = if (latIdx % 2 == 0) secondaryColor else primaryColor
-
-                    drawLine(
-                        color = lineColor.copy(alpha = strokeAlpha.coerceIn(0.03f, 0.38f)),
-                        start = Offset(prevScreenX, prevScreenY),
-                        end = Offset(screenX, screenY),
-                        strokeWidth = (if (isFront) 1.25.dp else 0.9.dp).toPx(),
-                        cap = StrokeCap.Round
-                    )
-                }
-            }
-
-            prevScreenX = screenX
-            prevScreenY = screenY
-            prevZ = z2
-            isFirst = false
-        }
-    }
-}
-
-/**
- * Отрисовка фоновых микро-частиц (stardust) вокруг сферы, создающих атмосферу живого поля.
- */
-private fun DrawScope.drawAmbientSpaceParticles(
-    center: Offset,
-    sphereRadius: Float,
-    phaseRad: Float,
-    primaryColor: Color,
-    secondaryColor: Color,
-    intensity: Float
-) {
-    val particleCount = 10
-    for (i in 0 until particleCount) {
-        val baseAngle = (i * (2.0 * PI / particleCount)).toFloat() + phaseRad * (if (i % 2 == 0) 0.22f else -0.18f)
-        val distRatio = 1.16f + (i % 3) * 0.11f + 0.04f * sin(phaseRad * 0.8f + i)
-        val px = center.x + sphereRadius * distRatio * cos(baseAngle)
-        val py = center.y + sphereRadius * (distRatio * 0.82f) * sin(baseAngle)
-        val twinkle = ((sin(phaseRad * 1.4f + i * 1.7f) + 1f) * 0.5f)
-        val alpha = (0.14f + 0.36f * twinkle) * intensity
-        val particleColor = if (i % 2 == 0) primaryColor else secondaryColor
-        val r = (1.2.dp.toPx() + 1.0.dp.toPx() * twinkle)
-
-        drawCircle(
-            color = particleColor.copy(alpha = alpha.coerceIn(0.05f, 0.55f)),
-            radius = r,
-            center = Offset(px, py)
-        )
     }
 }
 
@@ -2039,7 +2138,7 @@ private fun DrawScope.drawPlanetaryFinanceRing(
         drawOval(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    accentColor.copy(alpha = 0.32f),
+                    accentColor.copy(alpha = 0.34f),
                     accentColor.copy(alpha = 0.12f),
                     Color.Transparent
                 ),
@@ -2048,7 +2147,8 @@ private fun DrawScope.drawPlanetaryFinanceRing(
             ),
             topLeft = Offset(center.x - ringRadiusX, center.y - ringRadiusY),
             size = Size(ringRadiusX * 2f, ringRadiusY * 2f),
-            style = Stroke(width = 2.8.dp.toPx())
+            style = Stroke(width = 2.6.dp.toPx()),
+            blendMode = BlendMode.Plus
         )
 
         val scanAngle = orbitProgress * 2f * PI.toFloat()
@@ -2056,14 +2156,19 @@ private fun DrawScope.drawPlanetaryFinanceRing(
         val pulseY = center.y + ringRadiusY * sin(scanAngle)
 
         drawCircle(
-            color = goldColor.copy(alpha = 0.95f),
-            radius = 4.2.dp.toPx(),
-            center = Offset(pulseX, pulseY)
-        )
-        drawCircle(
-            color = accentColor.copy(alpha = 0.40f),
-            radius = 9.5.dp.toPx(),
-            center = Offset(pulseX, pulseY)
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color.White,
+                    goldColor.copy(alpha = 0.92f),
+                    accentColor.copy(alpha = 0.36f),
+                    Color.Transparent
+                ),
+                center = Offset(pulseX, pulseY),
+                radius = 11.dp.toPx()
+            ),
+            radius = 11.dp.toPx(),
+            center = Offset(pulseX, pulseY),
+            blendMode = BlendMode.Plus
         )
     }
 }
@@ -2087,8 +2192,9 @@ private fun DrawScope.drawAnalyzingDualOrbits(
         val beacon1Y = center.y + orbitRadiusY * sin(ang1)
         drawCircle(
             color = cyanColor,
-            radius = 3.6.dp.toPx(),
-            center = Offset(beacon1X, beacon1Y)
+            radius = 3.8.dp.toPx(),
+            center = Offset(beacon1X, beacon1Y),
+            blendMode = BlendMode.Plus
         )
     }
 
@@ -2098,8 +2204,9 @@ private fun DrawScope.drawAnalyzingDualOrbits(
         val beacon2Y = center.y + orbitRadiusY * sin(ang2)
         drawCircle(
             color = emeraldColor,
-            radius = 3.6.dp.toPx(),
-            center = Offset(beacon2X, beacon2Y)
+            radius = 3.8.dp.toPx(),
+            center = Offset(beacon2X, beacon2Y),
+            blendMode = BlendMode.Plus
         )
     }
 }
@@ -2118,28 +2225,30 @@ private fun DrawScope.drawAcousticSoundwaveArcs(
     val maxExpansion = 22.dp.toPx() * energy.coerceIn(0.1f, 1f)
 
     for (i in 1..arcCount) {
-        val extraDist = i * (10.dp.toPx() + maxExpansion * (i / 2f))
+        val extraDist = i * (10.dp.toPx() + maxExpansion * (i / 2f)) + 2.dp.toPx() * breathProgress
         val currentRadius = radius + extraDist
-        val alpha = (0.52f - (i * 0.16f)).coerceAtLeast(0.10f) * (0.5f + energy * 0.5f)
+        val alpha = (0.50f - (i * 0.15f)).coerceAtLeast(0.10f) * (0.5f + energy * 0.5f)
 
         drawArc(
             color = color.copy(alpha = alpha),
-            startAngle = 142f,
-            sweepAngle = 76f,
+            startAngle = 144f,
+            sweepAngle = 72f,
             useCenter = false,
             topLeft = Offset(center.x - currentRadius, center.y - currentRadius),
             size = Size(currentRadius * 2f, currentRadius * 2f),
-            style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 2.0.dp.toPx(), cap = StrokeCap.Round),
+            blendMode = BlendMode.Plus
         )
 
         drawArc(
             color = color.copy(alpha = alpha),
-            startAngle = -38f,
-            sweepAngle = 76f,
+            startAngle = -36f,
+            sweepAngle = 72f,
             useCenter = false,
             topLeft = Offset(center.x - currentRadius, center.y - currentRadius),
             size = Size(currentRadius * 2f, currentRadius * 2f),
-            style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 2.0.dp.toPx(), cap = StrokeCap.Round),
+            blendMode = BlendMode.Plus
         )
     }
 }
@@ -2164,7 +2273,8 @@ private fun DrawScope.drawConnectingHandshakeArcs(
             useCenter = false,
             topLeft = Offset(center.x - outerRadius, center.y - outerRadius),
             size = Size(outerRadius * 2f, outerRadius * 2f),
-            style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round),
+            blendMode = BlendMode.Plus
         )
         drawArc(
             color = color.copy(alpha = 0.78f),
@@ -2173,7 +2283,8 @@ private fun DrawScope.drawConnectingHandshakeArcs(
             useCenter = false,
             topLeft = Offset(center.x - outerRadius, center.y - outerRadius),
             size = Size(outerRadius * 2f, outerRadius * 2f),
-            style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
+            style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round),
+            blendMode = BlendMode.Plus
         )
     }
 }
@@ -2194,7 +2305,8 @@ private fun DrawScope.drawSuccessExpansionRing(
         color = color.copy(alpha = ringAlpha),
         radius = ringR,
         center = center,
-        style = Stroke(width = 2.4.dp.toPx())
+        style = Stroke(width = 2.4.dp.toPx()),
+        blendMode = BlendMode.Plus
     )
 }
 

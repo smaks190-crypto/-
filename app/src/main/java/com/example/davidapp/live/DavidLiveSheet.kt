@@ -307,41 +307,27 @@ fun DavidLiveHorizontalWaveVisualizer(
         label = "wave_secondary_color"
     )
 
+    val totalBars = barCount.coerceIn(12, 36)
+    val smoothedBarMagnitudes = remember(totalBars) { FloatArray(totalBars) { 0.08f } }
+
     Canvas(
         modifier = modifier
             .semantics {
                 contentDescription = "Горизонтальная звуковая волна David Live"
             }
     ) {
-        val totalBars = barCount.coerceIn(12, 36)
         val widthPx = size.width
         val heightPx = size.height
         val centerY = heightPx / 2f
         val stepX = widthPx / (totalBars + 1).toFloat()
-        val strokeWidth = (stepX * 0.50f).coerceIn(2.2.dp.toPx(), 4.2.dp.toPx())
+        val strokeWidth = (stepX * 0.48f).coerceIn(2.0.dp.toPx(), 4.0.dp.toPx())
         val minBarHalfHeight = (heightPx * 0.08f).coerceAtLeast(1.8.dp.toPx())
-        val maxBarHalfHeight = (heightPx * 0.46f).coerceAtLeast(minBarHalfHeight + 2f)
-
-        if (waveActivity > 0.2f && (!isMicMuted || isDavidSpeaking || isProcessing)) {
-            drawRoundRect(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        statePrimaryColor.copy(alpha = (0.16f + 0.20f * energyClamped) * waveActivity),
-                        Color.Transparent
-                    ),
-                    center = Offset(widthPx / 2f, centerY),
-                    radius = (widthPx * 0.48f).coerceAtLeast(16f)
-                ),
-                topLeft = Offset.Zero,
-                size = Size(widthPx, heightPx),
-                cornerRadius = CornerRadius(heightPx / 2f, heightPx / 2f)
-            )
-        }
+        val maxBarHalfHeight = (heightPx * 0.45f).coerceAtLeast(minBarHalfHeight + 2f)
 
         val rayCount = DavidLiveSpectrumAnalyzer.RAY_COUNT
         for (i in 0 until totalBars) {
             val normPos = (i + 0.5f) / totalBars.toFloat()
-            val centerEnvelope = sin(PI * normPos.toDouble()).toFloat().pow(1.32f)
+            val centerEnvelope = sin(PI * normPos.toDouble()).toFloat().pow(1.36f)
 
             val distFromCenter = kotlin.math.abs(normPos - 0.5f) * 2f
             val rayIdx = ((distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
@@ -349,13 +335,19 @@ fun DavidLiveHorizontalWaveVisualizer(
             val rawRay = (rayMagnitudes.getOrElse(rayIdx) { 0.08f } / env).coerceIn(0f, 1f)
 
             // Gentle harmonic contour in idle listening so the waveform under the sphere looks alive
-            val idleContour = 0.16f + 0.48f * centerEnvelope * (0.55f + 0.45f * kotlin.math.abs(sin((i * 0.85f).toDouble())).toFloat())
-            val activeMagnitude = if (isMicMuted && !isDavidSpeaking && !isProcessing) {
+            val idleContour = 0.14f + 0.42f * centerEnvelope * (0.55f + 0.45f * kotlin.math.abs(sin((i * 0.85f).toDouble())).toFloat())
+            val targetMagnitude = if (isMicMuted && !isDavidSpeaking && !isProcessing) {
                 0.06f
             } else {
-                val baseSignal = rawRay.coerceAtLeast(if (isIdleListeningUnmuted) idleContour else 0.10f)
-                (baseSignal * (0.35f + 0.85f * centerEnvelope) * waveActivity).coerceIn(0.06f, 1f)
+                val baseSignal = rawRay.coerceAtLeast(if (isIdleListeningUnmuted) idleContour else 0.09f)
+                (baseSignal * (0.32f + 0.86f * centerEnvelope) * waveActivity).coerceIn(0.06f, 1f)
             }
+
+            // Smooth per-bar temporal interpolation (fast attack, smooth decay)
+            val prevMag = smoothedBarMagnitudes[i]
+            val smoothingFactor = if (targetMagnitude > prevMag) 0.42f else 0.22f
+            val activeMagnitude = (prevMag + (targetMagnitude - prevMag) * smoothingFactor).coerceIn(0.06f, 1f)
+            smoothedBarMagnitudes[i] = activeMagnitude
 
             val halfBar = minBarHalfHeight + (maxBarHalfHeight - minBarHalfHeight) * activeMagnitude
             val x = stepX * (i + 1)
@@ -364,8 +356,8 @@ fun DavidLiveHorizontalWaveVisualizer(
                 effectiveVisualState == DavidLiveVisualState.OFFLINE -> ErrorCrimson.copy(alpha = 0.65f)
                 effectiveVisualState == DavidLiveVisualState.API_MISSING -> GoldApiMissing.copy(alpha = 0.68f)
                 effectiveVisualState == DavidLiveVisualState.ERROR -> CrimsonMagentaError.copy(alpha = 0.68f)
-                isMicMuted && !isDavidSpeaking -> IdleWaveSlate.copy(alpha = 0.62f)
-                !isVoiceOrProcessActive -> statePrimaryColor.copy(alpha = 0.48f)
+                isMicMuted && !isDavidSpeaking -> IdleWaveSlate.copy(alpha = 0.58f)
+                !isVoiceOrProcessActive -> statePrimaryColor.copy(alpha = 0.46f)
                 else -> lerp(
                     statePrimaryColor,
                     stateSecondaryColor,
@@ -373,10 +365,43 @@ fun DavidLiveHorizontalWaveVisualizer(
                 )
             }
 
+            val topY = centerY - halfBar
+            val bottomY = centerY + halfBar
+
+            // Soft diffused per-bar aura instead of a rectangular background glow
+            if (waveActivity > 0.18f && (!isMicMuted || isDavidSpeaking || isProcessing)) {
+                val haloHalfBar = (halfBar * 1.32f).coerceAtMost(heightPx * 0.49f)
+                val haloAlpha = (0.08f + 0.18f * activeMagnitude * centerEnvelope) * waveActivity
+                drawLine(
+                    brush = Brush.verticalGradient(
+                        0.0f to Color.Transparent,
+                        0.28f to statePrimaryColor.copy(alpha = haloAlpha * 0.65f),
+                        0.50f to barColor.copy(alpha = haloAlpha),
+                        0.72f to statePrimaryColor.copy(alpha = haloAlpha * 0.65f),
+                        1.0f to Color.Transparent,
+                        startY = centerY - haloHalfBar,
+                        endY = centerY + haloHalfBar
+                    ),
+                    start = Offset(x, centerY - haloHalfBar),
+                    end = Offset(x, centerY + haloHalfBar),
+                    strokeWidth = strokeWidth * 2.35f,
+                    cap = StrokeCap.Round
+                )
+            }
+
+            // Soft vertical gradient bar with tapered luminous tips
             drawLine(
-                color = barColor,
-                start = Offset(x, centerY - halfBar),
-                end = Offset(x, centerY + halfBar),
+                brush = Brush.verticalGradient(
+                    0.0f to barColor.copy(alpha = barColor.alpha * 0.42f),
+                    0.22f to barColor.copy(alpha = barColor.alpha * 0.88f),
+                    0.50f to lerp(barColor, Color.White, 0.22f * activeMagnitude).copy(alpha = barColor.alpha),
+                    0.78f to barColor.copy(alpha = barColor.alpha * 0.88f),
+                    1.0f to barColor.copy(alpha = barColor.alpha * 0.42f),
+                    startY = topY,
+                    endY = bottomY
+                ),
+                start = Offset(x, topY),
+                end = Offset(x, bottomY),
                 strokeWidth = strokeWidth,
                 cap = StrokeCap.Round
             )
