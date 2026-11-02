@@ -423,33 +423,6 @@ fun DavidLiveMeshSphereVisualizer(
         smoothed
     }
 
-    // Непрерывные циклические анимации для естественного дыхания и вращения 3D-сетки
-    val infiniteTransition = rememberInfiniteTransition(label = "david_live_mesh_motion")
-
-    // Спокойное дыхание сферы. Фаза не анимируется в фоне, при reduce motion и системных ошибках.
-    val breathProgress by infiniteTransition.animateFloat(
-        initialValue = if (ambientMotionEnabled) 0f else 0.5f,
-        targetValue = if (ambientMotionEnabled) 1f else 0.5f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "sphere_breathing"
-    )
-
-    // The continuously accumulated yaw phase above is retained across visual-state changes.
-
-    // Импульс сканирования / движения орбит
-    val orbitProgress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = if (ambientMotionEnabled) 1f else 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "sphere_orbit_scan"
-    )
-
     var touchPosition by remember { mutableStateOf(Offset(0.5f, 0.5f)) }
     var isTouchActive by remember { mutableStateOf(false) }
     val touchStrength by animateFloatAsState(

@@ -1166,8 +1166,7 @@ fun DavidLiveSheet(
                         Spacer(modifier = Modifier.height(if (isEmbeddedInModalCard) 8.dp else 12.dp))
 
                         // Contextual Speech / Status Cloud (`david_live_subtitle_bubble`)
-                        // Matches the reference design: crisp state-tinted border, clear explanation,
-                        // and contextual action pill ("Повторить", "Добавить API", "Настроить API")
+                        // Informational only: actions are handled directly by the sphere.
                         Column(modifier = Modifier.fillMaxWidth()) {
                             val isAlertState = effectiveVisualState == DavidLiveVisualState.OFFLINE ||
                                 effectiveVisualState == DavidLiveVisualState.API_MISSING ||
@@ -1227,7 +1226,6 @@ fun DavidLiveSheet(
                                         maxLines = 3,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                }
                                 }
                             }
 
