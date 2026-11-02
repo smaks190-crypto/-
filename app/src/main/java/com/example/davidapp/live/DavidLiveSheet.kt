@@ -292,16 +292,21 @@ internal fun computeHorizontalWaveBarTargetMagnitude(
     val distFromCenter = kotlin.math.abs(normPos - 0.5f) * 2f
 
     val rayCount = DavidLiveSpectrumAnalyzer.RAY_COUNT
-    // Направляем центральные столбики на голосовые форманты (индексы 6..15 и 30..39 соответствуют 180–2800 Гц),
+    // Направляем центральные столбики на голосовые форманты (индексы 6..20 и 30..44 соответствуют 140–2800 Гц),
     // где сосредоточена основная энергия живого голоса пользователя
-    val vocalRayIdx = (6 + (distFromCenter * 10f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
+    val vocalRayIdx = (8 + (distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
+    val neighborRayIdx = (vocalRayIdx + 2) % rayCount
     val highRayIdx = ((distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
 
     val envVocal = radialEnvelope.getOrElse(vocalRayIdx) { 0.65f }.coerceAtLeast(0.38f)
+    val envNeighbor = radialEnvelope.getOrElse(neighborRayIdx) { 0.65f }.coerceAtLeast(0.38f)
     val envHigh = radialEnvelope.getOrElse(highRayIdx) { 0.70f }.coerceAtLeast(0.38f)
-    val vocalRay = (rayMagnitudes.getOrElse(vocalRayIdx) { 0.06f } / envVocal).coerceIn(0f, 1f)
+    val vocalRay = maxOf(
+        (rayMagnitudes.getOrElse(vocalRayIdx) { 0.06f } / envVocal).coerceIn(0f, 1f),
+        (rayMagnitudes.getOrElse(neighborRayIdx) { 0.06f } / envNeighbor).coerceIn(0f, 1f) * 0.92f
+    )
     val highRay = (rayMagnitudes.getOrElse(highRayIdx) { 0.06f } / envHigh).coerceIn(0f, 1f)
-    val rawRay = (0.72f * vocalRay + 0.28f * highRay).coerceIn(0f, 1f)
+    val rawRay = (0.76f * vocalRay + 0.24f * highRay).coerceIn(0f, 1f)
 
     var peakRay = 0f
     var sumRay = 0f
@@ -310,20 +315,24 @@ internal fun computeHorizontalWaveBarTargetMagnitude(
         sumRay += r
     }
     val meanRay = if (rayMagnitudes.isNotEmpty()) sumRay / rayMagnitudes.size else 0f
-    val rawVoiceEnergy = maxOf(overallEnergy.coerceIn(0f, 1f), peakRay * 0.88f, meanRay * 1.45f).coerceIn(0f, 1f)
+    val rawVoiceEnergy = maxOf(overallEnergy.coerceIn(0f, 1f), peakRay * 0.90f, meanRay * 1.55f).coerceIn(0f, 1f)
 
     val isSpeakingActive = isUserSpeaking || isDavidSpeaking || (isIdleListeningUnmuted && rawVoiceEnergy > 0.045f)
     if (isSpeakingActive) {
-        // Нелинейное усиление чувствительности для живого голоса (нормальная речь даёт 60%–96% амплитуды)
-        val curvedEnergy = rawVoiceEnergy.coerceAtLeast(0.06f).pow(0.56f).coerceIn(0.18f, 1f)
-        val combinedSignal = (0.50f * rawRay.pow(0.72f) + 0.50f * curvedEnergy).coerceIn(0.18f, 1f)
+        // Нелинейное усиление чувствительности для живого голоса (нормальная речь даёт 62%–96% амплитуды в центре)
+        val curvedEnergy = rawVoiceEnergy.coerceAtLeast(0.08f).pow(0.50f).coerceIn(0.24f, 1f)
+        val harmonicFloor = maxOf(rawRay, peakRay * 0.78f).coerceIn(0.12f, 1f)
+        val combinedSignal = maxOf(
+            curvedEnergy * 0.88f,
+            0.44f * harmonicFloor.pow(0.65f) + 0.62f * curvedEnergy
+        ).coerceIn(0.24f, 1f)
 
         // Бегущая артикуляционная волна создаёт живое движение соседних столбиков в такт слогам речи
         val waveA = ((sin(wavePhaseRad * 3.0 + barIndex * 0.78) + 1.0) * 0.5).toFloat()
         val waveB = ((cos(wavePhaseRad * 5.0 - barIndex * 1.24) + 1.0) * 0.5).toFloat()
-        val dynamicArticulation = 0.64f + 0.58f * (0.62f * waveA + 0.38f * waveB)
+        val dynamicArticulation = 0.74f + 0.52f * (0.62f * waveA + 0.38f * waveB)
 
-        val shaped = combinedSignal * dynamicArticulation * (0.34f + 0.78f * centerEnvelope) * waveActivity
+        val shaped = combinedSignal * dynamicArticulation * (0.36f + 0.78f * centerEnvelope) * waveActivity
         return shaped.coerceIn(0.10f, 1f)
     }
 
