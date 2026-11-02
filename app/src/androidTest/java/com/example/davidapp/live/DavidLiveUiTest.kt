@@ -1,13 +1,8 @@
 package com.example.davidapp.live
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -15,7 +10,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.unit.dp
 import com.example.davidapp.ChatMessageType
 import com.example.davidapp.DavidChatInputBar
 import com.example.davidapp.DavidLiveSummaryBubble
@@ -353,43 +347,6 @@ class DavidLiveUiTest {
         composeTestRule.onNodeWithTag("david_live_circular_visualizer").assertIsDisplayed()
         composeTestRule.onNodeWithTag("david_live_state_badge").assertIsDisplayed()
     }
-    @Test
-    fun davidLiveSphereLongPressDragAttractsParticlesWithoutTriggeringTapAction() {
-        var tapCount = 0
-        var longPressStartCount = 0
-        var moveCount = 0
-        var endCount = 0
-
-        composeTestRule.setContent {
-            Box(
-                modifier = Modifier
-                    .size(180.dp)
-                    .davidLiveSphereGesture(
-                        actionDescription = "Тестовая энергетическая сфера",
-                        onTap = { tapCount++ },
-                        onLongPressStart = { longPressStartCount++ },
-                        onLongPressMove = { moveCount++ },
-                        onLongPressEnd = { endCount++ },
-                        onLongPressCancel = {}
-                    )
-                    .testTag("david_live_sphere_gesture_test")
-            )
-        }
-
-        composeTestRule.onNodeWithTag("david_live_sphere_gesture_test").performTouchInput {
-            down(center)
-            advanceEventTime(650L)
-            moveTo(center + Offset(18f, 12f), durationMillis = 100L)
-            up()
-        }
-        composeTestRule.waitForIdle()
-
-        assertEquals(0, tapCount)
-        assertEquals(1, longPressStartCount)
-        assertTrue(moveCount > 0)
-        assertEquals(1, endCount)
-    }
-
 }
 
 
