@@ -2453,9 +2453,69 @@ class DavidLiveUnitTest {
             computeStreamingTextFadeSplitIndex(previousText = next, currentText = next)
         )
     }
+
+    @Test
+    fun `procedural sound manager synthesizes click-free PCM buffers for coins, frog SMS, voice chat open-close and respects sound preference`() {
+        val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+
+        val buffers = mapOf(
+            "singleCoin" to com.example.davidapp.SoundManager.cachedCoinPcm,
+            "transactionCoins" to com.example.davidapp.SoundManager.cachedTransactionCoinsPcm,
+            "frogReceive" to com.example.davidapp.SoundManager.cachedFrogReceivePcm,
+            "sendBubble" to com.example.davidapp.SoundManager.cachedSendBubblePcm,
+            "voiceOpen" to com.example.davidapp.SoundManager.cachedVoiceOpenPcm,
+            "voiceClose" to com.example.davidapp.SoundManager.cachedVoiceClosePcm,
+            "achievement" to com.example.davidapp.SoundManager.cachedAchievementPcm,
+            "click" to com.example.davidapp.SoundManager.cachedClickPcm
+        )
+
+        for ((name, pcm) in buffers) {
+            assertTrue("$name PCM buffer must not be empty", pcm.isNotEmpty())
+            val peakAbs = pcm.maxOf { kotlin.math.abs(it.toInt()) }
+            assertTrue("$name PCM buffer must have audible non-zero peak (got $peakAbs)", peakAbs > 1500)
+            // First and last samples must be zero or near-zero to prevent hardware speaker clicks
+            assertTrue(
+                "$name first sample must start smoothly near zero (got ${pcm.first()})",
+                kotlin.math.abs(pcm.first().toInt()) <= 60
+            )
+            assertTrue(
+                "$name last sample must fade out smoothly near zero (got ${pcm.last()})",
+                kotlin.math.abs(pcm.last().toInt()) <= 60
+            )
+        }
+
+        // Verify cascading transaction coins buffer is longer than a single coin toss
+        assertTrue(
+            com.example.davidapp.SoundManager.cachedTransactionCoinsPcm.size >
+                com.example.davidapp.SoundManager.cachedCoinPcm.size
+        )
+
+        // Verify frog receive buffer has two distinct vocal syllables (energy dip around 102..114 ms)
+        val frogPcm = com.example.davidapp.SoundManager.cachedFrogReceivePcm
+        val sampleRate = com.example.davidapp.SoundManager.SAMPLE_RATE
+        val syllable1Peak = (10 * sampleRate / 1000 until 90 * sampleRate / 1000)
+            .maxOf { kotlin.math.abs(frogPcm[it].toInt()) }
+        val interSyllableGapPeak = (104 * sampleRate / 1000 until 112 * sampleRate / 1000)
+            .maxOf { kotlin.math.abs(frogPcm[it].toInt()) }
+        val syllable2Peak = (125 * sampleRate / 1000 until 220 * sampleRate / 1000)
+            .maxOf { kotlin.math.abs(frogPcm[it].toInt()) }
+        assertTrue("Frog syllable 1 must be audible", syllable1Peak > 2000)
+        assertEquals("Gap between frog syllables must be silent", 0, interSyllableGapPeak)
+        assertTrue("Frog syllable 2 must be audible", syllable2Peak > 2000)
+
+        // Verify sound preference gate blocks playback when sound is disabled in settings
+        val prevEnabled = com.example.data.preferences.BudgetPreferencesRepository.isSoundEnabled(context)
+        try {
+            com.example.data.preferences.BudgetPreferencesRepository.setSoundEnabled(context, false)
+            val mutedGain = com.example.davidapp.SoundManager.resolvePlaybackGain(
+                context = context,
+                baseGain = 0.28f,
+                maxGain = 0.34f
+            )
+            assertEquals("Playback gain must be 0f when sound is disabled in preferences", 0f, mutedGain, 0.0001f)
+        } finally {
+            com.example.data.preferences.BudgetPreferencesRepository.setSoundEnabled(context, prevEnabled)
+        }
+    }
 }
-
-
-
-
 

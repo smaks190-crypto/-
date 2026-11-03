@@ -207,7 +207,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 currentApiKey = clean
                 _hasApiKey.value = clean.isNotBlank()
-                soundManager?.playReceive()
+                if (soundManager != null) soundManager.playReceive() else SoundManager.playFrogReceive(getApplication())
                 addSessionMessage(
                     ChatMessage(
                         sender = "Давид Жабов 🐸",
@@ -225,7 +225,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             is SaveApiKeyResult.EncryptionError -> {
-                soundManager?.playReceive()
+                if (soundManager != null) soundManager.playReceive() else SoundManager.playFrogReceive(getApplication())
                 addSessionMessage(
                     ChatMessage(
                         sender = "Давид Жабов 🐸",
@@ -573,7 +573,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
             (trimmed.length >= 25 && !trimmed.contains(" ") && trimmed.all { it.isLetterOrDigit() || it == '_' || it == '-' || it == '.' })
 
         if (looksLikeApiKey) {
-            soundManager?.playSend()
+            if (soundManager != null) soundManager.playSend() else SoundManager.playSend(getApplication())
             val maskedMsg = ChatMessage(
                 sender = currentProfileName,
                 type = ChatMessageType.Text("🔑 API-ключ: ••••••••••••"),
@@ -587,7 +587,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            soundManager?.playSend()
+            if (soundManager != null) soundManager.playSend() else SoundManager.playSend(getApplication())
 
             val userMsg = ChatMessage(
                 sender = currentProfileName,
@@ -613,7 +613,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
             delay(650)
             _isDavidTyping.value = false
-            soundManager?.playReceive()
+            if (soundManager != null) soundManager.playReceive() else SoundManager.playFrogReceive(getApplication())
 
             val botMsg = ChatMessage(
                 sender = "Давид Жабов 🐸",
@@ -658,7 +658,11 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
             if (proposal.isAdded) return@launch
 
             val op = proposal.operation
-            soundManager?.playClick()
+            if (soundManager != null) {
+                soundManager.playTransactionCoins()
+            } else {
+                SoundManager.playTransactionCoins(getApplication())
+            }
             repository.insertTransaction(
                 TransactionEntity(
                     budgetId = currentBudgetId,
@@ -885,13 +889,17 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startDavidLive(soundManager: SoundManager? = null) {
-        soundManager?.playClick()
         liveFinancialToolsProvider.setBudgetId(currentBudgetId)
         if (liveSessionController.displayMode.value == DavidLiveDisplayMode.MINIMIZED &&
             liveSessionController.isSessionActive()
         ) {
-            expandDavidLive()
+            expandDavidLive(soundManager)
             return
+        }
+        if (soundManager != null) {
+            soundManager.playVoiceChatOpen()
+        } else {
+            SoundManager.playVoiceChatOpen(getApplication())
         }
         activeLiveSessionChatMsgIds.clear()
         if (activeAssistantAudioFocusRequest == null) {
@@ -918,7 +926,11 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         if (now - lastDisplayModeTransitionMs < 180L) return
         if (liveSessionController.displayMode.value != DavidLiveDisplayMode.EXPANDED) return
         lastDisplayModeTransitionMs = now
-        soundManager?.playClick()
+        if (soundManager != null) {
+            soundManager.playVoiceChatClose()
+        } else {
+            SoundManager.playVoiceChatClose(getApplication())
+        }
         liveSessionController.minimizeSession()
         _isLiveOverlayVisible.value = false
         _isLiveSessionActive.value = true
@@ -929,7 +941,11 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         if (now - lastDisplayModeTransitionMs < 180L) return
         if (liveSessionController.displayMode.value != DavidLiveDisplayMode.MINIMIZED) return
         lastDisplayModeTransitionMs = now
-        soundManager?.playClick()
+        if (soundManager != null) {
+            soundManager.playVoiceChatOpen()
+        } else {
+            SoundManager.playVoiceChatOpen(getApplication())
+        }
         liveSessionController.expandSession()
         _isLiveOverlayVisible.value = true
         _isLiveSessionActive.value = true
@@ -952,7 +968,11 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun endDavidLiveSession(soundManager: SoundManager? = null) {
-        soundManager?.playClick()
+        if (soundManager != null) {
+            soundManager.playVoiceChatClose()
+        } else {
+            SoundManager.playVoiceChatClose(getApplication())
+        }
         val (turns, facts) = liveSessionController.endSession()
         DavidLiveAudioEngine.abandonAssistantAudioFocus(
             getApplication(),
