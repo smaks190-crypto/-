@@ -1613,11 +1613,10 @@ fun DavidLiveSheet(
                                                 else -> Color(0xFFE2E8F0)
                                             }
 
-                                            // Reveal newly received transcript chunks while keeping the already spoken text stable.
-                                            DavidLiveStreamingText(
+                                            // The controller already reveals words against audible PCM playback progress.
+                                            // Render that synchronized prefix directly; a second word timer would add lag.
+                                            Text(
                                                 text = displayedPhrase,
-                                                streamKey = slotKey.toString(),
-                                                isStreaming = isSlotSpeaking,
                                                 color = baseTextColor,
                                                 fontSize = 15.sp,
                                                 fontWeight = if (isSlotSpeaking || isSlotAlert) {
@@ -1626,6 +1625,7 @@ fun DavidLiveSheet(
                                                     FontWeight.SemiBold
                                                 },
                                                 lineHeight = 20.5.sp,
+                                                textAlign = TextAlign.Center,
                                                 maxLines = 3,
                                                 overflow = TextOverflow.Ellipsis,
                                                 modifier = Modifier.testTag("david_live_subtitle_text")
