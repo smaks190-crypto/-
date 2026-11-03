@@ -8,7 +8,7 @@ class DavidLiveStreamingTextTest {
     @Test
     fun appendedTranscriptContinuesFromCurrentRevealCursor() {
         assertEquals(
-            8,
+            7,
             speechBubbleRevealStartIndex(
                 previousText = "Hello, ",
                 nextText = "Hello, David",
@@ -43,7 +43,7 @@ class DavidLiveStreamingTextTest {
 
     @Test
     fun nextChunkIncludesTrailingWhitespace() {
-        assertEquals(7, nextSpeechBubbleRevealEnd("Hello world", 0))
+        assertEquals(6, nextSpeechBubbleRevealEnd("Hello world", 0))
     }
 
     @Test
