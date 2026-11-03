@@ -1889,7 +1889,7 @@ class DavidLiveUnitTest {
         )
         assertTrue(
             "Long unpunctuated stream must segment into a readable active clause",
-            longRunOnClause.activeText.length <= 105
+            longRunOnClause.activeText.length <= 138
         )
         assertTrue(longRunOnClause.segmentIndex >= 1)
         assertTrue(longRunOnClause.activeText.contains("супермаркетам"))
@@ -2375,6 +2375,83 @@ class DavidLiveUnitTest {
         assertEquals("Записал 350 рублей в категорию Кафе!", completedTurns[1].text)
         assertTrue(completedTurns[0].timestampMs < completedTurns[1].timestampMs)
         assertTrue("onTranscriptTurnsChanged listener must have been notified during the call", mirroredSnapshots.size >= 4)
+    }
+
+    @Test
+    fun `speech sync tracker preserves already revealed words monotonically when new audio and transcript chunks arrive`() {
+        val tracker = DavidLiveSpeechSyncTracker()
+
+        // 1. Первая порция текста приходит с небольшим буфером аудио
+        tracker.updateTranscript(
+            sanitizedFullText = "Привет, я внимательно проверил твои расходы",
+            enqueuedSamples24k = 12_000L,
+            currentAudibleSamples24k = 0L
+        )
+        val initialWords = tracker.getScheduledWordsForTest()
+        assertEquals(6, initialWords.size)
+
+        // Прозвучало 3 слова ("Привет, я внимательно")
+        val thirdWordSample = initialWords[2].revealAtSample24k + 200L
+        val visibleAfter3Words = tracker.resolveVisibleSubtitle(audibleSamples24k = thirdWordSample)
+        assertEquals("Привет, я внимательно", visibleAfter3Words)
+
+        // 2. По WebSocket прилетает крупный чанк аудио (enqueuedSamples24k скачет до 96 000L) и продолжение текста.
+        // Уже открытые 3 слова НЕ должны прятаться обратно из-за пересчёта масштаба!
+        tracker.updateTranscript(
+            sanitizedFullText = "Привет, я внимательно проверил твои расходы за этот месяц, и баланс в полном порядке.",
+            enqueuedSamples24k = 96_000L,
+            currentAudibleSamples24k = thirdWordSample
+        )
+        val visibleImmediatelyAfterChunk = tracker.resolveVisibleSubtitle(audibleSamples24k = thirdWordSample)
+        assertTrue(
+            "Already revealed words must never disappear when enqueuedSamples24k jumps: got '$visibleImmediatelyAfterChunk'",
+            visibleImmediatelyAfterChunk.startsWith("Привет, я внимательно")
+        )
+
+        // 3. Предложение длиной до 138 символов с запятой не разрезается посреди фразы на сегменты
+        val singleSentenceWithComma =
+            "Привет, я внимательно проверил твои расходы за этот месяц, и твой свободный баланс в полном порядке."
+        assertTrue(singleSentenceWithComma.length in 97..138)
+        val segment = extractActiveSpeechBubbleSegment(singleSentenceWithComma)
+        assertEquals(0, segment.segmentIndex)
+        assertEquals(1, segment.totalSegments)
+        assertEquals(singleSentenceWithComma, segment.activeText)
+    }
+
+    @Test
+    fun `streaming text fade split index computes exact prefix boundary for live sheet and minimized chat bubbles`() {
+        // 1. Первое слово в новом голосовом облачке чата (previousText = "") проявляется целиком с индекса 0
+        assertEquals(
+            0,
+            computeStreamingTextFadeSplitIndex(
+                previousText = "",
+                currentText = "Привет!"
+            )
+        )
+
+        // 2. Переход от системной заглушки ("Слушаю...") к первому слову речи проявляется с индекса 0
+        assertEquals(
+            0,
+            computeStreamingTextFadeSplitIndex(
+                previousText = "Слушаю...",
+                currentText = "Давай проверим бюджет",
+                isPreviousPlaceholder = true
+            )
+        )
+
+        // 3. Пословное дописывание в облачке чата при свёрнутом разговоре в капсулу:
+        // уже показанный префикс остаётся на 100% альфе, а проявляется только новый хвост
+        val prev = "Давай проверим"
+        val next = "Давай проверим твой баланс"
+        val splitIdx = computeStreamingTextFadeSplitIndex(previousText = prev, currentText = next)
+        assertEquals(prev.length, splitIdx)
+        assertEquals(" твой баланс", next.substring(splitIdx))
+
+        // 4. Неизменившийся текст возвращает полную длину (0 символов для повторной анимации)
+        assertEquals(
+            next.length,
+            computeStreamingTextFadeSplitIndex(previousText = next, currentText = next)
+        )
     }
 }
 

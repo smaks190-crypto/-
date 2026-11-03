@@ -359,8 +359,7 @@ object DavidLiveVisualStateResolver {
             DavidLiveVisualState.DAVID_SPEAKING -> DavidLiveVisualMetadata(
                 visualState = visualState,
                 title = "Говорит Давид",
-                subtitle = liveSubtitle?.takeIf { it.isNotBlank() }
-                    ?.let { extractActiveSpeechBubbleSegment(it).activeText }
+                subtitle = customSpokenSubtitle?.let { extractActiveSpeechBubbleSegment(it).activeText }
                     ?: "Вот что я думаю...",
                 badgeText = "LIVE",
                 actionType = DavidLiveVisualActionType.NONE,
@@ -473,7 +472,11 @@ private val ClauseBoundaryRegex = Regex("(?<=;|—|:)\\s+|(?<=,)\\s+")
 
 /**
  * Извлекает текущую актуальную фразу из потоковой транскрипции речи Давида или пользователя,
- * отсекая уже произнесённые завершённые предложения и длинные клаузы.
+ * отсекая уже произнесённые завершённые предложения и сверхдлинные клаузы.
+ *
+ * Важно для плавности потокового вывода: пока текущее предложение (3 строки в облачке вмещают ~135–145 символов)
+ * помещается в карточку (`<= 138` символов), оно НЕ разрезается на лету по запятой на 93-м символе,
+ * чтобы не вызывать внезапный перезапуск `AnimatedContent` посреди одного произносимого предложения.
  */
 internal fun extractActiveSpeechBubbleSegment(rawText: String): ActiveSpeechSegment {
     val normalized = rawText.replace(Regex("\\s+"), " ").trim()
@@ -488,16 +491,17 @@ internal fun extractActiveSpeechBubbleSegment(rawText: String): ActiveSpeechSegm
 
     val phraseSegments = mutableListOf<String>()
     for (sentence in rawSentences) {
-        if (sentence.length <= 96) {
+        if (sentence.length <= 138) {
             phraseSegments.add(sentence)
         } else {
-            // Если одно предложение слишком длинное без точек, делим его по естественным смысловым паузам (тире, точка с запятой, запятая)
+            // Если одно предложение слишком длинное без точек (> 138 символов, не помещается в 3 строки),
+            // делим его по естественным смысловым паузам (тире, точка с запятой, запятая)
             val clauses = sentence.split(ClauseBoundaryRegex).map { it.trim() }.filter { it.isNotEmpty() }
             var currentChunk = StringBuilder()
             for (clause in clauses) {
                 if (currentChunk.isEmpty()) {
                     currentChunk.append(clause)
-                } else if (currentChunk.length + 1 + clause.length <= 92 || currentChunk.length < 34) {
+                } else if (currentChunk.length + 1 + clause.length <= 132 || currentChunk.length < 48) {
                     currentChunk.append(' ').append(clause)
                 } else {
                     phraseSegments.add(currentChunk.toString())
@@ -543,6 +547,35 @@ internal fun shouldDismissCompletedSpokenSubtitle(
         return false
     }
     return currentTrimmed == completedTrimmed
+}
+
+/**
+ * Вычисляет индекс разделения между уже отображённым (полностью непрозрачным) префиксом
+ * и новым дописанным хвостом при потоковом появлении слов в облачке субтитров или в чате Давида.
+ *
+ * - Если предыдущая строка пуста или была системной заглушкой ожидания — возвращает `0`,
+ *   чтобы вся первая реплика мягко проявилась целиком.
+ * - Если новая строка расширяет предыдущую (`currentText.startsWith(previousText)`) —
+ *   возвращает `previousText.length`, чтобы плавно проявилось только новое слово/фраза,
+ *   а уже произнесённые слова оставались неподвижными со 100% непрозрачностью.
+ * - В остальных случаях возвращает длину общего префикса.
+ */
+internal fun computeStreamingTextFadeSplitIndex(
+    previousText: String,
+    currentText: String,
+    isPreviousPlaceholder: Boolean = false
+): Int {
+    if (currentText.isEmpty()) return 0
+    if (previousText.isEmpty() || isPreviousPlaceholder) return 0
+    if (currentText == previousText) return currentText.length
+    if (currentText.startsWith(previousText)) return previousText.length
+
+    var common = 0
+    val minLen = minOf(previousText.length, currentText.length)
+    while (common < minLen && previousText[common] == currentText[common]) {
+        common++
+    }
+    return common
 }
 
 /**

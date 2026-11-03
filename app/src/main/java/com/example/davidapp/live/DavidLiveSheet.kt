@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -258,10 +259,14 @@ internal fun isDefaultStatusSubtitlePlaceholder(text: String?): Boolean {
         trimmed == "Я здесь, слушаю тебя" ||
         trimmed == "Слушаю..." ||
         trimmed == "Говорю..." ||
+        trimmed == "Вот что я думаю..." ||
         trimmed == "Говорите, я слушаю..." ||
         trimmed == "Давид отвечает..." ||
+        trimmed == "Слушаю вас" ||
         trimmed == "Слушаю вас..." ||
-        trimmed == "Слушаю тебя..."
+        trimmed == "Слушаю тебя..." ||
+        trimmed == "Микрофон отключён" ||
+        trimmed == "Подключаюсь к Давиду..."
 }
 
 /**
@@ -710,6 +715,22 @@ fun DavidLiveMinimizedCapsule(
 
                     Spacer(modifier = Modifier.height(2.dp))
 
+                    val capsuleStatusAlpha = remember { Animatable(1f) }
+                    var previousCapsuleStatus by remember { mutableStateOf(statusText) }
+                    LaunchedEffect(statusText) {
+                        if (statusText != previousCapsuleStatus) {
+                            previousCapsuleStatus = statusText
+                            capsuleStatusAlpha.snapTo(0.35f)
+                            capsuleStatusAlpha.animateTo(
+                                targetValue = 1f,
+                                animationSpec = tween(
+                                    durationMillis = 180,
+                                    easing = SmoothSubtitleEnterEasing
+                                )
+                            )
+                        }
+                    }
+
                     Text(
                         text = statusText,
                         color = if (isMicMuted && !isDavidSpeaking) {
@@ -721,7 +742,9 @@ fun DavidLiveMinimizedCapsule(
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.testTag("david_live_capsule_status")
+                        modifier = Modifier
+                            .alpha(capsuleStatusAlpha.value)
+                            .testTag("david_live_capsule_status")
                     )
                 }
             }
@@ -1011,15 +1034,18 @@ fun DavidLiveSheet(
         )
     }
 
-    val hasActiveSpokenPhrase = activeSpeechSegment.activeText.isNotBlank()
+    val hasActiveSpokenPhrase = activeSpeechSegment.activeText.isNotBlank() &&
+        !isDefaultStatusSubtitlePlaceholder(activeSpeechSegment.activeText)
+    // Не включаем hasActiveSpokenPhrase в ключ AnimatedContent для одного и того же хода речи,
+    // чтобы переход от стартовой заглушки ("Слушаю..." / "Вот что я думаю...") к первому слову
+    // не вызывал двойной 520-мс перезапуск slideIn/slideOut на 50-й миллисекунде речи.
     val speechPhraseSlotKey = remember(
         speechTurnEpoch,
         bubbleMetadataVisualState,
         isMicMuted,
-        hasActiveSpokenPhrase,
         activeSpeechSegment.segmentIndex
     ) {
-        "$speechTurnEpoch:${bubbleMetadataVisualState.name}:$isMicMuted:$hasActiveSpokenPhrase:${activeSpeechSegment.segmentIndex}"
+        "$speechTurnEpoch:${bubbleMetadataVisualState.name}:$isMicMuted:${activeSpeechSegment.segmentIndex}"
     }
     val phraseSlotTexts = remember { mutableStateMapOf<String, String>() }
     val phraseSlotVisualStates = remember { mutableStateMapOf<String, DavidLiveVisualState>() }
@@ -1505,15 +1531,15 @@ fun DavidLiveSheet(
 
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth(0.92f)
+                                        .widthIn(min = 52.dp, max = 336.dp)
                                         .scale(cloudHighlightScale)
+                                        .heightIn(min = 32.dp)
                                         .animateContentSize(
                                             animationSpec = tween(
-                                                durationMillis = 420,
+                                                durationMillis = 220,
                                                 easing = SmoothSubtitleEnterEasing
                                             )
                                         )
-                                        .heightIn(min = 42.dp)
                                         .clip(RoundedCornerShape(16.dp))
                                         .background(
                                             Brush.linearGradient(
@@ -1536,7 +1562,7 @@ fun DavidLiveSheet(
                                             },
                                             shape = RoundedCornerShape(16.dp)
                                         )
-                                        .padding(horizontal = 14.dp, vertical = 9.dp)
+                                        .padding(horizontal = 13.dp, vertical = 7.dp)
                                         .testTag("david_live_subtitle_bubble"),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1548,40 +1574,37 @@ fun DavidLiveSheet(
                                             transitionSpec = {
                                                 (slideInVertically(
                                                     animationSpec = tween(
-                                                        durationMillis = 520,
-                                                        delayMillis = 35,
+                                                        durationMillis = 360,
                                                         easing = SmoothSubtitleEnterEasing
                                                     ),
-                                                    initialOffsetY = { fullHeight -> (fullHeight * 0.36f).roundToInt() }
+                                                    initialOffsetY = { fullHeight -> (fullHeight * 0.24f).roundToInt() }
                                                 ) + fadeIn(
                                                     animationSpec = tween(
-                                                        durationMillis = 480,
-                                                        delayMillis = 35,
+                                                        durationMillis = 320,
                                                         easing = SmoothSubtitleEnterEasing
                                                     )
                                                 ) + scaleIn(
-                                                    initialScale = 0.96f,
+                                                    initialScale = 0.97f,
                                                     animationSpec = tween(
-                                                        durationMillis = 520,
-                                                        delayMillis = 35,
+                                                        durationMillis = 360,
                                                         easing = SmoothSubtitleEnterEasing
                                                     )
                                                 )).togetherWith(
                                                     slideOutVertically(
                                                         animationSpec = tween(
-                                                            durationMillis = 460,
+                                                            durationMillis = 280,
                                                             easing = SmoothSubtitleExitEasing
                                                         ),
-                                                        targetOffsetY = { fullHeight -> -(fullHeight * 0.38f).roundToInt() }
+                                                        targetOffsetY = { fullHeight -> -(fullHeight * 0.24f).roundToInt() }
                                                     ) + fadeOut(
                                                         animationSpec = tween(
-                                                            durationMillis = 420,
+                                                            durationMillis = 240,
                                                             easing = SmoothSubtitleExitEasing
                                                         )
                                                     ) + scaleOut(
-                                                        targetScale = 0.96f,
+                                                        targetScale = 0.97f,
                                                         animationSpec = tween(
-                                                            durationMillis = 460,
+                                                            durationMillis = 280,
                                                             easing = SmoothSubtitleExitEasing
                                                         )
                                                     )
@@ -1590,7 +1613,7 @@ fun DavidLiveSheet(
                                                         clip = false,
                                                         sizeAnimationSpec = { _, _ ->
                                                             tween(
-                                                                durationMillis = 420,
+                                                                durationMillis = 260,
                                                                 easing = SmoothSubtitleEnterEasing
                                                             )
                                                         }
@@ -1616,30 +1639,43 @@ fun DavidLiveSheet(
                                                 else -> Color(0xFFE2E8F0)
                                             }
 
-                                            // Плавное проявление новых слов внутри активной произносимой фразы
-                                            var committedPrefixLength by remember(slotKey) {
-                                                mutableIntStateOf(displayedPhrase.length)
+                                            // Безынерционное мягкое проявление нового слова/хвоста (без второго таймера задержки):
+                                            // уже произнесённый префикс остаётся на 100% альфе, а только что открытое по аудио слово
+                                            // мгновенно присутствует в строке на своём финальном месте и мягко набирает непрозрачность за 180 мс.
+                                            var previousRenderedPhrase by remember(slotKey) {
+                                                mutableStateOf(displayedPhrase)
                                             }
                                             var fadeStartIndex by remember(slotKey) {
                                                 mutableIntStateOf(displayedPhrase.length)
                                             }
-                                            val latestWordAlphaAnim = remember(slotKey) { Animatable(1f) }
+                                            val latestTailAlpha = remember(slotKey) { Animatable(1f) }
+
                                             LaunchedEffect(displayedPhrase) {
-                                                if (displayedPhrase.length > committedPrefixLength) {
-                                                    fadeStartIndex = committedPrefixLength
-                                                    committedPrefixLength = displayedPhrase.length
-                                                    latestWordAlphaAnim.snapTo(0.18f)
-                                                    latestWordAlphaAnim.animateTo(
-                                                        targetValue = 1f,
-                                                        animationSpec = tween(
-                                                            durationMillis = 280,
-                                                            easing = SmoothSubtitleEnterEasing
-                                                        )
+                                                val prev = previousRenderedPhrase
+                                                if (displayedPhrase != prev) {
+                                                    val isReplacingPlaceholder = isDefaultStatusSubtitlePlaceholder(prev) &&
+                                                        !isDefaultStatusSubtitlePlaceholder(displayedPhrase)
+                                                    val splitIdx = computeStreamingTextFadeSplitIndex(
+                                                        previousText = prev,
+                                                        currentText = displayedPhrase,
+                                                        isPreviousPlaceholder = isReplacingPlaceholder
                                                     )
-                                                } else {
-                                                    committedPrefixLength = displayedPhrase.length
-                                                    fadeStartIndex = displayedPhrase.length
-                                                    latestWordAlphaAnim.snapTo(1f)
+                                                    previousRenderedPhrase = displayedPhrase
+                                                    if (splitIdx < displayedPhrase.length) {
+                                                        fadeStartIndex = splitIdx
+                                                        latestTailAlpha.snapTo(0.24f)
+                                                        latestTailAlpha.animateTo(
+                                                            targetValue = 1f,
+                                                            animationSpec = tween(
+                                                                durationMillis = 180,
+                                                                easing = SmoothSubtitleEnterEasing
+                                                            )
+                                                        )
+                                                        fadeStartIndex = displayedPhrase.length
+                                                    } else {
+                                                        fadeStartIndex = displayedPhrase.length
+                                                        latestTailAlpha.snapTo(1f)
+                                                    }
                                                 }
                                             }
 
@@ -1647,18 +1683,18 @@ fun DavidLiveSheet(
                                                 displayedPhrase,
                                                 baseTextColor,
                                                 fadeStartIndex,
-                                                latestWordAlphaAnim.value
+                                                latestTailAlpha.value
                                             ) {
                                                 val safeSplit = fadeStartIndex.coerceIn(0, displayedPhrase.length)
                                                 buildAnnotatedString {
-                                                    if (safeSplit >= displayedPhrase.length || latestWordAlphaAnim.value >= 0.99f) {
+                                                    if (safeSplit >= displayedPhrase.length || latestTailAlpha.value >= 0.99f) {
                                                         append(displayedPhrase)
                                                     } else {
                                                         append(displayedPhrase.substring(0, safeSplit))
                                                         pushStyle(
                                                             SpanStyle(
                                                                 color = baseTextColor.copy(
-                                                                    alpha = latestWordAlphaAnim.value.coerceIn(0.18f, 1f)
+                                                                    alpha = latestTailAlpha.value.coerceIn(0.24f, 1f)
                                                                 )
                                                             )
                                                         )
@@ -1681,7 +1717,14 @@ fun DavidLiveSheet(
                                                 textAlign = TextAlign.Center,
                                                 maxLines = 3,
                                                 overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.testTag("david_live_subtitle_text")
+                                                modifier = Modifier
+                                                    .animateContentSize(
+                                                        animationSpec = tween(
+                                                            durationMillis = 220,
+                                                            easing = SmoothSubtitleEnterEasing
+                                                        )
+                                                    )
+                                                    .testTag("david_live_subtitle_text")
                                             )
                                         }
 
