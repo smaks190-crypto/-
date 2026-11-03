@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -1530,9 +1531,9 @@ fun DavidLiveSheet(
 
                                 Box(
                                     modifier = Modifier
-                                        .widthIn(min = 88.dp, max = 336.dp)
+                                        .widthIn(min = 52.dp, max = 336.dp)
                                         .scale(cloudHighlightScale)
-                                        .heightIn(min = 34.dp)
+                                        .heightIn(min = 32.dp)
                                         .animateContentSize(
                                             animationSpec = tween(
                                                 durationMillis = 220,
