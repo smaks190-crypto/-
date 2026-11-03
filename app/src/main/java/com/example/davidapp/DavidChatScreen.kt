@@ -186,10 +186,17 @@ fun DavidChatScreen(
             lastScrolledMsgId = lastMessageId
             lastScrolledTyping = isTyping
 
+            val layoutInfo = listState.layoutInfo
+            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val totalItemCount = layoutInfo.totalItemsCount
+            val targetIndex = (totalItemCount - 1).coerceAtLeast(0)
+
             if (isSameStreamingItem) {
-                listState.scrollToItem(totalItems)
+                if (lastVisibleIndex >= totalItemCount - 3) {
+                    listState.scrollToItem(targetIndex)
+                }
             } else {
-                listState.animateScrollToItem(totalItems)
+                listState.animateScrollToItem(targetIndex)
             }
         }
     }

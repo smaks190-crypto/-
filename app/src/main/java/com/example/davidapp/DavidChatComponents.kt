@@ -91,6 +91,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -460,7 +461,8 @@ fun DavidMessageItem(
                     content = type.content,
                     timestamp = message.timestamp,
                     isUser = message.isUser,
-                    isLiveVoiceTurn = isLiveVoiceTurn
+                    isLiveVoiceTurn = isLiveVoiceTurn,
+                    messageId = message.id
                 )
             }
             is ChatMessageType.File -> {
@@ -985,22 +987,28 @@ fun DavidTextBubble(
     timestamp: String,
     isUser: Boolean,
     isLiveVoiceTurn: Boolean = false,
+    messageId: String = "",
     modifier: Modifier = Modifier
 ) {
-    val isShortSingleLine = content.length <= 36 && !content.contains('\n')
+    val useRichMarkdownBlock = !isUser &&
+        !isLiveVoiceTurn &&
+        (content.contains("#") || content.contains("\n- ") || (content.contains("**") && (content.length > 90 || content.contains('\n'))))
+
+    val isShortSingleLine = content.length <= 48 && !content.contains('\n') && !useRichMarkdownBlock
+
     val bubbleShape = if (isUser) {
         RoundedCornerShape(
-            topStart = if (isShortSingleLine) 18.dp else 20.dp,
-            topEnd = if (isShortSingleLine) 18.dp else 20.dp,
-            bottomStart = if (isShortSingleLine) 18.dp else 20.dp,
+            topStart = if (isShortSingleLine) 16.dp else 20.dp,
+            topEnd = if (isShortSingleLine) 16.dp else 20.dp,
+            bottomStart = if (isShortSingleLine) 16.dp else 20.dp,
             bottomEnd = 6.dp
         )
     } else {
         RoundedCornerShape(
-            topStart = if (isShortSingleLine) 18.dp else 20.dp,
-            topEnd = if (isShortSingleLine) 18.dp else 20.dp,
+            topStart = if (isShortSingleLine) 16.dp else 20.dp,
+            topEnd = if (isShortSingleLine) 16.dp else 20.dp,
             bottomStart = 6.dp,
-            bottomEnd = if (isShortSingleLine) 18.dp else 20.dp
+            bottomEnd = if (isShortSingleLine) 16.dp else 20.dp
         )
     }
 
@@ -1026,34 +1034,37 @@ fun DavidTextBubble(
 
     val backgroundBrush = if (isUser) UserBubbleGradient else DavidBubbleGradient
 
-    // Плавный вход нового голосового облачка в ленту чата при разговоре в капсуле
-    val entryProgress = remember { Animatable(if (isLiveVoiceTurn) 0f else 1f) }
+    // Плавный вход нового облачка в ленту чата без рывков по вертикали
+    val entryProgress = remember { Animatable(if (isLiveVoiceTurn) 0.35f else 1f) }
     LaunchedEffect(Unit) {
         if (entryProgress.value < 1f) {
             entryProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(
-                    durationMillis = 260,
+                    durationMillis = 220,
                     easing = SmoothChatTextEnterEasing
                 )
             )
         }
     }
 
-    // Пословное мягкое проявление нового текста (аналогично DavidLiveSheet):
-    // уже произнесённый префикс остаётся на 100% непрозрачности, а только что появившееся слово
-    // мгновенно занимает своё место и плавно проявляется с 0.24f до 1f за 180 мс.
-    var previousRenderedText by remember {
+    // Пословное мягкое проявление нового текста при потоковой речи (аналогично DavidLiveSheet):
+    // уже произнесённый префикс остаётся на 100% непрозрачности, а только что открытое по аудио слово
+    // мгновенно занимает своё финальное место в строке и мягко набирает альфу за 180 мс.
+    val msgKey = remember(messageId, isLiveVoiceTurn) {
+        if (messageId.isNotBlank()) messageId else "turn_${isLiveVoiceTurn}_${isUser}"
+    }
+    var previousRenderedText by remember(msgKey) {
         mutableStateOf(if (isLiveVoiceTurn) "" else content)
     }
-    var fadeStartIndex by remember {
+    var fadeStartIndex by remember(msgKey) {
         mutableIntStateOf(if (isLiveVoiceTurn) 0 else content.length)
     }
-    val latestTailAlpha = remember {
+    val latestTailAlpha = remember(msgKey) {
         Animatable(if (isLiveVoiceTurn) 0.24f else 1f)
     }
 
-    LaunchedEffect(content) {
+    LaunchedEffect(content, msgKey) {
         val prev = previousRenderedText
         if (content != prev) {
             val splitIdx = computeStreamingTextFadeSplitIndex(
@@ -1061,7 +1072,7 @@ fun DavidTextBubble(
                 currentText = content
             )
             previousRenderedText = content
-            if (splitIdx < content.length) {
+            if (isLiveVoiceTurn && splitIdx < content.length) {
                 fadeStartIndex = splitIdx
                 latestTailAlpha.snapTo(0.24f)
                 latestTailAlpha.animateTo(
@@ -1076,7 +1087,7 @@ fun DavidTextBubble(
                 fadeStartIndex = content.length
                 latestTailAlpha.snapTo(1f)
             }
-        } else if (latestTailAlpha.value < 1f) {
+        } else if (isLiveVoiceTurn && latestTailAlpha.value < 1f) {
             latestTailAlpha.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(
@@ -1091,13 +1102,14 @@ fun DavidTextBubble(
     val styledContent = remember(
         content,
         fadeStartIndex,
-        latestTailAlpha.value
+        latestTailAlpha.value,
+        isLiveVoiceTurn
     ) {
         val safeSplit = fadeStartIndex.coerceIn(0, content.length)
-        buildAnnotatedString {
-            if (safeSplit >= content.length || latestTailAlpha.value >= 0.99f) {
-                append(content)
-            } else {
+        if (!isLiveVoiceTurn || safeSplit >= content.length || latestTailAlpha.value >= 0.99f) {
+            AnnotatedString(content)
+        } else {
+            buildAnnotatedString {
                 append(content.substring(0, safeSplit))
                 pushStyle(
                     SpanStyle(
@@ -1112,27 +1124,17 @@ fun DavidTextBubble(
         }
     }
 
-    val useRichMarkdownBlock = !isUser &&
-        !isLiveVoiceTurn &&
-        (content.contains("#") || content.contains("\n- ") || (content.contains("**") && (content.length > 90 || content.contains('\n'))))
-
-    val bubbleAlpha = 0.24f + 0.76f * entryProgress.value
-    val bubbleScale = 0.97f + 0.03f * entryProgress.value
+    val bubbleAlpha = entryProgress.value
+    val bubbleScale = 0.98f + 0.02f * entryProgress.value
 
     Surface(
         shape = bubbleShape,
         color = Color.Transparent,
         border = BorderStroke(1.dp, borderBrush),
         modifier = modifier
-            .widthIn(min = 56.dp, max = if (isUser) 292.dp else 332.dp)
+            .widthIn(min = 40.dp, max = if (isUser) 292.dp else 332.dp)
             .alpha(bubbleAlpha)
             .scale(bubbleScale)
-            .offset {
-                IntOffset(
-                    x = 0,
-                    y = ((1f - entryProgress.value) * 6.dp.toPx()).roundToInt()
-                )
-            }
             .shadow(if (isUser) 3.dp else 5.dp, bubbleShape)
             .animateContentSize(
                 animationSpec = tween(
@@ -1141,85 +1143,49 @@ fun DavidTextBubble(
                 )
             )
     ) {
-        Column(
-            modifier = Modifier
-                .background(backgroundBrush)
-                .padding(
-                    horizontal = if (isShortSingleLine) 11.dp else 13.dp,
-                    vertical = if (isShortSingleLine) 6.dp else 8.dp
-                )
-        ) {
-            if (!isUser) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(bottom = 3.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .clip(CircleShape)
-                                .background(Emerald400.copy(alpha = 0.14f))
-                                .border(0.8.dp, Emerald400.copy(alpha = 0.45f), CircleShape)
-                        ) {
-                            BrandFrogAvatar(size = 13.dp)
-                        }
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text(
-                            text = "Давид Жабов",
-                            color = Emerald400,
-                            fontSize = 11.sp,
-                            fontFamily = ManropeFontFamily,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                    }
-
-                    if (isLiveVoiceTurn) {
-                        LiveVoiceTurnBadge()
+        if (isShortSingleLine) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .background(backgroundBrush)
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                if (!isUser) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(Emerald400.copy(alpha = 0.14f))
+                            .border(0.8.dp, Emerald400.copy(alpha = 0.45f), CircleShape)
+                    ) {
+                        BrandFrogAvatar(size = 11.dp)
                     }
                 }
-            }
 
-            if (useRichMarkdownBlock) {
-                MarkdownFormattedText(
-                    markdownText = content,
-                    fontSize = 13.5.sp
-                )
-            } else {
                 Text(
                     text = styledContent,
                     color = TextLight,
                     fontSize = 14.sp,
                     fontFamily = ManropeFontFamily,
                     lineHeight = 19.sp,
-                    fontWeight = FontWeight.Normal,
-                    modifier = Modifier.animateContentSize(
-                        animationSpec = tween(
-                            durationMillis = 220,
-                            easing = SmoothChatTextEnterEasing
-                        )
-                    )
+                    fontWeight = FontWeight.Normal
                 )
-            }
 
-            Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.width(2.dp))
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.align(Alignment.End)
-            ) {
-                if (isUser && isLiveVoiceTurn) {
+                if (isLiveVoiceTurn) {
                     LiveVoiceTurnBadge()
                 }
+
                 Text(
                     text = timestamp,
                     color = Slate400.copy(alpha = 0.72f),
                     fontSize = 9.5.sp,
                     fontFamily = ManropeFontFamily
                 )
+
                 if (isUser) {
                     Icon(
                         imageVector = Icons.Default.DoneAll,
@@ -1227,6 +1193,87 @@ fun DavidTextBubble(
                         tint = Emerald400.copy(alpha = 0.82f),
                         modifier = Modifier.size(11.5.dp)
                     )
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .background(backgroundBrush)
+                    .padding(horizontal = 13.dp, vertical = 8.dp)
+            ) {
+                if (!isUser) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(bottom = 3.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(Emerald400.copy(alpha = 0.14f))
+                                    .border(0.8.dp, Emerald400.copy(alpha = 0.45f), CircleShape)
+                            ) {
+                                BrandFrogAvatar(size = 13.dp)
+                            }
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "Давид Жабов",
+                                color = Emerald400,
+                                fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+
+                        if (isLiveVoiceTurn) {
+                            LiveVoiceTurnBadge()
+                        }
+                    }
+                }
+
+                if (useRichMarkdownBlock) {
+                    MarkdownFormattedText(
+                        markdownText = content,
+                        fontSize = 13.5.sp
+                    )
+                } else {
+                    Text(
+                        text = styledContent,
+                        color = TextLight,
+                        fontSize = 14.sp,
+                        fontFamily = ManropeFontFamily,
+                        lineHeight = 19.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    if (isUser && isLiveVoiceTurn) {
+                        LiveVoiceTurnBadge()
+                    }
+                    Text(
+                        text = timestamp,
+                        color = Slate400.copy(alpha = 0.72f),
+                        fontSize = 9.5.sp,
+                        fontFamily = ManropeFontFamily
+                    )
+                    if (isUser) {
+                        Icon(
+                            imageVector = Icons.Default.DoneAll,
+                            contentDescription = null,
+                            tint = Emerald400.copy(alpha = 0.82f),
+                            modifier = Modifier.size(11.5.dp)
+                        )
+                    }
                 }
             }
         }
