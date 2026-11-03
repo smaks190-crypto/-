@@ -2473,10 +2473,17 @@ class DavidLiveUnitTest {
         for ((name, pcm) in buffers) {
             assertTrue("$name PCM buffer must not be empty", pcm.isNotEmpty())
             val peakAbs = pcm.maxOf { kotlin.math.abs(it.toInt()) }
-            assertTrue(
-                "$name PCM buffer must have strong normalized peak >= 24000 for clear loudness (got $peakAbs)",
-                peakAbs >= 24000
-            )
+            if (name == "singleCoin") {
+                assertTrue(
+                    "singleCoin splash PCM buffer must retain original delicate amplitude (got $peakAbs)",
+                    peakAbs in 5000..18000
+                )
+            } else {
+                assertTrue(
+                    "$name PCM buffer must have strong normalized peak >= 24000 for clear loudness (got $peakAbs)",
+                    peakAbs >= 24000
+                )
+            }
             // First and last samples must be zero or near-zero to prevent hardware speaker clicks
             assertTrue(
                 "$name first sample must start smoothly near zero (got ${pcm.first()})",
