@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.media.SoundPool
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +43,7 @@ class SoundManager(context: Context) {
 
     init {
         warmUpAllSounds()
+        Companion.warmUpSamples(context)
     }
 
     /**
@@ -134,6 +136,60 @@ class SoundManager(context: Context) {
         private const val CLICK_DURATION_MS = 28
 
         private val synthScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+        private val sampleLock = Any()
+        @Volatile private var samplePool: SoundPool? = null
+        private val sampleIds = mutableMapOf<Int, Int>()
+        private val loadedSampleIds = mutableSetOf<Int>()
+
+        /**
+         * Загружает короткие CC0 UI-звуки один раз на процесс.
+         * Splash coin остаётся отдельным процедурным звуком с исторически мягкой громкостью.
+         */
+        fun warmUpSamples(context: Context) {
+            synchronized(sampleLock) {
+                if (samplePool != null) return
+                val attributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+                val pool = SoundPool.Builder()
+                    .setMaxStreams(5)
+                    .setAudioAttributes(attributes)
+                    .build()
+                pool.setOnLoadCompleteListener { _, sampleId, status ->
+                    if (status == 0) synchronized(sampleLock) {
+                        loadedSampleIds.add(sampleId)
+                    }
+                }
+                samplePool = pool
+                val resources = intArrayOf(
+                    R.raw.david_sfx_open,
+                    R.raw.david_sfx_close,
+                    R.raw.david_sfx_send,
+                    R.raw.david_sfx_receive,
+                    R.raw.david_sfx_check,
+                    R.raw.david_sfx_complete,
+                    R.raw.david_sfx_achievement
+                )
+                resources.forEach { resourceId ->
+                    sampleIds[resourceId] = pool.load(context.applicationContext, resourceId, 1)
+                }
+            }
+        }
+
+        private fun playSample(context: Context?, resourceId: Int, baseGain: Float) {
+            val safeContext = context ?: return
+            warmUpSamples(safeContext)
+            val gain = resolvePlaybackGain(safeContext, baseGain, 1.0f)
+            if (gain <= 0.002f) return
+            synchronized(sampleLock) {
+                val pool = samplePool ?: return
+                val sampleId = sampleIds[resourceId] ?: return
+                if (sampleId !in loadedSampleIds) return
+                pool.play(sampleId, gain, gain, 1, 0, 1.0f)
+            }
+        }
 
         /**
          * 1. Кэшированный PCM-буфер одиночного звона подброшенной золотой монетки (320 мс)
@@ -805,84 +861,42 @@ class SoundManager(context: Context) {
          * Мягкий бархатный маримба-отклик при распознавании операции в голосовом вводе на лету
          */
         fun playVoiceOperationCaptured(context: Context? = null) {
-            playPcmBufferAsync(
-                context = context,
-                pcmProvider = { cachedVoiceCapturePcm },
-                durationMs = VOICE_CAPTURE_DURATION_MS,
-                baseGain = 0.78f,
-                maxGain = 0.88f,
-                debugTag = "voice_operation_captured"
-            )
+            playSample(context, R.raw.david_sfx_check, baseGain = 0.82f)
         }
 
         /**
          * Харизматичный звук жабы Давида («Ква-риббит») при входящем СМС/ответе в чате
          */
         fun playFrogReceive(context: Context? = null) {
-            playPcmBufferAsync(
-                context = context,
-                pcmProvider = { cachedFrogReceivePcm },
-                durationMs = FROG_RECEIVE_DURATION_MS,
-                baseGain = 0.96f,
-                maxGain = 1.00f,
-                debugTag = "frog_receive"
-            )
+            playSample(context, R.raw.david_sfx_receive, baseGain = 0.88f)
         }
 
         /**
          * Мягкий звук пузырька при отправке сообщения пользователем
          */
         fun playSend(context: Context? = null) {
-            playPcmBufferAsync(
-                context = context,
-                pcmProvider = { cachedSendBubblePcm },
-                durationMs = SEND_BUBBLE_DURATION_MS,
-                baseGain = 0.86f,
-                maxGain = 0.96f,
-                debugTag = "send_bubble"
-            )
+            playSample(context, R.raw.david_sfx_send, baseGain = 0.84f)
         }
 
         /**
          * Плавный восходящий звук раскрытия голосового чата (David Live / Голосовой ввод)
          */
         fun playVoiceChatOpen(context: Context? = null) {
-            playPcmBufferAsync(
-                context = context,
-                pcmProvider = { cachedVoiceOpenPcm },
-                durationMs = VOICE_OPEN_DURATION_MS,
-                baseGain = 0.90f,
-                maxGain = 0.98f,
-                debugTag = "voice_chat_open"
-            )
+            playSample(context, R.raw.david_sfx_open, baseGain = 0.86f)
         }
 
         /**
          * Плавный нисходящий звук закрытия / сворачивания голосового чата
          */
         fun playVoiceChatClose(context: Context? = null) {
-            playPcmBufferAsync(
-                context = context,
-                pcmProvider = { cachedVoiceClosePcm },
-                durationMs = VOICE_CLOSE_DURATION_MS,
-                baseGain = 0.88f,
-                maxGain = 0.96f,
-                debugTag = "voice_chat_close"
-            )
+            playSample(context, R.raw.david_sfx_close, baseGain = 0.82f)
         }
 
         /**
          * Торжественный изумрудный аккорд при разблокировке достижения
          */
         fun playAchievement(context: Context? = null) {
-            playPcmBufferAsync(
-                context = context,
-                pcmProvider = { cachedAchievementPcm },
-                durationMs = ACHIEVEMENT_DURATION_MS,
-                baseGain = 0.94f,
-                maxGain = 1.00f,
-                debugTag = "achievement"
-            )
+            playSample(context, R.raw.david_sfx_achievement, baseGain = 0.90f)
         }
 
         /**
