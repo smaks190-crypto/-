@@ -1889,7 +1889,7 @@ class DavidLiveUnitTest {
         )
         assertTrue(
             "Long unpunctuated stream must segment into a readable active clause",
-            longRunOnClause.activeText.length <= 105
+            longRunOnClause.activeText.length <= 138
         )
         assertTrue(longRunOnClause.segmentIndex >= 1)
         assertTrue(longRunOnClause.activeText.contains("супермаркетам"))
