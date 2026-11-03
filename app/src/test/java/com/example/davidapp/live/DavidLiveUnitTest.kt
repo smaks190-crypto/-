@@ -2376,6 +2376,47 @@ class DavidLiveUnitTest {
         assertTrue(completedTurns[0].timestampMs < completedTurns[1].timestampMs)
         assertTrue("onTranscriptTurnsChanged listener must have been notified during the call", mirroredSnapshots.size >= 4)
     }
+
+    @Test
+    fun `speech sync tracker preserves already revealed words monotonically when new audio and transcript chunks arrive`() {
+        val tracker = DavidLiveSpeechSyncTracker()
+
+        // 1. Первая порция текста приходит с небольшим буфером аудио
+        tracker.updateTranscript(
+            sanitizedFullText = "Привет, я внимательно проверил твои расходы",
+            enqueuedSamples24k = 12_000L,
+            currentAudibleSamples24k = 0L
+        )
+        val initialWords = tracker.getScheduledWordsForTest()
+        assertEquals(6, initialWords.size)
+
+        // Прозвучало 3 слова ("Привет, я внимательно")
+        val thirdWordSample = initialWords[2].revealAtSample24k + 200L
+        val visibleAfter3Words = tracker.resolveVisibleSubtitle(audibleSamples24k = thirdWordSample)
+        assertEquals("Привет, я внимательно", visibleAfter3Words)
+
+        // 2. По WebSocket прилетает крупный чанк аудио (enqueuedSamples24k скачет до 96 000L) и продолжение текста.
+        // Уже открытые 3 слова НЕ должны прятаться обратно из-за пересчёта масштаба!
+        tracker.updateTranscript(
+            sanitizedFullText = "Привет, я внимательно проверил твои расходы за этот месяц, и баланс в полном порядке.",
+            enqueuedSamples24k = 96_000L,
+            currentAudibleSamples24k = thirdWordSample
+        )
+        val visibleImmediatelyAfterChunk = tracker.resolveVisibleSubtitle(audibleSamples24k = thirdWordSample)
+        assertTrue(
+            "Already revealed words must never disappear when enqueuedSamples24k jumps: got '$visibleImmediatelyAfterChunk'",
+            visibleImmediatelyAfterChunk.startsWith("Привет, я внимательно")
+        )
+
+        // 3. Предложение длиной до 138 символов с запятой не разрезается посреди фразы на сегменты
+        val singleSentenceWithComma =
+            "Привет, я внимательно проверил твои расходы за этот месяц, и твой свободный баланс в полном порядке."
+        assertTrue(singleSentenceWithComma.length in 97..138)
+        val segment = extractActiveSpeechBubbleSegment(singleSentenceWithComma)
+        assertEquals(0, segment.segmentIndex)
+        assertEquals(1, segment.totalSegments)
+        assertEquals(singleSentenceWithComma, segment.activeText)
+    }
 }
 
 

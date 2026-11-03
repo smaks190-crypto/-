@@ -9,6 +9,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -104,6 +105,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -255,10 +258,14 @@ internal fun isDefaultStatusSubtitlePlaceholder(text: String?): Boolean {
         trimmed == "Я здесь, слушаю тебя" ||
         trimmed == "Слушаю..." ||
         trimmed == "Говорю..." ||
+        trimmed == "Вот что я думаю..." ||
         trimmed == "Говорите, я слушаю..." ||
         trimmed == "Давид отвечает..." ||
+        trimmed == "Слушаю вас" ||
         trimmed == "Слушаю вас..." ||
-        trimmed == "Слушаю тебя..."
+        trimmed == "Слушаю тебя..." ||
+        trimmed == "Микрофон отключён" ||
+        trimmed == "Подключаюсь к Давиду..."
 }
 
 /**
@@ -1008,15 +1015,18 @@ fun DavidLiveSheet(
         )
     }
 
-    val hasActiveSpokenPhrase = activeSpeechSegment.activeText.isNotBlank()
+    val hasActiveSpokenPhrase = activeSpeechSegment.activeText.isNotBlank() &&
+        !isDefaultStatusSubtitlePlaceholder(activeSpeechSegment.activeText)
+    // Не включаем hasActiveSpokenPhrase в ключ AnimatedContent для одного и того же хода речи,
+    // чтобы переход от стартовой заглушки ("Слушаю..." / "Вот что я думаю...") к первому слову
+    // не вызывал двойной 520-мс перезапуск slideIn/slideOut на 50-й миллисекунде речи.
     val speechPhraseSlotKey = remember(
         speechTurnEpoch,
         bubbleMetadataVisualState,
         isMicMuted,
-        hasActiveSpokenPhrase,
         activeSpeechSegment.segmentIndex
     ) {
-        "$speechTurnEpoch:${bubbleMetadataVisualState.name}:$isMicMuted:$hasActiveSpokenPhrase:${activeSpeechSegment.segmentIndex}"
+        "$speechTurnEpoch:${bubbleMetadataVisualState.name}:$isMicMuted:${activeSpeechSegment.segmentIndex}"
     }
     val phraseSlotTexts = remember { mutableStateMapOf<String, String>() }
     val phraseSlotVisualStates = remember { mutableStateMapOf<String, DavidLiveVisualState>() }
@@ -1504,12 +1514,6 @@ fun DavidLiveSheet(
                                     modifier = Modifier
                                         .fillMaxWidth(0.92f)
                                         .scale(cloudHighlightScale)
-                                        .animateContentSize(
-                                            animationSpec = tween(
-                                                durationMillis = 420,
-                                                easing = SmoothSubtitleEnterEasing
-                                            )
-                                        )
                                         .heightIn(min = 42.dp)
                                         .clip(RoundedCornerShape(16.dp))
                                         .background(
@@ -1545,40 +1549,37 @@ fun DavidLiveSheet(
                                             transitionSpec = {
                                                 (slideInVertically(
                                                     animationSpec = tween(
-                                                        durationMillis = 520,
-                                                        delayMillis = 35,
+                                                        durationMillis = 360,
                                                         easing = SmoothSubtitleEnterEasing
                                                     ),
-                                                    initialOffsetY = { fullHeight -> (fullHeight * 0.36f).roundToInt() }
+                                                    initialOffsetY = { fullHeight -> (fullHeight * 0.24f).roundToInt() }
                                                 ) + fadeIn(
                                                     animationSpec = tween(
-                                                        durationMillis = 480,
-                                                        delayMillis = 35,
+                                                        durationMillis = 320,
                                                         easing = SmoothSubtitleEnterEasing
                                                     )
                                                 ) + scaleIn(
-                                                    initialScale = 0.96f,
+                                                    initialScale = 0.97f,
                                                     animationSpec = tween(
-                                                        durationMillis = 520,
-                                                        delayMillis = 35,
+                                                        durationMillis = 360,
                                                         easing = SmoothSubtitleEnterEasing
                                                     )
                                                 )).togetherWith(
                                                     slideOutVertically(
                                                         animationSpec = tween(
-                                                            durationMillis = 460,
+                                                            durationMillis = 280,
                                                             easing = SmoothSubtitleExitEasing
                                                         ),
-                                                        targetOffsetY = { fullHeight -> -(fullHeight * 0.38f).roundToInt() }
+                                                        targetOffsetY = { fullHeight -> -(fullHeight * 0.24f).roundToInt() }
                                                     ) + fadeOut(
                                                         animationSpec = tween(
-                                                            durationMillis = 420,
+                                                            durationMillis = 240,
                                                             easing = SmoothSubtitleExitEasing
                                                         )
                                                     ) + scaleOut(
-                                                        targetScale = 0.96f,
+                                                        targetScale = 0.97f,
                                                         animationSpec = tween(
-                                                            durationMillis = 460,
+                                                            durationMillis = 280,
                                                             easing = SmoothSubtitleExitEasing
                                                         )
                                                     )
@@ -1587,7 +1588,7 @@ fun DavidLiveSheet(
                                                         clip = false,
                                                         sizeAnimationSpec = { _, _ ->
                                                             tween(
-                                                                durationMillis = 420,
+                                                                durationMillis = 260,
                                                                 easing = SmoothSubtitleEnterEasing
                                                             )
                                                         }
@@ -1613,10 +1614,80 @@ fun DavidLiveSheet(
                                                 else -> Color(0xFFE2E8F0)
                                             }
 
-                                            // The controller already reveals words against audible PCM playback progress.
-                                            // Render that synchronized prefix directly; a second word timer would add lag.
+                                            // Безынерционное мягкое проявление нового слова/хвоста (без второго таймера задержки):
+                                            // уже произнесённый префикс остаётся на 100% альфе, а только что открытое по аудио слово
+                                            // мгновенно присутствует в строке на своём финальном месте и мягко набирает непрозрачность за 180 мс.
+                                            var previousRenderedPhrase by remember(slotKey) {
+                                                mutableStateOf(displayedPhrase)
+                                            }
+                                            var fadeStartIndex by remember(slotKey) {
+                                                mutableIntStateOf(displayedPhrase.length)
+                                            }
+                                            val latestTailAlpha = remember(slotKey) { Animatable(1f) }
+
+                                            LaunchedEffect(displayedPhrase) {
+                                                val prev = previousRenderedPhrase
+                                                if (displayedPhrase != prev) {
+                                                    val isReplacingPlaceholder = isDefaultStatusSubtitlePlaceholder(prev) &&
+                                                        !isDefaultStatusSubtitlePlaceholder(displayedPhrase)
+                                                    val splitIdx = when {
+                                                        isReplacingPlaceholder -> 0
+                                                        displayedPhrase.startsWith(prev) -> prev.length
+                                                        else -> {
+                                                            var common = 0
+                                                            val minLen = minOf(prev.length, displayedPhrase.length)
+                                                            while (common < minLen && prev[common] == displayedPhrase[common]) {
+                                                                common++
+                                                            }
+                                                            common
+                                                        }
+                                                    }
+                                                    previousRenderedPhrase = displayedPhrase
+                                                    if (splitIdx < displayedPhrase.length) {
+                                                        fadeStartIndex = splitIdx
+                                                        latestTailAlpha.snapTo(0.24f)
+                                                        latestTailAlpha.animateTo(
+                                                            targetValue = 1f,
+                                                            animationSpec = tween(
+                                                                durationMillis = 180,
+                                                                easing = SmoothSubtitleEnterEasing
+                                                            )
+                                                        )
+                                                        fadeStartIndex = displayedPhrase.length
+                                                    } else {
+                                                        fadeStartIndex = displayedPhrase.length
+                                                        latestTailAlpha.snapTo(1f)
+                                                    }
+                                                }
+                                            }
+
+                                            val styledPhrase = remember(
+                                                displayedPhrase,
+                                                baseTextColor,
+                                                fadeStartIndex,
+                                                latestTailAlpha.value
+                                            ) {
+                                                val safeSplit = fadeStartIndex.coerceIn(0, displayedPhrase.length)
+                                                buildAnnotatedString {
+                                                    if (safeSplit >= displayedPhrase.length || latestTailAlpha.value >= 0.99f) {
+                                                        append(displayedPhrase)
+                                                    } else {
+                                                        append(displayedPhrase.substring(0, safeSplit))
+                                                        pushStyle(
+                                                            SpanStyle(
+                                                                color = baseTextColor.copy(
+                                                                    alpha = latestTailAlpha.value.coerceIn(0.24f, 1f)
+                                                                )
+                                                            )
+                                                        )
+                                                        append(displayedPhrase.substring(safeSplit))
+                                                        pop()
+                                                    }
+                                                }
+                                            }
+
                                             Text(
-                                                text = displayedPhrase,
+                                                text = styledPhrase,
                                                 color = baseTextColor,
                                                 fontSize = 15.sp,
                                                 fontWeight = if (isSlotSpeaking || isSlotAlert) {
@@ -1628,7 +1699,14 @@ fun DavidLiveSheet(
                                                 textAlign = TextAlign.Center,
                                                 maxLines = 3,
                                                 overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.testTag("david_live_subtitle_text")
+                                                modifier = Modifier
+                                                    .animateContentSize(
+                                                        animationSpec = tween(
+                                                            durationMillis = 220,
+                                                            easing = SmoothSubtitleEnterEasing
+                                                        )
+                                                    )
+                                                    .testTag("david_live_subtitle_text")
                                             )
                                         }
 
