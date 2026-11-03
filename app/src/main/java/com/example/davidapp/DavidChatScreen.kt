@@ -170,11 +170,27 @@ fun DavidChatScreen(
         }
     }
 
+    val lastMessageId = messages.lastOrNull()?.id
     val lastMessageTextContent = (messages.lastOrNull()?.type as? ChatMessageType.Text)?.content
-    LaunchedEffect(messages.size, messages.lastOrNull()?.id, lastMessageTextContent, isTyping, stage) {
+    var lastScrolledMsgCount by remember { mutableStateOf(0) }
+    var lastScrolledMsgId by remember { mutableStateOf<String?>(null) }
+    var lastScrolledTyping by remember { mutableStateOf(false) }
+
+    LaunchedEffect(messages.size, lastMessageId, lastMessageTextContent, isTyping, stage) {
         if (messages.isNotEmpty()) {
             val totalItems = messages.size + if (isTyping) 1 else 0
-            listState.animateScrollToItem(totalItems)
+            val isSameStreamingItem = messages.size == lastScrolledMsgCount &&
+                lastMessageId == lastScrolledMsgId &&
+                isTyping == lastScrolledTyping
+            lastScrolledMsgCount = messages.size
+            lastScrolledMsgId = lastMessageId
+            lastScrolledTyping = isTyping
+
+            if (isSameStreamingItem) {
+                listState.scrollToItem(totalItems)
+            } else {
+                listState.animateScrollToItem(totalItems)
+            }
         }
     }
 

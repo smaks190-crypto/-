@@ -714,6 +714,22 @@ fun DavidLiveMinimizedCapsule(
 
                     Spacer(modifier = Modifier.height(2.dp))
 
+                    val capsuleStatusAlpha = remember { Animatable(1f) }
+                    var previousCapsuleStatus by remember { mutableStateOf(statusText) }
+                    LaunchedEffect(statusText) {
+                        if (statusText != previousCapsuleStatus) {
+                            previousCapsuleStatus = statusText
+                            capsuleStatusAlpha.snapTo(0.35f)
+                            capsuleStatusAlpha.animateTo(
+                                targetValue = 1f,
+                                animationSpec = tween(
+                                    durationMillis = 180,
+                                    easing = SmoothSubtitleEnterEasing
+                                )
+                            )
+                        }
+                    }
+
                     Text(
                         text = statusText,
                         color = if (isMicMuted && !isDavidSpeaking) {
@@ -725,7 +741,9 @@ fun DavidLiveMinimizedCapsule(
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.testTag("david_live_capsule_status")
+                        modifier = Modifier
+                            .alpha(capsuleStatusAlpha.value)
+                            .testTag("david_live_capsule_status")
                     )
                 }
             }
@@ -1512,9 +1530,15 @@ fun DavidLiveSheet(
 
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxWidth(0.92f)
+                                        .widthIn(min = 88.dp, max = 336.dp)
                                         .scale(cloudHighlightScale)
-                                        .heightIn(min = 42.dp)
+                                        .heightIn(min = 34.dp)
+                                        .animateContentSize(
+                                            animationSpec = tween(
+                                                durationMillis = 220,
+                                                easing = SmoothSubtitleEnterEasing
+                                            )
+                                        )
                                         .clip(RoundedCornerShape(16.dp))
                                         .background(
                                             Brush.linearGradient(
@@ -1537,7 +1561,7 @@ fun DavidLiveSheet(
                                             },
                                             shape = RoundedCornerShape(16.dp)
                                         )
-                                        .padding(horizontal = 14.dp, vertical = 9.dp)
+                                        .padding(horizontal = 13.dp, vertical = 7.dp)
                                         .testTag("david_live_subtitle_bubble"),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -1630,18 +1654,11 @@ fun DavidLiveSheet(
                                                 if (displayedPhrase != prev) {
                                                     val isReplacingPlaceholder = isDefaultStatusSubtitlePlaceholder(prev) &&
                                                         !isDefaultStatusSubtitlePlaceholder(displayedPhrase)
-                                                    val splitIdx = when {
-                                                        isReplacingPlaceholder -> 0
-                                                        displayedPhrase.startsWith(prev) -> prev.length
-                                                        else -> {
-                                                            var common = 0
-                                                            val minLen = minOf(prev.length, displayedPhrase.length)
-                                                            while (common < minLen && prev[common] == displayedPhrase[common]) {
-                                                                common++
-                                                            }
-                                                            common
-                                                        }
-                                                    }
+                                                    val splitIdx = computeStreamingTextFadeSplitIndex(
+                                                        previousText = prev,
+                                                        currentText = displayedPhrase,
+                                                        isPreviousPlaceholder = isReplacingPlaceholder
+                                                    )
                                                     previousRenderedPhrase = displayedPhrase
                                                     if (splitIdx < displayedPhrase.length) {
                                                         fadeStartIndex = splitIdx

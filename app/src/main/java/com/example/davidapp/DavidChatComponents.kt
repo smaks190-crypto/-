@@ -5,6 +5,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -28,11 +30,13 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -62,14 +66,20 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -81,15 +91,20 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.davidapp.live.DavidSendButtonGestureHelper
+import com.example.davidapp.live.computeStreamingTextFadeSplitIndex
+import kotlin.math.roundToInt
 import com.example.ui.components.BrandFrogAvatar
 import com.example.ui.components.CategoryIconBadge
 import com.example.ui.components.MarkdownFormattedText
@@ -834,6 +849,8 @@ fun DavidParsedTransactionProposalBubble(
     }
 }
 
+private val SmoothChatTextEnterEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
+
 /**
  * Карточка добавленной операции от пользователя в стиле Obsidian Neo-Bank
  */
@@ -843,7 +860,7 @@ fun DavidOperationBubble(
     timestamp: String,
     modifier: Modifier = Modifier
 ) {
-    val bubbleShape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 22.dp, bottomEnd = 6.dp)
+    val bubbleShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp)
     val isExpense = operation.type == "expense"
     val accentColor = if (isExpense) Rose500 else Emerald400
     val amountPrefix = if (isExpense) "-" else "+"
@@ -861,12 +878,13 @@ fun DavidOperationBubble(
             )
         ),
         modifier = modifier
-            .widthIn(min = 140.dp, max = 320.dp)
+            .widthIn(min = 148.dp, max = 288.dp)
     ) {
         Column(
             modifier = Modifier
+                .width(IntrinsicSize.Max)
                 .background(UserBubbleGradient)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             if (operation.userPhrase.isNotBlank()) {
                 Text(
@@ -875,9 +893,9 @@ fun DavidOperationBubble(
                     fontSize = 13.5.sp,
                     fontFamily = ManropeFontFamily,
                     fontWeight = FontWeight.Medium,
-                    lineHeight = 19.sp
+                    lineHeight = 18.5.sp
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
             }
 
             Row(
@@ -885,22 +903,21 @@ fun DavidOperationBubble(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(13.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(Color(0xFF050B16).copy(alpha = 0.72f))
-                    .border(1.dp, GlassBorder, RoundedCornerShape(13.dp))
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 9.dp, vertical = 6.dp)
             ) {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     CategoryIconBadge(
                         categoryName = operation.category,
                         type = operation.type,
-                        size = 28.dp,
-                        iconSize = 14.dp
+                        size = 26.dp,
+                        iconSize = 13.dp
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(7.dp))
                     Column {
                         Text(
                             text = operation.category,
@@ -919,7 +936,7 @@ fun DavidOperationBubble(
                         }
                     }
                 }
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = "$amountPrefix${operation.amount.toInt()} ₽",
                     color = accentColor,
@@ -929,10 +946,10 @@ fun DavidOperationBubble(
                 )
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.align(Alignment.End),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -956,8 +973,11 @@ fun DavidOperationBubble(
 
 /**
  * Текстовое сообщение в обновлённой эстетике Obsidian Neo-Bank.
- * Поддерживает плавную анимацию изменения размера при потоковой транскрипции
- * и специальный бейдж `LIVE` для реплик из голосового разговора с Давидом.
+ * - Компактно адаптирует ширину и высоту облачка под фактический размер текста
+ *   (без принудительного растягивания на всю ширину экрана для коротких реплик).
+ * - При потоковой голосовой транскрипции (в том числе когда разговор David Live свёрнут в капсулу)
+ *   обеспечивает такое же плавное пословное проявление текста и мягкий вход облачка,
+ *   как и на полноэкранном визуализаторе David Live.
  */
 @Composable
 fun DavidTextBubble(
@@ -967,10 +987,21 @@ fun DavidTextBubble(
     isLiveVoiceTurn: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val isShortSingleLine = content.length <= 36 && !content.contains('\n')
     val bubbleShape = if (isUser) {
-        RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 22.dp, bottomEnd = 6.dp)
+        RoundedCornerShape(
+            topStart = if (isShortSingleLine) 18.dp else 20.dp,
+            topEnd = if (isShortSingleLine) 18.dp else 20.dp,
+            bottomStart = if (isShortSingleLine) 18.dp else 20.dp,
+            bottomEnd = 6.dp
+        )
     } else {
-        RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 6.dp, bottomEnd = 22.dp)
+        RoundedCornerShape(
+            topStart = if (isShortSingleLine) 18.dp else 20.dp,
+            topEnd = if (isShortSingleLine) 18.dp else 20.dp,
+            bottomStart = 6.dp,
+            bottomEnd = if (isShortSingleLine) 18.dp else 20.dp
+        )
     }
 
     val borderBrush = remember(isUser, isLiveVoiceTurn) {
@@ -995,49 +1026,151 @@ fun DavidTextBubble(
 
     val backgroundBrush = if (isUser) UserBubbleGradient else DavidBubbleGradient
 
+    // Плавный вход нового голосового облачка в ленту чата при разговоре в капсуле
+    val entryProgress = remember { Animatable(if (isLiveVoiceTurn) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (entryProgress.value < 1f) {
+            entryProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 260,
+                    easing = SmoothChatTextEnterEasing
+                )
+            )
+        }
+    }
+
+    // Пословное мягкое проявление нового текста (аналогично DavidLiveSheet):
+    // уже произнесённый префикс остаётся на 100% непрозрачности, а только что появившееся слово
+    // мгновенно занимает своё место и плавно проявляется с 0.24f до 1f за 180 мс.
+    var previousRenderedText by remember {
+        mutableStateOf(if (isLiveVoiceTurn) "" else content)
+    }
+    var fadeStartIndex by remember {
+        mutableIntStateOf(if (isLiveVoiceTurn) 0 else content.length)
+    }
+    val latestTailAlpha = remember {
+        Animatable(if (isLiveVoiceTurn) 0.24f else 1f)
+    }
+
+    LaunchedEffect(content) {
+        val prev = previousRenderedText
+        if (content != prev) {
+            val splitIdx = computeStreamingTextFadeSplitIndex(
+                previousText = prev,
+                currentText = content
+            )
+            previousRenderedText = content
+            if (splitIdx < content.length) {
+                fadeStartIndex = splitIdx
+                latestTailAlpha.snapTo(0.24f)
+                latestTailAlpha.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(
+                        durationMillis = 180,
+                        easing = SmoothChatTextEnterEasing
+                    )
+                )
+                fadeStartIndex = content.length
+            } else {
+                fadeStartIndex = content.length
+                latestTailAlpha.snapTo(1f)
+            }
+        } else if (latestTailAlpha.value < 1f) {
+            latestTailAlpha.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 180,
+                    easing = SmoothChatTextEnterEasing
+                )
+            )
+            fadeStartIndex = content.length
+        }
+    }
+
+    val styledContent = remember(
+        content,
+        fadeStartIndex,
+        latestTailAlpha.value
+    ) {
+        val safeSplit = fadeStartIndex.coerceIn(0, content.length)
+        buildAnnotatedString {
+            if (safeSplit >= content.length || latestTailAlpha.value >= 0.99f) {
+                append(content)
+            } else {
+                append(content.substring(0, safeSplit))
+                pushStyle(
+                    SpanStyle(
+                        color = TextLight.copy(
+                            alpha = latestTailAlpha.value.coerceIn(0.24f, 1f)
+                        )
+                    )
+                )
+                append(content.substring(safeSplit))
+                pop()
+            }
+        }
+    }
+
+    val useRichMarkdownBlock = !isUser &&
+        !isLiveVoiceTurn &&
+        (content.contains("#") || content.contains("\n- ") || (content.contains("**") && (content.length > 90 || content.contains('\n'))))
+
+    val bubbleAlpha = 0.24f + 0.76f * entryProgress.value
+    val bubbleScale = 0.97f + 0.03f * entryProgress.value
+
     Surface(
         shape = bubbleShape,
         color = Color.Transparent,
         border = BorderStroke(1.dp, borderBrush),
         modifier = modifier
-            .widthIn(min = 84.dp, max = if (isUser) 310.dp else 355.dp)
-            .shadow(if (isUser) 4.dp else 6.dp, bubbleShape)
+            .widthIn(min = 56.dp, max = if (isUser) 292.dp else 332.dp)
+            .alpha(bubbleAlpha)
+            .scale(bubbleScale)
+            .offset {
+                IntOffset(
+                    x = 0,
+                    y = ((1f - entryProgress.value) * 6.dp.toPx()).roundToInt()
+                )
+            }
+            .shadow(if (isUser) 3.dp else 5.dp, bubbleShape)
             .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow
+                animationSpec = tween(
+                    durationMillis = 220,
+                    easing = SmoothChatTextEnterEasing
                 )
             )
     ) {
         Column(
             modifier = Modifier
                 .background(backgroundBrush)
-                .padding(horizontal = 15.dp, vertical = 11.dp)
+                .padding(
+                    horizontal = if (isShortSingleLine) 11.dp else 13.dp,
+                    vertical = if (isShortSingleLine) 6.dp else 8.dp
+                )
         ) {
             if (!isUser) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(bottom = 3.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(20.dp)
+                                .size(18.dp)
                                 .clip(CircleShape)
                                 .background(Emerald400.copy(alpha = 0.14f))
                                 .border(0.8.dp, Emerald400.copy(alpha = 0.45f), CircleShape)
                         ) {
-                            BrandFrogAvatar(size = 15.dp)
+                            BrandFrogAvatar(size = 13.dp)
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
                             text = "Давид Жабов",
                             color = Emerald400,
-                            fontSize = 11.5.sp,
+                            fontSize = 11.sp,
                             fontFamily = ManropeFontFamily,
                             fontWeight = FontWeight.ExtraBold
                         )
@@ -1047,54 +1180,52 @@ fun DavidTextBubble(
                         LiveVoiceTurnBadge()
                     }
                 }
-            } else if (isLiveVoiceTurn) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 4.dp)
-                ) {
-                    LiveVoiceTurnBadge()
-                }
             }
 
-            if (!isUser && (content.contains("#") || content.contains("**") || content.contains("- "))) {
+            if (useRichMarkdownBlock) {
                 MarkdownFormattedText(
                     markdownText = content,
                     fontSize = 13.5.sp
                 )
             } else {
                 Text(
-                    text = content,
+                    text = styledContent,
                     color = TextLight,
                     fontSize = 14.sp,
                     fontFamily = ManropeFontFamily,
-                    lineHeight = 20.sp,
-                    fontWeight = FontWeight.Normal
+                    lineHeight = 19.sp,
+                    fontWeight = FontWeight.Normal,
+                    modifier = Modifier.animateContentSize(
+                        animationSpec = tween(
+                            durationMillis = 220,
+                            easing = SmoothChatTextEnterEasing
+                        )
+                    )
                 )
             }
 
-            Spacer(modifier = Modifier.height(5.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.align(Alignment.End)
             ) {
+                if (isUser && isLiveVoiceTurn) {
+                    LiveVoiceTurnBadge()
+                }
                 Text(
                     text = timestamp,
                     color = Slate400.copy(alpha = 0.72f),
-                    fontSize = 10.sp,
+                    fontSize = 9.5.sp,
                     fontFamily = ManropeFontFamily
                 )
                 if (isUser) {
-                    Spacer(modifier = Modifier.width(4.dp))
                     Icon(
                         imageVector = Icons.Default.DoneAll,
                         contentDescription = null,
                         tint = Emerald400.copy(alpha = 0.82f),
-                        modifier = Modifier.size(12.dp)
+                        modifier = Modifier.size(11.5.dp)
                     )
                 }
             }

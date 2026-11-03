@@ -2417,6 +2417,42 @@ class DavidLiveUnitTest {
         assertEquals(1, segment.totalSegments)
         assertEquals(singleSentenceWithComma, segment.activeText)
     }
+
+    @Test
+    fun `streaming text fade split index computes exact prefix boundary for live sheet and minimized chat bubbles`() {
+        // 1. Первое слово в новом голосовом облачке чата (previousText = "") проявляется целиком с индекса 0
+        assertEquals(
+            0,
+            computeStreamingTextFadeSplitIndex(
+                previousText = "",
+                currentText = "Привет!"
+            )
+        )
+
+        // 2. Переход от системной заглушки ("Слушаю...") к первому слову речи проявляется с индекса 0
+        assertEquals(
+            0,
+            computeStreamingTextFadeSplitIndex(
+                previousText = "Слушаю...",
+                currentText = "Давай проверим бюджет",
+                isPreviousPlaceholder = true
+            )
+        )
+
+        // 3. Пословное дописывание в облачке чата при свёрнутом разговоре в капсулу:
+        // уже показанный префикс остаётся на 100% альфе, а проявляется только новый хвост
+        val prev = "Давай проверим"
+        val next = "Давай проверим твой баланс"
+        val splitIdx = computeStreamingTextFadeSplitIndex(previousText = prev, currentText = next)
+        assertEquals(prev.length, splitIdx)
+        assertEquals(" твой баланс", next.substring(splitIdx))
+
+        // 4. Неизменившийся текст возвращает полную длину (0 символов для повторной анимации)
+        assertEquals(
+            next.length,
+            computeStreamingTextFadeSplitIndex(previousText = next, currentText = next)
+        )
+    }
 }
 
 

@@ -550,6 +550,35 @@ internal fun shouldDismissCompletedSpokenSubtitle(
 }
 
 /**
+ * Вычисляет индекс разделения между уже отображённым (полностью непрозрачным) префиксом
+ * и новым дописанным хвостом при потоковом появлении слов в облачке субтитров или в чате Давида.
+ *
+ * - Если предыдущая строка пуста или была системной заглушкой ожидания — возвращает `0`,
+ *   чтобы вся первая реплика мягко проявилась целиком.
+ * - Если новая строка расширяет предыдущую (`currentText.startsWith(previousText)`) —
+ *   возвращает `previousText.length`, чтобы плавно проявилось только новое слово/фраза,
+ *   а уже произнесённые слова оставались неподвижными со 100% непрозрачностью.
+ * - В остальных случаях возвращает длину общего префикса.
+ */
+internal fun computeStreamingTextFadeSplitIndex(
+    previousText: String,
+    currentText: String,
+    isPreviousPlaceholder: Boolean = false
+): Int {
+    if (currentText.isEmpty()) return 0
+    if (previousText.isEmpty() || isPreviousPlaceholder) return 0
+    if (currentText == previousText) return currentText.length
+    if (currentText.startsWith(previousText)) return previousText.length
+
+    var common = 0
+    val minLen = minOf(previousText.length, currentText.length)
+    while (common < minLen && previousText[common] == currentText[common]) {
+        common++
+    }
+    return common
+}
+
+/**
  * Участник диалога в David Live.
  */
 enum class DavidLiveSpeaker {
