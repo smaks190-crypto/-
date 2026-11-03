@@ -11,5 +11,6 @@ Cue mapping:
 - David Live open/close: Glass open/close
 - Chat send/receive: Glass send/receive
 - Voice operation recognized: Glass check
+- Operation successfully saved: Glass complete
 - Achievement unlocked: Arcade achievement
-- Glass complete is included for future explicit success events; transaction-save coin cascade remains unchanged.
+- The splash-screen coin toss remains its own original procedural effect.

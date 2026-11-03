@@ -847,14 +847,9 @@ class SoundManager(context: Context) {
          * Каскадный звон монет при сохранении финансовой операции (дохода, расхода, взноса в цель)
          */
         fun playTransactionCoins(context: Context? = null) {
-            playPcmBufferAsync(
-                context = context,
-                pcmProvider = { cachedTransactionCoinsPcm },
-                durationMs = TRANSACTION_COINS_DURATION_MS,
-                baseGain = 0.94f,
-                maxGain = 1.00f,
-                debugTag = "transaction_coins"
-            )
+            // Финальное подтверждение сохранения операции: короткий премиальный completion cue.
+            // Отдельный coin toss на Splash Screen остаётся процедурным и не затрагивается.
+            playSample(context, R.raw.david_sfx_complete, baseGain = 0.90f)
         }
 
         /**
