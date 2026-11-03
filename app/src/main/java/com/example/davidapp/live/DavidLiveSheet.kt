@@ -695,7 +695,8 @@ fun DavidLiveMinimizedCapsule(
                             color = Color.White,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            maxLines = 1
+                            maxLines = 1,
+                            softWrap = false
                         )
                         Box(
                             modifier = Modifier
@@ -709,7 +710,8 @@ fun DavidLiveMinimizedCapsule(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.ExtraBold,
                             letterSpacing = 0.5.sp,
-                            maxLines = 1
+                            maxLines = 1,
+                            softWrap = false
                         )
                     }
 
@@ -1047,13 +1049,6 @@ fun DavidLiveSheet(
     ) {
         "$speechTurnEpoch:${bubbleMetadataVisualState.name}:$isMicMuted:${activeSpeechSegment.segmentIndex}"
     }
-    val phraseSlotTexts = remember { mutableStateMapOf<String, String>() }
-    val phraseSlotVisualStates = remember { mutableStateMapOf<String, DavidLiveVisualState>() }
-    val existingSlotText = phraseSlotTexts[speechPhraseSlotKey]
-    if (existingSlotText == null || hasActiveSpokenPhrase || !isDefaultStatusSubtitlePlaceholder(visualMetadata.subtitle)) {
-        phraseSlotTexts[speechPhraseSlotKey] = visualMetadata.subtitle
-    }
-    phraseSlotVisualStates[speechPhraseSlotKey] = bubbleMetadataVisualState
 
     val (targetStatePrimaryColor, targetStateSecondaryColor) = remember(effectiveVisualState, isMicMuted) {
         resolveVisualStateColors(effectiveVisualState, isMicMuted)
@@ -1337,7 +1332,8 @@ fun DavidLiveSheet(
                                             color = statePrimaryColor,
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1
+                                            maxLines = 1,
+                                            softWrap = false
                                         )
                                     }
                                 }
@@ -1534,12 +1530,6 @@ fun DavidLiveSheet(
                                         .widthIn(min = 52.dp, max = 336.dp)
                                         .scale(cloudHighlightScale)
                                         .heightIn(min = 32.dp)
-                                        .animateContentSize(
-                                            animationSpec = tween(
-                                                durationMillis = 220,
-                                                easing = SmoothSubtitleEnterEasing
-                                            )
-                                        )
                                         .clip(RoundedCornerShape(16.dp))
                                         .background(
                                             Brush.linearGradient(
@@ -1562,6 +1552,12 @@ fun DavidLiveSheet(
                                             },
                                             shape = RoundedCornerShape(16.dp)
                                         )
+                                        .animateContentSize(
+                                            animationSpec = tween(
+                                                durationMillis = 240,
+                                                easing = SmoothSubtitleEnterEasing
+                                            )
+                                        )
                                         .padding(horizontal = 13.dp, vertical = 7.dp)
                                         .testTag("david_live_subtitle_bubble"),
                                     contentAlignment = Alignment.Center
@@ -1569,164 +1565,109 @@ fun DavidLiveSheet(
                                     Column(
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
-                                        AnimatedContent(
-                                            targetState = speechPhraseSlotKey,
-                                            transitionSpec = {
-                                                (slideInVertically(
-                                                    animationSpec = tween(
-                                                        durationMillis = 360,
-                                                        easing = SmoothSubtitleEnterEasing
-                                                    ),
-                                                    initialOffsetY = { fullHeight -> (fullHeight * 0.24f).roundToInt() }
-                                                ) + fadeIn(
-                                                    animationSpec = tween(
-                                                        durationMillis = 320,
-                                                        easing = SmoothSubtitleEnterEasing
-                                                    )
-                                                ) + scaleIn(
-                                                    initialScale = 0.97f,
-                                                    animationSpec = tween(
-                                                        durationMillis = 360,
-                                                        easing = SmoothSubtitleEnterEasing
-                                                    )
-                                                )).togetherWith(
-                                                    slideOutVertically(
-                                                        animationSpec = tween(
-                                                            durationMillis = 280,
-                                                            easing = SmoothSubtitleExitEasing
-                                                        ),
-                                                        targetOffsetY = { fullHeight -> -(fullHeight * 0.24f).roundToInt() }
-                                                    ) + fadeOut(
-                                                        animationSpec = tween(
-                                                            durationMillis = 240,
-                                                            easing = SmoothSubtitleExitEasing
-                                                        )
-                                                    ) + scaleOut(
-                                                        targetScale = 0.97f,
-                                                        animationSpec = tween(
-                                                            durationMillis = 280,
-                                                            easing = SmoothSubtitleExitEasing
-                                                        )
-                                                    )
-                                                ).using(
-                                                    SizeTransform(
-                                                        clip = false,
-                                                        sizeAnimationSpec = { _, _ ->
-                                                            tween(
-                                                                durationMillis = 260,
-                                                                easing = SmoothSubtitleEnterEasing
-                                                            )
-                                                        }
-                                                    )
+                                        val displayedPhrase = visualMetadata.subtitle
+                                        val slotVisualState = bubbleMetadataVisualState
+                                        val isSlotSpeaking = slotVisualState == DavidLiveVisualState.DAVID_SPEAKING ||
+                                            slotVisualState == DavidLiveVisualState.USER_SPEAKING
+                                        val isSlotAlert = slotVisualState == DavidLiveVisualState.OFFLINE ||
+                                            slotVisualState == DavidLiveVisualState.API_MISSING ||
+                                            slotVisualState == DavidLiveVisualState.ERROR
+                                        val baseTextColor = when (slotVisualState) {
+                                            DavidLiveVisualState.OFFLINE -> Color(0xFFFECACA)
+                                            DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
+                                            DavidLiveVisualState.ERROR -> Color(0xFFFBCFE8)
+                                            DavidLiveVisualState.SUCCESS -> Color(0xFFBBF7D0)
+                                            DavidLiveVisualState.DAVID_SPEAKING,
+                                            DavidLiveVisualState.USER_SPEAKING -> Color(0xFFF8FAFC)
+                                            else -> Color(0xFFE2E8F0)
+                                        }
+
+                                        // Единый стабильный текстовый узел без пересоздания AnimatedContent:
+                                        // само скруглённое облачко плавно расширяется (clip/background/border -> animateContentSize),
+                                        // а новые слова мягко проявляются на своём месте без повторной перерисовки карточки.
+                                        var previousRenderedPhrase by remember {
+                                            mutableStateOf(displayedPhrase)
+                                        }
+                                        var previousSlotKey by remember {
+                                            mutableStateOf(speechPhraseSlotKey)
+                                        }
+                                        var fadeStartIndex by remember {
+                                            mutableIntStateOf(displayedPhrase.length)
+                                        }
+                                        val latestTailAlpha = remember { Animatable(1f) }
+
+                                        LaunchedEffect(displayedPhrase, speechPhraseSlotKey) {
+                                            val prev = previousRenderedPhrase
+                                            val slotChanged = speechPhraseSlotKey != previousSlotKey
+                                            if (displayedPhrase != prev || slotChanged) {
+                                                val isReplacingPlaceholder = slotChanged ||
+                                                    (isDefaultStatusSubtitlePlaceholder(prev) &&
+                                                        !isDefaultStatusSubtitlePlaceholder(displayedPhrase))
+                                                val splitIdx = computeStreamingTextFadeSplitIndex(
+                                                    previousText = prev,
+                                                    currentText = displayedPhrase,
+                                                    isPreviousPlaceholder = isReplacingPlaceholder
                                                 )
-                                            },
-                                            label = "david_live_speech_phrase_transition"
-                                        ) { slotKey ->
-                                            val displayedPhrase = phraseSlotTexts[slotKey] ?: visualMetadata.subtitle
-                                            val slotVisualState = phraseSlotVisualStates[slotKey] ?: bubbleMetadataVisualState
-                                            val isSlotSpeaking = slotVisualState == DavidLiveVisualState.DAVID_SPEAKING ||
-                                                slotVisualState == DavidLiveVisualState.USER_SPEAKING
-                                            val isSlotAlert = slotVisualState == DavidLiveVisualState.OFFLINE ||
-                                                slotVisualState == DavidLiveVisualState.API_MISSING ||
-                                                slotVisualState == DavidLiveVisualState.ERROR
-                                            val baseTextColor = when (slotVisualState) {
-                                                DavidLiveVisualState.OFFLINE -> Color(0xFFFECACA)
-                                                DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
-                                                DavidLiveVisualState.ERROR -> Color(0xFFFBCFE8)
-                                                DavidLiveVisualState.SUCCESS -> Color(0xFFBBF7D0)
-                                                DavidLiveVisualState.DAVID_SPEAKING,
-                                                DavidLiveVisualState.USER_SPEAKING -> Color(0xFFF8FAFC)
-                                                else -> Color(0xFFE2E8F0)
-                                            }
-
-                                            // Безынерционное мягкое проявление нового слова/хвоста (без второго таймера задержки):
-                                            // уже произнесённый префикс остаётся на 100% альфе, а только что открытое по аудио слово
-                                            // мгновенно присутствует в строке на своём финальном месте и мягко набирает непрозрачность за 180 мс.
-                                            var previousRenderedPhrase by remember(slotKey) {
-                                                mutableStateOf(displayedPhrase)
-                                            }
-                                            var fadeStartIndex by remember(slotKey) {
-                                                mutableIntStateOf(displayedPhrase.length)
-                                            }
-                                            val latestTailAlpha = remember(slotKey) { Animatable(1f) }
-
-                                            LaunchedEffect(displayedPhrase) {
-                                                val prev = previousRenderedPhrase
-                                                if (displayedPhrase != prev) {
-                                                    val isReplacingPlaceholder = isDefaultStatusSubtitlePlaceholder(prev) &&
-                                                        !isDefaultStatusSubtitlePlaceholder(displayedPhrase)
-                                                    val splitIdx = computeStreamingTextFadeSplitIndex(
-                                                        previousText = prev,
-                                                        currentText = displayedPhrase,
-                                                        isPreviousPlaceholder = isReplacingPlaceholder
-                                                    )
-                                                    previousRenderedPhrase = displayedPhrase
-                                                    if (splitIdx < displayedPhrase.length) {
-                                                        fadeStartIndex = splitIdx
-                                                        latestTailAlpha.snapTo(0.24f)
-                                                        latestTailAlpha.animateTo(
-                                                            targetValue = 1f,
-                                                            animationSpec = tween(
-                                                                durationMillis = 180,
-                                                                easing = SmoothSubtitleEnterEasing
-                                                            )
-                                                        )
-                                                        fadeStartIndex = displayedPhrase.length
-                                                    } else {
-                                                        fadeStartIndex = displayedPhrase.length
-                                                        latestTailAlpha.snapTo(1f)
-                                                    }
-                                                }
-                                            }
-
-                                            val styledPhrase = remember(
-                                                displayedPhrase,
-                                                baseTextColor,
-                                                fadeStartIndex,
-                                                latestTailAlpha.value
-                                            ) {
-                                                val safeSplit = fadeStartIndex.coerceIn(0, displayedPhrase.length)
-                                                buildAnnotatedString {
-                                                    if (safeSplit >= displayedPhrase.length || latestTailAlpha.value >= 0.99f) {
-                                                        append(displayedPhrase)
-                                                    } else {
-                                                        append(displayedPhrase.substring(0, safeSplit))
-                                                        pushStyle(
-                                                            SpanStyle(
-                                                                color = baseTextColor.copy(
-                                                                    alpha = latestTailAlpha.value.coerceIn(0.24f, 1f)
-                                                                )
-                                                            )
-                                                        )
-                                                        append(displayedPhrase.substring(safeSplit))
-                                                        pop()
-                                                    }
-                                                }
-                                            }
-
-                                            Text(
-                                                text = styledPhrase,
-                                                color = baseTextColor,
-                                                fontSize = 15.sp,
-                                                fontWeight = if (isSlotSpeaking || isSlotAlert) {
-                                                    FontWeight.Bold
-                                                } else {
-                                                    FontWeight.SemiBold
-                                                },
-                                                lineHeight = 20.5.sp,
-                                                textAlign = TextAlign.Center,
-                                                maxLines = 3,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier
-                                                    .animateContentSize(
+                                                previousRenderedPhrase = displayedPhrase
+                                                previousSlotKey = speechPhraseSlotKey
+                                                if (splitIdx < displayedPhrase.length) {
+                                                    fadeStartIndex = splitIdx
+                                                    latestTailAlpha.snapTo(0.24f)
+                                                    latestTailAlpha.animateTo(
+                                                        targetValue = 1f,
                                                         animationSpec = tween(
-                                                            durationMillis = 220,
+                                                            durationMillis = 180,
                                                             easing = SmoothSubtitleEnterEasing
                                                         )
                                                     )
-                                                    .testTag("david_live_subtitle_text")
-                                            )
+                                                    fadeStartIndex = displayedPhrase.length
+                                                } else {
+                                                    fadeStartIndex = displayedPhrase.length
+                                                    latestTailAlpha.snapTo(1f)
+                                                }
+                                            }
                                         }
+
+                                        val styledPhrase = remember(
+                                            displayedPhrase,
+                                            baseTextColor,
+                                            fadeStartIndex,
+                                            latestTailAlpha.value
+                                        ) {
+                                            val safeSplit = fadeStartIndex.coerceIn(0, displayedPhrase.length)
+                                            buildAnnotatedString {
+                                                if (safeSplit >= displayedPhrase.length || latestTailAlpha.value >= 0.99f) {
+                                                    append(displayedPhrase)
+                                                } else {
+                                                    append(displayedPhrase.substring(0, safeSplit))
+                                                    pushStyle(
+                                                        SpanStyle(
+                                                            color = baseTextColor.copy(
+                                                                alpha = latestTailAlpha.value.coerceIn(0.24f, 1f)
+                                                            )
+                                                        )
+                                                    )
+                                                    append(displayedPhrase.substring(safeSplit))
+                                                    pop()
+                                                }
+                                            }
+                                        }
+
+                                        Text(
+                                            text = styledPhrase,
+                                            color = baseTextColor,
+                                            fontSize = 15.sp,
+                                            fontWeight = if (isSlotSpeaking || isSlotAlert) {
+                                                FontWeight.Bold
+                                            } else {
+                                                FontWeight.SemiBold
+                                            },
+                                            lineHeight = 20.5.sp,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 3,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.testTag("david_live_subtitle_text")
+                                        )
 
                                         AnimatedVisibility(
                                             visible = visualMetadata.actionType != DavidLiveVisualActionType.NONE &&

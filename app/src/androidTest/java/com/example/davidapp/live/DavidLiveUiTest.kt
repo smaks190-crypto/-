@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performTouchInput
 import com.example.davidapp.ChatMessageType
 import com.example.davidapp.DavidChatInputBar
 import com.example.davidapp.DavidLiveSummaryBubble
+import com.example.davidapp.DavidTextBubble
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -445,6 +446,86 @@ class DavidLiveUiTest {
         composeTestRule.onNodeWithTag("david_live_circular_visualizer").performClick()
         composeTestRule.waitForIdle()
         assertEquals(true, isMuted)
+    }
+
+    @Test
+    fun davidLiveSubtitleBubbleExpandsSmoothlyAndChatLiveBadgeRendersHorizontally() {
+        var liveSubtitle by mutableStateOf("Привет")
+        var chatMessageText by mutableStateOf("Привет, сколько у меня на счету сейчас?")
+
+        composeTestRule.setContent {
+            androidx.compose.foundation.layout.Column {
+                DavidLiveSheet(
+                    connectionState = DavidLiveConnectionState.DAVID_SPEAKING,
+                    liveSubtitle = liveSubtitle,
+                    rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.4f },
+                    overallEnergy = 0.35f,
+                    activeSpeaker = DavidLiveSpeaker.DAVID,
+                    isMicMuted = false,
+                    errorMessage = null,
+                    onToggleMicMute = {},
+                    onRetryConnection = {},
+                    onOpenApiKeySettings = {},
+                    onEndSession = {},
+                    visualState = DavidLiveVisualState.DAVID_SPEAKING
+                )
+                DavidTextBubble(
+                    content = chatMessageText,
+                    timestamp = "12:45",
+                    isUser = true,
+                    isLiveVoiceTurn = true,
+                    messageId = "live_turn_user_1"
+                )
+            }
+        }
+
+        // 1. Облачко в окне David Live начинает с короткого слова и расширяется в ширину по мере добавления слов
+        val initialBubbleBounds = composeTestRule
+            .onNodeWithTag("david_live_subtitle_bubble")
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        liveSubtitle = "Привет, я внимательно проверил все твои расходы за эту неделю"
+        composeTestRule.waitForIdle()
+
+        val expandedBubbleBounds = composeTestRule
+            .onNodeWithTag("david_live_subtitle_bubble")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "Subtitle bubble must expand horizontally as spoken words are appended (${initialBubbleBounds.width} -> ${expandedBubbleBounds.width})",
+            expandedBubbleBounds.width > initialBubbleBounds.width
+        )
+
+        // 2. Бейдж LIVE в сообщении чата всегда отрисовывается горизонтально в одну строку (ширина > высоты), без вертикального переноса L/I/V/E
+        val liveBadgeBounds = composeTestRule
+            .onNodeWithTag("david_chat_live_badge")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val liveBadgeTextBounds = composeTestRule
+            .onNodeWithTag("david_chat_live_badge_text", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "LIVE badge container in chat must be horizontal (width=${liveBadgeBounds.width}, height=${liveBadgeBounds.height})",
+            liveBadgeBounds.width > liveBadgeBounds.height
+        )
+        assertTrue(
+            "LIVE badge text in chat must be rendered horizontally on a single line (width=${liveBadgeTextBounds.width}, height=${liveBadgeTextBounds.height})",
+            liveBadgeTextBounds.width > liveBadgeTextBounds.height
+        )
+
+        // 3. При потоковом дописывании реплики свыше 48 символов бейдж LIVE остаётся горизонтальным
+        chatMessageText = "Привет, сколько у меня на счету сейчас и хватит ли лимита на выходные дни в этой категории?"
+        composeTestRule.waitForIdle()
+        val liveBadgeTextBoundsAfterExpand = composeTestRule
+            .onNodeWithTag("david_chat_live_badge_text", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "LIVE badge text must remain horizontal after streaming expansion",
+            liveBadgeTextBoundsAfterExpand.width > liveBadgeTextBoundsAfterExpand.height
+        )
     }
 }
 

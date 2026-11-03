@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -994,7 +995,7 @@ fun DavidTextBubble(
         !isLiveVoiceTurn &&
         (content.contains("#") || content.contains("\n- ") || (content.contains("**") && (content.length > 90 || content.contains('\n'))))
 
-    val isShortSingleLine = content.length <= 48 && !content.contains('\n') && !useRichMarkdownBlock
+    val isShortSingleLine = !isLiveVoiceTurn && content.length <= 36 && !content.contains('\n') && !useRichMarkdownBlock
 
     val bubbleShape = if (isUser) {
         RoundedCornerShape(
@@ -1136,12 +1137,6 @@ fun DavidTextBubble(
             .alpha(bubbleAlpha)
             .scale(bubbleScale)
             .shadow(if (isUser) 3.dp else 5.dp, bubbleShape)
-            .animateContentSize(
-                animationSpec = tween(
-                    durationMillis = 220,
-                    easing = SmoothChatTextEnterEasing
-                )
-            )
     ) {
         if (isShortSingleLine) {
             Row(
@@ -1149,6 +1144,12 @@ fun DavidTextBubble(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier
                     .background(backgroundBrush)
+                    .animateContentSize(
+                        animationSpec = tween(
+                            durationMillis = 220,
+                            easing = SmoothChatTextEnterEasing
+                        )
+                    )
                     .padding(horizontal = 10.dp, vertical = 6.dp)
             ) {
                 if (!isUser) {
@@ -1170,7 +1171,8 @@ fun DavidTextBubble(
                     fontSize = 14.sp,
                     fontFamily = ManropeFontFamily,
                     lineHeight = 19.sp,
-                    fontWeight = FontWeight.Normal
+                    fontWeight = FontWeight.Normal,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
 
                 Spacer(modifier = Modifier.width(2.dp))
@@ -1183,7 +1185,9 @@ fun DavidTextBubble(
                     text = timestamp,
                     color = Slate400.copy(alpha = 0.72f),
                     fontSize = 9.5.sp,
-                    fontFamily = ManropeFontFamily
+                    fontFamily = ManropeFontFamily,
+                    maxLines = 1,
+                    softWrap = false
                 )
 
                 if (isUser) {
@@ -1199,6 +1203,12 @@ fun DavidTextBubble(
             Column(
                 modifier = Modifier
                     .background(backgroundBrush)
+                    .animateContentSize(
+                        animationSpec = tween(
+                            durationMillis = 220,
+                            easing = SmoothChatTextEnterEasing
+                        )
+                    )
                     .padding(horizontal = 13.dp, vertical = 8.dp)
             ) {
                 if (!isUser) {
@@ -1224,7 +1234,9 @@ fun DavidTextBubble(
                                 color = Emerald400,
                                 fontSize = 11.sp,
                                 fontFamily = ManropeFontFamily,
-                                fontWeight = FontWeight.ExtraBold
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
 
@@ -1264,7 +1276,9 @@ fun DavidTextBubble(
                         text = timestamp,
                         color = Slate400.copy(alpha = 0.72f),
                         fontSize = 9.5.sp,
-                        fontFamily = ManropeFontFamily
+                        fontFamily = ManropeFontFamily,
+                        maxLines = 1,
+                        softWrap = false
                     )
                     if (isUser) {
                         Icon(
@@ -1285,10 +1299,12 @@ private fun LiveVoiceTurnBadge() {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
+            .requiredWidth(IntrinsicSize.Max)
             .clip(RoundedCornerShape(6.dp))
             .background(Emerald400.copy(alpha = 0.14f))
             .border(0.6.dp, Emerald400.copy(alpha = 0.42f), RoundedCornerShape(6.dp))
             .padding(horizontal = 5.dp, vertical = 1.5.dp)
+            .testTag("david_chat_live_badge")
     ) {
         Icon(
             imageVector = Icons.Default.Mic,
@@ -1302,7 +1318,10 @@ private fun LiveVoiceTurnBadge() {
             color = Emerald400,
             fontSize = 8.5.sp,
             fontFamily = SpaceGroteskFontFamily,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.testTag("david_chat_live_badge_text")
         )
     }
 }
