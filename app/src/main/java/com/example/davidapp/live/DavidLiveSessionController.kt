@@ -1294,6 +1294,7 @@ internal class DavidLiveSpeechSyncTracker {
 
     private val lock = Any()
     private var currentTranscript: String = ""
+    private var lastScheduledEnqueuedSamples24k: Long = -1L
     private var scheduledWords: List<ScheduledWord> = emptyList()
     private var maxRevealedWordCount: Int = 0
     private var lastObservedAudibleSamples24k: Long = 0L
@@ -1301,6 +1302,7 @@ internal class DavidLiveSpeechSyncTracker {
     fun reset() {
         synchronized(lock) {
             currentTranscript = ""
+            lastScheduledEnqueuedSamples24k = -1L
             scheduledWords = emptyList()
             maxRevealedWordCount = 0
             lastObservedAudibleSamples24k = 0L
@@ -1313,12 +1315,11 @@ internal class DavidLiveSpeechSyncTracker {
      * Обновляет расписание появления слов на шкале 24 кГц сэмплов.
      *
      * Гарантирует строго монотонное поведение без ретроактивных прыжков:
-     * 1. Уже открытые слова (`index < maxRevealedWordCount`) сохраняют свои зафиксированные отметки
+     * 1. Если ни текст `sanitizedFullText`, ни объём буферизованного аудио `enqueuedSamples24k`
+     *    не изменились, существующее расписание не пересчитывается и не сдвигается во время проигрывания.
+     * 2. Уже открытые слова (`index < maxRevealedWordCount`) сохраняют свои зафиксированные отметки
      *    `revealAtSample24k` и никогда не скрываются обратно, когда по WebSocket приходят новые пакеты
      *    транскрипции (`outputTranscription`) или аудио (`enqueuedSamples24k`).
-     * 2. Если сервер прислал очередной фрагмент текста позже (когда `audibleSamples24k` уже продвинулся вперёд),
-     *    новое ещё не показанное слово не «выстреливает» всю пачку мгновенно в один кадр, а распределяется
-     *    по естественному темпу речи от текущей точки звучания до `enqueuedSamples24k`.
      */
     fun updateTranscript(
         sanitizedFullText: String,
@@ -1340,6 +1341,13 @@ internal class DavidLiveSpeechSyncTracker {
             if (currentAudibleSamples24k >= 0L) {
                 lastObservedAudibleSamples24k = maxOf(lastObservedAudibleSamples24k, currentAudibleSamples24k)
             }
+            if (cleaned == currentTranscript &&
+                enqueuedSamples24k == lastScheduledEnqueuedSamples24k &&
+                scheduledWords.size == words.size
+            ) {
+                return
+            }
+
             val previousWords = scheduledWords
             var sharedPrefixCount = 0
             val maxShared = minOf(previousWords.size, words.size)
@@ -1350,6 +1358,7 @@ internal class DavidLiveSpeechSyncTracker {
             maxRevealedWordCount = lockedCount
 
             currentTranscript = cleaned
+            lastScheduledEnqueuedSamples24k = enqueuedSamples24k
 
             val rawDurations = LongArray(words.size) { idx ->
                 estimateWordSpokenSamples24k(words[idx])
@@ -1366,10 +1375,7 @@ internal class DavidLiveSpeechSyncTracker {
             }
 
             val anchorSample = if (lockedCount > 0) {
-                maxOf(
-                    result.last().estimatedEndSample24k,
-                    lastObservedAudibleSamples24k
-                )
+                result.last().estimatedEndSample24k
             } else {
                 INITIAL_VOICE_ONSET_SAMPLES_24K
             }
@@ -1381,10 +1387,10 @@ internal class DavidLiveSpeechSyncTracker {
             val safeRemainingRawSpan = remainingRawSpan.coerceAtLeast(1L)
             val remainingAudioSpan = (enqueuedSamples24k - anchorSample).coerceAtLeast(0L)
 
-            // Масштабируем только ещё НЕ открытый хвост реплики в мягких пределах (0.72..1.45),
+            // Масштабируем только ещё НЕ открытый хвост реплики в пределах (0.45..2.25),
             // чтобы приход нового чанка никогда не сжимал и не растягивал уже показанные слова.
             val tailScaleFactor = if (remainingAudioSpan > INITIAL_VOICE_ONSET_SAMPLES_24K) {
-                (remainingAudioSpan.toDouble() / safeRemainingRawSpan.toDouble()).coerceIn(0.72, 1.45)
+                (remainingAudioSpan.toDouble() / safeRemainingRawSpan.toDouble()).coerceIn(0.45, 2.25)
             } else {
                 1.0
             }
@@ -1392,7 +1398,7 @@ internal class DavidLiveSpeechSyncTracker {
             var cursor = anchorSample
             for (i in lockedCount until words.size) {
                 val startSample = cursor
-                val scaledDuration = (rawDurations[i] * tailScaleFactor).toLong().coerceAtLeast(1_440L) // >= 60ms между словами
+                val scaledDuration = (rawDurations[i] * tailScaleFactor).toLong().coerceAtLeast(1_200L)
                 val endSample = startSample + scaledDuration
                 result.add(
                     ScheduledWord(
