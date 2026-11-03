@@ -1616,60 +1616,11 @@ fun DavidLiveSheet(
                                                 else -> Color(0xFFE2E8F0)
                                             }
 
-                                            // Плавное проявление новых слов внутри активной произносимой фразы
-                                            var committedPrefixLength by remember(slotKey) {
-                                                mutableIntStateOf(displayedPhrase.length)
-                                            }
-                                            var fadeStartIndex by remember(slotKey) {
-                                                mutableIntStateOf(displayedPhrase.length)
-                                            }
-                                            val latestWordAlphaAnim = remember(slotKey) { Animatable(1f) }
-                                            LaunchedEffect(displayedPhrase) {
-                                                if (displayedPhrase.length > committedPrefixLength) {
-                                                    fadeStartIndex = committedPrefixLength
-                                                    committedPrefixLength = displayedPhrase.length
-                                                    latestWordAlphaAnim.snapTo(0.18f)
-                                                    latestWordAlphaAnim.animateTo(
-                                                        targetValue = 1f,
-                                                        animationSpec = tween(
-                                                            durationMillis = 280,
-                                                            easing = SmoothSubtitleEnterEasing
-                                                        )
-                                                    )
-                                                } else {
-                                                    committedPrefixLength = displayedPhrase.length
-                                                    fadeStartIndex = displayedPhrase.length
-                                                    latestWordAlphaAnim.snapTo(1f)
-                                                }
-                                            }
-
-                                            val styledPhrase = remember(
-                                                displayedPhrase,
-                                                baseTextColor,
-                                                fadeStartIndex,
-                                                latestWordAlphaAnim.value
-                                            ) {
-                                                val safeSplit = fadeStartIndex.coerceIn(0, displayedPhrase.length)
-                                                buildAnnotatedString {
-                                                    if (safeSplit >= displayedPhrase.length || latestWordAlphaAnim.value >= 0.99f) {
-                                                        append(displayedPhrase)
-                                                    } else {
-                                                        append(displayedPhrase.substring(0, safeSplit))
-                                                        pushStyle(
-                                                            SpanStyle(
-                                                                color = baseTextColor.copy(
-                                                                    alpha = latestWordAlphaAnim.value.coerceIn(0.18f, 1f)
-                                                                )
-                                                            )
-                                                        )
-                                                        append(displayedPhrase.substring(safeSplit))
-                                                        pop()
-                                                    }
-                                                }
-                                            }
-
-                                            Text(
-                                                text = styledPhrase,
+                                            // Reveal newly received transcript chunks while keeping the already spoken text stable.
+                                            DavidLiveStreamingText(
+                                                text = displayedPhrase,
+                                                streamKey = slotKey.toString(),
+                                                isStreaming = isSlotSpeaking,
                                                 color = baseTextColor,
                                                 fontSize = 15.sp,
                                                 fontWeight = if (isSlotSpeaking || isSlotAlert) {
@@ -1678,7 +1629,6 @@ fun DavidLiveSheet(
                                                     FontWeight.SemiBold
                                                 },
                                                 lineHeight = 20.5.sp,
-                                                textAlign = TextAlign.Center,
                                                 maxLines = 3,
                                                 overflow = TextOverflow.Ellipsis,
                                                 modifier = Modifier.testTag("david_live_subtitle_text")
