@@ -12,6 +12,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.sin
@@ -20,9 +21,11 @@ import kotlin.math.sin
  * Единый процедурный звуковой движок David Finance (Obsidian Neo-Bank).
  *
  * Все звуки синтезируются процедурно в формате 16-bit PCM (44.1 кГц, моно)
- * с плавными огибающими без стартовых/финальных щелчков и кэшируются в памяти
+ * с пиковой нормализацией (86–95% полной шкалы Short.MAX_VALUE) и плавными косинусными
+ * огибающими без стартовых/финальных щелчков, кэшируясь в памяти
  * для мгновенного воспроизведения через [AudioTrack.MODE_STATIC] с нулевой задержкой:
- * - [playTransactionCoins] — реалистичный каскадный звон монет при добавлении операций;
+ * - [playTransactionCoins] — реалистичный каскадный звон монет при сохранении операций;
+ * - [playVoiceOperationCaptured] — мягкий бархатный маримба-отклик при распознавании операции голосом на лету;
  * - [playReceive] / [playFrogReceive] — харизматичный двухсложный «ква-риббит» жабы Давида при входящем сообщении;
  * - [playSend] — мягкий водный «бульк» (bubble pop) при отправке сообщения пользователем;
  * - [playVoiceChatOpen] — плавный восходящий эмбиент-аккорд при раскрытии голосового чата (David Live / Голосовой ввод);
@@ -63,10 +66,17 @@ class SoundManager(context: Context) {
     }
 
     /**
-     * Воспроизведение каскадного звона монет при добавлении финансовой операции
+     * Воспроизведение каскадного звона монет при сохранении финансовой операции
      */
     fun playTransactionCoins() {
         Companion.playTransactionCoins(context)
+    }
+
+    /**
+     * Воспроизведение мягкого тёплого звука при распознавании операции в голосовом вводе
+     */
+    fun playVoiceOperationCaptured() {
+        Companion.playVoiceOperationCaptured(context)
     }
 
     /**
@@ -115,6 +125,7 @@ class SoundManager(context: Context) {
         internal const val SAMPLE_RATE = 44100
         private const val COIN_DURATION_MS = 320
         private const val TRANSACTION_COINS_DURATION_MS = 430
+        private const val VOICE_CAPTURE_DURATION_MS = 160
         private const val FROG_RECEIVE_DURATION_MS = 310
         private const val SEND_BUBBLE_DURATION_MS = 95
         private const val VOICE_OPEN_DURATION_MS = 290
@@ -139,50 +150,100 @@ class SoundManager(context: Context) {
         }
 
         /**
-         * 3. Кэшированный PCM-буфер фирменного звука жабы Давида («Ква-риббит») при СМС в чате (310 мс)
+         * 3. Кэшированный PCM-буфер мягкого тёплого отклика распознанной голосовой операции (160 мс)
+         */
+        internal val cachedVoiceCapturePcm: ShortArray by lazy {
+            synthesizeVoiceOperationCapturedPcm()
+        }
+
+        /**
+         * 4. Кэшированный PCM-буфер фирменного звука жабы Давида («Ква-риббит») при СМС в чате (310 мс)
          */
         internal val cachedFrogReceivePcm: ShortArray by lazy {
             synthesizeFrogReceivePcm()
         }
 
         /**
-         * 4. Кэшированный PCM-буфер мягкого пузырька отправки сообщения пользователем (95 мс)
+         * 5. Кэшированный PCM-буфер мягкого пузырька отправки сообщения пользователем (95 мс)
          */
         internal val cachedSendBubblePcm: ShortArray by lazy {
             synthesizeSendBubblePcm()
         }
 
         /**
-         * 5. Кэшированный PCM-буфер плавного восходящего раскрытия голосового чата (290 мс)
+         * 6. Кэшированный PCM-буфер плавного восходящего раскрытия голосового чата (290 мс)
          */
         internal val cachedVoiceOpenPcm: ShortArray by lazy {
             synthesizeVoiceChatOpenPcm()
         }
 
         /**
-         * 6. Кэшированный PCM-буфер плавного нисходящего закрытия голосового чата (260 мс)
+         * 7. Кэшированный PCM-буфер плавного нисходящего закрытия голосового чата (260 мс)
          */
         internal val cachedVoiceClosePcm: ShortArray by lazy {
             synthesizeVoiceChatClosePcm()
         }
 
         /**
-         * 7. Кэшированный PCM-буфер победного аккорда достижения (460 мс)
+         * 8. Кэшированный PCM-буфер победного аккорда достижения (460 мс)
          */
         internal val cachedAchievementPcm: ShortArray by lazy {
             synthesizeAchievementPcm()
         }
 
         /**
-         * 8. Кэшированный PCM-буфер мягкого тактильного микро-клика (28 мс)
+         * 9. Кэшированный PCM-буфер мягкого тактильного микро-клика (28 мс)
          */
         internal val cachedClickPcm: ShortArray by lazy {
             synthesizeClickPcm()
         }
 
+        /**
+         * Нормализует сырой буфер сэмплов до целевого пикового уровня [targetPeakRatio] от [Short.MAX_VALUE]
+         * с гарантированным плавным косинусным входом и выходом без щелчков (первый и последний сэмпл = 0).
+         */
+        internal fun normalizePcmPeak(
+            rawSamples: DoubleArray,
+            targetPeakRatio: Double = 0.92,
+            fadeInSamples: Int = 48,
+            fadeOutSamples: Int = 160
+        ): ShortArray {
+            if (rawSamples.isEmpty()) return ShortArray(0)
+            val total = rawSamples.size
+            val safeFadeIn = fadeInSamples.coerceIn(1, (total / 4).coerceAtLeast(1))
+            val safeFadeOut = fadeOutSamples.coerceIn(1, (total / 3).coerceAtLeast(1))
+
+            var maxAbs = 0.0
+            for (i in 0 until total) {
+                val a = abs(rawSamples[i])
+                if (a > maxAbs) maxAbs = a
+            }
+            val scale = if (maxAbs > 1e-6) (targetPeakRatio.coerceIn(0.1, 0.98) / maxAbs) else 1.0
+            val out = ShortArray(total)
+
+            for (i in 0 until total) {
+                val envIn = if (i < safeFadeIn) {
+                    0.5 * (1.0 - cos(PI * i.toDouble() / safeFadeIn))
+                } else {
+                    1.0
+                }
+                val rem = total - 1 - i
+                val envOut = if (rem < safeFadeOut) {
+                    0.5 * (1.0 - cos(PI * rem.toDouble() / safeFadeOut))
+                } else {
+                    1.0
+                }
+                val normalized = (rawSamples[i] * scale * envIn * envOut).coerceIn(-1.0, 1.0)
+                out[i] = (normalized * Short.MAX_VALUE).toInt().toShort()
+            }
+            out[0] = 0
+            out[total - 1] = 0
+            return out
+        }
+
         internal fun synthesizeSingleCoinPcm(): ShortArray {
             val totalSamples = (SAMPLE_RATE * COIN_DURATION_MS) / 1000
-            val pcmBuffer = ShortArray(totalSamples)
+            val raw = DoubleArray(totalSamples)
 
             val f1 = 2637.0 // Нота E7
             val f2 = 5274.0 // Октавный обертон E8
@@ -207,21 +268,20 @@ class SoundManager(context: Context) {
                 val tone3 = 0.14 * sin(twoPi * f3 * t) * exp(-t * 22.0) * spinModulation
                 val tone4 = 0.08 * sin(twoPi * f4 * t) * exp(-t * 22.0) * spinModulation
 
-                val combined = ((tone1 + tone2 + tone3 + tone4) * 0.24 + flickImpulse) * attackEnv * tailFade
-                pcmBuffer[i] = (combined.coerceIn(-1.0, 1.0) * Short.MAX_VALUE).toInt().toShort()
+                raw[i] = ((tone1 + tone2 + tone3 + tone4) * 0.24 + flickImpulse) * attackEnv * tailFade
             }
-            return pcmBuffer
+            return normalizePcmPeak(raw, targetPeakRatio = 0.90, fadeInSamples = 32, fadeOutSamples = 180)
         }
 
         internal fun synthesizeTransactionCoinsPcm(): ShortArray {
             val totalSamples = (SAMPLE_RATE * TRANSACTION_COINS_DURATION_MS) / 1000
-            val pcmBuffer = ShortArray(totalSamples)
+            val raw = DoubleArray(totalSamples)
             val twoPi = 2.0 * PI
             val totalDurationSec = TRANSACTION_COINS_DURATION_MS / 1000.0
 
             // Три каскадных удара монет (золотая -> серебряная -> изумрудная крона), образующие мажорное трезвучие
             val coinOnsets = doubleArrayOf(0.000, 0.068, 0.142)
-            val baseFreqs = doubleArrayOf(2489.0, 2960.0, 3520.0) // D#7, F#7, A7/A#7 звон
+            val baseFreqs = doubleArrayOf(2489.0, 2960.0, 3520.0) // D#7, F#7, A7 звон
             val coinGains = doubleArrayOf(0.88, 0.94, 1.00)
 
             for (i in 0 until totalSamples) {
@@ -238,7 +298,6 @@ class SoundManager(context: Context) {
                         val f4 = f1 * 3.48
 
                         val attack = (dt / 0.0016).coerceIn(0.0, 1.0)
-                        // Короткий металлический щелчок соприкосновения монет
                         val clinkTransient = if (dt < 0.0045) {
                             0.24 * sin(twoPi * (f1 * 1.45) * dt) * exp(-dt * 850.0)
                         } else {
@@ -256,21 +315,63 @@ class SoundManager(context: Context) {
                     }
                 }
 
-                val clamped = (sampleSum * masterTail).coerceIn(-1.0, 1.0)
-                pcmBuffer[i] = (clamped * Short.MAX_VALUE).toInt().toShort()
+                raw[i] = sampleSum * masterTail
             }
-            return pcmBuffer
+            return normalizePcmPeak(raw, targetPeakRatio = 0.94, fadeInSamples = 32, fadeOutSamples = 200)
+        }
+
+        /**
+         * Мягкий, тёплый бархатный отклик при распознавании операции в голосовом вводе (160 мс):
+         * двухнотный деревянно-стеклянный маримба-интервал (G4 392 Гц -> D5 587.33 Гц)
+         * с округлым косинусным вступлением и полным отсутствием резких высоких металлических гармоник,
+         * чтобы звук приятно подтверждал захват операции и не перебивал речь пользователя.
+         */
+        internal fun synthesizeVoiceOperationCapturedPcm(): ShortArray {
+            val totalSamples = (SAMPLE_RATE * VOICE_CAPTURE_DURATION_MS) / 1000
+            val raw = DoubleArray(totalSamples)
+            val twoPi = 2.0 * PI
+            val totalSec = VOICE_CAPTURE_DURATION_MS / 1000.0
+
+            val note1Freq = 392.00 // G4 — тёплая бархатная основа
+            val note2Freq = 587.33 // D5 — мягкая чистая квинта подтверждения
+            val note2Onset = 0.038 // Вторая нота мягко вступает через 38 мс
+
+            for (i in 0 until totalSamples) {
+                val t = i.toDouble() / SAMPLE_RATE
+                val masterTail = ((totalSec - t) / 0.024).coerceIn(0.0, 1.0)
+
+                // Первая нота с плавной косинусной атакой 12 мс (без щелчка/удара)
+                val attack1 = if (t < 0.012) 0.5 * (1.0 - cos(PI * (t / 0.012))) else 1.0
+                val decay1 = exp(-t * 18.0)
+                val subWarmth1 = 0.28 * sin(twoPi * (note1Freq * 0.5) * t) * exp(-t * 22.0)
+                val fund1 = 0.85 * sin(twoPi * note1Freq * t)
+                val warmHarm1 = 0.18 * sin(twoPi * (note1Freq * 2.0) * t) * exp(-t * 34.0)
+                var signal = (subWarmth1 + fund1 + warmHarm1) * attack1 * decay1
+
+                // Вторая нота — мягкое просветление на квинту вверх
+                if (t >= note2Onset) {
+                    val dt = t - note2Onset
+                    val attack2 = if (dt < 0.014) 0.5 * (1.0 - cos(PI * (dt / 0.014))) else 1.0
+                    val decay2 = exp(-dt * 15.5)
+                    val fund2 = 0.92 * sin(twoPi * note2Freq * dt)
+                    val warmHarm2 = 0.14 * sin(twoPi * (note2Freq * 2.0) * dt) * exp(-dt * 32.0)
+                    signal += (fund2 + warmHarm2) * attack2 * decay2
+                }
+
+                raw[i] = signal * masterTail
+            }
+            return normalizePcmPeak(raw, targetPeakRatio = 0.88, fadeInSamples = 80, fadeOutSamples = 240)
         }
 
         internal fun synthesizeFrogReceivePcm(): ShortArray {
             val totalSamples = (SAMPLE_RATE * FROG_RECEIVE_DURATION_MS) / 1000
-            val pcmBuffer = ShortArray(totalSamples)
+            val raw = DoubleArray(totalSamples)
             val twoPi = 2.0 * PI
             val totalSec = FROG_RECEIVE_DURATION_MS / 1000.0
 
             // Двухсложный музыкальный «ква-риббит» Давида Жабова:
-            // Слог 1 (0..102 мс): короткий упругий «кв-» с подъёмом питча 175 -> 295 Гц и горловой пульсацией 46 Гц
-            // Слог 2 (116..310 мс): выразительный «ква-а!» 205 -> 385 -> 325 Гц с изумрудным резонансом
+            // Слог 1 (0..102 мс): короткий упругий «кв-» с подъёмом питча 175 -> 295 Гц и горловой пульсацией 48 Гц
+            // Слог 2 (114..310 мс): выразительный «ква-а!» 205 -> 385 -> 325 Гц с изумрудным резонансом
             var phase1 = 0.0
             var phase2 = 0.0
 
@@ -316,15 +417,14 @@ class SoundManager(context: Context) {
                     signal += ((fundamental + formant2 + formant3) * throatTrill * decay + emeraldTail) * attack * 0.36
                 }
 
-                val clamped = (signal * masterTail).coerceIn(-1.0, 1.0)
-                pcmBuffer[i] = (clamped * Short.MAX_VALUE).toInt().toShort()
+                raw[i] = signal * masterTail
             }
-            return pcmBuffer
+            return normalizePcmPeak(raw, targetPeakRatio = 0.95, fadeInSamples = 40, fadeOutSamples = 180)
         }
 
         internal fun synthesizeSendBubblePcm(): ShortArray {
             val totalSamples = (SAMPLE_RATE * SEND_BUBBLE_DURATION_MS) / 1000
-            val pcmBuffer = ShortArray(totalSamples)
+            val raw = DoubleArray(totalSamples)
             val twoPi = 2.0 * PI
             val totalSec = SEND_BUBBLE_DURATION_MS / 1000.0
             var phase = 0.0
@@ -342,15 +442,14 @@ class SoundManager(context: Context) {
 
                 val tone1 = 0.85 * sin(phase)
                 val tone2 = 0.28 * sin(phase * 2.0) * exp(-t * 35.0)
-                val combined = (tone1 + tone2) * env * 0.34
-                pcmBuffer[i] = (combined.coerceIn(-1.0, 1.0) * Short.MAX_VALUE).toInt().toShort()
+                raw[i] = (tone1 + tone2) * env
             }
-            return pcmBuffer
+            return normalizePcmPeak(raw, targetPeakRatio = 0.90, fadeInSamples = 36, fadeOutSamples = 120)
         }
 
         internal fun synthesizeVoiceChatOpenPcm(): ShortArray {
             val totalSamples = (SAMPLE_RATE * VOICE_OPEN_DURATION_MS) / 1000
-            val pcmBuffer = ShortArray(totalSamples)
+            val raw = DoubleArray(totalSamples)
             val twoPi = 2.0 * PI
             val totalSec = VOICE_OPEN_DURATION_MS / 1000.0
             var sweepPhase = 0.0
@@ -380,15 +479,14 @@ class SoundManager(context: Context) {
                 val note3 = 0.26 * sin(twoPi * 659.25 * t) * shimmerDelay * exp(-t * 6.2) // E5
                 val note4 = 0.20 * sin(twoPi * 739.99 * t) * shimmerDelay * exp(-t * 7.0) // F#5
 
-                val combined = (padGlide + note1 + note2 + note3 + note4) * env * 0.28
-                pcmBuffer[i] = (combined.coerceIn(-1.0, 1.0) * Short.MAX_VALUE).toInt().toShort()
+                raw[i] = (padGlide + note1 + note2 + note3 + note4) * env
             }
-            return pcmBuffer
+            return normalizePcmPeak(raw, targetPeakRatio = 0.92, fadeInSamples = 96, fadeOutSamples = 240)
         }
 
         internal fun synthesizeVoiceChatClosePcm(): ShortArray {
             val totalSamples = (SAMPLE_RATE * VOICE_CLOSE_DURATION_MS) / 1000
-            val pcmBuffer = ShortArray(totalSamples)
+            val raw = DoubleArray(totalSamples)
             val twoPi = 2.0 * PI
             val totalSec = VOICE_CLOSE_DURATION_MS / 1000.0
             var sweepPhase = 0.0
@@ -414,15 +512,14 @@ class SoundManager(context: Context) {
                 val midNote = 0.34 * sin(twoPi * 440.00 * t) * exp(-t * 7.5) // A4
                 val lowWarmth = 0.40 * sin(twoPi * 293.66 * t) * exp(-t * 5.2) // D4 мягкая опора
 
-                val combined = (padGlide + highNote + midNote + lowWarmth) * env * 0.27
-                pcmBuffer[i] = (combined.coerceIn(-1.0, 1.0) * Short.MAX_VALUE).toInt().toShort()
+                raw[i] = (padGlide + highNote + midNote + lowWarmth) * env
             }
-            return pcmBuffer
+            return normalizePcmPeak(raw, targetPeakRatio = 0.90, fadeInSamples = 80, fadeOutSamples = 240)
         }
 
         internal fun synthesizeAchievementPcm(): ShortArray {
             val totalSamples = (SAMPLE_RATE * ACHIEVEMENT_DURATION_MS) / 1000
-            val pcmBuffer = ShortArray(totalSamples)
+            val raw = DoubleArray(totalSamples)
             val twoPi = 2.0 * PI
             val totalSec = ACHIEVEMENT_DURATION_MS / 1000.0
 
@@ -444,19 +541,18 @@ class SoundManager(context: Context) {
                         val env = attack * exp(-dt * decayRate)
                         val fundamental = 0.75 * sin(twoPi * f * dt)
                         val overtone = 0.25 * sin(twoPi * (f * 2.0) * dt) * exp(-dt * 16.0)
-                        sum += (fundamental + overtone) * env * 0.24
+                        sum += (fundamental + overtone) * env
                     }
                 }
 
-                val clamped = (sum * masterTail).coerceIn(-1.0, 1.0)
-                pcmBuffer[i] = (clamped * Short.MAX_VALUE).toInt().toShort()
+                raw[i] = sum * masterTail
             }
-            return pcmBuffer
+            return normalizePcmPeak(raw, targetPeakRatio = 0.93, fadeInSamples = 40, fadeOutSamples = 200)
         }
 
         internal fun synthesizeClickPcm(): ShortArray {
             val totalSamples = (SAMPLE_RATE * CLICK_DURATION_MS) / 1000
-            val pcmBuffer = ShortArray(totalSamples)
+            val raw = DoubleArray(totalSamples)
             val twoPi = 2.0 * PI
             val totalSec = CLICK_DURATION_MS / 1000.0
             var phase = 0.0
@@ -468,10 +564,9 @@ class SoundManager(context: Context) {
                 val instFreq = 580.0 * exp(-t * 55.0) + 180.0
                 phase += twoPi * instFreq / SAMPLE_RATE
 
-                val sample = sin(phase) * exp(-t * 115.0) * attack * tail * 0.22
-                pcmBuffer[i] = (sample.coerceIn(-1.0, 1.0) * Short.MAX_VALUE).toInt().toShort()
+                raw[i] = sin(phase) * exp(-t * 115.0) * attack * tail
             }
-            return pcmBuffer
+            return normalizePcmPeak(raw, targetPeakRatio = 0.82, fadeInSamples = 20, fadeOutSamples = 80)
         }
 
         /**
@@ -482,6 +577,7 @@ class SoundManager(context: Context) {
             synthScope.launch {
                 cachedCoinPcm.size
                 cachedTransactionCoinsPcm.size
+                cachedVoiceCapturePcm.size
                 cachedFrogReceivePcm.size
                 cachedSendBubblePcm.size
                 cachedVoiceOpenPcm.size
@@ -500,13 +596,15 @@ class SoundManager(context: Context) {
 
         /**
          * Проверяет разрешение звука в настройках приложения, режим звонка и системную громкость.
+         * Не применяет двойного затухания поверх системного микшера STREAM_MUSIC, чтобы звуки
+         * звучали насыщенно и отчётливо на реальных Android-устройствах.
          */
         internal fun resolvePlaybackGain(
             context: Context?,
             baseGain: Float,
             maxGain: Float
         ): Float {
-            var userVolumeRatio = 0.6f
+            var userVolumeRatio = 0.85f
 
             if (context != null) {
                 try {
@@ -537,15 +635,18 @@ class SoundManager(context: Context) {
                 }
             }
 
-            return (baseGain * userVolumeRatio).coerceIn(0f, maxGain)
+            // Аппаратный микшер Android уже масштабирует громкость потока, поэтому сохраняем высокий
+            // базовый коэффициент (78%..100% от baseGain), чтобы избежать двойного ослабления сигнала.
+            val perceptualScale = 0.78f + 0.22f * userVolumeRatio
+            return (baseGain * perceptualScale).coerceIn(0f, maxGain)
         }
 
         private fun playPcmBufferAsync(
             context: Context?,
             pcmProvider: () -> ShortArray,
             durationMs: Int,
-            baseGain: Float = 0.26f,
-            maxGain: Float = 0.32f,
+            baseGain: Float = 0.88f,
+            maxGain: Float = 0.98f,
             debugTag: String = "sound"
         ) {
             val finalGain = resolvePlaybackGain(context, baseGain, maxGain)
@@ -558,7 +659,7 @@ class SoundManager(context: Context) {
                     val byteSize = pcmBuffer.size * 2
 
                     val audioAttributes = AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
 
@@ -605,23 +706,37 @@ class SoundManager(context: Context) {
                 context = context,
                 pcmProvider = { cachedCoinPcm },
                 durationMs = COIN_DURATION_MS,
-                baseGain = 0.22f,
-                maxGain = 0.25f,
+                baseGain = 0.86f,
+                maxGain = 0.95f,
                 debugTag = "coin_toss"
             )
         }
 
         /**
-         * Каскадный звон монет при добавлении финансовой операции (дохода, расхода, взноса в цель)
+         * Каскадный звон монет при сохранении финансовой операции (дохода, расхода, взноса в цель)
          */
         fun playTransactionCoins(context: Context? = null) {
             playPcmBufferAsync(
                 context = context,
                 pcmProvider = { cachedTransactionCoinsPcm },
                 durationMs = TRANSACTION_COINS_DURATION_MS,
-                baseGain = 0.28f,
-                maxGain = 0.34f,
+                baseGain = 0.94f,
+                maxGain = 1.00f,
                 debugTag = "transaction_coins"
+            )
+        }
+
+        /**
+         * Мягкий бархатный маримба-отклик при распознавании операции в голосовом вводе на лету
+         */
+        fun playVoiceOperationCaptured(context: Context? = null) {
+            playPcmBufferAsync(
+                context = context,
+                pcmProvider = { cachedVoiceCapturePcm },
+                durationMs = VOICE_CAPTURE_DURATION_MS,
+                baseGain = 0.78f,
+                maxGain = 0.88f,
+                debugTag = "voice_operation_captured"
             )
         }
 
@@ -633,8 +748,8 @@ class SoundManager(context: Context) {
                 context = context,
                 pcmProvider = { cachedFrogReceivePcm },
                 durationMs = FROG_RECEIVE_DURATION_MS,
-                baseGain = 0.30f,
-                maxGain = 0.36f,
+                baseGain = 0.96f,
+                maxGain = 1.00f,
                 debugTag = "frog_receive"
             )
         }
@@ -647,8 +762,8 @@ class SoundManager(context: Context) {
                 context = context,
                 pcmProvider = { cachedSendBubblePcm },
                 durationMs = SEND_BUBBLE_DURATION_MS,
-                baseGain = 0.25f,
-                maxGain = 0.30f,
+                baseGain = 0.86f,
+                maxGain = 0.96f,
                 debugTag = "send_bubble"
             )
         }
@@ -661,8 +776,8 @@ class SoundManager(context: Context) {
                 context = context,
                 pcmProvider = { cachedVoiceOpenPcm },
                 durationMs = VOICE_OPEN_DURATION_MS,
-                baseGain = 0.26f,
-                maxGain = 0.32f,
+                baseGain = 0.90f,
+                maxGain = 0.98f,
                 debugTag = "voice_chat_open"
             )
         }
@@ -675,8 +790,8 @@ class SoundManager(context: Context) {
                 context = context,
                 pcmProvider = { cachedVoiceClosePcm },
                 durationMs = VOICE_CLOSE_DURATION_MS,
-                baseGain = 0.25f,
-                maxGain = 0.30f,
+                baseGain = 0.88f,
+                maxGain = 0.96f,
                 debugTag = "voice_chat_close"
             )
         }
@@ -689,8 +804,8 @@ class SoundManager(context: Context) {
                 context = context,
                 pcmProvider = { cachedAchievementPcm },
                 durationMs = ACHIEVEMENT_DURATION_MS,
-                baseGain = 0.28f,
-                maxGain = 0.34f,
+                baseGain = 0.94f,
+                maxGain = 1.00f,
                 debugTag = "achievement"
             )
         }
@@ -703,8 +818,8 @@ class SoundManager(context: Context) {
                 context = context,
                 pcmProvider = { cachedClickPcm },
                 durationMs = CLICK_DURATION_MS,
-                baseGain = 0.18f,
-                maxGain = 0.22f,
+                baseGain = 0.68f,
+                maxGain = 0.80f,
                 debugTag = "click"
             )
         }

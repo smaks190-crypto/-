@@ -2461,6 +2461,7 @@ class DavidLiveUnitTest {
         val buffers = mapOf(
             "singleCoin" to com.example.davidapp.SoundManager.cachedCoinPcm,
             "transactionCoins" to com.example.davidapp.SoundManager.cachedTransactionCoinsPcm,
+            "voiceCapture" to com.example.davidapp.SoundManager.cachedVoiceCapturePcm,
             "frogReceive" to com.example.davidapp.SoundManager.cachedFrogReceivePcm,
             "sendBubble" to com.example.davidapp.SoundManager.cachedSendBubblePcm,
             "voiceOpen" to com.example.davidapp.SoundManager.cachedVoiceOpenPcm,
@@ -2472,7 +2473,10 @@ class DavidLiveUnitTest {
         for ((name, pcm) in buffers) {
             assertTrue("$name PCM buffer must not be empty", pcm.isNotEmpty())
             val peakAbs = pcm.maxOf { kotlin.math.abs(it.toInt()) }
-            assertTrue("$name PCM buffer must have audible non-zero peak (got $peakAbs)", peakAbs > 1500)
+            assertTrue(
+                "$name PCM buffer must have strong normalized peak >= 24000 for clear loudness (got $peakAbs)",
+                peakAbs >= 24000
+            )
             // First and last samples must be zero or near-zero to prevent hardware speaker clicks
             assertTrue(
                 "$name first sample must start smoothly near zero (got ${pcm.first()})",
@@ -2484,13 +2488,19 @@ class DavidLiveUnitTest {
             )
         }
 
+        // Verify soft voice capture sound is shorter and gentler than cascading transaction coins
+        assertTrue(
+            com.example.davidapp.SoundManager.cachedVoiceCapturePcm.size <
+                com.example.davidapp.SoundManager.cachedTransactionCoinsPcm.size
+        )
+
         // Verify cascading transaction coins buffer is longer than a single coin toss
         assertTrue(
             com.example.davidapp.SoundManager.cachedTransactionCoinsPcm.size >
                 com.example.davidapp.SoundManager.cachedCoinPcm.size
         )
 
-        // Verify frog receive buffer has two distinct vocal syllables (energy dip around 102..114 ms)
+        // Verify frog receive buffer has two distinct vocal syllables (energy dip around 104..112 ms)
         val frogPcm = com.example.davidapp.SoundManager.cachedFrogReceivePcm
         val sampleRate = com.example.davidapp.SoundManager.SAMPLE_RATE
         val syllable1Peak = (10 * sampleRate / 1000 until 90 * sampleRate / 1000)
@@ -2499,18 +2509,27 @@ class DavidLiveUnitTest {
             .maxOf { kotlin.math.abs(frogPcm[it].toInt()) }
         val syllable2Peak = (125 * sampleRate / 1000 until 220 * sampleRate / 1000)
             .maxOf { kotlin.math.abs(frogPcm[it].toInt()) }
-        assertTrue("Frog syllable 1 must be audible", syllable1Peak > 2000)
+        assertTrue("Frog syllable 1 must be strongly audible", syllable1Peak > 15000)
         assertEquals("Gap between frog syllables must be silent", 0, interSyllableGapPeak)
-        assertTrue("Frog syllable 2 must be audible", syllable2Peak > 2000)
+        assertTrue("Frog syllable 2 must be strongly audible", syllable2Peak > 15000)
 
-        // Verify sound preference gate blocks playback when sound is disabled in settings
+        // Verify sound preference gate blocks playback when sound is disabled in settings,
+        // and preserves high playback gain (>= 0.65f) when enabled
         val prevEnabled = com.example.data.preferences.BudgetPreferencesRepository.isSoundEnabled(context)
         try {
+            com.example.data.preferences.BudgetPreferencesRepository.setSoundEnabled(context, true)
+            val activeGain = com.example.davidapp.SoundManager.resolvePlaybackGain(
+                context = null,
+                baseGain = 0.94f,
+                maxGain = 1.00f
+            )
+            assertTrue("Active playback gain must be loud (>= 0.80f), got $activeGain", activeGain >= 0.80f)
+
             com.example.data.preferences.BudgetPreferencesRepository.setSoundEnabled(context, false)
             val mutedGain = com.example.davidapp.SoundManager.resolvePlaybackGain(
                 context = context,
-                baseGain = 0.28f,
-                maxGain = 0.34f
+                baseGain = 0.94f,
+                maxGain = 1.00f
             )
             assertEquals("Playback gain must be 0f when sound is disabled in preferences", 0f, mutedGain, 0.0001f)
         } finally {

@@ -107,7 +107,7 @@ class TransactionStateDelegate(
             type = lastOp.type,
             isCorrection = false
         )
-        com.example.davidapp.SoundManager.playCoinToss(context)
+        com.example.davidapp.SoundManager.playVoiceOperationCaptured(context)
         com.example.utils.GlobalConsoleLogger.i(
             "UI",
             "Gemini Live BidiGenerateContent: +${liveOps.size} операций (всего ${updatedList.size}), последняя: $lastOpTranscript"
@@ -148,6 +148,7 @@ class TransactionStateDelegate(
                 type = createdOp.type,
                 isCorrection = true
             )
+            com.example.davidapp.SoundManager.playVoiceOperationCaptured(context)
             return
         }
 
@@ -184,6 +185,7 @@ class TransactionStateDelegate(
             type = updatedOp.type,
             isCorrection = true
         )
+        com.example.davidapp.SoundManager.playVoiceOperationCaptured(context)
         com.example.utils.GlobalConsoleLogger.i(
             "UI",
             "Gemini Live BidiGenerateContent: исправлена последняя операция -> $updatedTranscript"
