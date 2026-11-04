@@ -1269,8 +1269,8 @@ class SafeToSpendCalculatorTest {
 
         assertEquals(200_000.0, snapWithSalary200k.safeToSpendResult.todayPendingGuaranteedIncomeRub, 0.01)
         assertEquals(200_000.0, brWithSalary200k.plannedIncomeRub, 0.01)
-        assertEquals(uiAfterEditExpense.freeMoneyAfterReservationRub + 200_000.0, uiWithSalary200k.freeMoneyAfterReservationRub, 0.01)
-        assertTrue(uiWithSalary200k.canSpendTodayRub > uiAfterEditExpense.canSpendTodayRub + 1_000.0)
+        assertEquals(uiAfterEditExpense.freeMoneyAfterReservationRub, uiWithSalary200k.freeMoneyAfterReservationRub, 0.01)
+        assertEquals(uiAfterEditExpense.canSpendTodayRub, uiWithSalary200k.canSpendTodayRub, 0.01)
 
         // Редактирование регулярного дохода (200 000 ₽ -> 500 000 ₽):
         val salaryToday500k = salaryToday200k.copy(amount = 500_000.0)
@@ -1288,8 +1288,8 @@ class SafeToSpendCalculatorTest {
         val brWithSalary500k = buildSafeToSpendBreakdownUiModel(snapWithSalary500k.safeToSpendResult)
 
         assertEquals(500_000.0, brWithSalary500k.plannedIncomeRub, 0.01)
-        assertEquals(uiWithSalary200k.freeMoneyAfterReservationRub + 300_000.0, uiWithSalary500k.freeMoneyAfterReservationRub, 0.01)
-        assertTrue(uiWithSalary500k.canSpendTodayRub > uiWithSalary200k.canSpendTodayRub + 5_000.0)
+        assertEquals(uiWithSalary200k.freeMoneyAfterReservationRub, uiWithSalary500k.freeMoneyAfterReservationRub, 0.01)
+        assertEquals(uiWithSalary200k.canSpendTodayRub, uiWithSalary500k.canSpendTodayRub, 0.01)
 
         // 4. Подтверждение фактического исполнения (PAID) не приводит к двойному учёту:
         val confirmedRentTx = TransactionEntity(

@@ -598,8 +598,9 @@ class DavidLiveFinancialToolsProvider(
     }
 
     internal fun parseTransactionMillis(tx: TransactionEntity): Long {
-        if (tx.createdAt > 0L) return tx.createdAt
-        return parseIsoDateToMillis(tx.date)
+        // The operation date chosen by the user controls financial periods, including imported/backdated entries.
+        val operationDate = parseIsoDateToMillis(tx.date)
+        return if (operationDate > 0L) operationDate else tx.createdAt.coerceAtLeast(0L)
     }
 
     private fun referenceNowMillis(): Long {

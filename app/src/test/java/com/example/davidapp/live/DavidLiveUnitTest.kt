@@ -1661,7 +1661,7 @@ class DavidLiveUnitTest {
             accountDao = null
         )
 
-        // 1. Если задан createdAt > 0, возвращается точный timestamp создания
+        // 1. Дата операции важнее времени её создания (включая импорт и ввод задним числом)
         val txWithCreatedAt = TransactionEntity(
             id = "tx_created",
             budgetId = "default",
@@ -1672,7 +1672,10 @@ class DavidLiveUnitTest {
             amount = 350.0,
             createdAt = 1761740000123L
         )
-        assertEquals(1761740000123L, provider.parseTransactionMillis(txWithCreatedAt))
+        assertEquals(
+            java.time.LocalDate.of(2026, 10, 29).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            provider.parseTransactionMillis(txWithCreatedAt)
+        )
 
         // 2. Если createdAt == 0, парсится ISO дата YYYY-MM-DD в полночь системной таймзоны
         val txIsoOnly = TransactionEntity(
