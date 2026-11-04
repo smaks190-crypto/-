@@ -304,7 +304,7 @@ fun BudgetSelectionScreen(
                             color = ObsidianSurface,
                             border = BorderStroke(1.dp, GlassBorder),
                             modifier = Modifier
-                                .height(38.dp)
+                                .height(48.dp)
                                 .testTag("open_security_button")
                         ) {
                             Row(
@@ -341,7 +341,7 @@ fun BudgetSelectionScreen(
                         color = ObsidianSurface,
                         border = BorderStroke(1.dp, Indigo500.copy(alpha = 0.45f)),
                         modifier = Modifier
-                            .height(38.dp)
+                            .height(48.dp)
                             .testTag("import_copy_button")
                     ) {
                         Row(
@@ -638,7 +638,7 @@ fun BudgetSelectionScreen(
 
                             Box(
                                 modifier = Modifier
-                                    .height(38.dp)
+                                    .height(48.dp)
                                     .width(46.dp)
                                     .clip(CircleShape)
                                     .background(

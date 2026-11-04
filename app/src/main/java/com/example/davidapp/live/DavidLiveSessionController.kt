@@ -49,6 +49,8 @@ class DavidLiveSessionController(
 
     private val _liveSubtitle = MutableStateFlow("Говорите, я слушаю...")
     val liveSubtitle: StateFlow<String> = _liveSubtitle.asStateFlow()
+    private val _spokenTranscript = MutableStateFlow("")
+    val spokenTranscript: StateFlow<String> = _spokenTranscript.asStateFlow()
 
     private val _isMicMuted = MutableStateFlow(false)
     val isMicMuted: StateFlow<Boolean> = _isMicMuted.asStateFlow()
@@ -247,6 +249,7 @@ class DavidLiveSessionController(
         }
         pendingUserTranscript.clear()
         pendingDavidTranscript.clear()
+        _spokenTranscript.value = ""
         financialToolsProvider.clearVerifiedFacts()
         resetProcessingFlags()
         _failureKind.value = DavidLiveConnectionFailureKind.NONE
@@ -747,6 +750,7 @@ class DavidLiveSessionController(
             val cleanedUserText = sanitizeSpokenSubtitle(pendingUserTranscript.toString())
             if (cleanedUserText.isNotBlank()) {
                 _liveSubtitle.value = cleanedUserText
+                _spokenTranscript.value = cleanedUserText
             }
             // Как только пользователь произнёс фразу, если не идёт поиск/речь Давида — активируем готовность к размышлению
             if (!_isToolLookupActive.value && !_isAnalyzingToolData.value) {
@@ -774,6 +778,7 @@ class DavidLiveSessionController(
             val cleanedDavidText = sanitizeSpokenSubtitle(pendingDavidTranscript.toString())
             if (cleanedDavidText.isNotBlank()) {
                 _liveSubtitle.value = cleanedDavidText
+                _spokenTranscript.value = cleanedDavidText
             }
             recomputeVisualState()
         }
@@ -812,6 +817,7 @@ class DavidLiveSessionController(
                     if (cleanedPart.isNotBlank()) {
                         pendingDavidTranscript.append(cleanedPart)
                         _liveSubtitle.value = sanitizeSpokenSubtitle(pendingDavidTranscript.toString())
+                        _spokenTranscript.value = _liveSubtitle.value
                     }
                 }
 
