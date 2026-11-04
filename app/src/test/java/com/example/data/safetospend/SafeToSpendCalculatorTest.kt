@@ -10,6 +10,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.example.data.db.CategoryEntity
+import com.example.ui.components.dialogs.localizeBottleneckReason
 import com.example.ui.components.dialogs.buildFinancialStateUiModel
 import com.example.ui.components.dialogs.buildSafeToSpendBreakdownUiModel
 import com.example.ui.components.dialogs.localizeWhatIfVerdict
