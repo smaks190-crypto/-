@@ -156,6 +156,17 @@ data class ScheduledObligationItem(
     val categoryName: String
 )
 
+data class ScheduledIncomeItem(
+    val sourceId: String,
+    val recurringId: Long? = null,
+    val title: String,
+    val amountRub: Double,
+    val dueEpochDay: Long,
+    val incomeCertainty: IncomeCertainty,
+    val categoryName: String,
+    val frequency: PaymentFrequency = PaymentFrequency.MONTHLY
+)
+
 data class DayLiquidityPoint(
     val offsetDays: Int,
     val epochDay: Long,
@@ -242,18 +253,37 @@ data class SafeToSpendResult(
     val cashGapEpochDay: Long?,
     val cashGapAmountRub: Double,
     val trajectory: List<DayLiquidityPoint>,
-    val upcomingObligations: List<ScheduledObligationItem>
+    val upcomingObligations: List<ScheduledObligationItem>,
+    val upcomingIncomes: List<ScheduledIncomeItem> = emptyList()
 ) {
     val obligationsReservedTotalRub: Double
         get() = overdueObligationsRub + todayPendingObligationsRub + reservedFutureObligationsRub
 
-    fun toStructuredDavidSummary(): String = buildString {
+    val todayPendingGuaranteedIncomeRub: Double
+        get() = upcomingIncomes.filter {
+            it.incomeCertainty == IncomeCertainty.GUARANTEED && it.dueEpochDay == trajectory.firstOrNull()?.epochDay
+        }.sumOf { it.amountRub }
+
+    val upcomingGuaranteedIncomeRub: Double
+        get() {
+            val today = trajectory.firstOrNull()?.epochDay ?: return 0.0
+            return upcomingIncomes.filter {
+                it.incomeCertainty == IncomeCertainty.GUARANTEED && it.dueEpochDay > today && it.dueEpochDay < today + horizonDays
+            }.sumOf { it.amountRub }
+        }
+
+    val netBalanceAfterObligationsBeforeSalaryRub: Double
+        get() = availableBalanceRub - lockedGoalsAndReserveRub - obligationsReservedTotalRub
+
+    fun toStructuredDavidSummary(todayEpochDayOverride: Long? = null): String = buildString {
+        val refToday = todayEpochDayOverride ?: trajectory.firstOrNull()?.epochDay ?: bottleneckEpochDay
         appendLine("=== SAFE-TO-SPEND 2.0 (ДЕТЕРМИНИРОВАННЫЙ ПРОГНОЗ ЛИКВИДНОСТИ) ===")
         appendLine("• Свободный лимит на сегодня (необязательные траты): ${canSpendTodayDiscRub.toLong()} ₽")
         appendLine("• Защищённый резерв на базовые нужды сегодня (еда, транспорт, аптека): ${canSpendTodayEssRub.toLong()} ₽")
         appendLine("• Суммарно доступно сегодня без нарушения обязательств: ${canSpendTodayTotalRub.toLong()} ₽")
         appendLine("• Расчётная дневная скорость на будущие дни горизонта: ${dailyDiscretionarySpeedRub.toLong()} ₽/день")
         appendLine("• Доступный баланс (B_avail): ${availableBalanceRub.toLong()} ₽")
+        appendLine("• Остаток после вычета всех обязательств до зарплаты (до вычета базовой жизни и защитного резерва): ${netBalanceAfterObligationsBeforeSalaryRub.toLong()} ₽")
         appendLine("• Потрачено сегодня: всего ${spentTodayTotalRub.toLong()} ₽ (обязательные: ${spentTodayMandatoryRub.toLong()} ₽, базовые: ${spentTodayEssentialRub.toLong()} ₽, свободные: ${spentTodayDiscretionaryRub.toLong()} ₽)")
         if (todayOverspendRub > 0.0) {
             appendLine("• Перерасход дневного лимита сегодня: ${todayOverspendRub.toLong()} ₽")
@@ -267,9 +297,9 @@ data class SafeToSpendResult(
         if (requiresEssentialBudgetPrompt && !essentialWarningMessage.isNullOrBlank()) {
             appendLine("• ВНИМАНИЕ ПО БАЗОВЫМ РАСХОДАМ: $essentialWarningMessage")
         }
-        appendLine("• Узкое место горизонта: через $bottleneckDayOffset дн. (${LocalDate.ofEpochDay(bottleneckEpochDay)}), причина: $bottleneckReason")
+        appendLine("• Узкое место горизонта: через $bottleneckDayOffset дн. (${RussianDateVerbalizer.formatSpokenDateGenitiveRu(bottleneckEpochDay)}), причина: $bottleneckReason")
         if (hasCashGap) {
-            val gapDate = cashGapEpochDay?.let { LocalDate.ofEpochDay(it).toString() } ?: "сегодня"
+            val gapDate = cashGapEpochDay?.let { RussianDateVerbalizer.formatSpokenDateGenitiveRu(it) } ?: "сегодня"
             appendLine("• РИСК КАССОВОГО РАЗРЫВА: дефицит ${cashGapAmountRub.toLong()} ₽ на дату $gapDate")
         } else {
             appendLine("• Кассовый разрыв: отсутствует (0 ₽)")
@@ -279,10 +309,123 @@ data class SafeToSpendResult(
         }
         if (upcomingObligations.isNotEmpty()) {
             appendLine("• Ближайшие обязательства:")
-            upcomingObligations.take(5).forEach { item ->
-                val statusLabel = if (item.isOverdue) "ПРОСРОЧЕНО" else LocalDate.ofEpochDay(item.dueEpochDay).toString()
+            upcomingObligations.take(7).forEach { item ->
+                val statusLabel = if (item.isOverdue) {
+                    "ПРОСРОЧЕНО (${RussianDateVerbalizer.formatSpokenDateGenitiveRu(item.dueEpochDay)})"
+                } else {
+                    RussianDateVerbalizer.formatRelativeDueSpokenRu(item.dueEpochDay, refToday)
+                }
                 appendLine("  - ${item.title}: ${item.amountRub.toLong()} ₽ ($statusLabel)")
             }
+        }
+        if (upcomingIncomes.isNotEmpty()) {
+            appendLine("• Ближайшие плановые доходы (прогноз, НЕ входят в текущий доступный баланс B_avail):")
+            upcomingIncomes.take(7).forEach { item ->
+                val whenStr = RussianDateVerbalizer.formatRelativeDueSpokenRu(item.dueEpochDay, refToday)
+                appendLine("  - ${item.title}: ${item.amountRub.toLong()} ₽ ($whenStr, статус достоверности: ${item.incomeCertainty})")
+            }
+        }
+    }
+}
+
+object RussianDateVerbalizer {
+    private val monthsGenitive = arrayOf(
+        "",
+        "января", "февраля", "марта", "апреля", "мая", "июня",
+        "июля", "августа", "сентября", "октября", "ноября", "декабря"
+    )
+
+    fun dayOrdinalGenitiveRu(day: Int): String = when (day) {
+        1 -> "первого"
+        2 -> "второго"
+        3 -> "третьего"
+        4 -> "четвёртого"
+        5 -> "пятого"
+        6 -> "шестого"
+        7 -> "седьмого"
+        8 -> "восьмого"
+        9 -> "девятого"
+        10 -> "десятого"
+        11 -> "одиннадцатого"
+        12 -> "двенадцатого"
+        13 -> "тринадцатого"
+        14 -> "четырнадцатого"
+        15 -> "пятнадцатого"
+        16 -> "шестнадцатого"
+        17 -> "семнадцатого"
+        18 -> "восемнадцатого"
+        19 -> "девятнадцатого"
+        20 -> "двадцатого"
+        21 -> "двадцать первого"
+        22 -> "двадцать второго"
+        23 -> "двадцать третьего"
+        24 -> "двадцать четвёртого"
+        25 -> "двадцать пятого"
+        26 -> "двадцать шестого"
+        27 -> "двадцать седьмого"
+        28 -> "двадцать восьмого"
+        29 -> "двадцать девятого"
+        30 -> "тридцатого"
+        31 -> "тридцать первого"
+        else -> "$day-го"
+    }
+
+    fun dayOrdinalNominativeRu(day: Int): String = when (day) {
+        1 -> "первое"
+        2 -> "второе"
+        3 -> "третье"
+        4 -> "четвёртое"
+        5 -> "пятое"
+        6 -> "шестое"
+        7 -> "седьмое"
+        8 -> "восьмое"
+        9 -> "девятое"
+        10 -> "десятое"
+        11 -> "одиннадцатое"
+        12 -> "двенадцатое"
+        13 -> "тринадцатое"
+        14 -> "четырнадцатое"
+        15 -> "пятнадцатое"
+        16 -> "шестнадцатое"
+        17 -> "семнадцатое"
+        18 -> "восемнадцатое"
+        19 -> "девятнадцатое"
+        20 -> "двадцатое"
+        21 -> "двадцать первое"
+        22 -> "двадцать второе"
+        23 -> "двадцать третье"
+        24 -> "двадцать четвёртое"
+        25 -> "двадцать пятое"
+        26 -> "двадцать шестое"
+        27 -> "двадцать седьмое"
+        28 -> "двадцать восьмое"
+        29 -> "двадцать девятое"
+        30 -> "тридцатое"
+        31 -> "тридцать первое"
+        else -> "$day-е"
+    }
+
+    fun formatHumanDateRu(epochDay: Long): String {
+        val date = LocalDate.ofEpochDay(epochDay)
+        val monthName = monthsGenitive.getOrElse(date.monthValue) { "" }
+        return "${date.dayOfMonth} $monthName ${date.year}"
+    }
+
+    fun formatSpokenDateGenitiveRu(epochDay: Long): String {
+        val date = LocalDate.ofEpochDay(epochDay)
+        val monthName = monthsGenitive.getOrElse(date.monthValue) { "" }
+        val dayWords = dayOrdinalGenitiveRu(date.dayOfMonth)
+        return "${date.dayOfMonth} $monthName ${date.year} года ($dayWords $monthName)"
+    }
+
+    fun formatRelativeDueSpokenRu(dueEpochDay: Long, todayEpochDay: Long): String {
+        val delta = (dueEpochDay - todayEpochDay).toInt()
+        val spokenDate = formatSpokenDateGenitiveRu(dueEpochDay)
+        return when {
+            delta == 0 -> "сегодня, $spokenDate"
+            delta == 1 -> "завтра, $spokenDate"
+            delta > 1 -> "через $delta дн., $spokenDate"
+            else -> "просрочено на ${-delta} дн. ($spokenDate)"
         }
     }
 }
@@ -302,6 +445,14 @@ sealed class WhatIfScenarioRequest {
     data class IncomeDelay(
         val delayDays: Int,
         val targetIncomeId: Long? = null
+    ) : WhatIfScenarioRequest()
+
+    data class MandatoryPaymentChange(
+        val deltaAmountRub: Double = 0.0,
+        val newAmountRub: Double? = null,
+        val targetObligationId: Long? = null,
+        val targetTitle: String? = null,
+        val dueInDaysIfNew: Int = 5
     ) : WhatIfScenarioRequest()
 }
 

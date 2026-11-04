@@ -897,6 +897,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         priority: String = "MANDATORY",
         incomeTier: String = "GUARANTEED"
     ) {
+        if (!amount.isFinite() || amount <= 0.0) return
         val currentBudgetId = _selectedBudgetId.value ?: "default"
         val dueEpochDay = com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(nextDueDateIso)
             ?: java.time.LocalDate.now().toEpochDay()
@@ -923,6 +924,38 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 )
             )
             _toastMessage.emit("Регулярный платёж «${title.ifBlank { category }}» добавлен!")
+        }
+    }
+
+    fun updateRecurringPayment(
+        paymentId: Long,
+        title: String,
+        amount: Double,
+        type: String,
+        category: String,
+        frequency: String,
+        nextDueDateIso: String,
+        priority: String,
+        incomeTier: String
+    ) {
+        val budgetId = _selectedBudgetId.value ?: return
+        val dueDay = com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(nextDueDateIso) ?: return
+        if (!amount.isFinite() || amount <= 0.0) return
+        viewModelScope.launch {
+            val updated = repository.updateRecurringPaymentDetails(paymentId, budgetId) { existing ->
+                existing.copy(
+                    title = title.trim().ifBlank { category },
+                    amount = amount,
+                    isIncome = type.equals("INCOME", ignoreCase = true),
+                    incomeCertainty = incomeTier,
+                    categoryName = category,
+                    frequency = frequency,
+                    anchorDayOfMonth = java.time.LocalDate.ofEpochDay(dueDay).dayOfMonth,
+                    nextDueDateEpochDay = dueDay,
+                    priority = priority
+                )
+            }
+            _toastMessage.emit(if (updated) "Регулярная операция обновлена" else "Операция уже удалена или бюджет изменён")
         }
     }
 

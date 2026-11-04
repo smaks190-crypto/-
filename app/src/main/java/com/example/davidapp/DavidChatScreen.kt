@@ -45,6 +45,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -172,19 +173,66 @@ fun DavidChatScreen(
         }
     }
 
-    LaunchedEffect(messages.size, messages.lastOrNull()?.id, isTyping, stage) {
+    val lastMessageId = messages.lastOrNull()?.id
+    val lastMessageTextContent = (messages.lastOrNull()?.type as? ChatMessageType.Text)?.content
+    var lastScrolledMsgCount by remember { mutableStateOf(0) }
+    var lastScrolledMsgId by remember { mutableStateOf<String?>(null) }
+    var lastScrolledTyping by remember { mutableStateOf(false) }
+
+    LaunchedEffect(messages.size, lastMessageId, lastMessageTextContent, isTyping, stage) {
         if (messages.isNotEmpty()) {
             val totalItems = messages.size + if (isTyping) 1 else 0
-            listState.animateScrollToItem(totalItems)
+            val isSameStreamingItem = messages.size == lastScrolledMsgCount &&
+                lastMessageId == lastScrolledMsgId &&
+                isTyping == lastScrolledTyping
+            lastScrolledMsgCount = messages.size
+            lastScrolledMsgId = lastMessageId
+            lastScrolledTyping = isTyping
+
+            val layoutInfo = listState.layoutInfo
+            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val totalItemCount = layoutInfo.totalItemsCount
+            val targetIndex = (totalItemCount - 1).coerceAtLeast(0)
+
+            if (isSameStreamingItem) {
+                if (lastVisibleIndex >= totalItemCount - 3) {
+                    listState.scrollToItem(targetIndex)
+                }
+            } else {
+                listState.animateScrollToItem(targetIndex)
+            }
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    val ambientStageBrush = remember {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFF050D1E),
+                DarkBg,
+                Color(0xFF030712)
+            )
+        )
+    }
+    val bottomDockBrush = remember {
+        Brush.verticalGradient(
+            colors = listOf(
+                DarkBg.copy(alpha = 0.0f),
+                DarkBg.copy(alpha = 0.92f),
+                DarkBg.copy(alpha = 0.98f)
+            )
+        )
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(ambientStageBrush)
+    ) {
         Scaffold(
             modifier = Modifier
                 .fillMaxSize()
-                .background(DarkBg),
-            containerColor = DarkBg,
+                .background(Color.Transparent),
+            containerColor = Color.Transparent,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 DavidChatTopBar(
@@ -204,13 +252,13 @@ fun DavidChatScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(DarkBg.copy(alpha = 0.96f))
+                        .background(bottomDockBrush)
                         .then(
                             if (isEmbeddedInCapsule) Modifier
                             else Modifier.navigationBarsPadding().imePadding()
                         )
                         .padding(horizontal = 14.dp)
-                        .padding(top = 8.dp, bottom = 10.dp),
+                        .padding(top = 10.dp, bottom = 10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     androidx.compose.animation.AnimatedContent(

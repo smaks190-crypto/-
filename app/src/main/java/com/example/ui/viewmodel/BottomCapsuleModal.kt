@@ -27,5 +27,6 @@ sealed interface BottomCapsuleModal {
         val messageOverride: String? = null,
         val triggerAuditAfterAccept: Boolean = false
     ) : BottomCapsuleModal
+    data class SafeToSpend(val initialTab: Int = 0) : BottomCapsuleModal
     data object DavidChat : BottomCapsuleModal
 }

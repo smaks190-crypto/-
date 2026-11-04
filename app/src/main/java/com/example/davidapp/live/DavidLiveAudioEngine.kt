@@ -109,6 +109,19 @@ class DavidLiveAudioEngine(
     private val _activeSpeaker = MutableStateFlow(DavidLiveSpeaker.NONE)
     val activeSpeaker: StateFlow<DavidLiveSpeaker> = _activeSpeaker.asStateFlow()
 
+    private val enqueuedDavidTurnSamplesCount = AtomicLong(0L)
+    private val writtenDavidTurnSamplesCount = AtomicLong(0L)
+    private val turnPlaybackStartWallClockMs = AtomicLong(0L)
+
+    private val _enqueuedDavidTurnSamples = MutableStateFlow(0L)
+    val enqueuedDavidTurnSamples: StateFlow<Long> = _enqueuedDavidTurnSamples.asStateFlow()
+
+    private val _audibleDavidTurnSamples = MutableStateFlow(0L)
+    val audibleDavidTurnSamples: StateFlow<Long> = _audibleDavidTurnSamples.asStateFlow()
+
+
+
+
     private val _isPlaybackDrained = MutableStateFlow(true)
     val isPlaybackDrained: StateFlow<Boolean> = _isPlaybackDrained.asStateFlow()
 
@@ -431,6 +444,7 @@ class DavidLiveAudioEngine(
         estimatedPlayoutEndEpochMs.set(0L)
         playbackBurstStartEpochMs.set(0L)
         bargeInEchoSuppressUntilMs.set(0L)
+        resetDavidTurnSampleCounters()
         _isPlaybackDrained.value = true
         _isWithinUserSpeechHold.value = false
         _isWithinDavidSpeechHold.value = false
@@ -474,6 +488,8 @@ class DavidLiveAudioEngine(
             samples[i] = ((high shl 8) or low).toShort()
             byteIdx += 2
         }
+        val sampleTotal = enqueuedDavidTurnSamplesCount.addAndGet(sampleCount.toLong())
+        _enqueuedDavidTurnSamples.value = sampleTotal
         _isPlaybackDrained.value = false
         queuedPlaybackSamples.addAndGet(sampleCount.toLong())
         // Seed the reference envelope immediately only when no playback reference is active yet;
@@ -523,6 +539,7 @@ class DavidLiveAudioEngine(
      * does not get captured by the microphone as a new user utterance.
      */
     fun clearModelPlaybackQueue(nowMs: Long = System.currentTimeMillis()) {
+        resetDavidTurnSampleCounters()
         playbackGeneration.incrementAndGet()
         playbackQueue.clear()
         queuedPlaybackSamples.set(0L)
@@ -790,6 +807,10 @@ class DavidLiveAudioEngine(
     ) {
         val now = System.currentTimeMillis()
         if (speaker == DavidLiveSpeaker.DAVID) {
+            val totalWritten = writtenDavidTurnSamplesCount.addAndGet(samples.size.toLong())
+            enqueuedDavidTurnSamplesCount.updateAndGet { maxOf(it, totalWritten) }
+            _enqueuedDavidTurnSamples.value = enqueuedDavidTurnSamplesCount.get()
+            _audibleDavidTurnSamples.value = totalWritten
             recordModelOutputActivity(samples, sampleRateHz, nowMs, updateEnvelope = true)
         }
         _activeSpeaker.value = speaker
@@ -807,6 +828,28 @@ class DavidLiveAudioEngine(
         }
         _rayMagnitudes.value = spectrumAnalyzer.analyzePcmFrame(samples, samples.size, sampleRateHz)
         _overallEnergy.value = spectrumAnalyzer.overallEnergy
+    }
+
+    fun resetDavidTurnSampleCounters() {
+        enqueuedDavidTurnSamplesCount.set(0L)
+        writtenDavidTurnSamplesCount.set(0L)
+        turnPlaybackStartWallClockMs.set(0L)
+        _enqueuedDavidTurnSamples.value = 0L
+        _audibleDavidTurnSamples.value = 0L
+    }
+
+    internal fun simulateEnqueuedAndAudibleSamplesForTest(
+        enqueuedSamples24k: Long,
+        audibleSamples24k: Long,
+        isDrained: Boolean = audibleSamples24k >= enqueuedSamples24k && enqueuedSamples24k > 0L
+    ) {
+        enqueuedDavidTurnSamplesCount.set(enqueuedSamples24k)
+        writtenDavidTurnSamplesCount.set(audibleSamples24k)
+        _enqueuedDavidTurnSamples.value = enqueuedSamples24k
+        _audibleDavidTurnSamples.value = audibleSamples24k
+        _isPlaybackDrained.value = isDrained
+        _activeSpeaker.value = if (isDrained) DavidLiveSpeaker.NONE else DavidLiveSpeaker.DAVID
+        _isWithinDavidSpeechHold.value = !isDrained
     }
 
     fun isPlaybackCurrentlyDrained(): Boolean = _isPlaybackDrained.value && playbackQueue.isEmpty()
@@ -929,7 +972,8 @@ class DavidLiveAudioEngine(
                 record.startRecording()
 
                 // 1024 samples @ 16 kHz = 64 ms chunk
-                val shortBuffer = ShortArray(1024)
+                val shortBuffer = ShortArray(512)
+                val micVisualizerBuffer = ShortArray(512)
 
                 while (isActive && isRunning.get()) {
                     val readStartMs = System.currentTimeMillis()
@@ -980,12 +1024,13 @@ class DavidLiveAudioEngine(
 
                     // Update visualizer from user's microphone when David is not currently speaking
                     if (!decision.davidCurrentlyPlaying && isRunning.get()) {
+                        boostMicSamplesForVisualizer(shortBuffer, micVisualizerBuffer, readCount, decision.micRms)
                         _rayMagnitudes.value = spectrumAnalyzer.analyzePcmFrame(
-                            pcmSamples = shortBuffer,
+                            pcmSamples = micVisualizerBuffer,
                             sampleCount = readCount,
                             sampleRateHz = INPUT_SAMPLE_RATE_HZ
                         )
-                        _overallEnergy.value = spectrumAnalyzer.overallEnergy
+                        _overallEnergy.value = computeUserVisualizerEnergy(spectrumAnalyzer.overallEnergy, decision.micRms)
                         if (decision.micRms > USER_SPEECH_RMS_THRESHOLD) {
                             lastUserSpeechDetectedMs.set(nowMs)
                             _isWithinUserSpeechHold.value = true
@@ -1148,12 +1193,19 @@ class DavidLiveAudioEngine(
                         activePlaybackWindowInProgress.set(false)
                         queuedPlaybackSamples.set(0L)
                         val now = System.currentTimeMillis()
+                        val written = writtenDavidTurnSamplesCount.get()
+                        if (written > 0L) {
+                            _audibleDavidTurnSamples.value = computeAudibleSamplesAt(
+                                written, turnPlaybackStartWallClockMs.get(), lastOutputChunkTimestamp.get(), now, false
+                            )
+                        }
                         val playoutFinished = now > estimatedPlayoutEndEpochMs.get() + 120L &&
                             now - lastOutputChunkTimestamp.get() > 220L
                         if (!serverTurnSpeakingActive.get() &&
                             playoutFinished &&
                             _activeSpeaker.value == DavidLiveSpeaker.DAVID
                         ) {
+                            _audibleDavidTurnSamples.value = writtenDavidTurnSamplesCount.get()
                             _isPlaybackDrained.value = true
                             _isWithinDavidSpeechHold.value = false
                             _activeSpeaker.value = DavidLiveSpeaker.NONE
@@ -1176,6 +1228,7 @@ class DavidLiveAudioEngine(
                         val window = samples.copyOfRange(offset, offset + len)
                         if (!isRunning.get() || generation != playbackGeneration.get()) break
                         val wallStartMs = System.currentTimeMillis()
+                        turnPlaybackStartWallClockMs.compareAndSet(0L, wallStartMs)
                         val writeStartMs = maxOf(wallStartMs, lastOutputChunkTimestamp.get())
                         val remainingInChunk = (samples.size - offset).coerceAtLeast(window.size).toLong()
                         val totalRemainingSamples = maxOf(remainingInChunk, queuedPlaybackSamples.get())
@@ -1201,6 +1254,12 @@ class DavidLiveAudioEngine(
                             }
                         } catch (_: Exception) {
                         }
+                        val totalWritten = writtenDavidTurnSamplesCount.addAndGet(len.toLong())
+                        val afterWriteMs = System.currentTimeMillis()
+                        _audibleDavidTurnSamples.value = computeAudibleSamplesAt(
+                            totalWritten, turnPlaybackStartWallClockMs.get(), afterWriteMs, afterWriteMs,
+                            (offset + len < samples.size) || playbackQueue.isNotEmpty()
+                        )
                         queuedPlaybackSamples.updateAndGet { maxOf(0L, it - len.toLong()) }
                         val windowDurationMs = ((window.size * 1000L) / OUTPUT_SAMPLE_RATE_HZ).coerceAtLeast(16L)
                         val writeElapsedMs = System.currentTimeMillis() - wallStartMs
@@ -1235,6 +1294,68 @@ class DavidLiveAudioEngine(
     }
 
     companion object {
+        internal const val AUDIO_TRACK_DAC_ONSET_MS = 100L
+        internal const val AUDIO_TRACK_BUFFER_LEAD_SAMPLES = 4_800L
+        internal const val AUDIO_TRACK_DRAIN_TAIL_MS = 220L
+        internal fun boostMicSamplesForVisualizer(
+            source: ShortArray,
+            destination: ShortArray,
+            count: Int,
+            rms: Float
+        ) {
+            val safeCount = count.coerceIn(0, minOf(source.size, destination.size))
+            if (rms < 0.0025f) {
+                for (i in 0 until safeCount) {
+                    destination[i] = source[i]
+                }
+                return
+            }
+            // Adaptive gain: stronger boost (up to 4.2x) for normal conversational mic levels (rms 0.01..0.045),
+            // tapering smoothly for loud speech to avoid harsh clipping.
+            val adaptiveGain = when {
+                rms < 0.025f -> 4.2f
+                rms < 0.065f -> 3.4f
+                else -> 2.4f
+            }
+            for (i in 0 until safeCount) {
+                val boosted = (source[i].toFloat() * adaptiveGain).toInt()
+                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                destination[i] = boosted.toShort()
+            }
+        }
+
+        internal fun computeUserVisualizerEnergy(fftEnergy: Float, micRms: Float): Float {
+            if (micRms <= USER_SPEECH_RMS_THRESHOLD * 0.65f) {
+                return fftEnergy.coerceIn(0f, 1f)
+            }
+            val normalizedRms = ((micRms - USER_SPEECH_RMS_THRESHOLD * 0.65f) / 0.042f).coerceIn(0f, 1f)
+            val curvedRmsEnergy = kotlin.math.sqrt(normalizedRms)
+            return maxOf(fftEnergy, curvedRmsEnergy).coerceIn(0f, 1f)
+        }
+
+        internal fun computeAudibleSamplesAt(
+            writtenSamples24k: Long,
+            turnStartWallMs: Long,
+            lastWriteWallMs: Long,
+            nowWallMs: Long,
+            hasMoreQueuedAudio: Boolean
+        ): Long {
+            if (writtenSamples24k <= 0L || turnStartWallMs <= 0L) return 0L
+            val elapsedSinceStartMs = (nowWallMs - turnStartWallMs - AUDIO_TRACK_DAC_ONSET_MS).coerceAtLeast(0L)
+            val wallClockPlayedSamples = (elapsedSinceStartMs * OUTPUT_SAMPLE_RATE_HZ) / 1000L
+            return if (hasMoreQueuedAudio) {
+                val bufferCompensated = (writtenSamples24k - AUDIO_TRACK_BUFFER_LEAD_SAMPLES).coerceAtLeast(0L)
+                minOf(wallClockPlayedSamples, bufferCompensated.coerceAtLeast(minOf(writtenSamples24k, 1_200L)))
+            } else {
+                val drainElapsedMs = (nowWallMs - lastWriteWallMs).coerceIn(0L, AUDIO_TRACK_DRAIN_TAIL_MS)
+                val remainingLead = ((AUDIO_TRACK_BUFFER_LEAD_SAMPLES * (AUDIO_TRACK_DRAIN_TAIL_MS - drainElapsedMs)) / AUDIO_TRACK_DRAIN_TAIL_MS)
+                    .coerceAtLeast(0L)
+                val drainedSamples = (writtenSamples24k - remainingLead).coerceIn(0L, writtenSamples24k)
+                minOf(writtenSamples24k, maxOf(wallClockPlayedSamples.coerceAtMost(writtenSamples24k), drainedSamples))
+            }
+        }
+
+
         const val INPUT_SAMPLE_RATE_HZ = 16_000
         const val OUTPUT_SAMPLE_RATE_HZ = 24_000
         const val AUDIO_USAGE_ASSISTANT = AudioAttributes.USAGE_ASSISTANT

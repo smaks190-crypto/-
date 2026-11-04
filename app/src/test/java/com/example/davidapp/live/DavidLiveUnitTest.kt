@@ -496,7 +496,7 @@ class DavidLiveUnitTest {
 
         // Гарантия режима только для чтения
         assertFalse("David Live must never mutate financial records without confirmation", provider.canMutateRecords)
-        assertEquals(7, provider.buildFunctionDeclarationsJson().length())
+        assertEquals(8, provider.buildFunctionDeclarationsJson().length())
 
         // 1. Сводка бюджета
         val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
@@ -1661,7 +1661,7 @@ class DavidLiveUnitTest {
             accountDao = null
         )
 
-        // 1. Если задан createdAt > 0, возвращается точный timestamp создания
+        // 1. Дата операции важнее времени её создания (включая импорт и ввод задним числом)
         val txWithCreatedAt = TransactionEntity(
             id = "tx_created",
             budgetId = "default",
@@ -1672,7 +1672,10 @@ class DavidLiveUnitTest {
             amount = 350.0,
             createdAt = 1761740000123L
         )
-        assertEquals(1761740000123L, provider.parseTransactionMillis(txWithCreatedAt))
+        assertEquals(
+            java.time.LocalDate.of(2026, 10, 29).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            provider.parseTransactionMillis(txWithCreatedAt)
+        )
 
         // 2. Если createdAt == 0, парсится ISO дата YYYY-MM-DD в полночь системной таймзоны
         val txIsoOnly = TransactionEntity(
@@ -2542,6 +2545,11 @@ class DavidLiveUnitTest {
             """{"serverContent":{"outputTranscription":{"text":"На кафе осталось 1 500 рублей."}}}"""
         )
         assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        // Text is revealed with the new answer's audible audio, never ahead of playback.
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 24_000L, audibleSamples24k = 24_000L, isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
         assertEquals("На кафе осталось 1 500 рублей.", controller.liveSubtitle.value)
 
         controller.endSession()
@@ -2866,6 +2874,11 @@ class DavidLiveUnitTest {
             """{"serverContent":{"outputTranscription":{"text":"На такси в этом месяце ты потратил 3 400 рублей."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
         )
         assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        // Text is revealed with the new answer's audible audio, never ahead of playback.
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 24_000L, audibleSamples24k = 24_000L, isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
         assertEquals("На такси в этом месяце ты потратил 3 400 рублей.", controller.liveSubtitle.value)
 
         socket.simulateServerText("""{"serverContent":{"turnComplete":true}}""")
@@ -2888,11 +2901,1941 @@ class DavidLiveUnitTest {
             (sin(2.0 * PI * frequencyHz * i / sampleRateHz) * amplitude).toInt().toShort()
         }
     }
+
+    private fun createReadOnlyRecurringPaymentDao(
+        payments: List<com.example.data.db.RecurringPaymentEntity>,
+        logs: List<com.example.data.db.RecurringExecutionLogEntity> = emptyList()
+    ) = object : com.example.data.db.RecurringPaymentDao {
+        override fun getRecurringPaymentsByBudgetId(budgetId: String): Flow<List<com.example.data.db.RecurringPaymentEntity>> =
+            flowOf(payments.filter { it.budgetId == budgetId })
+        override fun getAllRecurringPayments(): Flow<List<com.example.data.db.RecurringPaymentEntity>> =
+            flowOf(payments)
+        override suspend fun getRecurringPaymentById(id: Long): com.example.data.db.RecurringPaymentEntity? =
+            payments.firstOrNull { it.id == id }
+        override suspend fun insertRecurringPayment(payment: com.example.data.db.RecurringPaymentEntity): Long =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun insertRecurringPayments(payments: List<com.example.data.db.RecurringPaymentEntity>) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun updateNextDueDate(id: Long, nextDueDateEpochDay: Long) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun updateStatus(id: Long, status: String) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun deleteRecurringPaymentById(id: Long) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun deleteRecurringPaymentsByBudgetId(budgetId: String) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun deleteAllRecurringPayments() =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override fun getExecutionLogsByBudgetId(budgetId: String): Flow<List<com.example.data.db.RecurringExecutionLogEntity>> =
+            flowOf(logs.filter { it.budgetId == budgetId })
+        override fun getAllExecutionLogs(): Flow<List<com.example.data.db.RecurringExecutionLogEntity>> =
+            flowOf(logs)
+        override suspend fun getExecutionLogByTransactionId(transactionId: String): com.example.data.db.RecurringExecutionLogEntity? =
+            logs.firstOrNull { it.linkedTransactionId == transactionId }
+        override suspend fun getExecutionLogBySchedule(recurringId: Long, scheduledEpochDay: Long): com.example.data.db.RecurringExecutionLogEntity? =
+            logs.firstOrNull { it.recurringId == recurringId && it.scheduledEpochDay == scheduledEpochDay }
+        override suspend fun insertExecutionLog(log: com.example.data.db.RecurringExecutionLogEntity): Long =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun deleteExecutionLogsByBudgetId(budgetId: String) =
+            throw UnsupportedOperationException("Read-only in David Live")
+        override suspend fun deleteAllExecutionLogs() =
+            throw UnsupportedOperationException("Read-only in David Live")
+    }
+
+    @Test
+    fun `issue 60 - all 8 tool declarations match executeToolCall dispatch and return valid structured JSON`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 1).toEpochDay()
+        val now = System.currentTimeMillis()
+        val txs = listOf(
+            TransactionEntity(id = "t1", budgetId = "b1", type = "income", date = "2026-11-01", category = "Начальный баланс", subcategory = "Карта", amount = 80_000.0, createdAt = now - 50_000L),
+            TransactionEntity(id = "t2", budgetId = "b1", type = "expense", date = "2026-11-01", category = "Продукты", subcategory = "Супермаркет", amount = 2_000.0, createdAt = now - 10_000L)
+        )
+        val cats = listOf(CategoryEntity(id = "c1", budgetId = "b1", type = "expense", name = "Продукты", monthlyLimit = 20_000.0))
+        val goals = listOf(GoalEntity(id = "g1", budgetId = "b1", name = "Отпуск", targetAmount = 100_000.0, currentAmount = 25_000.0))
+        val accs = listOf(AccountEntity(id = "a1", budgetId = "b1", name = "Основная", balance = 78_000.0, type = "card"))
+        val recs = listOf(
+            com.example.data.db.RecurringPaymentEntity(
+                id = 1L,
+                budgetId = "b1",
+                title = "Зарплата",
+                amount = 120_000.0,
+                isIncome = true,
+                incomeCertainty = "GUARANTEED",
+                categoryName = "Зарплата",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 10L,
+                status = "ACTIVE"
+            )
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(cats),
+            goalDao = createReadOnlyGoalDao(goals),
+            accountDao = createReadOnlyAccountDao(accs),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recs),
+            todayEpochDayProvider = { d0 }
+        )
+
+        val declarations = provider.buildFunctionDeclarationsJson()
+        assertEquals(8, declarations.length())
+
+        val declaredNames = (0 until declarations.length()).map { idx ->
+            val decl = declarations.getJSONObject(idx)
+            assertTrue(decl.getString("description").isNotBlank())
+            assertEquals("OBJECT", decl.getJSONObject("parameters").getString("type"))
+            decl.getString("name")
+        }
+        assertEquals(DavidLiveFinancialToolsProvider.ALL_REGISTERED_TOOLS, declaredNames)
+
+        for (toolName in declaredNames) {
+            val res = provider.executeToolCall(toolName, JSONObject())
+            assertEquals("Tool $toolName must return status=ok", "ok", res.getString("status"))
+            assertTrue("Tool $toolName must return dataAvailable=true", res.getBoolean("dataAvailable"))
+            assertEquals("b1", res.getString("budgetId"))
+            assertTrue("Tool $toolName must provide non-blank humanSummary", res.getString("humanSummary").isNotBlank())
+        }
+
+        val unsupported = provider.executeToolCall("mutate_database_secretly", JSONObject())
+        assertEquals("unsupported_tool", unsupported.getString("status"))
+        assertFalse(unsupported.getBoolean("dataAvailable"))
+    }
+
+    @Test
+    fun `issue 60 - active recurring salary and rent schedule and safe to spend after rent before salary match SafeToSpendCalculator`() = runBlocking {
+        // Сегодня: 2026-11-01 (d0). Доступный баланс B_avail = 70 000 ₽.
+        // Аренда квартиры: 30 000 ₽ через 4 дня (d0 + 4, MANDATORY).
+        // Гарантированная зарплата: 100 000 ₽ через 10 дней (d0 + 10, GUARANTEED).
+        // Пользовательский норматив базовых расходов: 1 000 ₽/день (10 дней * 1 000 = 10 000 ₽).
+        // Защитный резерв R_floor = 10 000 ₽.
+        // Ожидаемый расчёт:
+        // - Остаток после аренды до зарплаты (netBalanceAfterObligationsBeforeSalaryRub) = 70 000 - 30 000 = 40 000 ₽.
+        // - Свободная ликвидность до зарплаты F_guar(9) = 70 000 - 10 000 (R_floor) - 30 000 (Аренда) - 10 000 (Базовая жизнь 10 дн.) = 20 000 ₽.
+        // - Дневная скорость необязательных трат на 10 дней = 20 000 / 10 = 2 000 ₽/день.
+        // - Суммарно можно потратить сегодня = 2 000 (свободные) + 1 000 (защищённые базовые) = 3 000 ₽.
+        val d0 = java.time.LocalDate.of(2026, 11, 1).toEpochDay()
+        val now = System.currentTimeMillis()
+        val txs = listOf(
+            TransactionEntity(
+                id = "tx_init",
+                budgetId = "b1",
+                type = "income",
+                date = "2026-10-20",
+                category = "Начальный баланс",
+                subcategory = "Карта",
+                amount = 70_000.0,
+                createdAt = now - 86_400_000L * 5
+            )
+        )
+        val recurringRules = listOf(
+            com.example.data.db.RecurringPaymentEntity(
+                id = 10L,
+                budgetId = "b1",
+                title = "Аренда квартиры",
+                amount = 30_000.0,
+                amountType = "FIXED",
+                isIncome = false,
+                incomeCertainty = "GUARANTEED",
+                categoryName = "Аренда",
+                frequency = "MONTHLY",
+                anchorDayOfMonth = 5,
+                nextDueDateEpochDay = d0 + 4L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            com.example.data.db.RecurringPaymentEntity(
+                id = 20L,
+                budgetId = "b1",
+                title = "Зарплата",
+                amount = 100_000.0,
+                amountType = "FIXED",
+                isIncome = true,
+                incomeCertainty = "GUARANTEED",
+                categoryName = "Зарплата",
+                frequency = "MONTHLY",
+                anchorDayOfMonth = 11,
+                nextDueDateEpochDay = d0 + 10L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            )
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recurringRules),
+            userSafetyFloorProvider = { 10_000.0 },
+            userLockedReserveProvider = { 0.0 },
+            userEssentialDailyNormProvider = { 1_000.0 },
+            todayEpochDayProvider = { d0 }
+        )
+
+        // 1. Проверка расписания регулярных доходов и расходов (get_recurring_schedule)
+        val scheduleJson = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, JSONObject())
+        assertEquals("ok", scheduleJson.getString("status"))
+        assertEquals(2, scheduleJson.getInt("activeRulesCount"))
+        assertEquals(1, scheduleJson.getInt("upcomingIncomesCount"))
+        assertEquals(1, scheduleJson.getInt("upcomingExpensesCount"))
+        assertEquals("2026-11-11", scheduleJson.getString("nextGuaranteedIncomeDateIso"))
+        assertEquals("Зарплата", scheduleJson.getString("nextGuaranteedIncomeTitle"))
+        assertEquals(100_000.0, scheduleJson.getDouble("nextGuaranteedIncomeAmountRub"), 0.01)
+        assertEquals(10, scheduleJson.getInt("daysUntilNextGuaranteedIncome"))
+
+        val incomeItem = scheduleJson.getJSONArray("upcomingIncomes").getJSONObject(0)
+        assertEquals("Зарплата", incomeItem.getString("title"))
+        assertEquals(100_000.0, incomeItem.getDouble("amountRub"), 0.01)
+        assertEquals("2026-11-11", incomeItem.getString("nextDueDateIso"))
+        assertEquals(10, incomeItem.getInt("daysUntilNextDue"))
+        assertEquals("GUARANTEED", incomeItem.getString("incomeCertainty"))
+        assertFalse("Future salary must NEVER be marked as already included in current balance", incomeItem.getBoolean("isAlreadyIncludedInCurrentBalance"))
+
+        val expenseItem = scheduleJson.getJSONArray("upcomingExpenses").getJSONObject(0)
+        assertEquals("Аренда квартиры", expenseItem.getString("title"))
+        assertEquals(30_000.0, expenseItem.getDouble("effectiveReservedAmountRub"), 0.01)
+        assertEquals("2026-11-05", expenseItem.getString("nextDueDateIso"))
+        assertEquals(4, expenseItem.getInt("daysUntilNextDue"))
+        assertEquals("MANDATORY", expenseItem.getString("priority"))
+
+        // 2. Проверка «Сколько останется после аренды до зарплаты?» и «Сколько безопасно потратить сейчас?»
+        val forecastJson = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, JSONObject())
+        assertEquals(70_000.0, forecastJson.getDouble("availableBalanceRub"), 0.01)
+        assertEquals(30_000.0, forecastJson.getDouble("reservedFutureObligationsRub"), 0.01)
+        assertEquals(40_000.0, forecastJson.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertEquals(10_000.0, forecastJson.getDouble("mandatorySafetyFloorRub"), 0.01)
+        assertEquals(10_000.0, forecastJson.getDouble("reservedEssentialLivingHorizonRub"), 0.01)
+        assertEquals(10, forecastJson.getInt("horizonDays"))
+        assertEquals(2_000.0, forecastJson.getDouble("canSpendTodayDiscRub"), 0.01)
+        assertEquals(1_000.0, forecastJson.getDouble("canSpendTodayEssRub"), 0.01)
+        assertEquals(3_000.0, forecastJson.getDouble("canSpendTodayTotalRub"), 0.01)
+        assertEquals(1, forecastJson.getJSONArray("upcomingObligations").length())
+        assertEquals(1, forecastJson.getJSONArray("upcomingIncomes").length())
+
+        // Сравнение с прямым вызовом эталонного SafeToSpendCalculator
+        val directSnapshot = com.example.data.safetospend.DavidFinancialIntelligenceProvider.computeSnapshot(
+            transactions = txs,
+            accounts = emptyList(),
+            goals = emptyList(),
+            categories = emptyList(),
+            recurringPayments = recurringRules,
+            executionLogs = emptyList(),
+            todayEpochDay = d0,
+            userSafetyFloorRub = 10_000.0,
+            userLockedReserveRub = 0.0,
+            userEssentialDailyNormRub = 1_000.0
+        )
+        assertEquals(directSnapshot.safeToSpendResult.canSpendTodayDiscRub, forecastJson.getDouble("canSpendTodayDiscRub"), 0.001)
+        assertEquals(directSnapshot.safeToSpendResult.netBalanceAfterObligationsBeforeSalaryRub, forecastJson.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.001)
+
+        // 3. Проверка What-If: «Что будет, если зарплата задержится на 5 дней?»
+        // Горизонт увеличивается с 10 до 15 дней. Базовые расходы на 15 дней = 15 000 ₽.
+        // Свободная ликвидность на 15 дней = 70 000 - 10 000 (резерв) - 30 000 (аренда) - 15 000 (база 15 дн.) = 15 000 ₽.
+        // Новый свободный дневной лимит = 15 000 / 15 = 1 000 ₽/день (снижение на -1 000 ₽/день).
+        val whatIfDelayJson = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF,
+            JSONObject().apply {
+                put("scenarioType", "INCOME_DELAY")
+                put("delayDays", 5)
+            }
+        )
+        assertEquals("ok", whatIfDelayJson.getString("status"))
+        assertEquals(10, whatIfDelayJson.getInt("baselineHorizonDays"))
+        assertEquals(15, whatIfDelayJson.getInt("simulatedHorizonDays"))
+        assertEquals("2026-11-11", whatIfDelayJson.getString("baselineNextIncomeDateIso"))
+        assertEquals("2026-11-16", whatIfDelayJson.getString("simulatedNextIncomeDateIso"))
+        assertEquals(2_000.0, whatIfDelayJson.getDouble("baselineCanSpendTodayRub"), 0.01)
+        assertEquals(1_000.0, whatIfDelayJson.getDouble("simulatedCanSpendTodayRub"), 0.01)
+        assertEquals(-1_000.0, whatIfDelayJson.getDouble("deltaDailyBudgetRub"), 0.01)
+    }
+
+    @Test
+    fun `issue 60 - EXPECTED and HYPOTHETICAL recurring incomes are never mixed into guaranteed baseline or availableBalanceRub`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 1).toEpochDay()
+        val now = System.currentTimeMillis()
+        val txs = listOf(
+            TransactionEntity(
+                id = "tx_init",
+                budgetId = "b1",
+                type = "income",
+                date = "2026-10-25",
+                category = "Начальный баланс",
+                subcategory = "Карта",
+                amount = 30_000.0,
+                createdAt = now - 86_400_000L
+            )
+        )
+        val recurringRules = listOf(
+            com.example.data.db.RecurringPaymentEntity(
+                id = 101L,
+                budgetId = "b1",
+                title = "Фриланс-проект",
+                amount = 60_000.0,
+                isIncome = true,
+                incomeCertainty = "EXPECTED",
+                categoryName = "Фриланс",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 5L,
+                status = "ACTIVE"
+            ),
+            com.example.data.db.RecurringPaymentEntity(
+                id = 102L,
+                budgetId = "b1",
+                title = "Возможная премия",
+                amount = 40_000.0,
+                isIncome = true,
+                incomeCertainty = "HYPOTHETICAL",
+                categoryName = "Бонус",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 7L,
+                status = "ACTIVE"
+            )
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recurringRules),
+            userEssentialDailyNormProvider = { 500.0 },
+            todayEpochDayProvider = { d0 }
+        )
+
+        val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        // Текущий баланс остаётся 30 000 ₽, заработанный доход за 30 дней = 0 ₽ (будущие регулярные доходы не зачислены!)
+        assertEquals(30_000L, overview.getLong("availableBalanceRub"))
+        assertEquals(0L, overview.getLong("earnedIncome30dRub"))
+
+        val schedule = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE,
+            JSONObject().put("horizonDays", 30)
+        )
+        assertEquals(0.0, schedule.getDouble("totalGuaranteedFutureIncomeHorizonRub"), 0.01)
+        assertEquals(60_000.0, schedule.getDouble("totalExpectedFutureIncomeHorizonRub"), 0.01)
+        assertEquals(40_000.0, schedule.getDouble("totalHypotheticalFutureIncomeHorizonRub"), 0.01)
+        assertFalse("No guaranteed income exists", schedule.has("nextGuaranteedIncomeDateIso"))
+
+        val forecast = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, null)
+        // Так как GUARANTEED дохода нет, горизонт равен числу дней до конца ноября (30 дней: с 1 по 30 ноября)
+        assertEquals(30, forecast.getInt("horizonDays"))
+        assertFalse(forecast.has("nextIncomeDateIso"))
+        // В гарантированном сценарии: 30 000 - 30 * 500 (база 15 000) = 15 000 ₽ -> 15 000 / 30 = 500 ₽/день
+        assertEquals(500.0, forecast.getDouble("canSpendTodayDiscRub"), 0.01)
+        // В справочном ожидаемом сценарии (с учётом EXPECTED 60 000 ₽ на 5-й день) бюджет выше, но показывается отдельно
+        assertEquals(60_000.0, forecast.getDouble("expectedUnconfirmedIncomeHorizonRub"), 0.01)
+        assertEquals(40_000.0, forecast.getDouble("hypotheticalDebtReceivablesRub"), 0.01)
+    }
+
+    @Test
+    fun `issue 60 - PAID RESCHEDULED SKIPPED OVERDUE PAUSED ARCHIVED recurring items and linked transactions avoid double counting`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 10).toEpochDay()
+        val now = System.currentTimeMillis()
+
+        // Доступный баланс: начальный 100 000 ₽ минус уже оплаченная аренда сегодня 25 000 ₽ = 75 000 ₽
+        val txs = listOf(
+            TransactionEntity(id = "tx_init", budgetId = "b1", type = "income", date = "2026-11-01", category = "Начальный баланс", subcategory = "Карта", amount = 100_000.0, createdAt = now - 86_400_000L * 5),
+            TransactionEntity(id = "tx_rent_paid", budgetId = "b1", type = "expense", date = "2026-11-10", category = "Аренда", subcategory = "Оплата аренды", amount = 25_000.0, createdAt = now - 1000L)
+        )
+
+        val recurringRules = listOf(
+            // 1. Уже оплаченная сегодня аренда (связана через linkedTransactionId = tx_rent_paid) -> НЕ должна резервироваться повторно!
+            com.example.data.db.RecurringPaymentEntity(
+                id = 1L,
+                budgetId = "b1",
+                title = "Аренда",
+                amount = 25_000.0,
+                isIncome = false,
+                categoryName = "Аренда",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            // 2. Пропущенная подписка (SKIPPED) -> НЕ должна резервироваться
+            com.example.data.db.RecurringPaymentEntity(
+                id = 2L,
+                budgetId = "b1",
+                title = "Подписка Кино",
+                amount = 1_000.0,
+                isIncome = false,
+                categoryName = "Подписки",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 2L,
+                priority = "DISCRETIONARY_SUBSCRIPTION",
+                status = "ACTIVE"
+            ),
+            // 3. Перенесённый платёж (RESCHEDULED на d0 + 3) -> старая дата d0 + 3 исключена
+            com.example.data.db.RecurringPaymentEntity(
+                id = 3L,
+                budgetId = "b1",
+                title = "Страховка",
+                amount = 4_000.0,
+                isIncome = false,
+                categoryName = "Страховка",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 3L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            // 4. Просроченный платёж ЖКХ (OVERDUE с d0 - 2) -> резервируется ровно 1 раз в overdueObligationsRub (5 000 ₽)
+            com.example.data.db.RecurringPaymentEntity(
+                id = 4L,
+                budgetId = "b1",
+                title = "ЖКХ",
+                amount = 5_000.0,
+                isIncome = false,
+                categoryName = "ЖКХ",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 28L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            // 5. Приостановленное правило (PAUSED) -> полностью исключено
+            com.example.data.db.RecurringPaymentEntity(
+                id = 5L,
+                budgetId = "b1",
+                title = "Спортзал на паузе",
+                amount = 8_000.0,
+                isIncome = false,
+                categoryName = "Спорт",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 4L,
+                priority = "DISCRETIONARY_SUBSCRIPTION",
+                status = "PAUSED"
+            ),
+            // 6. Архивное правило (ARCHIVED) -> полностью исключено
+            com.example.data.db.RecurringPaymentEntity(
+                id = 6L,
+                budgetId = "b1",
+                title = "Старый кредит",
+                amount = 15_000.0,
+                isIncome = false,
+                categoryName = "Кредиты",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 5L,
+                priority = "MANDATORY",
+                status = "ARCHIVED"
+            ),
+            // 7. Гарантированная зарплата через 10 дней (d0 + 10)
+            com.example.data.db.RecurringPaymentEntity(
+                id = 7L,
+                budgetId = "b1",
+                title = "Зарплата",
+                amount = 90_000.0,
+                isIncome = true,
+                incomeCertainty = "GUARANTEED",
+                categoryName = "Зарплата",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 10L,
+                status = "ACTIVE"
+            )
+        )
+
+        val logs = listOf(
+            // Аренда за d0 связана с реальной транзакцией tx_rent_paid
+            com.example.data.db.RecurringExecutionLogEntity(
+                id = 100L,
+                budgetId = "b1",
+                recurringId = 1L,
+                scheduledEpochDay = d0,
+                executedEpochDay = d0,
+                actualAmount = 25_000.0,
+                status = "PENDING", // Даже если статус остался PENDING, связь с существующей транзакцией делает его исполненным
+                linkedTransactionId = "tx_rent_paid"
+            ),
+            com.example.data.db.RecurringExecutionLogEntity(
+                id = 101L,
+                budgetId = "b1",
+                recurringId = 2L,
+                scheduledEpochDay = d0 + 2L,
+                status = "SKIPPED"
+            ),
+            com.example.data.db.RecurringExecutionLogEntity(
+                id = 102L,
+                budgetId = "b1",
+                recurringId = 3L,
+                scheduledEpochDay = d0 + 3L,
+                status = "RESCHEDULED"
+            ),
+            com.example.data.db.RecurringExecutionLogEntity(
+                id = 103L,
+                budgetId = "b1",
+                recurringId = 4L,
+                scheduledEpochDay = d0 - 2L,
+                actualAmount = 5_000.0,
+                status = "OVERDUE"
+            )
+        )
+
+        // Также добавим долговой счёт с таким же именем «ЖКХ», чтобы проверить дедупликацию между recurring и we_owe
+        val duplicateDebtAcc = AccountEntity(
+            id = "debt_jkh",
+            budgetId = "b1",
+            name = "Долг: ЖКХ",
+            balance = 5_000.0,
+            type = "we_owe",
+            accountNumber = "2026-11-08"
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(listOf(duplicateDebtAcc)),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recurringRules, logs),
+            userEssentialDailyNormProvider = { 1_000.0 },
+            todayEpochDayProvider = { d0 }
+        )
+
+        val schedule = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, JSONObject().put("horizonDays", 10))
+        assertEquals(5, schedule.getInt("activeRulesCount"))
+        assertEquals(2, schedule.getInt("pausedOrArchivedRulesCount"))
+        assertEquals(3, schedule.getInt("excludedExecutedOrSkippedOccurrencesCount"))
+        assertEquals(1, schedule.getInt("overdueExpensesCount"))
+        assertEquals(5_000.0, schedule.getDouble("totalOverdueObligationsRub"), 0.01)
+
+        val forecast = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, null)
+        // Доступный баланс = 75 000 ₽ (25 000 ₽ аренды уже списаны в tx_rent_paid)
+        assertEquals(75_000.0, forecast.getDouble("availableBalanceRub"), 0.01)
+        // Сегодняшние неоплаченные обязательства = 0 ₽ (аренда оплачена)
+        assertEquals(0.0, forecast.getDouble("todayPendingObligationsRub"), 0.01)
+        // Будущие обязательства в горизонте 10 дн. = 0 ₽ (Подписка SKIPPED, Страховка RESCHEDULED, Спортзал PAUSED, Кредит ARCHIVED)
+        assertEquals(0.0, forecast.getDouble("reservedFutureObligationsRub"), 0.01)
+        // Просроченные обязательства = ровно 5 000 ₽ (ЖКХ без двойного вычитания долгового счёта)
+        assertEquals(5_000.0, forecast.getDouble("overdueObligationsRub"), 0.01)
+        // Остаток после обязательств до зарплаты = 75 000 - 5 000 = 70 000 ₽
+        assertEquals(70_000.0, forecast.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+    }
+
+    @Test
+    fun `issue 60 - profile switching budgetId isolates recurring schedule safe to spend preferences and clears stale facts`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 1).toEpochDay()
+        val now = System.currentTimeMillis()
+
+        val txs = listOf(
+            TransactionEntity(id = "t_main", budgetId = "b_main", type = "income", date = "2026-10-25", category = "Начальный баланс", subcategory = "Карта", amount = 100_000.0, createdAt = now - 10_000L),
+            TransactionEntity(id = "t_family", budgetId = "b_family", type = "income", date = "2026-10-25", category = "Начальный баланс", subcategory = "Карта", amount = 40_000.0, createdAt = now - 10_000L)
+        )
+        val recs = listOf(
+            com.example.data.db.RecurringPaymentEntity(
+                id = 1L,
+                budgetId = "b_main",
+                title = "Аренда офиса",
+                amount = 20_000.0,
+                isIncome = false,
+                categoryName = "Аренда",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 5L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            com.example.data.db.RecurringPaymentEntity(
+                id = 2L,
+                budgetId = "b_family",
+                title = "Детский сад",
+                amount = 10_000.0,
+                isIncome = false,
+                categoryName = "Дети",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 3L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            )
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b_main",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recs),
+            userSafetyFloorProvider = { id -> if (id == "b_main") 15_000.0 else 5_000.0 },
+            userEssentialDailyNormProvider = { 1_000.0 },
+            todayEpochDayProvider = { d0 }
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+        controller.recordTranscriptTurn(DavidLiveSpeaker.USER, "Проверка профиля b_main")
+
+        // Профиль 1: b_main
+        val mainSched = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, null)
+        assertEquals("b_main", mainSched.getString("budgetId"))
+        assertEquals(1, mainSched.getInt("upcomingExpensesCount"))
+        assertEquals("Аренда офиса", mainSched.getJSONArray("upcomingExpenses").getJSONObject(0).getString("title"))
+        assertEquals(100_000.0, mainSched.getDouble("availableBalanceRub"), 0.01)
+        assertEquals(1, provider.verifiedFacts.size)
+
+        // Переключаем профиль на b_family через контроллер
+        controller.onBudgetProfileChanged("b_family")
+        assertEquals("b_family", provider.getBudgetId())
+        assertTrue("Verified facts from previous profile must be cleared on profile switch", provider.verifiedFacts.isEmpty())
+        assertTrue("Transcript turns from previous profile must be cleared on profile switch", controller.transcriptTurns.isEmpty())
+
+        // Профиль 2: b_family
+        val familySched = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, null)
+        val familyForecast = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, null)
+        assertEquals("b_family", familySched.getString("budgetId"))
+        assertEquals(1, familySched.getInt("upcomingExpensesCount"))
+        assertEquals("Детский сад", familySched.getJSONArray("upcomingExpenses").getJSONObject(0).getString("title"))
+        assertEquals(40_000.0, familySched.getDouble("availableBalanceRub"), 0.01)
+        assertEquals(5_000.0, familyForecast.getDouble("mandatorySafetyFloorRub"), 0.01)
+        assertEquals(30_000.0, familyForecast.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+    }
+
+    @Test
+    fun `issue 60 - empty database and DAO errors or null DAOs report transparent status without fabricating zero balance as confirmed fact`() = runBlocking {
+        // 1. Все DAO == null (источники данных отключены)
+        val disconnectedProvider = DavidLiveFinancialToolsProvider(
+            budgetId = "b_disconnected",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null,
+            recurringPaymentDao = null
+        )
+        for (toolName in DavidLiveFinancialToolsProvider.ALL_REGISTERED_TOOLS) {
+            val res = disconnectedProvider.executeToolCall(toolName, JSONObject())
+            assertEquals("Tool $toolName must return status=data_unavailable when DAOs are null", "data_unavailable", res.getString("status"))
+            assertFalse("Tool $toolName must report dataAvailable=false", res.getBoolean("dataAvailable"))
+            assertFalse("Tool $toolName must report hasData=false", res.getBoolean("hasData"))
+        }
+        assertTrue("Disconnected tools must never record fabricated verifiedFacts", disconnectedProvider.verifiedFacts.isEmpty())
+
+        // 2. DAO подключены, но база данных для профиля пуста
+        val emptyProvider = DavidLiveFinancialToolsProvider(
+            budgetId = "b_empty",
+            transactionDao = createReadOnlyTransactionDao(emptyList()),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(emptyList())
+        )
+        val emptyOverview = emptyProvider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        assertEquals("ok", emptyOverview.getString("status"))
+        assertTrue(emptyOverview.getBoolean("dataAvailable"))
+        assertFalse(emptyOverview.getBoolean("hasData"))
+        assertTrue(emptyOverview.getBoolean("isDatabaseEmpty"))
+        assertTrue(emptyOverview.getString("humanSummary").contains("пуста"))
+
+        val emptySchedule = emptyProvider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, null)
+        assertEquals("ok", emptySchedule.getString("status"))
+        assertFalse(emptySchedule.getBoolean("hasData"))
+        assertTrue(emptySchedule.getBoolean("isDatabaseEmpty"))
+
+        // 3. DAO выбрасывает исключение при чтении
+        val failingTxDao = object : TransactionDao {
+            override fun getAllTransactions(): Flow<List<TransactionEntity>> = throw IllegalStateException("SQLite disk I/O error")
+            override fun getTransactionsByBudgetId(budgetId: String): Flow<List<TransactionEntity>> = throw IllegalStateException("SQLite disk I/O error")
+            override suspend fun insertTransaction(transaction: TransactionEntity) {}
+            override suspend fun insertTransactions(transactions: List<TransactionEntity>) {}
+            override suspend fun getExpenseCountForDate(dateStr: String): Int = 0
+            override suspend fun getExpenseSumForDate(dateStr: String): Double = 0.0
+            override fun getExpenseCountForDateSync(dateStr: String): Int = 0
+            override suspend fun deleteTransactionById(id: String) {}
+            override suspend fun deleteTransactionsByBudgetId(budgetId: String) {}
+            override suspend fun deleteAllTransactions() {}
+        }
+        val failingProvider = DavidLiveFinancialToolsProvider(
+            budgetId = "b_fail",
+            transactionDao = failingTxDao,
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(emptyList())
+        )
+        val errorResult = failingProvider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        assertEquals("error", errorResult.getString("status"))
+        assertFalse(errorResult.getBoolean("dataAvailable"))
+        assertEquals("DAO_READ_ERROR", errorResult.getString("errorCode"))
+        assertTrue("Failed DAO call must not record verifiedFacts", failingProvider.verifiedFacts.isEmpty())
+    }
+
+    @Test
+    fun `issue 60 - combined multi-domain questions invoke all required tools and enrich DavidLiveSessionController tool responses`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 1).toEpochDay()
+        val now = System.currentTimeMillis()
+        val txs = listOf(
+            TransactionEntity(id = "tx1", budgetId = "b1", type = "income", date = "2026-10-25", category = "Начальный баланс", subcategory = "Карта", amount = 65_000.0, createdAt = now - 10_000L)
+        )
+        val recs = listOf(
+            com.example.data.db.RecurringPaymentEntity(
+                id = 1L,
+                budgetId = "b1",
+                title = "Аренда",
+                amount = 25_000.0,
+                isIncome = false,
+                categoryName = "Аренда",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 4L,
+                priority = "MANDATORY",
+                status = "ACTIVE"
+            ),
+            com.example.data.db.RecurringPaymentEntity(
+                id = 2L,
+                budgetId = "b1",
+                title = "Зарплата",
+                amount = 95_000.0,
+                isIncome = true,
+                incomeCertainty = "GUARANTEED",
+                categoryName = "Зарплата",
+                frequency = "MONTHLY",
+                nextDueDateEpochDay = d0 + 10L,
+                status = "ACTIVE"
+            )
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList()),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(recs),
+            userEssentialDailyNormProvider = { 1_000.0 },
+            todayEpochDayProvider = { d0 }
+        )
+
+        // 1. Маршрутизация вопроса «Сколько останется после аренды до зарплаты?»
+        val specsRentSalary = provider.resolveRequiredToolsForQuery("Сколько останется после аренды до зарплаты?")
+        val toolNamesRentSalary = specsRentSalary.map { it.toolName }
+        assertTrue(toolNamesRentSalary.contains(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE))
+        assertTrue(toolNamesRentSalary.contains(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST))
+
+        val executedRentSalary = provider.executeToolsForQuery("Сколько останется после аренды до зарплаты?")
+        assertEquals(2, executedRentSalary.size)
+        val scheduleOutput = executedRentSalary.first { it.first == DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE }.second
+        val forecastOutput = executedRentSalary.first { it.first == DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST }.second
+        assertEquals(40_000.0, scheduleOutput.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertEquals(40_000.0, forecastOutput.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+
+        // 2. Маршрутизация вопроса «Что будет, если зарплата задержится на 5 дней?»
+        val specsDelay = provider.resolveRequiredToolsForQuery("Что будет, если зарплата задержится на 5 дней?")
+        val toolNamesDelay = specsDelay.map { it.toolName }
+        assertTrue(toolNamesDelay.contains(DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF))
+        assertTrue(toolNamesDelay.contains(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST))
+        assertTrue(toolNamesDelay.contains(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE))
+        val whatIfSpec = specsDelay.first { it.toolName == DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF }
+        assertEquals("INCOME_DELAY", whatIfSpec.args.getString("scenarioType"))
+        assertEquals(5, whatIfSpec.args.getInt("delayDays"))
+    }
+
+    @Test
+    fun `pr82 test 1 - today scheduled income is reported as due today with 0 days remaining and never shifted 30 days ahead`() = runBlocking {
+        val d0 = java.time.LocalDate.of(2026, 11, 2).toEpochDay()
+        val nowMs = java.time.LocalDate.of(2026, 11, 2)
+            .atTime(12, 0)
+            .atZone(java.time.ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+
+        val accounts = listOf(
+            AccountEntity(id = "acc_card", budgetId = "b_today_income", name = "Основная карта", balance = 42_000.0, type = "bank")
+        )
+        val txs = listOf(
+            TransactionEntity(
+                id = "tx_coffee",
+                budgetId = "b_today_income",
+                type = "expense",
+                date = "2026-11-02",
+                category = "Кафе и Доставка",
+                subcategory = "Утренний кофе",
+                amount = 350.0,
+                accountId = null,
+                createdAt = nowMs - 3_600_000L
+            )
+        )
+        // Зарплата назначена на СЕГОДНЯ (2026-11-02, 2-е число месяца) и ещё НЕ получена (нет PAID лога)
+        val salaryRuleToday = com.example.data.db.RecurringPaymentEntity(
+            id = 501L,
+            budgetId = "b_today_income",
+            title = "Основная зарплата",
+            amount = 85_000.0,
+            isIncome = true,
+            incomeCertainty = "GUARANTEED",
+            categoryName = "Зарплата",
+            frequency = "MONTHLY",
+            anchorDayOfMonth = 2,
+            nextDueDateEpochDay = d0,
+            priority = "MANDATORY",
+            status = "ACTIVE"
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b_today_income",
+            transactionDao = createReadOnlyTransactionDao(txs),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(accounts),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(listOf(salaryRuleToday), emptyList()),
+            userEssentialDailyNormProvider = { 1_000.0 },
+            todayEpochDayProvider = { d0 }
+        )
+
+        // 1. Проверяем get_recurring_schedule
+        val schedule = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE, null)
+        assertEquals("ok", schedule.getString("status"))
+        assertEquals(1, schedule.getInt("upcomingIncomesCount"))
+        val incomeItem = schedule.getJSONArray("upcomingIncomes").getJSONObject(0)
+        assertEquals("Основная зарплата", incomeItem.getString("title"))
+        assertEquals("2026-11-02", incomeItem.getString("nextDueDateIso"))
+        assertEquals("2 ноября 2026", incomeItem.getString("nextDueDateHumanRu"))
+        assertEquals("2 ноября 2026 года (второго ноября)", incomeItem.getString("nextDueDateSpokenRu"))
+        assertEquals(2, incomeItem.getInt("dayOfMonth"))
+        assertEquals("второго", incomeItem.getString("dayOrdinalGenitiveRu"))
+        assertEquals("второе", incomeItem.getString("dayOrdinalNominativeRu"))
+        assertEquals(0, incomeItem.getInt("daysUntilNextDue"))
+        assertTrue("Salary scheduled for today must have isDueToday=true", incomeItem.getBoolean("isDueToday"))
+        assertFalse("Salary not yet received must have executedToday=false", incomeItem.getBoolean("executedToday"))
+        assertEquals("сегодня, 2 ноября 2026 года (второго ноября)", incomeItem.getString("whenSpokenRu"))
+        assertEquals("2026-12-02", incomeItem.getString("followingCycleDueDateIso"))
+        assertTrue(schedule.getString("humanSummary").contains("сегодня, 2 ноября 2026 года (второго ноября)"))
+
+        // 2. Проверяем get_safe_to_spend_forecast
+        val forecast = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, null)
+        assertEquals("ok", forecast.getString("status"))
+        assertEquals("2026-11-02", forecast.getString("nextIncomeDateIso"))
+        assertEquals("2 ноября 2026 года (второго ноября)", forecast.getString("nextIncomeDateSpokenRu"))
+        assertEquals("сегодня, 2 ноября 2026 года (второго ноября)", forecast.getString("nextIncomeWhenSpokenRu"))
+        val forecastIncomes = forecast.getJSONArray("upcomingIncomes")
+        assertTrue(forecastIncomes.length() >= 1)
+        val firstForecastIncome = forecastIncomes.getJSONObject(0)
+        assertEquals("2026-11-02", firstForecastIncome.getString("dueDateIso"))
+        assertEquals(0, firstForecastIncome.getInt("daysUntilDue"))
+        assertTrue(firstForecastIncome.getBoolean("isDueToday"))
+
+        // 3. Проверяем get_financial_overview
+        val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        assertEquals("ok", overview.getString("status"))
+        assertTrue(overview.getInt("upcomingIncomesCount") >= 1)
+        assertEquals("2026-11-02", overview.getString("nextIncomeDateIso"))
+        assertEquals(0, overview.getInt("daysUntilNextIncome"))
+        assertTrue(overview.getBoolean("isNextIncomeDueToday"))
+        assertEquals("сегодня, 2 ноября 2026 года (второго ноября)", overview.getString("nextIncomeWhenSpokenRu"))
+    }
+
+    @Test
+    fun `pr82 test 1 - RussianDateVerbalizer and DavidLiveSessionController prevent 2nd day from turning into 22nd in voice or transcript`() {
+        val nov2 = java.time.LocalDate.of(2026, 11, 2).toEpochDay()
+        val nov12 = java.time.LocalDate.of(2026, 11, 12).toEpochDay()
+        val nov22 = java.time.LocalDate.of(2026, 11, 22).toEpochDay()
+
+        assertEquals("второго", com.example.data.safetospend.RussianDateVerbalizer.dayOrdinalGenitiveRu(2))
+        assertEquals("двенадцатого", com.example.data.safetospend.RussianDateVerbalizer.dayOrdinalGenitiveRu(12))
+        assertEquals("двадцать второго", com.example.data.safetospend.RussianDateVerbalizer.dayOrdinalGenitiveRu(22))
+
+        assertEquals("2 ноября 2026 года (второго ноября)", com.example.data.safetospend.RussianDateVerbalizer.formatSpokenDateGenitiveRu(nov2))
+        assertEquals("12 ноября 2026 года (двенадцатого ноября)", com.example.data.safetospend.RussianDateVerbalizer.formatSpokenDateGenitiveRu(nov12))
+        assertEquals("22 ноября 2026 года (двадцать второго ноября)", com.example.data.safetospend.RussianDateVerbalizer.formatSpokenDateGenitiveRu(nov22))
+        assertEquals("сегодня, 2 ноября 2026 года (второго ноября)", com.example.data.safetospend.RussianDateVerbalizer.formatRelativeDueSpokenRu(nov2, nov2))
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        controller.processServerMessageForTest("""{"setupComplete": {}}""")
+
+        // Сценарий A: приходят потоковые чанки outputTranscription И одновременно дублирующий modelTurn.parts.text с числом "2"
+        // Контроллер НЕ должен склеивать оба потока и превращать "2" + "2" в "22"
+        controller.processServerMessageForTest(
+            """{"serverContent":{"outputTranscription":{"text":"Следующая зарплата придет 2"}}}"""
+        )
+        controller.processServerMessageForTest(
+            """{"serverContent":{"modelTurn":{"parts":[{"text":"2 ноября"}]}}}"""
+        )
+        controller.processServerMessageForTest(
+            """{"serverContent":{"outputTranscription":{"text":" ноября (второго ноября)."}}}"""
+        )
+        controller.processServerMessageForTest(
+            """{"serverContent":{"turnComplete":true}}"""
+        )
+
+        val davidTurns = controller.transcriptTurns.filter { it.speaker == DavidLiveSpeaker.DAVID }
+        assertEquals(1, davidTurns.size)
+        assertEquals("Следующая зарплата придет 2 ноября (второго ноября).", davidTurns.first().text)
+        assertFalse("Must never turn '2' into '22'", davidTurns.first().text.contains("22"))
+    }
+
+    @Test
+    fun `pr82 full verification - realistic budget 01_01_2026 to 02_11_2026 verifies all 8 tools WhatIf month boundaries and profile isolation`() = runBlocking {
+        val dataset = com.example.data.safetospend.RealisticTestBudget2026Seeder.buildDataset(
+            budgetId = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID
+        )
+        val d0 = dataset.referenceTodayEpochDay // 2026-11-02 (epochDay = 20759)
+
+        // 0. Проверка границ диапазона дат 01.01.2026 – 02.11.2026 включительно и отсутствия будущих операций
+        val minDate = dataset.transactions.minOf { it.date }
+        val maxDate = dataset.transactions.maxOf { it.date }
+        assertEquals("2026-01-01", minDate)
+        assertEquals("2026-11-02", maxDate)
+        assertTrue(
+            "Zero transactions may have dates after 2026-11-02",
+            dataset.transactions.none { it.date > "2026-11-02" }
+        )
+        // Проверяем, что представлены все 11 месяцев с января по ноябрь 2026
+        val monthsPresent = dataset.transactions.map { it.date.substring(0, 7) }.toSet()
+        assertEquals(
+            setOf(
+                "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06",
+                "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"
+            ),
+            monthsPresent
+        )
+
+        // Проверка переходов границ месяцев (31 января -> 28 февраля -> 31 марта)
+        val jan31 = java.time.LocalDate.of(2026, 1, 31).toEpochDay()
+        val feb28 = com.example.data.safetospend.RecurringScheduleCalculator.computeNextDueDate(
+            currentDueDateEpochDay = jan31,
+            frequency = com.example.data.safetospend.PaymentFrequency.MONTHLY,
+            anchorDayOfMonth = 31
+        )
+        assertEquals(java.time.LocalDate.of(2026, 2, 28).toEpochDay(), feb28)
+        val mar31 = com.example.data.safetospend.RecurringScheduleCalculator.computeNextDueDate(
+            currentDueDateEpochDay = feb28,
+            frequency = com.example.data.safetospend.PaymentFrequency.MONTHLY,
+            anchorDayOfMonth = 31
+        )
+        assertEquals(java.time.LocalDate.of(2026, 3, 31).toEpochDay(), mar31)
+
+        // Добавим данные другого профиля ("personal_other") в общие списки DAO для проверки строгой изоляции по budgetId
+        val otherAccount = AccountEntity(
+            id = "acc_other",
+            budgetId = "personal_other",
+            name = "Чужой счёт",
+            balance = 999_999.0,
+            type = "bank"
+        )
+        val otherTx = TransactionEntity(
+            id = "tx_other",
+            budgetId = "personal_other",
+            type = "income",
+            date = "2026-11-01",
+            category = "Зарплата",
+            subcategory = "Чужая зарплата",
+            amount = 500_000.0,
+            accountId = null
+        )
+        val otherRecurring = com.example.data.db.RecurringPaymentEntity(
+            id = 999L,
+            budgetId = "personal_other",
+            title = "Чужая ипотека",
+            amount = 120_000.0,
+            isIncome = false,
+            categoryName = "Ипотека",
+            frequency = "MONTHLY",
+            nextDueDateEpochDay = d0 + 3L,
+            priority = "MANDATORY",
+            status = "ACTIVE"
+        )
+
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID,
+            transactionDao = createReadOnlyTransactionDao(dataset.transactions + otherTx),
+            categoryDao = createReadOnlyCategoryDao(dataset.categories),
+            goalDao = createReadOnlyGoalDao(dataset.goals),
+            accountDao = createReadOnlyAccountDao(dataset.accounts + otherAccount),
+            recurringPaymentDao = createReadOnlyRecurringPaymentDao(
+                dataset.recurringPayments + otherRecurring,
+                dataset.executionLogs
+            ),
+            userSafetyFloorProvider = { dataset.mandatorySafetyFloorRub },
+            userEssentialDailyNormProvider = { dataset.essentialDailyNormRub },
+            todayEpochDayProvider = { d0 }
+        )
+
+        // 1. Инструмент 1: get_financial_overview
+        val overview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        assertEquals("ok", overview.getString("status"))
+        assertEquals(115_000L, overview.getLong("availableBalanceRub"))
+        assertEquals(144_500L, overview.getLong("earnedIncome30dRub"))
+        assertEquals(130_000L, overview.getLong("salaryIncome30dRub"))
+        assertEquals(14_500L, overview.getLong("otherEarnedIncome30dRub"))
+        assertEquals(5_000L, overview.getLong("debtReturned30dRub"))
+        assertEquals(97_828L, overview.getLong("regularExpense30dRub"))
+        assertEquals(18_500L, overview.getLong("debtRepayment30dRub"))
+        assertEquals(116_328L, overview.getLong("expense30dRub"))
+        assertEquals(28_172L, overview.getLong("netCashFlow30dRub"))
+        assertEquals(49_000L, overview.getLong("totalWeOweRub"))
+        assertEquals(20_000L, overview.getLong("totalOwesUsRub"))
+
+        // 2. Инструмент 2: get_recurring_schedule
+        val schedule = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_RECURRING_SCHEDULE,
+            JSONObject().put("horizonDays", 35)
+        )
+        assertEquals("ok", schedule.getString("status"))
+        assertEquals(7, schedule.getInt("activeRulesCount"))
+        assertEquals(1, schedule.getInt("pausedOrArchivedRulesCount"))
+        assertEquals(0, schedule.getInt("overdueExpensesCount"))
+        // Проверяем, что оплаченный сегодня (02.11.2026) интернет НЕ висит как неоплаченный на сегодня, а переведён на 02.12.2026 ("второго декабря")
+        val upcomingExpenses = schedule.getJSONArray("upcomingExpenses")
+        var foundRentNov5 = false
+        var foundInternetDec2 = false
+        for (i in 0 until upcomingExpenses.length()) {
+            val item = upcomingExpenses.getJSONObject(i)
+            when (item.getString("title")) {
+                "Аренда квартиры" -> {
+                    assertEquals("2026-11-05", item.getString("nextDueDateIso"))
+                    assertEquals(3, item.getInt("daysUntilNextDue"))
+                    assertEquals(38_000.0, item.getDouble("amountRub"), 0.01)
+                    foundRentNov5 = true
+                }
+                "Домашний интернет и мобильная связь" -> {
+                    assertEquals("2026-12-02", item.getString("nextDueDateIso"))
+                    assertEquals(30, item.getInt("daysUntilNextDue"))
+                    assertEquals("второго", item.getString("dayOrdinalGenitiveRu"))
+                    assertTrue(item.getString("nextDueDateSpokenRu").contains("второго декабря"))
+                    foundInternetDec2 = true
+                }
+            }
+        }
+        assertTrue(foundRentNov5)
+        assertTrue(foundInternetDec2)
+
+        // 3. Инструмент 3: get_safe_to_spend_forecast
+        val forecast = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST, null)
+        assertEquals("ok", forecast.getString("status"))
+        assertEquals(115_000.0, forecast.getDouble("availableBalanceRub"), 0.01)
+        assertEquals(8, forecast.getInt("horizonDays"))
+        assertEquals("2026-11-10", forecast.getString("nextIncomeDateIso"))
+        // До зарплаты 10.11 резервируются Аренда (38 000 ₽ 05.11) + Долг брату Андрею (14 000 ₽ 08.11) = 52 000 ₽
+        assertEquals(0.0, forecast.getDouble("todayPendingObligationsRub"), 0.01)
+        assertEquals(52_000.0, forecast.getDouble("reservedFutureObligationsRub"), 0.01)
+        assertEquals(52_000.0, forecast.getDouble("obligationsReservedTotalRub"), 0.01)
+        assertEquals(63_000.0, forecast.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertEquals(15_000.0, forecast.getDouble("mandatorySafetyFloorRub"), 0.01)
+        val forecastObligations = forecast.getJSONArray("upcomingObligations")
+        var foundDebtNov8InForecast = false
+        for (i in 0 until forecastObligations.length()) {
+            val obl = forecastObligations.getJSONObject(i)
+            if (obl.getString("title") == "Долг: Долг брату Андрею") {
+                assertEquals("2026-11-08", obl.getString("dueDateIso"))
+                assertEquals(6, obl.getInt("daysUntilDue"))
+                assertEquals(14_000.0, obl.getDouble("amountRub"), 0.01)
+                foundDebtNov8InForecast = true
+            }
+        }
+        assertTrue(foundDebtNov8InForecast)
+        val baseSafeToday = forecast.getDouble("canSpendTodayDiscRub")
+        assertTrue("Safe-to-spend today must be positive", baseSafeToday > 0.0)
+
+        // 4. Инструмент 4: simulate_what_if (3 сценария: разовая покупка 5 000 ₽, задержка зарплаты на 5 дн., рост аренды на +4 000 ₽)
+        // 4a. Разовая трата 5 000 ₽
+        val whatIfSpend5k = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF,
+            JSONObject()
+                .put("scenarioType", "HYPOTHETICAL_SPEND")
+                .put("amountRub", 5_000.0)
+        )
+        assertEquals("ok", whatIfSpend5k.getString("status"))
+        assertEquals(58_000.0, whatIfSpend5k.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertTrue(whatIfSpend5k.getDouble("simulatedCanSpendTodayRub") < baseSafeToday)
+
+        // 4b. Задержка зарплаты на 5 дней (с 10.11 на 15.11)
+        val whatIfSalaryDelay = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF,
+            JSONObject()
+                .put("scenarioType", "INCOME_DELAY")
+                .put("delayDays", 5)
+        )
+        assertEquals("ok", whatIfSalaryDelay.getString("status"))
+        assertEquals(8, whatIfSalaryDelay.getInt("baselineHorizonDays"))
+        assertEquals(13, whatIfSalaryDelay.getInt("simulatedHorizonDays"))
+        assertEquals(52_000.0, whatIfSalaryDelay.getDouble("baselineObligationsReservedRub"), 0.01)
+        assertEquals(58_800.0, whatIfSalaryDelay.getDouble("simulatedObligationsReservedRub"), 0.01)
+        assertEquals(56_200.0, whatIfSalaryDelay.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+        assertEquals(1, whatIfSalaryDelay.getInt("newlyExposedObligationsCount"))
+        assertTrue(whatIfSalaryDelay.getDouble("simulatedCanSpendTodayRub") <= baseSafeToday)
+
+        // 4c. Увеличение обязательного платежа (Аренда квартиры +4 000 ₽ -> 42 000 ₽)
+        val whatIfMandatoryIncrease = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_SIMULATE_WHAT_IF,
+            JSONObject()
+                .put("scenarioType", "MANDATORY_PAYMENT_CHANGE")
+                .put("deltaAmountRub", 4_000.0)
+                .put("targetTitle", "Аренда квартиры")
+        )
+        assertEquals("ok", whatIfMandatoryIncrease.getString("status"))
+        assertEquals(52_000.0, whatIfMandatoryIncrease.getDouble("baselineObligationsReservedRub"), 0.01)
+        assertEquals(56_000.0, whatIfMandatoryIncrease.getDouble("simulatedObligationsReservedRub"), 0.01)
+        assertEquals(59_000.0, whatIfMandatoryIncrease.getDouble("netBalanceAfterObligationsBeforeSalaryRub"), 0.01)
+
+        // 5. Инструмент 5: get_goals_and_debts
+        val goalsAndDebts = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_GOALS_AND_DEBTS, null)
+        assertEquals("ok", goalsAndDebts.getString("status"))
+        assertEquals(2, goalsAndDebts.getInt("count"))
+        assertEquals(4, goalsAndDebts.getInt("debtsCount"))
+        assertEquals(49_000L, goalsAndDebts.getLong("totalWeOweRub"))
+        assertEquals(20_000L, goalsAndDebts.getLong("totalOwesUsRub"))
+        val goalsItems = goalsAndDebts.getJSONArray("items")
+        var totalGoalsSavedRub = 0L
+        for (i in 0 until goalsItems.length()) {
+            totalGoalsSavedRub += goalsItems.getJSONObject(i).getLong("savedAmountRub")
+        }
+        assertEquals(237_000L, totalGoalsSavedRub)
+
+        // 6. Инструмент 6: get_category_spending
+        val categorySpending = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING, null)
+        assertEquals("ok", categorySpending.getString("status"))
+        val catsArray = categorySpending.getJSONArray("categories")
+        val catMap = mutableMapOf<String, JSONObject>()
+        var totalCatSpent30d = 0L
+        for (i in 0 until catsArray.length()) {
+            val obj = catsArray.getJSONObject(i)
+            catMap[obj.getString("category")] = obj
+            totalCatSpent30d += obj.getLong("spentRub")
+        }
+        assertEquals(97_828L, totalCatSpent30d)
+        assertEquals(44_380L, catMap["ЖКХ и Аренда"]!!.getLong("spentRub"))
+        assertFalse(catMap["ЖКХ и Аренда"]!!.getBoolean("isLimitExceeded"))
+        assertEquals(19_840L, catMap["Продукты"]!!.getLong("spentRub"))
+        assertFalse(catMap["Продукты"]!!.getBoolean("isLimitExceeded"))
+        assertEquals(9_850L, catMap["Кафе и Доставка"]!!.getLong("spentRub"))
+        assertTrue(catMap["Кафе и Доставка"]!!.getBoolean("isLimitExceeded"))
+        assertEquals(8_400L, catMap["Развлечения и Хобби"]!!.getLong("spentRub"))
+        assertTrue(catMap["Развлечения и Хобби"]!!.getBoolean("isLimitExceeded"))
+
+        // 7. Инструмент 7: compare_spending_periods (7 дней и 30 дней)
+        val compare7d = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_COMPARE_PERIODS,
+            JSONObject().put("days", 7)
+        )
+        assertEquals("ok", compare7d.getString("status"))
+        assertEquals(9_500L, compare7d.getLong("currentExpenseRub"))
+        assertEquals(25_140L, compare7d.getLong("previousExpenseRub"))
+        assertEquals(-62L, compare7d.getLong("expenseChangePercent"))
+
+        val compare30d = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_COMPARE_PERIODS,
+            JSONObject().put("days", 30)
+        )
+        assertEquals("ok", compare30d.getString("status"))
+        assertEquals(116_328L, compare30d.getLong("currentExpenseRub"))
+        assertEquals(94_088L, compare30d.getLong("previousExpenseRub"))
+        assertEquals(144_500L, compare30d.getLong("currentIncomeRub"))
+        assertEquals(130_000L, compare30d.getLong("previousIncomeRub"))
+        assertEquals(24L, compare30d.getLong("expenseChangePercent"))
+
+        // 8. Инструмент 8: get_recent_transactions
+        val recentTxs = provider.executeToolCall(
+            DavidLiveFinancialToolsProvider.TOOL_RECENT_TRANSACTIONS,
+            JSONObject().put("limit", 5)
+        )
+        assertEquals("ok", recentTxs.getString("status"))
+        val txArray = recentTxs.getJSONArray("transactions")
+        assertEquals(5, txArray.length())
+        assertEquals("2026-11-02", txArray.getJSONObject(0).getString("date"))
+        assertEquals("2026-11-02", txArray.getJSONObject(1).getString("date"))
+        assertEquals("2026-11-02", txArray.getJSONObject(2).getString("date"))
+        assertEquals("2026-11-02", txArray.getJSONObject(3).getString("date"))
+        assertEquals("2026-11-01", txArray.getJSONObject(4).getString("date"))
+
+        // 9. Проверка строгой изоляции профилей: переключение на "personal_other" не смешивает данные с "demo_2026_test"
+        provider.setBudgetId("personal_other")
+        val otherOverview = provider.executeToolCall(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, null)
+        assertEquals("personal_other", otherOverview.getString("budgetId"))
+        assertEquals(500_000L, otherOverview.getLong("availableBalanceRub"))
+        assertEquals(500_000L, otherOverview.getLong("earnedIncome30dRub"))
+        assertEquals(0L, otherOverview.getLong("regularExpense30dRub"))
+    }
     // Keep pending tool work paused while asserting the synchronous state transition.
     private class QueuedLiveDispatcher : kotlinx.coroutines.CoroutineDispatcher() {
         override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) = Unit
     }
 
-}
+    @Test
+    fun `mute visual palette applies dimmed silver-slate colors to mic states without masking priority states or David speaking`() {
+        val micDrivenStates = listOf(
+            DavidLiveVisualState.IDLE_LISTENING,
+            DavidLiveVisualState.USER_SPEAKING,
+            DavidLiveVisualState.THINKING,
+            DavidLiveVisualState.FINANCE_LOOKUP,
+            DavidLiveVisualState.ANALYZING,
+            DavidLiveVisualState.PREPARING_RESPONSE
+        )
 
+        for (state in micDrivenStates) {
+            assertTrue(
+                "Muted visual palette must apply to $state when isMicMuted=true",
+                shouldApplyMutedVisualPalette(state, isMicMuted = true)
+            )
+            val unmutedPalette = resolveSpherePalette(state, isMicMuted = false)
+            val mutedPalette = resolveSpherePalette(state, isMicMuted = true)
+            assertEquals(MutedSlatePrimary, mutedPalette.primary)
+            assertEquals(MutedSilverSecondary, mutedPalette.secondary)
+            assertFalse(
+                "Sphere primary color for $state must change when mic is muted",
+                unmutedPalette.primary == mutedPalette.primary
+            )
+
+            val (sheetPrimary, sheetSecondary) = resolveVisualStateColors(state, isMicMuted = true)
+            assertEquals(MutedSlatePrimary, sheetPrimary)
+            assertEquals(MutedSilverSecondary, sheetSecondary)
+        }
+
+        // Приоритетные системные состояния и исходящая речь Давида НЕ маскируются mute-оформлением
+        val nonMaskedStates = listOf(
+            DavidLiveVisualState.DAVID_SPEAKING,
+            DavidLiveVisualState.OFFLINE,
+            DavidLiveVisualState.API_MISSING,
+            DavidLiveVisualState.ERROR,
+            DavidLiveVisualState.CONNECTING,
+            DavidLiveVisualState.RECONNECTING,
+            DavidLiveVisualState.SUCCESS
+        )
+
+        for (state in nonMaskedStates) {
+            assertFalse(
+                "Priority or outgoing speech state $state must NOT be masked by mic mute",
+                shouldApplyMutedVisualPalette(state, isMicMuted = true)
+            )
+            val unmutedPalette = resolveSpherePalette(state, isMicMuted = false)
+            val mutedPalette = resolveSpherePalette(state, isMicMuted = true)
+            assertEquals(
+                "Palette for $state must remain unchanged when mic is muted",
+                unmutedPalette,
+                mutedPalette
+            )
+            assertEquals(
+                resolveVisualStateColors(state, isMicMuted = false),
+                resolveVisualStateColors(state, isMicMuted = true)
+            )
+        }
+    }
+
+    @Test
+    fun `orbital motion speed hierarchy and continuous phase accumulator transition without resetting phase`() {
+        val offlineSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.OFFLINE)
+        val mutedIdleSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.IDLE_LISTENING, isMicMuted = true)
+        val idleSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.IDLE_LISTENING, isMicMuted = false)
+        val thinkingSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.THINKING)
+        val analyzingSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.ANALYZING)
+        val financeSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.FINANCE_LOOKUP)
+        val userQuietSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.USER_SPEAKING, audioEnergy = 0.1f)
+        val userLoudSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.USER_SPEAKING, audioEnergy = 0.9f)
+        val davidSpeakingSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.DAVID_SPEAKING, audioEnergy = 0.85f)
+
+        assertTrue(offlineSpeed < mutedIdleSpeed)
+        assertTrue(mutedIdleSpeed < idleSpeed)
+        assertTrue(idleSpeed < thinkingSpeed)
+        assertTrue(thinkingSpeed < analyzingSpeed)
+        assertTrue(analyzingSpeed < financeSpeed)
+        assertTrue(financeSpeed < userQuietSpeed)
+        assertTrue("Audio energy must boost user speaking orbit speed", userLoudSpeed > userQuietSpeed)
+        assertTrue(davidSpeakingSpeed > thinkingSpeed)
+
+        // Непрерывное накопление фазы при смене состояний без сброса в 0
+        var phase = 0f
+        phase = advanceContinuousOrbitPhase(phase, deltaMs = 16L, angularSpeedRadPerSec = idleSpeed)
+        val afterIdle = phase
+        assertTrue(afterIdle > 0f)
+
+        phase = advanceContinuousOrbitPhase(phase, deltaMs = 16L, angularSpeedRadPerSec = userLoudSpeed)
+        val afterUserSpeech = phase
+        assertTrue("Phase must continue advancing from current value on state change", afterUserSpeech > afterIdle)
+
+        phase = advanceContinuousOrbitPhase(phase, deltaMs = 16L, angularSpeedRadPerSec = thinkingSpeed)
+        val afterThinking = phase
+        assertTrue("Phase must continue advancing during Thinking without resetting", afterThinking > afterUserSpeech)
+
+        // При включённом системном ограничении анимаций (reduceMotion = true) фаза остаётся стабильной
+        val frozenPhase = advanceContinuousOrbitPhase(
+            currentPhaseRad = afterThinking,
+            deltaMs = 16L,
+            angularSpeedRadPerSec = davidSpeakingSpeed,
+            reduceMotion = true
+        )
+        assertEquals(afterThinking, frozenPhase, 0.0001f)
+    }
+
+    @Test
+    fun `extractActiveSpeechBubbleSegment prevents completed phrase accumulation and splits long streams cleanly`() {
+        val singlePhrase = extractActiveSpeechBubbleSegment("Привет! ")
+        assertEquals("Привет!", singlePhrase.activeText)
+        assertEquals(0, singlePhrase.segmentIndex)
+
+        // Когда начинается следующее предложение в потоке транскрипции, в облачке отображается только новая активная фраза
+        val multiSentence = extractActiveSpeechBubbleSegment(
+            "Привет! Я проверил твой бюджет за октябрь. Сейчас расскажу про подписки"
+        )
+        assertEquals("Сейчас расскажу про подписки", multiSentence.activeText)
+        assertEquals(2, multiSentence.segmentIndex)
+
+        // Если все предложения уже закрыты знаками препинания, показывается последнее актуальное предложение без склейки со старыми
+        val twoCompletedSentences = extractActiveSpeechBubbleSegment(
+            "Записал расход 450 рублей в кафе. Баланс обновлён!"
+        )
+        assertEquals("Баланс обновлён!", twoCompletedSentences.activeText)
+        assertEquals(1, twoCompletedSentences.segmentIndex)
+
+        // Длинная фраза без точек автоматически делится по естественным границам синтагм, чтобы не копить простыню текста
+        val longRunOnClause = extractActiveSpeechBubbleSegment(
+            "Смотри внимательно на свои расходы за прошлую неделю, потому что в категории ресторанов и доставки мы вышли за лимит, а вот по супермаркетам всё идёт отлично"
+        )
+        assertTrue(
+            "Long unpunctuated stream must segment into a readable active clause",
+            longRunOnClause.activeText.length <= 138
+        )
+        assertTrue(longRunOnClause.segmentIndex >= 1)
+        assertTrue(longRunOnClause.activeText.contains("супермаркетам"))
+    }
+
+    @Test
+    fun `shouldDismissCompletedSpokenSubtitle clears finished speech when David finishes speaking and resets on next phrase`() {
+        val completedSpeech = "Записал 500 рублей на такси."
+
+        // 1. Во время активной речи Давида субтитр НЕ скрывается
+        assertFalse(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.DAVID_SPEAKING,
+                currentLiveSubtitle = completedSpeech,
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+
+        // 2. Сразу после завершения речи и перехода в IDLE_LISTENING отговорившая фраза уходит вверх и исчезает
+        assertTrue(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.IDLE_LISTENING,
+                currentLiveSubtitle = completedSpeech,
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+
+        // 3. Когда начинается следующая фраза (или пользователь начинает говорить), новое сообщение снова отображается
+        assertFalse(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.IDLE_LISTENING,
+                currentLiveSubtitle = "Слушаю следующий вопрос",
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+
+        // 4. Приоритетные карточки (OFFLINE / API_MISSING / ERROR) отображают собственные системные метаданные
+        assertTrue(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.OFFLINE,
+                currentLiveSubtitle = completedSpeech,
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+    }
+
+    @Test
+    fun `evaluateSphereTouchGesture separates short tap action from hold and drag 3D energy attraction`() {
+        val touchSlopPx = 18f
+
+        // Короткий тап (< 165 мс и без сдвига) -> выполняется действие (Mute / Retry / API), без залипания притяжения
+        val shortTapOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = 95L,
+            maxDragDistancePx = 4f,
+            touchSlopPx = touchSlopPx,
+            wasCancelled = false
+        )
+        assertEquals(SphereTouchGestureOutcome.SHORT_TAP_ACTION, shortTapOutcome)
+
+        // Удержание пальца (>= 165 мс) на сфере -> активируется только притяжение света/сгустков без срабатывания тапа
+        val holdOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = SPHERE_TOUCH_HOLD_ACTIVATION_MS + 40L,
+            maxDragDistancePx = 3f,
+            touchSlopPx = touchSlopPx,
+            wasCancelled = false
+        )
+        assertEquals(SphereTouchGestureOutcome.HOLD_OR_DRAG_ATTRACTION, holdOutcome)
+
+        // Перемещение пальца по сфере (drag > touchSlop) даже за короткое время -> 3D-притяжение без ложного тапа
+        val dragOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = 80L,
+            maxDragDistancePx = touchSlopPx + 6f,
+            touchSlopPx = touchSlopPx,
+            wasCancelled = false
+        )
+        assertEquals(SphereTouchGestureOutcome.HOLD_OR_DRAG_ATTRACTION, dragOutcome)
+
+        // Отменённый жест (например, перехват скролла или сворачивание) -> безопасно игнорируется
+        val canceledOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = 60L,
+            maxDragDistancePx = 2f,
+            touchSlopPx = touchSlopPx,
+            wasCancelled = true
+        )
+        assertEquals(SphereTouchGestureOutcome.CANCELLED, canceledOutcome)
+    }
+
+    @Test
+    fun `volumetric 3D sphere projection and cluster attraction respond to finger tracking and disperse smoothly`() {
+        val center = androidx.compose.ui.geometry.Offset(200f, 200f)
+        val sphereRadius = 120f
+
+        // 1. Проекция точки касания на переднюю полусферу сохраняет выпуклую глубину normZ > 0
+        val centerTouch = projectTouchTo3DSphere(
+            touchOffset = androidx.compose.ui.geometry.Offset(200f, 200f),
+            sphereCenter = center,
+            sphereRadius = sphereRadius
+        )
+        assertEquals(0f, centerTouch.normX, 0.001f)
+        assertEquals(0f, centerTouch.normY, 0.001f)
+        assertTrue("Center touch on convex sphere must have maximal positive Z depth", centerTouch.normZ > 0.99f)
+
+        val edgeTouch = projectTouchTo3DSphere(
+            touchOffset = androidx.compose.ui.geometry.Offset(350f, 200f),
+            sphereCenter = center,
+            sphereRadius = sphereRadius
+        )
+        val clampedRadialNorm = kotlin.math.hypot(edgeTouch.normX.toDouble(), edgeTouch.normY.toDouble()).toFloat()
+        assertTrue("Touch outside sphere rim must be clamped to convex surface boundary", clampedRadialNorm <= 0.96f)
+        assertTrue("Clamped rim touch must retain positive Z depth on front hemisphere", edgeTouch.normZ > 0.2f)
+
+        // 2. Плавное следование за пальцем по сфере и мягкое нарастание/рассеивание силы притяжения
+        val trackedX = interpolateTouchSurfaceCoordinate(currentValue = 0f, targetValue = 0.6f, deltaMs = 16L)
+        assertTrue(trackedX in 0.1f..0.55f)
+
+        var attraction = 0f
+        repeat(12) {
+            attraction = advanceTouchAttractionStrength(
+                currentStrength = attraction,
+                isTouchActive = true,
+                deltaMs = 16L
+            )
+        }
+        assertTrue("Holding finger on sphere must smoothly build attraction strength", attraction > 0.5f)
+
+        // 3. Внутренние 3D-сгустки распределены по передней и задней полусферам и стягиваются к точке касания
+        val spec = DefaultVolumetricClusters.first()
+        val unattractedCluster = computeVolumetricCluster3D(
+            clusterIndex = 0,
+            spec = spec,
+            center = center,
+            sphereRadius = sphereRadius,
+            phaseRad = 1.1f,
+            energy = 0.35f,
+            touchPoint3D = edgeTouch,
+            touchAttractionStrength = 0f
+        )
+        val attractedCluster = computeVolumetricCluster3D(
+            clusterIndex = 0,
+            spec = spec,
+            center = center,
+            sphereRadius = sphereRadius,
+            phaseRad = 1.1f,
+            energy = 0.35f,
+            touchPoint3D = edgeTouch,
+            touchAttractionStrength = 0.85f
+        )
+
+        val distBefore = kotlin.math.hypot(
+            (unattractedCluster.screenOffset.x - edgeTouch.projectedScreenOffset.x).toDouble(),
+            (unattractedCluster.screenOffset.y - edgeTouch.projectedScreenOffset.y).toDouble()
+        )
+        val distAfter = kotlin.math.hypot(
+            (attractedCluster.screenOffset.x - edgeTouch.projectedScreenOffset.x).toDouble(),
+            (attractedCluster.screenOffset.y - edgeTouch.projectedScreenOffset.y).toDouble()
+        )
+        assertTrue(
+            "3D light cluster must move closer to the finger touch point when attraction is active",
+            distAfter < distBefore
+        )
+        assertTrue(
+            "Attracted cluster must have positive touchPullFactor near the touch point",
+            attractedCluster.touchPullFactor > unattractedCluster.touchPullFactor
+        )
+
+        // Проверяем, что в ансамбле 3D-сгустков одновременно присутствуют элементы как передней (worldZ >= 0), так и задней (worldZ < 0) полусферы
+        val allClustersAtPhase = DefaultVolumetricClusters.mapIndexed { idx, clusterSpec ->
+            computeVolumetricCluster3D(
+                clusterIndex = idx,
+                spec = clusterSpec,
+                center = center,
+                sphereRadius = sphereRadius,
+                phaseRad = 0.75f,
+                energy = 0.25f,
+                touchPoint3D = null,
+                touchAttractionStrength = 0f
+            )
+        }
+        assertTrue("Sphere must have front-hemisphere 3D clusters", allClustersAtPhase.any { it.worldZ >= 0f })
+        assertTrue("Sphere must have back-hemisphere 3D clusters for volumetric depth", allClustersAtPhase.any { it.worldZ < 0f })
+
+        // 4. После отпускания пальца сгустки мягко расходятся обратно в обычный режим
+        var dispersed = attraction
+        repeat(60) {
+            dispersed = advanceTouchAttractionStrength(
+                currentStrength = dispersed,
+                isTouchActive = false,
+                deltaMs = 16L
+            )
+        }
+        assertTrue("Releasing finger must softly disperse touch attraction back toward 0", dispersed < 0.08f)
+    }
+
+    @Test
+    fun `david live speech sync tracker and session controller synchronize subtitle text with audible 24kHz audio playback`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider, controllerDispatcher = QueuedLiveDispatcher())
+
+        // 1. Проверка компенсации буфера AudioTrack (200 мс) и старта ЦАП (100 мс) в computeAudibleSamplesAt
+        val startMs = 10_000L
+        // В момент t = startMs + 50ms (до завершения 100 мс старта ЦАП) реально услышанных сэмплов ещё 0
+        val beforeDacOnset = DavidLiveAudioEngine.computeAudibleSamplesAt(
+            writtenSamples24k = 24_000L,
+            turnStartWallMs = startMs,
+            lastWriteWallMs = startMs + 50L,
+            nowWallMs = startMs + 50L,
+            hasMoreQueuedAudio = true
+        )
+        assertEquals(0L, beforeDacOnset)
+
+        // В момент t = startMs + 600ms (500 мс реального звучания = 12 000 сэмплов @ 24 кГц),
+        // даже если в буфер уже записано 48 000 сэмплов, прозвучало ровно 12 000 сэмплов
+        val at500msAudible = DavidLiveAudioEngine.computeAudibleSamplesAt(
+            writtenSamples24k = 48_000L,
+            turnStartWallMs = startMs,
+            lastWriteWallMs = startMs + 600L,
+            nowWallMs = startMs + 600L,
+            hasMoreQueuedAudio = true
+        )
+        assertEquals(12_000L, at500msAudible)
+
+        // 2. Сервер Gemini Live присылает сразу два предложения в outputTranscription и 3.5 секунды аудио (84 000 сэмплов),
+        // плюс преждевременный turnComplete, пока AudioTrack только начинает озвучивать первое слово.
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = 0L,
+            isDrained = false
+        )
+
+        controller.processServerMessageForTest(
+            """
+            {
+              "serverContent": {
+                "outputTranscription": {
+                  "text": "Привет! Я проверил твой бюджет за октябрь. Сейчас расскажу про подписки."
+                },
+                "turnComplete": true
+              }
+            }
+            """.trimIndent()
+        )
+
+        // Пока audibleSamples24k == 0 (звук ещё не вышел из динамика), текст следующих предложений НЕ появляется заранее,
+        // а состояние остаётся DAVID_SPEAKING несмотря на пришедший с сервера turnComplete!
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertEquals("Давид отвечает...", controller.liveSubtitle.value)
+        assertFalse(controller.liveSubtitle.value.contains("подписки"))
+
+        val scheduled = controller.speechSyncTracker.getScheduledWordsForTest()
+        assertTrue(scheduled.size >= 9)
+        val firstWordSample = scheduled.first().revealAtSample24k
+        val secondSentenceWord = scheduled.first { it.word.startsWith("Я") }
+        val thirdSentenceWord = scheduled.first { it.word.startsWith("Сейчас") }
+
+        // 3. Давид произносит первое слово («Привет!») -> в облачке появляется только «Привет!»
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = firstWordSample + 100L,
+            isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
+        assertEquals("Привет!", controller.liveSubtitle.value)
+        assertEquals("Привет!", extractActiveSpeechBubbleSegment(controller.liveSubtitle.value).activeText)
+
+        // 4. Давид произносит второе предложение («Я проверил твой бюджет за октябрь.») ->
+        // в облачке отображается второе предложение, а третье («Сейчас расскажу про подписки.») ещё НЕ появилось!
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = thirdSentenceWord.revealAtSample24k - 500L,
+            isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
+        assertTrue(controller.liveSubtitle.value.contains("Я проверил твой бюджет за октябрь."))
+        assertFalse(
+            "Third sentence must NOT appear in subtitle bubble before David's voice reaches it",
+            controller.liveSubtitle.value.contains("Сейчас")
+        )
+        assertEquals(
+            "Я проверил твой бюджет за октябрь.",
+            extractActiveSpeechBubbleSegment(controller.liveSubtitle.value).activeText
+        )
+        assertTrue(secondSentenceWord.revealAtSample24k < thirdSentenceWord.revealAtSample24k)
+
+        // 5. Голос Давида доходит до третьего предложения («Сейчас расскажу про подписки.») ->
+        // облачко синхронно переключается на третье предложение!
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = 84_000L,
+            isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
+        assertEquals(
+            "Сейчас расскажу про подписки.",
+            extractActiveSpeechBubbleSegment(controller.liveSubtitle.value).activeText
+        )
+
+        // 6. Когда воспроизведение аудио реально завершилось (isDrained = true), реплика фиксируется в истории и режим переходит в LISTENING
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = 84_000L,
+            isDrained = true
+        )
+        controller.completeDavidTurnAfterPlaybackDrain()
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertEquals(1, controller.transcriptTurns.size)
+        assertEquals(
+            "Привет! Я проверил твой бюджет за октябрь. Сейчас расскажу про подписки.",
+            controller.transcriptTurns.first().text
+        )
+    }
+
+    @Test
+    fun `david live horizontal wave visualizer responds vividly to conversational user microphone levels and preserves spoken slot snapshots`() {
+        val analyzer = DavidLiveSpectrumAnalyzer()
+        // Имитируем реальный тихий сигнал микрофона после аппаратного шумоподавления VOICE_COMMUNICATION (RMS ~ 0.032, 320 Гц голос)
+        val rawMicSamples = ShortArray(512) { idx ->
+            val t = idx.toDouble() / 16_000.0
+            (kotlin.math.sin(2.0 * Math.PI * 320.0 * t) * 1450.0).toInt().toShort()
+        }
+        var sumSq = 0.0
+        for (sample in rawMicSamples) {
+            val norm = sample / 32768.0
+            sumSq += norm * norm
+        }
+        val rawRms = kotlin.math.sqrt(sumSq / rawMicSamples.size).toFloat()
+        assertTrue("Conversational VOICE_COMMUNICATION mic RMS should be in 0.015..0.06 range", rawRms in 0.015f..0.06f)
+
+        val boostedSamples = ShortArray(512)
+        DavidLiveAudioEngine.boostMicSamplesForVisualizer(
+            source = rawMicSamples,
+            destination = boostedSamples,
+            count = rawMicSamples.size,
+            rms = rawRms
+        )
+        val rays = analyzer.analyzePcmFrame(
+            pcmSamples = boostedSamples,
+            sampleCount = boostedSamples.size,
+            sampleRateHz = 16_000
+        )
+        val boostedEnergy = DavidLiveAudioEngine.computeUserVisualizerEnergy(
+            fftEnergy = analyzer.overallEnergy,
+            micRms = rawRms
+        )
+        assertTrue(
+            "Boosted user visualizer energy ($boostedEnergy) must be vivid (> 0.42f) for conversational speech",
+            boostedEnergy > 0.42f
+        )
+
+        val totalBars = 29
+        val radialEnvelope = analyzer.getRadialSpatialEnvelope()
+
+        val idleCenterBar = computeHorizontalWaveBarTargetMagnitude(
+            barIndex = 14,
+            totalBars = totalBars,
+            rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.02f },
+            radialEnvelope = radialEnvelope,
+            overallEnergy = 0.02f,
+            wavePhaseRad = 0.8f,
+            waveActivity = 0.25f,
+            isMicMuted = false,
+            isUserSpeaking = false,
+            isDavidSpeaking = false,
+            isProcessing = false,
+            isIdleListeningUnmuted = true
+        )
+        val userSpeakingCenterBarPhaseA = computeHorizontalWaveBarTargetMagnitude(
+            barIndex = 14,
+            totalBars = totalBars,
+            rayMagnitudes = rays,
+            radialEnvelope = radialEnvelope,
+            overallEnergy = boostedEnergy,
+            wavePhaseRad = 0.4f,
+            waveActivity = 1f,
+            isMicMuted = false,
+            isUserSpeaking = true,
+            isDavidSpeaking = false,
+            isProcessing = false,
+            isIdleListeningUnmuted = false
+        )
+        val userSpeakingCenterBarPhaseB = computeHorizontalWaveBarTargetMagnitude(
+            barIndex = 14,
+            totalBars = totalBars,
+            rayMagnitudes = rays,
+            radialEnvelope = radialEnvelope,
+            overallEnergy = boostedEnergy,
+            wavePhaseRad = 1.9f,
+            waveActivity = 1f,
+            isMicMuted = false,
+            isUserSpeaking = true,
+            isDavidSpeaking = false,
+            isProcessing = false,
+            isIdleListeningUnmuted = false
+        )
+
+        assertTrue(
+            "User speaking center bar ($userSpeakingCenterBarPhaseA) must be significantly taller than idle ($idleCenterBar)",
+            userSpeakingCenterBarPhaseA > idleCenterBar * 2.2f && userSpeakingCenterBarPhaseA > 0.55f
+        )
+        assertTrue(
+            "Traveling wave phase must actively articulate bar height during user speech",
+            kotlin.math.abs(userSpeakingCenterBarPhaseA - userSpeakingCenterBarPhaseB) > 0.02f
+        )
+
+        assertTrue(isDefaultStatusSubtitlePlaceholder("Я здесь, слушаю тебя"))
+        assertTrue(isDefaultStatusSubtitlePlaceholder("Говорю..."))
+        assertTrue(isDefaultStatusSubtitlePlaceholder("Слушаю..."))
+        assertFalse(isDefaultStatusSubtitlePlaceholder("Записал расход 450 рублей в категорию кафе."))
+    }
+
+    @Test
+    fun `david live conversation duplicates user and david turns into chat in real time and preserves them after session ends`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val mirroredSnapshots = mutableListOf<List<DavidLiveTranscriptTurn>>()
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+        controller.onTranscriptTurnsChanged = { turns ->
+            mirroredSnapshots.add(turns)
+        }
+
+        // 1. Пользователь произносит фразу по частям (streaming inputTranscription)
+        controller.processServerMessageForTest(
+            """{"serverContent":{"inputTranscription":{"text":"Давид, запиши кофе "}}}"""
+        )
+        assertTrue("Streaming user turn must be emitted immediately", controller.liveTranscriptTurns.value.isNotEmpty())
+        assertEquals(1, controller.liveTranscriptTurns.value.size)
+        assertEquals(DavidLiveSpeaker.USER, controller.liveTranscriptTurns.value[0].speaker)
+        assertEquals("Давид, запиши кофе", controller.liveTranscriptTurns.value[0].text)
+        assertFalse("Streaming user turn is not final yet", controller.liveTranscriptTurns.value[0].isFinal)
+        val firstUserTurnId = controller.liveTranscriptTurns.value[0].id
+
+        controller.processServerMessageForTest(
+            """{"serverContent":{"inputTranscription":{"text":"за 350 рублей"}}}"""
+        )
+        assertEquals(1, controller.liveTranscriptTurns.value.size)
+        assertEquals(
+            "Streaming user turn must update in-place with the same turn id",
+            firstUserTurnId,
+            controller.liveTranscriptTurns.value[0].id
+        )
+        assertEquals("Давид, запиши кофе за 350 рублей", controller.liveTranscriptTurns.value[0].text)
+
+        // 2. Давид начинает отвечать — реплика пользователя фиксируется (isFinal = true), а реплика Давида стримится с единым ID
+        controller.processServerMessageForTest(
+            """{"serverContent":{"outputTranscription":{"text":"Записал 350 рублей "}}}"""
+        )
+        assertEquals(2, controller.liveTranscriptTurns.value.size)
+        assertTrue("User turn must become final when David starts speaking", controller.liveTranscriptTurns.value[0].isFinal)
+        assertEquals(firstUserTurnId, controller.liveTranscriptTurns.value[0].id)
+        assertEquals(DavidLiveSpeaker.DAVID, controller.liveTranscriptTurns.value[1].speaker)
+        assertEquals("Записал 350 рублей", controller.liveTranscriptTurns.value[1].text)
+        assertFalse(controller.liveTranscriptTurns.value[1].isFinal)
+        val firstDavidTurnId = controller.liveTranscriptTurns.value[1].id
+
+        controller.processServerMessageForTest(
+            """{"serverContent":{"outputTranscription":{"text":"в категорию Кафе!"},"turnComplete":true}}"""
+        )
+        assertEquals(2, controller.liveTranscriptTurns.value.size)
+        assertEquals(
+            "David turn must keep the same ID when finalized on turnComplete",
+            firstDavidTurnId,
+            controller.liveTranscriptTurns.value[1].id
+        )
+        assertEquals("Записал 350 рублей в категорию Кафе!", controller.liveTranscriptTurns.value[1].text)
+        assertTrue("David turn must be marked final on turnComplete", controller.liveTranscriptTurns.value[1].isFinal)
+
+        // 3. При завершении сессии обе реплики (пользователя и Давида) возвращаются с теми же стабильными ID и хронологией
+        val (completedTurns, _) = controller.endSession()
+        assertEquals(2, completedTurns.size)
+        assertEquals(firstUserTurnId, completedTurns[0].id)
+        assertEquals("Давид, запиши кофе за 350 рублей", completedTurns[0].text)
+        assertEquals(firstDavidTurnId, completedTurns[1].id)
+        assertEquals("Записал 350 рублей в категорию Кафе!", completedTurns[1].text)
+        assertTrue(completedTurns[0].timestampMs < completedTurns[1].timestampMs)
+        assertTrue("onTranscriptTurnsChanged listener must have been notified during the call", mirroredSnapshots.size >= 4)
+    }
+
+    @Test
+    fun `speech sync tracker preserves already revealed words monotonically when new audio and transcript chunks arrive`() {
+        val tracker = DavidLiveSpeechSyncTracker()
+
+        // 1. Первая порция текста приходит с небольшим буфером аудио
+        tracker.updateTranscript(
+            sanitizedFullText = "Привет, я внимательно проверил твои расходы",
+            enqueuedSamples24k = 12_000L,
+            currentAudibleSamples24k = 0L
+        )
+        val initialWords = tracker.getScheduledWordsForTest()
+        assertEquals(6, initialWords.size)
+
+        // Прозвучало 3 слова ("Привет, я внимательно")
+        val thirdWordSample = initialWords[2].revealAtSample24k + 200L
+        val visibleAfter3Words = tracker.resolveVisibleSubtitle(audibleSamples24k = thirdWordSample)
+        assertEquals("Привет, я внимательно", visibleAfter3Words)
+
+        // 2. По WebSocket прилетает крупный чанк аудио (enqueuedSamples24k скачет до 96 000L) и продолжение текста.
+        // Уже открытые 3 слова НЕ должны прятаться обратно из-за пересчёта масштаба!
+        tracker.updateTranscript(
+            sanitizedFullText = "Привет, я внимательно проверил твои расходы за этот месяц, и баланс в полном порядке.",
+            enqueuedSamples24k = 96_000L,
+            currentAudibleSamples24k = thirdWordSample
+        )
+        val visibleImmediatelyAfterChunk = tracker.resolveVisibleSubtitle(audibleSamples24k = thirdWordSample)
+        assertTrue(
+            "Already revealed words must never disappear when enqueuedSamples24k jumps: got '$visibleImmediatelyAfterChunk'",
+            visibleImmediatelyAfterChunk.startsWith("Привет, я внимательно")
+        )
+
+        // 3. Предложение длиной до 138 символов с запятой не разрезается посреди фразы на сегменты
+        val singleSentenceWithComma =
+            "Привет, я внимательно проверил твои расходы за этот месяц, и твой свободный баланс в полном порядке."
+        assertTrue(singleSentenceWithComma.length in 97..138)
+        val segment = extractActiveSpeechBubbleSegment(singleSentenceWithComma)
+        assertEquals(0, segment.segmentIndex)
+        assertEquals(1, segment.totalSegments)
+        assertEquals(singleSentenceWithComma, segment.activeText)
+    }
+
+    @Test
+    fun `streaming text fade split index computes exact prefix boundary for live sheet and minimized chat bubbles`() {
+        // 1. Первое слово в новом голосовом облачке чата (previousText = "") проявляется целиком с индекса 0
+        assertEquals(
+            0,
+            computeStreamingTextFadeSplitIndex(
+                previousText = "",
+                currentText = "Привет!"
+            )
+        )
+
+        // 2. Переход от системной заглушки ("Слушаю...") к первому слову речи проявляется с индекса 0
+        assertEquals(
+            0,
+            computeStreamingTextFadeSplitIndex(
+                previousText = "Слушаю...",
+                currentText = "Давай проверим бюджет",
+                isPreviousPlaceholder = true
+            )
+        )
+
+        // 3. Пословное дописывание в облачке чата при свёрнутом разговоре в капсулу:
+        // уже показанный префикс остаётся на 100% альфе, а проявляется только новый хвост
+        val prev = "Давай проверим"
+        val next = "Давай проверим твой баланс"
+        val splitIdx = computeStreamingTextFadeSplitIndex(previousText = prev, currentText = next)
+        assertEquals(prev.length, splitIdx)
+        assertEquals(" твой баланс", next.substring(splitIdx))
+
+        // 4. Неизменившийся текст возвращает полную длину (0 символов для повторной анимации)
+        assertEquals(
+            next.length,
+            computeStreamingTextFadeSplitIndex(previousText = next, currentText = next)
+        )
+    }
+
+    @Test
+    fun `procedural sound manager synthesizes click-free PCM buffers for coins, frog SMS, voice chat open-close and respects sound preference`() {
+        val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+
+        val buffers = mapOf(
+            "singleCoin" to com.example.davidapp.SoundManager.cachedCoinPcm,
+            "transactionCoins" to com.example.davidapp.SoundManager.cachedTransactionCoinsPcm,
+            "voiceCapture" to com.example.davidapp.SoundManager.cachedVoiceCapturePcm,
+            "frogReceive" to com.example.davidapp.SoundManager.cachedFrogReceivePcm,
+            "sendBubble" to com.example.davidapp.SoundManager.cachedSendBubblePcm,
+            "voiceOpen" to com.example.davidapp.SoundManager.cachedVoiceOpenPcm,
+            "voiceClose" to com.example.davidapp.SoundManager.cachedVoiceClosePcm,
+            "achievement" to com.example.davidapp.SoundManager.cachedAchievementPcm,
+            "click" to com.example.davidapp.SoundManager.cachedClickPcm
+        )
+
+        for ((name, pcm) in buffers) {
+            assertTrue("$name PCM buffer must not be empty", pcm.isNotEmpty())
+            val peakAbs = pcm.maxOf { kotlin.math.abs(it.toInt()) }
+            if (name == "singleCoin") {
+                assertTrue(
+                    "singleCoin splash PCM buffer must retain original delicate amplitude (got $peakAbs)",
+                    peakAbs in 5000..18000
+                )
+            } else {
+                assertTrue(
+                    "$name PCM buffer must have strong normalized peak >= 24000 for clear loudness (got $peakAbs)",
+                    peakAbs >= 24000
+                )
+            }
+            // First and last samples must be zero or near-zero to prevent hardware speaker clicks
+            assertTrue(
+                "$name first sample must start smoothly near zero (got ${pcm.first()})",
+                kotlin.math.abs(pcm.first().toInt()) <= 60
+            )
+            assertTrue(
+                "$name last sample must fade out smoothly near zero (got ${pcm.last()})",
+                kotlin.math.abs(pcm.last().toInt()) <= 60
+            )
+        }
+
+        // Verify soft voice capture sound is shorter and gentler than cascading transaction coins
+        assertTrue(
+            com.example.davidapp.SoundManager.cachedVoiceCapturePcm.size <
+                com.example.davidapp.SoundManager.cachedTransactionCoinsPcm.size
+        )
+
+        // Verify cascading transaction coins buffer is longer than a single coin toss
+        assertTrue(
+            com.example.davidapp.SoundManager.cachedTransactionCoinsPcm.size >
+                com.example.davidapp.SoundManager.cachedCoinPcm.size
+        )
+
+        // Verify frog receive buffer has two distinct vocal syllables (energy dip around 104..112 ms)
+        val frogPcm = com.example.davidapp.SoundManager.cachedFrogReceivePcm
+        val sampleRate = com.example.davidapp.SoundManager.SAMPLE_RATE
+        val syllable1Peak = (10 * sampleRate / 1000 until 90 * sampleRate / 1000)
+            .maxOf { kotlin.math.abs(frogPcm[it].toInt()) }
+        val interSyllableGapPeak = (104 * sampleRate / 1000 until 112 * sampleRate / 1000)
+            .maxOf { kotlin.math.abs(frogPcm[it].toInt()) }
+        val syllable2Peak = (125 * sampleRate / 1000 until 220 * sampleRate / 1000)
+            .maxOf { kotlin.math.abs(frogPcm[it].toInt()) }
+        assertTrue("Frog syllable 1 must be strongly audible", syllable1Peak > 15000)
+        assertEquals("Gap between frog syllables must be silent", 0, interSyllableGapPeak)
+        assertTrue("Frog syllable 2 must be strongly audible", syllable2Peak > 15000)
+
+        // Verify sound preference gate blocks playback when sound is disabled in settings,
+        // and preserves high playback gain (>= 0.65f) when enabled
+        val prevEnabled = com.example.data.preferences.BudgetPreferencesRepository.isSoundEnabled(context)
+        try {
+            com.example.data.preferences.BudgetPreferencesRepository.setSoundEnabled(context, true)
+            val activeGain = com.example.davidapp.SoundManager.resolvePlaybackGain(
+                context = null,
+                baseGain = 0.94f,
+                maxGain = 1.00f
+            )
+            assertTrue("Active playback gain must be loud (>= 0.80f), got $activeGain", activeGain >= 0.80f)
+
+            com.example.data.preferences.BudgetPreferencesRepository.setSoundEnabled(context, false)
+            val mutedGain = com.example.davidapp.SoundManager.resolvePlaybackGain(
+                context = context,
+                baseGain = 0.94f,
+                maxGain = 1.00f
+            )
+            assertEquals("Playback gain must be 0f when sound is disabled in preferences", 0f, mutedGain, 0.0001f)
+        } finally {
+            com.example.data.preferences.BudgetPreferencesRepository.setSoundEnabled(context, prevEnabled)
+        }
+    }
+}
 
