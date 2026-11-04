@@ -474,15 +474,33 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun clearAllDataAndResetSecurity(securityManager: com.example.data.SecurityManager) {
-        com.example.davidapp.AchievementManager.resetAll(getApplication())
+    private var securityResetInProgress = false
+
+    fun clearAllDataAndResetSecurity(
+        securityManager: com.example.data.SecurityManager,
+        onCompleted: (Boolean) -> Unit = {}
+    ) {
+        if (securityResetInProgress) return
+        securityResetInProgress = true
         viewModelScope.launch {
-            securityManager.removePin()
-            repository.clearAllData()
-            com.example.data.preferences.BudgetPreferencesRepository.resetBudgetSelectionOnClear(getApplication())
-            _selectedBudgetId.value = null
-            repository.ensureDefaultProfileExists()
-            _toastMessage.emit("Защита сброшена, данные операций удалены!")
+            try {
+                // Keep the PIN until erasure succeeds. A failed deletion must never expose old records.
+                repository.clearAllData()
+                securityManager.removePin()
+                com.example.davidapp.AchievementManager.resetAll(getApplication())
+                com.example.data.preferences.BudgetPreferencesRepository.resetBudgetSelectionOnClear(getApplication())
+                _selectedBudgetId.value = null
+                repository.ensureDefaultProfileExists()
+                _toastMessage.emit("Защита сброшена, данные операций удалены!")
+                onCompleted(true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _toastMessage.emit("Не удалось завершить сброс. Перезапустите приложение и повторите попытку.")
+                onCompleted(false)
+            } finally {
+                securityResetInProgress = false
+            }
         }
     }
 

@@ -426,8 +426,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                     }
                 },
                 onResetSecurity = {
-                    viewModel.clearAllDataAndResetSecurity(securityManager)
-                    isAppLocked = false
+                    viewModel.clearAllDataAndResetSecurity(securityManager) { success ->
+                        if (success) isAppLocked = false
+                    }
                 },
                 onSuccess = {
                     isAppLocked = false
@@ -437,8 +438,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         com.example.ui.security.BiometricPromptHelper.showBiometricOrDevicePrompt(
                             activity = activity,
                             onSuccess = {
-                                viewModel.clearAllDataAndResetSecurity(securityManager)
-                                isAppLocked = false
+                                viewModel.clearAllDataAndResetSecurity(securityManager) { success ->
+                                    if (success) isAppLocked = false
+                                }
                             },
                             onError = { err ->
                                 Toast.makeText(

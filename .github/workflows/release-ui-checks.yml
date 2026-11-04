@@ -37,10 +37,18 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
+          target: google_apis
+          ram-size: 2048M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.ui.components.BudgetDocumentImportUiTest,com.example.davidapp.live.DavidLivePresentationUiTest
+          script: |
+            adb shell input keyevent 224
+            adb shell input keyevent 82
+            adb shell wm dismiss-keyguard
+            adb shell am force-stop com.android.launcher3
+            ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.ui.components.BudgetDocumentImportUiTest,com.example.davidapp.live.DavidLivePresentationUiTest
       - name: Collect screenshots
         if: always()
         run: adb pull /sdcard/Android/data/ru.personalbudget.app.aadece/files/release-screenshots screenshots || true
