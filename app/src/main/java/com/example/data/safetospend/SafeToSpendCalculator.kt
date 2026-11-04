@@ -26,8 +26,7 @@ object SafeToSpendCalculator {
             .sumOf { max(0.0, it.amountRub) }
         val spentTodayTotal = spentTodayMandatory + spentTodayEssential + spentTodayDiscretionary
 
-        // 2. Build unified obligation & income schedule across 60-day lookahead window first
-        //    Guaranteed no double-counting between L_0, O_overdue, O_due(0), and E_mand(0).
+        // 2. Determine dynamic horizon H
         val activePayments = input.activeRecurringPayments.filter { it.status == RecurringStatus.ACTIVE }
         val earliestGuaranteedIncomeDay = findEarliestGuaranteedIncomeEpochDay(
             activePayments = activePayments,
@@ -36,51 +35,30 @@ object SafeToSpendCalculator {
             maxSearchDays = 60
         )
 
-        val schedule = buildObligationAndIncomeSchedule(
-            d0 = d0,
-            maxOffsetDays = 60,
-            activePayments = activePayments,
-            executionLogs = input.executionLogs,
-            scheduledDebts = input.scheduledDebts
-        )
-
-        val latestObligationOffsetInFallbackWindow = (1 until MAX_FALLBACK_HORIZON_DAYS)
-            .lastOrNull { t -> !schedule.dueItemsByOffset[t].isNullOrEmpty() }
-        val obligationHorizonDays = if (latestObligationOffsetInFallbackWindow != null) {
-            latestObligationOffsetInFallbackWindow + 1
-        } else {
-            1
-        }
-
-        // 3. Determine dynamic horizon H
-        //    When horizonDaysOverride is null:
-        //    - If a future guaranteed income exists, horizon is the window up to that income.
-        //    - Otherwise use the 30-day rolling fallback window so month-end dates (e.g. Oct 31) never collapse to 1 day.
         val horizonDays = when {
             input.horizonDaysOverride != null -> input.horizonDaysOverride.coerceIn(1, 60)
             earliestGuaranteedIncomeDay != null -> {
                 val delta = (earliestGuaranteedIncomeDay - d0).toInt()
                 delta.coerceIn(1, MAX_DYNAMIC_HORIZON_WITH_INCOME_DAYS)
             }
-            else -> max(MAX_FALLBACK_HORIZON_DAYS, obligationHorizonDays).coerceIn(1, MAX_FALLBACK_HORIZON_DAYS)
+            else -> min(daysRemMonth, MAX_FALLBACK_HORIZON_DAYS).coerceAtLeast(1)
         }
+
+        // 3. Build unified obligation schedule (Overdue O_overdue and Horizon O_due(t))
+        //    Guaranteed no double-counting between L_0, O_overdue, O_due(0), and E_mand(0).
+        val maxWindowDays = max(horizonDays, SAFETY_FLOOR_OBLIGATION_WINDOW_DAYS + 1)
+        val schedule = buildObligationAndIncomeSchedule(
+            d0 = d0,
+            maxOffsetDays = maxWindowDays - 1,
+            activePayments = activePayments,
+            executionLogs = input.executionLogs,
+            scheduledDebts = input.scheduledDebts
+        )
 
         val overdueObligationsRub = schedule.overdueItems.sumOf { it.amountRub }
         val todayPendingObligationsRub = schedule.dueItemsByOffset[0]?.sumOf { it.amountRub } ?: 0.0
         val reservedFutureObligationsRub = (1 until horizonDays).sumOf { t ->
             schedule.dueItemsByOffset[t]?.sumOf { it.amountRub } ?: 0.0
-        }
-        val todayPendingGuaranteedIncomeRub = schedule.guaranteedInflowByOffset[0] ?: 0.0
-        val inHorizonFutureGuaranteedIncomeRub = (1 until horizonDays).sumOf { t ->
-            schedule.guaranteedInflowByOffset[t] ?: 0.0
-        }
-        val anchorPaydayOffset = earliestGuaranteedIncomeDay?.let { (it - d0).toInt() }
-        val upcomingGuaranteedIncomeRub = if (todayPendingGuaranteedIncomeRub > 0.0 || inHorizonFutureGuaranteedIncomeRub > 0.0) {
-            inHorizonFutureGuaranteedIncomeRub
-        } else if (anchorPaydayOffset != null && anchorPaydayOffset in 1..60) {
-            schedule.guaranteedInflowByOffset[anchorPaydayOffset] ?: 0.0
-        } else {
-            0.0
         }
 
         // 4. Safety floor R_floor (never shrunk to 10% when balance is low!)
@@ -117,8 +95,10 @@ object SafeToSpendCalculator {
 
         for (tau in 0 until horizonDays) {
             val currentEpochDay = d0 + tau.toLong()
-            cumGuarInflows += schedule.guaranteedInflowByOffset[tau] ?: 0.0
-            cumExpInflows += schedule.expectedInflowByOffset[tau] ?: 0.0
+            if (tau >= 1) {
+                cumGuarInflows += schedule.guaranteedInflowByOffset[tau] ?: 0.0
+                cumExpInflows += schedule.expectedInflowByOffset[tau] ?: 0.0
+            }
             val dueTodayOrAtTau = schedule.dueItemsByOffset[tau]?.sumOf { it.amountRub } ?: 0.0
             cumMandatoryOutflows += dueTodayOrAtTau
 
@@ -248,8 +228,11 @@ object SafeToSpendCalculator {
             else -> BottleneckReason.LIQUIDITY_HORIZON
         }
 
-        // 11. Today's protected essential allowance (clamped only if literal cash after today's mandatory bills is < rEssToday)
-        val cashAfterTodayMandatory = lNet - overdueObligationsRub - todayPendingObligationsRub
+        // 11. Essential spending must respect both the protected reserve and the projected obligations.
+        val cashAfterTodayMandatory = min(
+            l0 - overdueObligationsRub - todayPendingObligationsRub,
+            minFreeLiquidity + rEssToday
+        )
         val canSpendTodayEssRub = if (cashAfterTodayMandatory <= 0.0) {
             0.0
         } else {
@@ -263,6 +246,16 @@ object SafeToSpendCalculator {
                 schedule.dueItemsByOffset[t]?.let { addAll(it) }
             }
         }
+
+        val maxIncomeLookaheadOffset = max(horizonDays, SAFETY_FLOOR_OBLIGATION_WINDOW_DAYS)
+        val allUpcomingIncomes = schedule.upcomingIncomeItems
+            .filter { (it.dueEpochDay - d0).toInt() in 0..maxIncomeLookaheadOffset }
+            .sortedBy { it.dueEpochDay }
+
+        val effectiveNextIncomeEpochDay = allUpcomingIncomes
+            .firstOrNull { it.incomeCertainty == IncomeCertainty.GUARANTEED }
+            ?.dueEpochDay
+            ?: earliestGuaranteedIncomeDay
 
         return SafeToSpendResult(
             canSpendTodayDiscRub = finalCanSpendDiscToday,
@@ -290,11 +283,9 @@ object SafeToSpendCalculator {
             reservedFutureObligationsRub = reservedFutureObligationsRub,
             reservedEssentialLivingHorizonRub = reservedEssentialHorizonRub,
             expectedUnconfirmedIncomeHorizonRub = cumExpInflows,
-            todayPendingGuaranteedIncomeRub = todayPendingGuaranteedIncomeRub,
-            upcomingGuaranteedIncomeRub = upcomingGuaranteedIncomeRub,
             hypotheticalDebtReceivablesRub = schedule.hypotheticalReceivablesRub,
             horizonDays = horizonDays,
-            nextIncomeEpochDay = earliestGuaranteedIncomeDay,
+            nextIncomeEpochDay = effectiveNextIncomeEpochDay,
             bottleneckDayOffset = bottleneckOffset,
             bottleneckEpochDay = d0 + bottleneckOffset.toLong(),
             bottleneckReason = bottleneckReason,
@@ -302,7 +293,8 @@ object SafeToSpendCalculator {
             cashGapEpochDay = firstCashGapEpochDay,
             cashGapAmountRub = maxCashGapAmount,
             trajectory = trajectory,
-            upcomingObligations = allUpcomingObligations
+            upcomingObligations = allUpcomingObligations,
+            upcomingIncomes = allUpcomingIncomes
         )
     }
 
@@ -311,8 +303,17 @@ object SafeToSpendCalculator {
         val dueItemsByOffset: Map<Int, List<ScheduledObligationItem>>,
         val guaranteedInflowByOffset: Map<Int, Double>,
         val expectedInflowByOffset: Map<Int, Double>,
-        val hypotheticalReceivablesRub: Double
+        val hypotheticalReceivablesRub: Double,
+        val upcomingIncomeItems: List<ScheduledIncomeItem>
     )
+
+    private fun isLogAlreadyExecutedOrExcluded(log: RecurringExecutionLogDomain?): Boolean {
+        if (log == null) return false
+        return log.status == ExecutionStatus.PAID ||
+            log.status == ExecutionStatus.SKIPPED ||
+            log.status == ExecutionStatus.RESCHEDULED ||
+            !log.linkedTransactionId.isNullOrBlank()
+    }
 
     private fun findEarliestGuaranteedIncomeEpochDay(
         activePayments: List<RecurringPaymentDomain>,
@@ -334,12 +335,12 @@ object SafeToSpendCalculator {
                 rangeEndEpochDay = searchEnd
             )
             for (occ in occurrences) {
-                val isSkippedOrPaid = executionLogs.any { log ->
+                val isExcluded = executionLogs.any { log ->
                     log.recurringId == rule.id &&
                         log.scheduledEpochDay == occ &&
-                        (log.status == ExecutionStatus.PAID || log.status == ExecutionStatus.SKIPPED)
+                        isLogAlreadyExecutedOrExcluded(log)
                 }
-                if (!isSkippedOrPaid) {
+                if (!isExcluded) {
                     if (earliest == null || occ < earliest) {
                         earliest = occ
                     }
@@ -362,6 +363,7 @@ object SafeToSpendCalculator {
         val dueItemsByOffset = mutableMapOf<Int, MutableList<ScheduledObligationItem>>()
         val guaranteedInflowByOffset = mutableMapOf<Int, Double>()
         val expectedInflowByOffset = mutableMapOf<Int, Double>()
+        val upcomingIncomeItems = mutableListOf<ScheduledIncomeItem>()
         var hypotheticalReceivablesRub = 0.0
 
         val logsByRecurringAndDate = executionLogs.associateBy { it.recurringId to it.scheduledEpochDay }
@@ -369,15 +371,16 @@ object SafeToSpendCalculator {
 
         for (rule in activePayments) {
             if (rule.status != RecurringStatus.ACTIVE) continue
-            val effectiveAmount = rule.effectiveReservedAmountRub
+            val effectiveAmount = if (rule.isIncome) rule.amount else rule.effectiveReservedAmountRub
             if (effectiveAmount <= 0.0) continue
 
             if (!rule.isIncome) {
-                // 1. Check any explicit past logs that are PENDING or OVERDUE
+                // 1. Check any explicit past logs that are PENDING or OVERDUE (and not already linked to a transaction)
                 executionLogs
                     .filter {
                         it.recurringId == rule.id &&
                             it.scheduledEpochDay < d0 &&
+                            it.linkedTransactionId.isNullOrBlank() &&
                             (it.status == ExecutionStatus.PENDING || it.status == ExecutionStatus.OVERDUE)
                     }
                     .forEach { log ->
@@ -386,7 +389,7 @@ object SafeToSpendCalculator {
                                 ScheduledObligationItem(
                                     sourceId = "rec_${rule.id}_${log.scheduledEpochDay}",
                                     title = rule.title,
-                                    amountRub = log?.actualAmount ?: effectiveAmount,
+                                    amountRub = log.actualAmount ?: effectiveAmount,
                                     dueEpochDay = log.scheduledEpochDay,
                                     isOverdue = true,
                                     isPriorityMandatory = rule.priority == ObligationPriority.MANDATORY,
@@ -405,8 +408,8 @@ object SafeToSpendCalculator {
 
                 for (occDay in occurrences) {
                     val log = logsByRecurringAndDate[rule.id to occDay]
-                    // If already PAID or SKIPPED, do not reserve again (money already left B_avail or skipped)
-                    if (log != null && (log.status == ExecutionStatus.PAID || log.status == ExecutionStatus.SKIPPED || log.status == ExecutionStatus.RESCHEDULED)) {
+                    // If already PAID, SKIPPED, RESCHEDULED, or linked to an executed transaction, do not reserve again
+                    if (isLogAlreadyExecutedOrExcluded(log)) {
                         continue
                     }
 
@@ -442,8 +445,9 @@ object SafeToSpendCalculator {
                     }
                 }
             } else {
-                // Recurring Income: include unconfirmed today occurrence (offset = 0) and future occurrences (offset >= 1).
-                // Confirmed (PAID/SKIPPED/RESCHEDULED) occurrences are skipped to prevent double-counting with B_avail.
+                // Recurring Income: include today (offset == 0) in upcomingIncomeItems if not yet executed,
+                // while conservative trajectory inflows only add unreceived income at future offsets t >= 1
+                // (today's income enters B_avail once actually received/confirmed).
                 val occurrences = RecurringScheduleCalculator.generateOccurrencesInRange(
                     payment = rule,
                     rangeStartEpochDay = d0,
@@ -451,22 +455,37 @@ object SafeToSpendCalculator {
                 )
                 for (occDay in occurrences) {
                     val log = logsByRecurringAndDate[rule.id to occDay]
-                    if (log != null && (log.status == ExecutionStatus.PAID || log.status == ExecutionStatus.SKIPPED || log.status == ExecutionStatus.RESCHEDULED)) {
+                    if (isLogAlreadyExecutedOrExcluded(log)) {
                         continue
                     }
                     val offset = (occDay - d0).toInt()
+                    val occAmount = log?.actualAmount ?: effectiveAmount
                     if (offset in 0..maxOffsetDays) {
-                        when (rule.incomeCertainty) {
-                            IncomeCertainty.GUARANTEED -> {
-                                guaranteedInflowByOffset[offset] =
-                                    (guaranteedInflowByOffset[offset] ?: 0.0) + effectiveAmount
-                            }
-                            IncomeCertainty.EXPECTED -> {
-                                expectedInflowByOffset[offset] =
-                                    (expectedInflowByOffset[offset] ?: 0.0) + effectiveAmount
-                            }
-                            IncomeCertainty.HYPOTHETICAL -> {
-                                hypotheticalReceivablesRub += effectiveAmount
+                        upcomingIncomeItems.add(
+                            ScheduledIncomeItem(
+                                sourceId = "inc_${rule.id}_$occDay",
+                                recurringId = rule.id,
+                                title = rule.title,
+                                amountRub = occAmount,
+                                dueEpochDay = occDay,
+                                incomeCertainty = rule.incomeCertainty,
+                                categoryName = rule.categoryName,
+                                frequency = rule.frequency
+                            )
+                        )
+                        if (offset >= 1) {
+                            when (rule.incomeCertainty) {
+                                IncomeCertainty.GUARANTEED -> {
+                                    guaranteedInflowByOffset[offset] =
+                                        (guaranteedInflowByOffset[offset] ?: 0.0) + occAmount
+                                }
+                                IncomeCertainty.EXPECTED -> {
+                                    expectedInflowByOffset[offset] =
+                                        (expectedInflowByOffset[offset] ?: 0.0) + occAmount
+                                }
+                                IncomeCertainty.HYPOTHETICAL -> {
+                                    hypotheticalReceivablesRub += occAmount
+                                }
                             }
                         }
                     }
@@ -528,7 +547,8 @@ object SafeToSpendCalculator {
             dueItemsByOffset = dueItemsByOffset,
             guaranteedInflowByOffset = guaranteedInflowByOffset,
             expectedInflowByOffset = expectedInflowByOffset,
-            hypotheticalReceivablesRub = hypotheticalReceivablesRub
+            hypotheticalReceivablesRub = hypotheticalReceivablesRub,
+            upcomingIncomeItems = upcomingIncomeItems
         )
     }
 }

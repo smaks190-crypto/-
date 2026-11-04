@@ -1,0 +1,113 @@
+name: Cleanup old GitHub Actions data
+
+on:
+  schedule:
+    # Weekly on Sunday at 23:45 UTC.
+    - cron: "45 23 * * 0"
+  workflow_dispatch:
+    inputs:
+      retention_days:
+        description: "Delete completed workflow runs older than this many days"
+        required: false
+        default: "14"
+        type: string
+      keep_latest:
+        description: "Always keep at least this many newest completed runs"
+        required: false
+        default: "10"
+        type: string
+      cache_unused_days:
+        description: "Delete caches not accessed for this many days"
+        required: false
+        default: "14"
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: cleanup-old-actions-data
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Clean old workflow runs, artifacts, logs, and stale caches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old completed workflow runs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const retentionDays = Number(context.payload.inputs?.retention_days ?? '14');
+            const keepLatest = Number(context.payload.inputs?.keep_latest ?? '10');
+
+            if (!Number.isInteger(retentionDays) || retentionDays < 1) {
+              throw new Error('retention_days must be a positive integer');
+            }
+            if (!Number.isInteger(keepLatest) || keepLatest < 0) {
+              throw new Error('keep_latest must be a non-negative integer');
+            }
+
+            const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
+            );
+
+            const completed = runs
+              .filter(run => run.status === 'completed')
+              .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            const protectedIds = new Set(completed.slice(0, keepLatest).map(run => run.id));
+            const expired = completed.filter(run =>
+              !protectedIds.has(run.id) && new Date(run.created_at).getTime() < cutoff
+            );
+
+            core.info(`Total runs: ${runs.length}; completed: ${completed.length}; expired eligible: ${expired.length}.`);
+
+            let deletedRuns = 0;
+            for (const run of expired) {
+              core.info(`Deleting run #${run.run_number} (${run.id}), ${run.name}, ${run.created_at}.`);
+              await github.rest.actions.deleteWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id
+              });
+              deletedRuns++;
+            }
+            core.notice(`Deleted ${deletedRuns} old completed runs. Their associated artifacts and logs are removed with them.`);
+
+      - name: Delete stale Actions caches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const unusedDays = Number(context.payload.inputs?.cache_unused_days ?? '14');
+            if (!Number.isInteger(unusedDays) || unusedDays < 1) {
+              throw new Error('cache_unused_days must be a positive integer');
+            }
+
+            const cutoff = Date.now() - unusedDays * 24 * 60 * 60 * 1000;
+            const caches = await github.paginate(
+              github.rest.actions.getActionsCacheList,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
+            );
+
+            const stale = caches.filter(cache =>
+              cache.last_accessed_at &&
+              new Date(cache.last_accessed_at).getTime() < cutoff
+            );
+
+            core.info(`Found ${caches.length} caches; ${stale.length} have not been accessed for ${unusedDays} days.`);
+
+            let deletedCaches = 0;
+            for (const cache of stale) {
+              core.info(`Deleting stale cache ${cache.id}, key: ${cache.key}, last accessed: ${cache.last_accessed_at}.`);
+              await github.rest.actions.deleteActionsCacheById({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                cache_id: cache.id
+              });
+              deletedCaches++;
+            }
+            core.notice(`Deleted ${deletedCaches} stale Actions caches.`);

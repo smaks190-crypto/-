@@ -1,9 +1,7 @@
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
-  alias(libs.plugins.google.devtools.ksp)
   // alias(libs.plugins.roborazzi)
-  alias(libs.plugins.secrets)
 }
 
 import java.io.File
@@ -45,28 +43,15 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystoreFile = file("${rootDir}/my-upload-key.jks")
-      if (keystoreFile.exists() && keystoreFile.length() > 0L) {
-        storeFile = keystoreFile
-        val storePass = System.getenv("STORE_PASSWORD")?.takeIf { it.isNotBlank() }
-        val keyPass = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() }
-        val alias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "upload"
+      val keystoreFile = rootProject.file(System.getenv("KEYSTORE_PATH") ?: "my-upload-key.jks")
+      storeFile = keystoreFile
+      val storePass = System.getenv("STORE_PASSWORD")?.takeIf { it.isNotBlank() }
+      val keyPass = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+      val alias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "upload"
 
-        storePassword = storePass ?: keyPass
-        keyAlias = alias
-        keyPassword = keyPass ?: storePass
-      } else {
-        storeFile = file("${rootDir}/debug.keystore")
-        storePassword = "android"
-        keyAlias = "androiddebugkey"
-        keyPassword = "android"
-      }
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+      storePassword = storePass ?: keyPass
+      keyAlias = alias
+      keyPassword = keyPass ?: storePass
     }
   }
 
@@ -79,13 +64,15 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
+      applicationIdSuffix = ".preview"
+      versionNameSuffix = "-preview"
       isCrunchPngs = false
       isMinifyEnabled = false
       isShrinkResources = false
     }
   }
   compileOptions {
+    isCoreLibraryDesugaringEnabled = true
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
   }
@@ -93,6 +80,8 @@ android {
     compose = true
     buildConfig = true
   }
+  // User keys are entered in the app. Never package CI or developer credentials in an APK.
+  defaultConfig.buildConfigField("String", "GEMINI_API_KEY", "\"\"")
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
@@ -100,12 +89,8 @@ configurations.all {
   exclude(group = "androidx.compose.compiler", module = "compiler")
 }
 
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
-}
-
 dependencies {
+  coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.compose.material.icons.core)
@@ -119,8 +104,7 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
-  implementation(libs.androidx.room.ktx)
-  implementation(libs.androidx.room.runtime)
+  implementation(project(":core:database"))
   implementation(libs.androidx.security.crypto)
   implementation(libs.androidx.biometric)
   implementation(libs.androidx.fragment.ktx)
@@ -149,7 +133,6 @@ dependencies {
   androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
-  "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen) // Не используется (применяется рефлексивный KotlinJsonAdapterFactory)
 
   // Автоматический парсинг Markdown для Jetpack Compose
@@ -162,18 +145,55 @@ dependencies {
   // implementation("com.alphacephei:vosk-android:0.3.47")
 }
 
-// Автоматическая верификация Unit-тестов Developer Console, David Live, FinancialSemantics и SafeToSpend 2.0 при сборке Debug APK
+// ============================================================================
+// МНОГОСТУПЕНЧАТЫЙ КОНВЕЙЕР СБОРКИ И ТЕСТИРОВАНИЯ (ЭТАПЫ A -> B -> C -> D)
+// ============================================================================
+val ciChangeScope = (rootProject.extra.properties["ciChangeScope"] as? String) ?: "full"
+val ciHasAndroidTestChanges = (rootProject.extra.properties["ciHasAndroidTestChanges"] as? Boolean) ?: false
+
+// Кэшируем runtime-зависимости Robolectric (android-all-instrumented) внутри ~/.gradle/caches,
+// чтобы gradle/actions/setup-gradle автоматически сохранял и восстанавливал их между запусками CI.
+val robolectricCacheDir = File(gradle.gradleUserHomeDir, "caches/robolectric-m2").apply { mkdirs() }
+
+// ЭТАП D: Параллельное выполнение Unit-тестов с переиспользованием JVM форков
 tasks.withType<Test>().configureEach {
-  filter {
-    includeTestsMatching("com.example.utils.GlobalConsoleLoggerTest")
-    includeTestsMatching("com.example.ExampleUnitTest")
-    includeTestsMatching("com.example.davidapp.live.DavidLiveUnitTest")
-    includeTestsMatching("com.example.data.FinancialSemanticsCalculatorTest")
-    includeTestsMatching("com.example.data.safetospend.SafeToSpendCalculatorTest")
+  testLogging.exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+  maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
+  forkEvery = 0L
+  systemProperty("maven.repo.local", robolectricCacheDir.absolutePath)
+  onlyIf {
+    System.getenv("GITHUB_ACTIONS") != "true" ||
+      (ciChangeScope != "docs_only" && ciChangeScope != "android_test_only")
+  }
+}
+
+// ЭТАП B: Ранняя компиляция Kotlin (Fail-Fast барьер перед DEX, упаковкой APK и запуском тестов)
+val ciStageBCompileKotlin = tasks.register("ciStageBCompileKotlin") {
+  group = "verification"
+  description = "Stage B: Early Kotlin compilation gate before heavy DEXing, APK packaging, or test execution."
+  dependsOn(":ciStageAFastChecks")
+  when (ciChangeScope) {
+    "docs_only" -> {
+      // Только документация: ранняя компиляция проверяет быстрый инкрементальный кэш
+      dependsOn(":core:database:compileDebugKotlin", "compileDebugKotlin")
+    }
+    "unit_test_only" -> {
+      dependsOn("compileDebugUnitTestKotlin")
+    }
+    "android_test_only" -> {
+      dependsOn("compileDebugAndroidTestKotlin")
+    }
+    else -> {
+      dependsOn(":core:database:compileDebugKotlin", "compileDebugKotlin", "compileDebugUnitTestKotlin")
+      if (ciHasAndroidTestChanges) {
+        dependsOn("compileDebugAndroidTestKotlin")
+      }
+    }
   }
 }
 
 val startCiAndroidEmulator = tasks.register<Exec>("startCiAndroidEmulator") {
+  onlyIf { System.getenv("CI_EXTERNAL_EMULATOR") != "true" }
   workingDir = rootProject.projectDir
   commandLine("bash", "${rootProject.projectDir}/ci/start_emulator.sh")
   mustRunAfter("packageDebugAndroidTest", "packageDebug")
@@ -185,14 +205,75 @@ val collectCiEmulatorArtifacts = tasks.register<Exec>("collectCiEmulatorArtifact
 }
 
 if (System.getenv("GITHUB_ACTIONS") == "true") {
+  tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(":ciStageAFastChecks")
+  }
+
+  // Гарантируем, что compileDebugUnitTestKotlin не блокируется в очереди за тяжёлым DEX-этапом
+  tasks.matching { it.name == "compileDebugUnitTestKotlin" }.configureEach {
+    mustRunAfter("compileDebugKotlin", "bundleDebugClassesToCompileJar")
+  }
+
+  // ЭТАП C (тяжёлые задачи DEX, сжатия ресурсов и упаковки APK) и ЭТАП D (запуск тестов)
+  // запускаются СТРОГО ПОСЛЕ успешного завершения Этапа B (ранней компиляции Kotlin).
+  // Если в любом .kt файле допущена ошибка компиляции, сборка мгновенно падает на Этапе B!
+  val heavyStageCTasks = setOf(
+    "mergeExtDexDebug",
+    "mergeLibDexDebug",
+    "dexBuilderDebug",
+    "mergeProjectDexDebug",
+    "desugarDebugFileDependencies",
+    "mergeDebugJavaResource",
+    "mergeDebugNativeLibs",
+    "stripDebugDebugSymbols",
+    "compressDebugAssets",
+    "packageDebug"
+  )
+  tasks.matching { it.name in heavyStageCTasks }.configureEach {
+    mustRunAfter(
+      ciStageBCompileKotlin,
+      ":core:database:compileDebugKotlin",
+      ":core:database:bundleLibRuntimeToJarDebug",
+      "compileDebugKotlin",
+      "bundleDebugClassesToCompileJar",
+      "compileDebugUnitTestKotlin"
+    )
+  }
+
+  tasks.matching { it.name == "packageDebug" }.configureEach {
+    mustRunAfter("testDebugUnitTest")
+  }
+
+  tasks.matching { it.name == "testDebugUnitTest" }.configureEach {
+    dependsOn(ciStageBCompileKotlin)
+    mustRunAfter(ciStageBCompileKotlin, "compileDebugUnitTestKotlin")
+  }
+
+  // В режиме многоступенчатого CI (по умолчанию) assembleDebug включает Этап B и Этап D,
+  // а при внешнем пошаговом запуске (CI_STAGED_PIPELINE=true) шаги вызываются раздельно из workflow.
+  if (System.getenv("CI_STAGED_PIPELINE") != "true") {
+    tasks.matching { it.name == "assembleDebug" }.configureEach {
+      dependsOn(ciStageBCompileKotlin)
+      if (ciChangeScope != "docs_only" && ciChangeScope != "android_test_only") {
+        dependsOn("testDebugUnitTest")
+      }
+    }
+  }
+
+  // При релизной сборке на main запускаем проверку Unit-тестов и прогреваем кэш Debug-компиляции для будущих PR
+  tasks.matching { it.name == "assembleRelease" }.configureEach {
+    dependsOn("testDebugUnitTest")
+  }
+
   tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
     dependsOn(startCiAndroidEmulator)
     finalizedBy(collectCiEmulatorArtifacts)
   }
 }
 
-tasks.matching { it.name == "assembleDebug" }.configureEach {
+// Полная проверка всех Source Sets (Release + AndroidTest + UnitTest) доступна через отдельную задачу
+tasks.register("verifyAllSourceSets") {
+  group = "verification"
+  description = "Compiles Release and AndroidTest source sets and runs Debug unit tests."
   dependsOn("compileReleaseKotlin", "compileDebugAndroidTestKotlin", "testDebugUnitTest")
 }
-
-

@@ -5,8 +5,6 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.example.data.db.AccountEntity
 import com.example.data.db.AppDatabase
 import com.example.data.db.BudgetProfileEntity
@@ -35,51 +33,18 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-enum class PeriodType { DAY, WEEK, MONTH, ALL }
-
-sealed interface BottomCapsuleModal {
-    data object None : BottomCapsuleModal
-    data class ManualAddTransaction(val initialType: String = "expense") : BottomCapsuleModal
-    data class EditTransaction(val transaction: TransactionEntity) : BottomCapsuleModal
-    data object VoiceInput : BottomCapsuleModal
-    data class AllTransactions(
-        val initialFilterType: String = "all",
-        val initialDate: String? = null
-    ) : BottomCapsuleModal
-    data class SettingsHub(
-        val initialScreen: SettingsScreen = SettingsScreen.HUB
-    ) : BottomCapsuleModal
-    data object CategoryLimits : BottomCapsuleModal
-    data object Categories : BottomCapsuleModal
-    data object AddGoal : BottomCapsuleModal
-    data object AddDebt : BottomCapsuleModal
-    data class DebtDetails(val debt: AccountEntity) : BottomCapsuleModal
-    data class GeminiConsent(
-        val messageOverride: String? = null,
-        val triggerAuditAfterAccept: Boolean = false
-    ) : BottomCapsuleModal
-    data object DavidChat : BottomCapsuleModal
-    data class SafeToSpend(val initialTab: Int = 0) : BottomCapsuleModal
-}
-
 @OptIn(ExperimentalCoroutinesApi::class)
 class BudgetViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: BudgetRepository
     private val prefs = application.getSharedPreferences("budget_prefs", Context.MODE_PRIVATE)
-    private val securePrefs: SharedPreferences = try {
-        val masterKey = MasterKey.Builder(application)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            application,
-            "secure_prefs",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    } catch (_: Exception) {
-        application.getSharedPreferences("secure_prefs", Context.MODE_PRIVATE)
+    private var securePrefs: SharedPreferences? =
+        com.example.davidapp.DavidViewModel.createSecurePrefsOrNull(application)
+
+    private fun obtainSecurePrefs(): SharedPreferences? {
+        securePrefs?.let { return it }
+        return com.example.davidapp.DavidViewModel.createSecurePrefsOrNull(getApplication())
+            .also { securePrefs = it }
     }
 
     val budgetProfiles: StateFlow<List<BudgetProfileEntity>>
@@ -92,19 +57,16 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     val categories: StateFlow<List<CategoryEntity>>
     val accounts: StateFlow<List<AccountEntity>>
     val notifications: StateFlow<List<NotificationEntity>>
-    private val _recurringPayments = MutableStateFlow<List<RecurringPaymentEntity>>(emptyList())
-    val recurringPayments: StateFlow<List<RecurringPaymentEntity>> = _recurringPayments.asStateFlow()
+    val recurringPayments: StateFlow<List<RecurringPaymentEntity>>
+    val recurringExecutionLogs: StateFlow<List<RecurringExecutionLogEntity>>
 
-    private val _recurringExecutionLogs = MutableStateFlow<List<RecurringExecutionLogEntity>>(emptyList())
-    val recurringExecutionLogs: StateFlow<List<RecurringExecutionLogEntity>> = _recurringExecutionLogs.asStateFlow()
-
-    private val _userSafetyFloorRub = MutableStateFlow(prefs.getFloat("user_safety_floor_rub", 0f).toDouble())
+    private val _userSafetyFloorRub = MutableStateFlow(
+        com.example.data.preferences.BudgetPreferencesRepository.getUserSafetyFloorRub(application)
+    )
     val userSafetyFloorRub: StateFlow<Double> = _userSafetyFloorRub.asStateFlow()
 
     private val _userEssentialDailyNormRub = MutableStateFlow<Double?>(
-        if (prefs.contains("user_essential_daily_norm_rub")) {
-            prefs.getFloat("user_essential_daily_norm_rub", 500f).toDouble()
-        } else null
+        com.example.data.preferences.BudgetPreferencesRepository.getUserEssentialDailyNormRub(application)
     )
     val userEssentialDailyNormRub: StateFlow<Double?> = _userEssentialDailyNormRub.asStateFlow()
 
@@ -153,11 +115,13 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     private val _expandedIncome = MutableStateFlow(false)
     val expandedIncome: StateFlow<Boolean> = _expandedIncome.asStateFlow()
 
-    private val _isGeminiConsentGiven = MutableStateFlow(prefs.getBoolean("gemini_consent_given", false))
+    private val _isGeminiConsentGiven = MutableStateFlow(
+        com.example.data.preferences.BudgetPreferencesRepository.isGeminiConsentGiven(application)
+    )
     val isGeminiConsentGiven: StateFlow<Boolean> = _isGeminiConsentGiven.asStateFlow()
 
     fun setGeminiConsentGiven(given: Boolean) {
-        prefs.edit().putBoolean("gemini_consent_given", given).apply()
+        com.example.data.preferences.BudgetPreferencesRepository.setGeminiConsentGiven(getApplication(), given)
         _isGeminiConsentGiven.value = given
     }
 
@@ -276,12 +240,12 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     val showSetupModal: StateFlow<Boolean> = _showSetupModal.asStateFlow()
 
     init {
-        // One-time migration of legacy API key to EncryptedSharedPreferences
-        val oldKey = prefs.getString("gemini_api_key", null)
-        if (!oldKey.isNullOrEmpty()) {
-            securePrefs.edit().putString("gemini_api_key", oldKey).apply()
-            prefs.edit().remove("gemini_api_key").apply()
-        }
+        // One-time atomic migration of legacy API key to EncryptedSharedPreferences
+        com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = prefs,
+            securePrefs = obtainSecurePrefs(),
+            allowBuildConfigFallback = true
+        )
 
         val database = AppDatabase.getDatabase(application)
         repository = BudgetRepository(
@@ -357,21 +321,23 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             emptyList()
         )
 
-        viewModelScope.launch {
-            _selectedBudgetId.flatMapLatest { id ->
-                repository.getRecurringPaymentsForBudget(id ?: "default")
-            }.collect { list ->
-                _recurringPayments.value = list
-            }
-        }
+        recurringPayments = _selectedBudgetId.flatMapLatest { id ->
+            if (id == null) kotlinx.coroutines.flow.flowOf(emptyList())
+            else repository.getRecurringPaymentsForBudget(id)
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            emptyList()
+        )
 
-        viewModelScope.launch {
-            _selectedBudgetId.flatMapLatest { id ->
-                repository.getExecutionLogsForBudget(id ?: "default")
-            }.collect { list ->
-                _recurringExecutionLogs.value = list
-            }
-        }
+        recurringExecutionLogs = _selectedBudgetId.flatMapLatest { id ->
+            if (id == null) kotlinx.coroutines.flow.flowOf(emptyList())
+            else repository.getExecutionLogsForBudget(id)
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            emptyList()
+        )
 
         stateDelegate = TransactionStateDelegate(
             context = application.applicationContext,
@@ -459,8 +425,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             repository.ensureDefaultProfileExists()
             val profilesList = repository.allProfiles.first()
-            val isFirstLaunch = prefs.getBoolean("is_first_launch_selection", true)
-            val lastId = prefs.getString("last_selected_budget_id", null)
+            val isFirstLaunch = com.example.data.preferences.BudgetPreferencesRepository.isFirstLaunchSelection(application)
+            val lastId = com.example.data.preferences.BudgetPreferencesRepository.getLastSelectedBudgetId(application)
 
             val targetId = if (!isFirstLaunch) {
                 if (lastId != null && profilesList.any { it.id == lastId }) lastId
@@ -472,63 +438,76 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun getSavedApiKey(): String {
-        val legacyKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            prefs.getString("gemini_api_key", null)
+        return com.example.davidapp.DavidViewModel.resolveAndMigrateApiKey(
+            legacyPrefs = prefs,
+            securePrefs = obtainSecurePrefs(),
+            allowBuildConfigFallback = true
         )
-        if (legacyKey.isNotEmpty()) {
-            securePrefs.edit().putString("gemini_api_key", legacyKey).apply()
-            prefs.edit().remove("gemini_api_key").apply()
-            return legacyKey
-        }
-
-        val saved = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            securePrefs.getString("gemini_api_key", "")
-        )
-        if (saved.isNotBlank()) {
-            return saved
-        }
-
-        val defaultKey = com.example.data.api.GeminiModelConfig.sanitizeApiKey(
-            com.example.BuildConfig.GEMINI_API_KEY
-        )
-        if (com.example.data.api.GeminiModelConfig.isValidGeminiApiKey(defaultKey)) {
-            return defaultKey
-        }
-        return ""
     }
 
-    fun saveApiKey(key: String) {
-        val trimmed = com.example.data.api.GeminiModelConfig.sanitizeApiKey(key)
-        securePrefs.edit().putString("gemini_api_key", trimmed).apply()
-        prefs.edit().remove("gemini_api_key").apply()
-        _apiKey.value = trimmed
-        viewModelScope.launch {
-            _toastMessage.emit(if (trimmed.isEmpty()) "API ключ удален" else "API ключ сохранен!")
+    fun saveApiKey(key: String): Boolean {
+        return when (
+            val result = com.example.davidapp.DavidViewModel.saveSanitizedApiKey(
+                legacyPrefs = prefs,
+                securePrefs = obtainSecurePrefs(),
+                newKey = key
+            )
+        ) {
+            is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.Success -> {
+                val trimmed = result.sanitizedKey
+                _apiKey.value = trimmed
+                if (trimmed.isNotBlank()) {
+                    com.example.data.preferences.BudgetPreferencesRepository.setGeminiConsentGiven(getApplication(), true)
+                    _isGeminiConsentGiven.value = true
+                }
+                viewModelScope.launch {
+                    _toastMessage.emit(if (trimmed.isEmpty()) "API ключ удален" else "API ключ сохранен!")
+                }
+                true
+            }
+            is com.example.davidapp.DavidViewModel.Companion.SaveApiKeyResult.EncryptionError -> {
+                viewModelScope.launch {
+                    _toastMessage.emit(result.message)
+                }
+                false
+            }
         }
     }
 
-    fun clearAllDataAndResetSecurity(securityManager: com.example.data.SecurityManager) {
-        com.example.davidapp.AchievementManager.resetAll(getApplication())
+    private var securityResetInProgress = false
+
+    fun clearAllDataAndResetSecurity(
+        securityManager: com.example.data.SecurityManager,
+        onCompleted: (Boolean) -> Unit = {}
+    ) {
+        if (securityResetInProgress) return
+        securityResetInProgress = true
         viewModelScope.launch {
-            securityManager.removePin()
-            repository.clearAllData()
-            prefs.edit()
-                .remove("last_selected_budget_id")
-                .putBoolean("is_first_launch_selection", true)
-                .apply()
-            _selectedBudgetId.value = null
-            repository.ensureDefaultProfileExists()
-            _toastMessage.emit("Защита сброшена, данные операций удалены!")
+            try {
+                // Keep the PIN until erasure succeeds. A failed deletion must never expose old records.
+                repository.clearAllData()
+                securityManager.removePin()
+                com.example.davidapp.AchievementManager.resetAll(getApplication())
+                com.example.data.preferences.BudgetPreferencesRepository.resetBudgetSelectionOnClear(getApplication())
+                _selectedBudgetId.value = null
+                repository.ensureDefaultProfileExists()
+                _toastMessage.emit("Защита сброшена, данные операций удалены!")
+                onCompleted(true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _toastMessage.emit("Не удалось завершить сброс. Перезапустите приложение и повторите попытку.")
+                onCompleted(false)
+            } finally {
+                securityResetInProgress = false
+            }
         }
     }
 
     fun selectBudget(id: String?) {
         com.example.utils.GlobalConsoleLogger.i("STATE", "Selected Budget ID changed to: $id")
         if (id != null) {
-            prefs.edit()
-                .putString("last_selected_budget_id", id)
-                .putBoolean("is_first_launch_selection", false)
-                .apply()
+            com.example.data.preferences.BudgetPreferencesRepository.setSelectedBudget(getApplication(), id)
         }
         _selectedBudgetId.value = id
     }
@@ -634,7 +613,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun confirmSetupMode(mode: String) {
-        prefs.edit().putBoolean("is_first_run", false).apply()
+        com.example.data.preferences.BudgetPreferencesRepository.markSetupModeConfirmed(getApplication())
         _showSetupModal.value = false
         val budgetId = _selectedBudgetId.value ?: "default"
         viewModelScope.launch {
@@ -664,70 +643,13 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addWelcomeNotification(profileName: String, overrideBudgetId: String? = null) {
         val currentBudgetId = overrideBudgetId ?: _selectedBudgetId.value ?: "default"
-        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-        val timeGreeting = when (hour) {
-            in 5..11 -> "Доброе утро"
-            in 12..16 -> "Добрый день"
-            in 17..22 -> "Добрый вечер"
-            else -> "Доброй ночи"
-        }
-        val nameStr = if (profileName.isNotBlank() && profileName != "Вы") ", $profileName" else ""
-
-        val todayDate = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
-        val currentProfileKey = currentBudgetId
-        val lastGreetingDate = prefs.getString("last_greeting_date_$currentProfileKey", "")
-        val isFirstLaunch = !prefs.getBoolean("has_welcomed_first_time_$currentProfileKey", false)
-        val now = System.currentTimeMillis()
-
         viewModelScope.launch {
-            val currentNotifs = try {
-                repository.getNotificationsForBudget(currentBudgetId).first()
-            } catch (e: Exception) {
-                emptyList()
-            }
-            
-            // Проверяем, не было ли уже создано приветствие сегодня в базе данных
-            val alreadyHasGreetingToday = currentNotifs.any {
-                it.title == "Жабов Давид" && 
-                (it.description.startsWith("Добр") || it.description.startsWith("Салют")) &&
-                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(it.timestamp)) == todayDate
-            }
-            if (alreadyHasGreetingToday) {
-                return@launch
-            }
-
-            val hasUnread = currentNotifs.any { !it.isRead }
-
-            if (isFirstLaunch) {
-                prefs.edit().putBoolean("has_welcomed_first_time_$currentProfileKey", true).apply()
-                prefs.edit().putString("last_greeting_date_$currentProfileKey", todayDate).apply()
-                val greetingMsg = "$timeGreeting$nameStr!"
-                repository.insertNotification(
-                    com.example.data.db.NotificationEntity(
-                        budgetId = currentBudgetId,
-                        title = "Жабов Давид",
-                        description = greetingMsg,
-                        icon = "david",
-                        color = "emerald400",
-                        timestamp = now,
-                        isRead = false
-                    )
-                )
-            } else if (!hasUnread && lastGreetingDate != todayDate) {
-                prefs.edit().putString("last_greeting_date_$currentProfileKey", todayDate).apply()
-                val greetingMsg = "$timeGreeting$nameStr!"
-                repository.insertNotification(
-                    com.example.data.db.NotificationEntity(
-                        budgetId = currentBudgetId,
-                        title = "Жабов Давид",
-                        description = greetingMsg,
-                        icon = "david",
-                        color = "emerald400",
-                        timestamp = now,
-                        isRead = false
-                    )
-                )
-            }
+            BudgetWelcomeNotificationHelper.ensureWelcomeNotification(
+                context = getApplication(),
+                repository = repository,
+                currentBudgetId = currentBudgetId,
+                profileName = profileName
+            )
         }
     }
 
@@ -829,6 +751,34 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private var documentImportInProgress = false
+
+    /** Runs in ViewModel scope so a configuration change cannot cancel a selected document. */
+    fun importBackupDocument(uri: android.net.Uri) {
+        if (documentImportInProgress) return
+        documentImportInProgress = true
+        viewModelScope.launch {
+            try {
+                val json = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.data.repository.BudgetDocumentReader.read(getApplication(), uri)
+                }
+                val profile = repository.importBackupAsNewBudget(json)
+                if (profile != null) {
+                    selectBudget(profile.id)
+                    _toastMessage.emit("Бюджет «${profile.name}» загружен")
+                } else {
+                    _toastMessage.emit("Не удалось загрузить бюджет. Проверьте, что выбрана JSON-копия приложения.")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _toastMessage.emit("Не удалось прочитать файл. Выберите доступную JSON-копию бюджета размером до 10 МБ.")
+            } finally {
+                documentImportInProgress = false
+            }
+        }
+    }
+
     fun importBackupAsNewBudget(json: String, customName: String? = null, onCompleted: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
             val newProfile = repository.importBackupAsNewBudget(json, customName)
@@ -867,14 +817,8 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    private fun splitAuditIntoSections(auditText: String): List<String> {
-        if (auditText.isBlank() || auditText == "ERROR_NO_CONNECTION") return emptyList()
-        val headerRegex = Regex("(?m)^(?=#{1,6}\\s+|(?i)(?:Главный Вердикт|Цифры и Динамика|Прожарка|Ачивки|Выводы))")
-        val rawBlocks = auditText.split(headerRegex)
-        return rawBlocks
-            .map { it.trim() }
-            .filter { it.isNotBlank() && it != "ERROR_NO_CONNECTION" }
-    }
+    private fun splitAuditIntoSections(auditText: String): List<String> =
+        BudgetWelcomeNotificationHelper.splitAuditIntoSections(auditText)
 
     suspend fun suggestCategory(
         transactionName: String,
@@ -906,7 +850,12 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
 
     fun setUserSafetyFloor(amountRub: Double) {
         val clean = amountRub.coerceAtLeast(0.0)
-        prefs.edit().putFloat("user_safety_floor_rub", clean.toFloat()).apply()
+        val currentBudgetId = _selectedBudgetId.value ?: "default"
+        com.example.data.preferences.BudgetPreferencesRepository.setUserSafetyFloorRub(
+            getApplication(),
+            clean,
+            currentBudgetId
+        )
         _userSafetyFloorRub.value = clean
         viewModelScope.launch {
             _toastMessage.emit("Неснижаемый резерв: ${clean.toInt()} ₽")
@@ -914,25 +863,27 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setUserEssentialDailyNorm(amountRub: Double?) {
+        val currentBudgetId = _selectedBudgetId.value ?: "default"
         if (amountRub == null || amountRub <= 0.0) {
-            prefs.edit().remove("user_essential_daily_norm_rub").apply()
+            com.example.data.preferences.BudgetPreferencesRepository.setUserEssentialDailyNormRub(
+                getApplication(),
+                null,
+                currentBudgetId
+            )
             _userEssentialDailyNormRub.value = null
             viewModelScope.launch {
                 _toastMessage.emit("Ориентир базовых расходов сброшен")
             }
         } else {
-            prefs.edit().putFloat("user_essential_daily_norm_rub", amountRub.toFloat()).apply()
+            com.example.data.preferences.BudgetPreferencesRepository.setUserEssentialDailyNormRub(
+                getApplication(),
+                amountRub,
+                currentBudgetId
+            )
             _userEssentialDailyNormRub.value = amountRub
             viewModelScope.launch {
                 _toastMessage.emit("Ориентир базовых расходов: ${amountRub.toInt()} ₽/день")
             }
-        }
-    }
-
-    private suspend fun refreshRecurringStateNow(budgetId: String = _selectedBudgetId.value ?: "default") {
-        runCatching {
-            _recurringPayments.value = repository.getRecurringPaymentsForBudget(budgetId).first()
-            _recurringExecutionLogs.value = repository.getExecutionLogsForBudget(budgetId).first()
         }
     }
 
@@ -971,7 +922,6 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                     status = "ACTIVE"
                 )
             )
-            refreshRecurringStateNow(currentBudgetId)
             _toastMessage.emit("Регулярный платёж «${title.ifBlank { category }}» добавлен!")
         }
     }
@@ -980,59 +930,37 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         paymentId: Long,
         title: String,
         amount: Double,
-        type: String = "EXPENSE",
-        category: String = "ЖКХ и Аренда",
-        frequency: String = "MONTHLY",
+        type: String,
+        category: String,
+        frequency: String,
         nextDueDateIso: String,
-        priority: String = "MANDATORY",
-        incomeTier: String = "GUARANTEED"
+        priority: String,
+        incomeTier: String
     ) {
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
-        val existing = _recurringPayments.value.find { it.id == paymentId }
-        val dueEpochDay = com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(nextDueDateIso)
-            ?: existing?.nextDueDateEpochDay
-            ?: java.time.LocalDate.now().toEpochDay()
-        val anchorDay = try {
-            java.time.LocalDate.ofEpochDay(dueEpochDay).dayOfMonth
-        } catch (_: Exception) {
-            existing?.anchorDayOfMonth ?: 1
-        }
+        val budgetId = _selectedBudgetId.value ?: return
+        val dueDay = com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(nextDueDateIso) ?: return
+        if (!amount.isFinite() || amount <= 0.0) return
         viewModelScope.launch {
-            val existingLogs = _recurringExecutionLogs.value.filter { it.recurringId == paymentId }
-            val updatedEntity = (existing ?: RecurringPaymentEntity(
-                id = paymentId,
-                budgetId = currentBudgetId,
-                title = title.trim().ifBlank { category },
-                amount = amount.coerceAtLeast(0.0),
-                categoryName = category,
-                nextDueDateEpochDay = dueEpochDay
-            )).copy(
-                budgetId = existing?.budgetId ?: currentBudgetId,
-                title = title.trim().ifBlank { category },
-                amount = amount.coerceAtLeast(0.0),
-                isIncome = type.equals("INCOME", ignoreCase = true),
-                incomeCertainty = incomeTier,
-                categoryName = category,
-                frequency = frequency,
-                anchorDayOfMonth = anchorDay,
-                nextDueDateEpochDay = dueEpochDay,
-                priority = priority
-            )
-            repository.insertRecurringPayment(updatedEntity)
-            // Restore execution logs if ON DELETE CASCADE cleared them during REPLACE
-            for (log in existingLogs) {
-                AppDatabase.getDatabase(getApplication()).recurringPaymentDao().insertExecutionLog(log)
+            val updated = repository.updateRecurringPaymentDetails(paymentId, budgetId) { existing ->
+                existing.copy(
+                    title = title.trim().ifBlank { category },
+                    amount = amount,
+                    isIncome = type.equals("INCOME", ignoreCase = true),
+                    incomeCertainty = incomeTier,
+                    categoryName = category,
+                    frequency = frequency,
+                    anchorDayOfMonth = java.time.LocalDate.ofEpochDay(dueDay).dayOfMonth,
+                    nextDueDateEpochDay = dueDay,
+                    priority = priority
+                )
             }
-            refreshRecurringStateNow(currentBudgetId)
-            _toastMessage.emit("Регулярная операция «${title.ifBlank { category }}» обновлена!")
+            _toastMessage.emit(if (updated) "Регулярная операция обновлена" else "Операция уже удалена или бюджет изменён")
         }
     }
 
     fun confirmRecurringPayment(paymentId: Long) {
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
         viewModelScope.launch {
             val tx = repository.confirmRecurringPaymentExecution(paymentId)
-            refreshRecurringStateNow(currentBudgetId)
             if (tx != null) {
                 _toastMessage.emit("Платёж «${tx.subcategory.ifBlank { tx.category }}» подтверждён (${tx.amount.toInt()} ₽)")
             }
@@ -1040,32 +968,28 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun rescheduleRecurringPayment(paymentId: Long, oldScheduledEpochDay: Long, newDueDateIso: String) {
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
         val newEpochDay = com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(newDueDateIso) ?: return
         viewModelScope.launch {
             repository.rescheduleRecurringPayment(paymentId, oldScheduledEpochDay, newEpochDay)
-            refreshRecurringStateNow(currentBudgetId)
             _toastMessage.emit("Дата платежа перенесена на $newDueDateIso")
         }
     }
 
     fun toggleRecurringPaymentStatus(paymentId: Long, currentStatus: String) {
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
         val nextStatus = if (currentStatus == "ACTIVE") "PAUSED" else "ACTIVE"
         viewModelScope.launch {
             repository.updateRecurringPaymentStatus(paymentId, nextStatus)
-            refreshRecurringStateNow(currentBudgetId)
             _toastMessage.emit(if (nextStatus == "PAUSED") "Регулярный платёж на паузе" else "Регулярный платёж активирован")
         }
     }
 
     fun deleteRecurringPayment(paymentId: Long) {
-        val currentBudgetId = _selectedBudgetId.value ?: "default"
         viewModelScope.launch {
             repository.deleteRecurringPayment(paymentId)
-            refreshRecurringStateNow(currentBudgetId)
             _toastMessage.emit("Регулярный платёж удалён")
         }
     }
 
 }
+
+

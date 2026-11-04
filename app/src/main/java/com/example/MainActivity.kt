@@ -96,6 +96,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.withResumed
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -125,9 +127,6 @@ import com.example.ui.screens.PeriodBudgetScreen
 import com.example.ui.screens.RecentTransactionsScreen
 import com.example.ui.components.ReportDetailsDialog
 import com.example.ui.theme.BudgetTheme
-import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Indigo500
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
@@ -176,6 +175,7 @@ class MainActivity : FragmentActivity() {
 
 @Composable
 fun MainAppScreen(viewModel: BudgetViewModel) {
+    val davidViewModel: com.example.davidapp.DavidViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -240,10 +240,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     val isGeneratingReaction by viewModel.isGeneratingReaction.collectAsState()
     val savedAiAudit by viewModel.savedAiAudit.collectAsState()
     val activeModal by viewModel.activeModal.collectAsState()
-    val recurringPayments by viewModel.recurringPayments.collectAsState()
-    val recurringLogs by viewModel.recurringExecutionLogs.collectAsState()
-    val userSafetyFloorRub by viewModel.userSafetyFloorRub.collectAsState()
-    val userEssentialDailyNormRub by viewModel.userEssentialDailyNormRub.collectAsState()
 
     var triggerAuditAfterKeySave by remember { mutableStateOf(false) }
 
@@ -267,8 +263,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             is com.example.ui.viewmodel.BottomCapsuleModal.AddDebt,
             is com.example.ui.viewmodel.BottomCapsuleModal.DebtDetails ->
                 com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: Debt dialog opened")
-            is com.example.ui.viewmodel.BottomCapsuleModal.SafeToSpend ->
-                com.example.utils.GlobalConsoleLogger.i("UI", "CapsuleModal: SafeToSpend opened")
             else -> {}
         }
     }
@@ -279,8 +273,6 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
 
     var showWelcomeBubble by remember { mutableStateOf(false) }
     var showDebugConsole by remember { mutableStateOf(false) }
-    var avatarTapCount by remember { mutableStateOf(0) }
-    var lastAvatarTapTime by remember { mutableStateOf(0L) }
 
     LaunchedEffect(selectedBudgetId, splashStage) {
         if (splashStage == "done" && selectedBudgetId != null) {
@@ -293,8 +285,13 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, securityManager) {
+    DisposableEffect(lifecycleOwner, securityManager, davidViewModel) {
         val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> davidViewModel.onDavidLiveAppBackgrounded()
+                Lifecycle.Event.ON_START -> davidViewModel.onDavidLiveAppForegrounded()
+                else -> Unit
+            }
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
                 if (securityManager.isPinEnabled()) {
                     isAppLocked = true
@@ -316,6 +313,11 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             )
         }
     }
+
+    val chooseBudgetDocument = com.example.ui.components.rememberBudgetDocumentImport(
+        isLocked = isAppLocked,
+        onImport = viewModel::importBackupDocument
+    )
 
     var pendingExportJson by remember { mutableStateOf<String?>(null) }
 
@@ -427,8 +429,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                     }
                 },
                 onResetSecurity = {
-                    viewModel.clearAllDataAndResetSecurity(securityManager)
-                    isAppLocked = false
+                    viewModel.clearAllDataAndResetSecurity(securityManager) { success ->
+                        if (success) isAppLocked = false
+                    }
                 },
                 onSuccess = {
                     isAppLocked = false
@@ -438,8 +441,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         com.example.ui.security.BiometricPromptHelper.showBiometricOrDevicePrompt(
                             activity = activity,
                             onSuccess = {
-                                viewModel.clearAllDataAndResetSecurity(securityManager)
-                                isAppLocked = false
+                                viewModel.clearAllDataAndResetSecurity(securityManager) { success ->
+                                    if (success) isAppLocked = false
+                                }
                             },
                             onError = { err ->
                                 Toast.makeText(
@@ -472,7 +476,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                             onRenameBudget = { id, name -> viewModel.renameBudget(id, name) },
                             onDeleteBudget = { id -> viewModel.deleteBudget(id) },
                             onExportBudget = { budgetId -> triggerDirectExport(budgetId) },
-                            onImportFromBackup = { json, nameHint -> viewModel.importBackupAsNewBudget(json, nameHint) },
+                            onChooseBackup = chooseBudgetDocument,
                             onOpenApiKeyModal = {
                                 viewModel.openModal(
                                     com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(
@@ -504,279 +508,26 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         ) {
                             Spacer(modifier = Modifier.height(8.dp))
                             // --- OBSIDIAN NEO-BANK TOP APP BAR ---
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 2.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(20.dp))
-                                        .clickable(
-                                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                            indication = null
-                                        ) {
-                                            val now = System.currentTimeMillis()
-                                            if (now - lastAvatarTapTime < 500) {
-                                                avatarTapCount++
-                                                if (avatarTapCount >= 3) {
-                                                    showDebugConsole = true
-                                                    avatarTapCount = 0
-                                                }
-                                            } else {
-                                                avatarTapCount = 1
-                                            }
-                                            lastAvatarTapTime = now
-
-                                            viewModel.openModal(
-                                                com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(
-                                                    com.example.ui.components.SettingsScreen.HUB
-                                                )
-                                            )
-                                        }
-                                        .padding(end = 8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier.size(42.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .background(
-                                                    com.example.ui.theme.ObsidianSurface,
-                                                    CircleShape
-                                                )
-                                                .border(
-                                                    width = 1.5.dp,
-                                                    brush = Brush.linearGradient(
-                                                        listOf(
-                                                            Emerald400.copy(alpha = 0.7f),
-                                                            com.example.ui.theme.GlassBorder
-                                                        )
-                                                    ),
-                                                    shape = CircleShape
-                                                )
-                                                .padding(2.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (avatarBitmap != null) {
-                                                Image(
-                                                    bitmap = avatarBitmap,
-                                                    contentDescription = "Аватар",
-                                                    modifier = Modifier
-                                                        .fillMaxSize()
-                                                        .clip(CircleShape),
-                                                    contentScale = ContentScale.Crop
-                                                )
-                                            } else {
-                                                Text(
-                                                    text = getProfileInitials(currentProfile?.name ?: ""),
-                                                    color = Emerald400,
-                                                    fontFamily = com.example.ui.theme.ManropeFontFamily,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 14.sp
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    Column {
-                                        Text(
-                                            text = currentProfile?.name ?: "Личный бюджет",
-                                            color = Color.White,
-                                            fontSize = 15.sp,
-                                            fontFamily = com.example.ui.theme.ManropeFontFamily,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1
+                            com.example.ui.components.ObsidianTopAppBar(
+                                currentProfile = currentProfile,
+                                avatarBitmap = avatarBitmap,
+                                isDavidChatOpen = activeModal is com.example.ui.viewmodel.BottomCapsuleModal.DavidChat,
+                                unreadNotificationsCount = unreadNotificationsCount,
+                                splashStage = splashStage,
+                                showWelcomeBubble = showWelcomeBubble,
+                                onDismissWelcomeBubble = { showWelcomeBubble = false },
+                                onOpenSettingsHub = {
+                                    viewModel.openModal(
+                                        com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(
+                                            com.example.ui.components.SettingsScreen.HUB
                                         )
-                                        Text(
-                                            text = "Профиль и настройки ›",
-                                            color = Slate400,
-                                            fontSize = 11.sp,
-                                            fontFamily = com.example.ui.theme.ManropeFontFamily,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
+                                    )
+                                },
+                                onOpenDebugConsole = { showDebugConsole = true },
+                                onOpenDavidChat = {
+                                    viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.DavidChat)
                                 }
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    // --- OBSIDIAN GLASS DAVID AI CHAT PILL ---
-                                    val context = androidx.compose.ui.platform.LocalContext.current
-                                    val pName = currentProfile?.name ?: "default"
-                                    val prefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
-                                    val isDavidChatOpen = activeModal is com.example.ui.viewmodel.BottomCapsuleModal.DavidChat
-                                    val hasOpenedChatBefore = remember(isDavidChatOpen, pName) { prefs.getBoolean("has_opened_david_chat_before_$pName", false) }
-                                    val hasUnread = unreadNotificationsCount > 0 || !hasOpenedChatBefore
-                                    val shouldShowMessage = (splashStage == "done") && (showWelcomeBubble || (hasUnread && unreadNotificationsCount > 0))
-                                    val iconNeonColor = Emerald400
-
-                                    var isExpandedByNeon by remember { mutableStateOf(false) }
-                                    var isNeonFlickering by remember { mutableStateOf(false) }
-                                    val haptic = LocalHapticFeedback.current
-                                    val neonAlpha = remember { androidx.compose.animation.core.Animatable(1f) }
-
-                                    LaunchedEffect(shouldShowMessage, unreadNotificationsCount, splashStage) {
-                                        if (shouldShowMessage) {
-                                            if (isExpandedByNeon) {
-                                                kotlinx.coroutines.delay(4000)
-                                                isExpandedByNeon = false
-                                                return@LaunchedEffect
-                                            }
-
-                                            kotlinx.coroutines.delay(500)
-                                            isExpandedByNeon = false
-                                            isNeonFlickering = true
-
-                                            neonAlpha.snapTo(0.25f)
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            kotlinx.coroutines.delay(70)
-                                            neonAlpha.snapTo(1f)
-                                            kotlinx.coroutines.delay(50)
-                                            neonAlpha.snapTo(0.35f)
-                                            kotlinx.coroutines.delay(80)
-                                            neonAlpha.snapTo(1f)
-
-                                            isNeonFlickering = false
-                                            isExpandedByNeon = true
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-
-                                            kotlinx.coroutines.delay(4000)
-                                            isExpandedByNeon = false
-                                        } else {
-                                            isNeonFlickering = false
-                                            isExpandedByNeon = false
-                                            neonAlpha.snapTo(1f)
-                                        }
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .height(40.dp)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(com.example.ui.theme.ObsidianSurface)
-                                            .drawBehind {
-                                                val borderColor = if (isNeonFlickering) {
-                                                    iconNeonColor.copy(alpha = neonAlpha.value.coerceIn(0.15f, 1f))
-                                                } else if (shouldShowMessage || hasUnread) {
-                                                    iconNeonColor.copy(alpha = 0.6f)
-                                                } else {
-                                                    com.example.ui.theme.GlassBorder
-                                                }
-                                                drawRoundRect(
-                                                    color = borderColor,
-                                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx(), 16.dp.toPx()),
-                                                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.dp.toPx())
-                                                )
-                                            }
-                                            .animateContentSize(
-                                                animationSpec = spring(
-                                                    stiffness = Spring.StiffnessMediumLow,
-                                                    dampingRatio = Spring.DampingRatioLowBouncy
-                                                )
-                                            )
-                                            .clickable {
-                                                showWelcomeBubble = false
-                                                isExpandedByNeon = false
-                                                viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.DavidChat)
-                                            }
-                                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            com.example.ui.components.BrandFrogAvatar(size = 20.dp)
-                                            if (!isExpandedByNeon || !shouldShowMessage) {
-                                                Text(
-                                                    text = "Давид AI",
-                                                    color = Color.White,
-                                                    fontSize = 12.sp,
-                                                    fontFamily = com.example.ui.theme.ManropeFontFamily,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                if (unreadNotificationsCount > 0) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(7.dp)
-                                                            .clip(CircleShape)
-                                                            .background(Emerald400)
-                                                    )
-                                                }
-                                            }
-
-                                            AnimatedVisibility(
-                                                visible = isExpandedByNeon && shouldShowMessage,
-                                                enter = fadeIn(animationSpec = tween(300)) + expandHorizontally(
-                                                    expandFrom = Alignment.Start,
-                                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
-                                                ),
-                                                exit = fadeOut(animationSpec = tween(200)) + shrinkHorizontally(
-                                                    shrinkTowards = Alignment.Start,
-                                                    animationSpec = tween(200)
-                                                )
-                                            ) {
-                                                Row(
-                                                    verticalAlignment = Alignment.CenterVertically,
-                                                    modifier = Modifier.padding(start = 4.dp, end = 2.dp)
-                                                ) {
-                                                    val welcomeGreeting = remember(currentProfile?.id, currentProfile?.name) {
-                                                        val prefs = context.getSharedPreferences("budget_prefs", android.content.Context.MODE_PRIVATE)
-                                                        val profileKey = currentProfile?.id ?: currentProfile?.name ?: "default"
-                                                        val hasOpened = prefs.getBoolean("has_opened_profile_$profileKey", false)
-                                                        val hourNow = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-                                                        val timeOfDayGreeting = when (hourNow) {
-                                                            in 5..11 -> "Доброе утро"
-                                                            in 12..16 -> "Добрый день"
-                                                            in 17..22 -> "Добрый вечер"
-                                                            else -> "Доброй ночи"
-                                                        }
-                                                        if (!hasOpened) {
-                                                            prefs.edit().putBoolean("has_opened_profile_$profileKey", true).apply()
-                                                            "Добро пожаловать"
-                                                        } else {
-                                                            timeOfDayGreeting
-                                                        }
-                                                    }
-                                                    if (hasUnread && unreadNotificationsCount > 0) {
-                                                        Text(
-                                                            text = "Новое сообщение от Давида",
-                                                            color = Emerald400,
-                                                            fontSize = 11.sp,
-                                                            fontFamily = com.example.ui.theme.ManropeFontFamily,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
-                                                    } else {
-                                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                                            Text(
-                                                                text = "$welcomeGreeting, ",
-                                                                color = Color.White,
-                                                                fontSize = 11.sp,
-                                                                fontFamily = com.example.ui.theme.ManropeFontFamily,
-                                                                fontWeight = FontWeight.Medium
-                                                            )
-                                                            Text(
-                                                                text = "${currentProfile?.name ?: "Друг"}!",
-                                                                color = Emerald400,
-                                                                fontSize = 11.sp,
-                                                                fontFamily = com.example.ui.theme.ManropeFontFamily,
-                                                                fontWeight = FontWeight.Bold
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            )
 
                             // --- HORIZONTAL PAGER MAIN TAB CONTENT SCREEN ---
                             HorizontalPager(
@@ -866,20 +617,22 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             }
 
             // --- SHARED DAVID LIVE SESSION & UNIFIED MORPHING BOTTOM BAR ---
-            val davidViewModel: com.example.davidapp.DavidViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
             val liveDisplayMode by davidViewModel.liveDisplayMode.collectAsState()
             val liveConnectionState by davidViewModel.liveConnectionState.collectAsState()
+            val liveVisualPhase by davidViewModel.liveVisualPhase.collectAsState()
             val liveSubtitle by davidViewModel.liveSubtitle.collectAsState()
             val liveRayMagnitudes by davidViewModel.liveRayMagnitudes.collectAsState()
             val liveOverallEnergy by davidViewModel.liveOverallEnergy.collectAsState()
             val liveActiveSpeaker by davidViewModel.liveActiveSpeaker.collectAsState()
             val isLiveMicMuted by davidViewModel.isLiveMicMuted.collectAsState()
             val liveErrorMessage by davidViewModel.liveErrorMessage.collectAsState()
+            val liveVisualState by davidViewModel.liveVisualState.collectAsState()
+            val liveFailureKind by davidViewModel.liveFailureKind.collectAsState()
 
             val currentBudgetProfile = budgetProfiles.find { it.id == selectedBudgetId }
             LaunchedEffect(selectedBudgetId, currentBudgetProfile?.name, apiKey) {
                 davidViewModel.bindProfile(
-                    budgetId = currentBudgetProfile?.id ?: "default",
+                    budgetId = selectedBudgetId?.takeIf { it.isNotBlank() } ?: currentBudgetProfile?.id ?: "default",
                     profileName = currentBudgetProfile?.name ?: "Максим",
                     apiKey = apiKey
                 )
@@ -956,7 +709,10 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     },
                                     onToggleMicMute = { davidViewModel.toggleLiveMicMute() },
                                     onEndSession = { davidViewModel.endDavidLiveSession() },
-                                    embeddedInBottomBar = true
+                                    embeddedInBottomBar = true,
+                                    visualState = liveVisualState,
+                                    failureKind = liveFailureKind,
+                                    visualPhase = liveVisualPhase
                                 )
                             }
                         } else {
@@ -967,281 +723,27 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                             viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.DavidChat)
                         },
                         modalContent = { modal ->
-                            when (modal) {
-                                is com.example.ui.viewmodel.BottomCapsuleModal.EditTransaction -> {
-                                    AddTransactionDialog(
-                                        initialType = modal.transaction.type,
-                                        categories = categories,
-                                        onDismiss = { viewModel.closeModal() },
-                                        onSave = { type, date, category, subcategory, amount ->
-                                            viewModel.updateTransaction(
-                                                modal.transaction.id,
-                                                type,
-                                                date,
-                                                category,
-                                                subcategory,
-                                                amount
-                                            )
-                                            viewModel.closeModal()
-                                        },
-                                        onSuggestCategory = { txName, type, catList ->
-                                            viewModel.suggestCategory(txName, type, catList)
-                                        },
-                                        editingTransaction = modal.transaction
-                                    )
-                                }
-
-                                is com.example.ui.viewmodel.BottomCapsuleModal.AllTransactions -> {
-                                    AllTransactionsDialog(
-                                        transactions = transactions,
-                                        initialFilterType = modal.initialFilterType,
-                                        initialDate = modal.initialDate,
-                                        onDismiss = { viewModel.closeModal() },
-                                        onEditTransaction = { tx ->
-                                            viewModel.openModal(
-                                                com.example.ui.viewmodel.BottomCapsuleModal.EditTransaction(tx)
-                                            )
-                                        },
-                                        onDeleteTransaction = { txId ->
-                                            viewModel.deleteTransaction(txId)
-                                        },
-                                        onRestoreTransaction = { tx ->
-                                            viewModel.restoreTransaction(tx)
-                                        }
-                                    )
-                                }
-
-                                is com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub -> {
-                                    com.example.ui.components.SettingsHubDialog(
-                                        securityManager = securityManager,
-                                        apiKey = apiKey,
-                                        currentProfileName = currentProfile?.name ?: "",
-                                        profileId = currentProfile?.id ?: "default",
-                                        onAvatarChanged = { avatarUpdateKey++ },
-                                        onRenameProfile = { newName ->
-                                            currentProfile?.let { viewModel.renameBudget(it.id, newName) }
-                                        },
-                                        onResetAllData = {
-                                            viewModel.clearAllDataAndResetSecurity(securityManager)
-                                            viewModel.closeModal()
-                                        },
-                                        initialScreen = modal.initialScreen,
-                                        onDismiss = {
-                                            viewModel.closeModal()
-                                            triggerAuditAfterKeySave = false
-                                        },
-                                        onSaveApiKey = { newKey ->
-                                            viewModel.saveApiKey(newKey)
-                                            if (triggerAuditAfterKeySave && newKey.isNotBlank()) {
-                                                triggerAuditAfterKeySave = false
-                                                viewModel.requestAiAudit(filteredTransactions)
-                                            }
-                                        },
-                                        onSecurityUpdated = {
-                                            if (!securityManager.isPinEnabled()) {
-                                                isAppLocked = false
-                                            }
-                                        },
-                                        onOpenSecurity = {},
-                                        onOpenReminders = {},
-                                        onOpenApiKey = {},
-                                        onOpenCategories = {
-                                            viewModel.openModal(com.example.ui.viewmodel.BottomCapsuleModal.Categories)
-                                        },
-                                        onExitBudget = {
-                                            viewModel.selectBudget(null)
-                                            viewModel.closeModal()
-                                        }
-                                    )
-                                }
-
-                                is com.example.ui.viewmodel.BottomCapsuleModal.CategoryLimits -> {
-                                    CategoryLimitsDialog(
-                                        categories = categories,
-                                        transactions = filteredTransactions,
-                                        onUpdateLimit = { catName, limit ->
-                                            viewModel.updateCategoryLimit(
-                                                categoryName = catName,
-                                                type = "expense",
-                                                newLimit = limit
-                                            )
-                                        },
-                                        onDismiss = { viewModel.closeModal() }
-                                    )
-                                }
-
-                                is com.example.ui.viewmodel.BottomCapsuleModal.Categories -> {
-                                    CategoriesDialog(
-                                        categories = categories,
-                                        onDismiss = { viewModel.closeModal() },
-                                        onAddCategory = { type, name -> viewModel.addCategory(type, name) },
-                                        onDeleteCategory = { id -> viewModel.deleteCategory(id) }
-                                    )
-                                }
-
-                                is com.example.ui.viewmodel.BottomCapsuleModal.AddGoal -> {
-                                    AddGoalDialog(
-                                        onDismiss = { viewModel.closeModal() },
-                                        onSave = { name, target, current ->
-                                            viewModel.saveNewGoal(name, target, current)
-                                            viewModel.closeModal()
-                                        }
-                                    )
-                                }
-
-                                is com.example.ui.viewmodel.BottomCapsuleModal.AddDebt -> {
-                                    com.example.ui.screens.AddDebtDialog(
-                                        onDismiss = { viewModel.closeModal() },
-                                        onConfirm = { name, amount, type, comment ->
-                                            viewModel.addAccount(name, amount, type, comment)
-                                            viewModel.closeModal()
-                                        }
-                                    )
-                                }
-
-                                is com.example.ui.viewmodel.BottomCapsuleModal.DebtDetails -> {
-                                    val liveDebt = accounts.find { it.id == modal.debt.id } ?: modal.debt
-                                    val debtTransactions = transactions.filter { it.accountId == liveDebt.id }
-                                    val isWeOwe = liveDebt.type != "owes_us"
-                                    val paidSoFar = debtTransactions.sumOf { tx ->
-                                        val matchesRepayment = if (isWeOwe) tx.type == "expense" else tx.type == "income"
-                                        if (matchesRepayment) tx.amount else -tx.amount
+                            com.example.ui.components.BottomCapsuleModalHost(
+                                modal = modal,
+                                context = context,
+                                viewModel = viewModel,
+                                davidViewModel = davidViewModel,
+                                securityManager = securityManager,
+                                currentProfile = currentProfile,
+                                apiKey = apiKey,
+                                categories = categories,
+                                transactions = transactions,
+                                filteredTransactions = filteredTransactions,
+                                accounts = accounts,
+                                triggerAuditAfterKeySave = triggerAuditAfterKeySave,
+                                onSetTriggerAuditAfterKeySave = { triggerAuditAfterKeySave = it },
+                                onAvatarChanged = { avatarUpdateKey++ },
+                                onUnlockAppIfPinDisabled = {
+                                    if (!securityManager.isPinEnabled()) {
+                                        isAppLocked = false
                                     }
-                                    val remaining = (liveDebt.balance - paidSoFar).coerceAtLeast(0.0)
-                                    com.example.ui.screens.DebtDetailsDialog(
-                                        debt = liveDebt,
-                                        remainingBalance = remaining,
-                                        transactions = debtTransactions,
-                                        onDismiss = { viewModel.closeModal() },
-                                        onAddPayment = { type, date, amt, subcat ->
-                                            viewModel.addTransaction(type, date, "Долги", subcat, amt, liveDebt.id)
-                                        }
-                                    )
                                 }
-
-                                is com.example.ui.viewmodel.BottomCapsuleModal.GeminiConsent -> {
-                                    GeminiConsentDialog(
-                                        messageOverride = modal.messageOverride ?: "Для использования ИИ-функций требуется ваше согласие на обработку данных.",
-                                        currentApiKey = apiKey,
-                                        onSaveApiKey = { newKey -> viewModel.saveApiKey(newKey) },
-                                        onAccept = {
-                                            viewModel.setGeminiConsentGiven(true)
-                                            if (apiKey.isBlank()) {
-                                                triggerAuditAfterKeySave = modal.triggerAuditAfterAccept
-                                                viewModel.openModal(
-                                                    com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(
-                                                        com.example.ui.components.SettingsScreen.API_KEY
-                                                    )
-                                                )
-                                            } else {
-                                                viewModel.closeModal()
-                                                if (modal.triggerAuditAfterAccept) {
-                                                    viewModel.requestAiAudit(filteredTransactions)
-                                                }
-                                            }
-                                        },
-                                        onDecline = {
-                                            viewModel.setGeminiConsentGiven(false)
-                                            viewModel.closeModal()
-                                        }
-                                    )
-                                }
-
-                                is com.example.ui.viewmodel.BottomCapsuleModal.DavidChat -> {
-                                    val profileKey = currentProfile?.name ?: "default"
-                                    val appPrefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
-                                    com.example.davidapp.DavidChatScreen(
-                                        budgetId = currentProfile?.id ?: "default",
-                                        profileName = currentProfile?.name ?: "Максим",
-                                        apiKey = apiKey,
-                                        viewModel = davidViewModel,
-                                        isEmbeddedInCapsule = true,
-                                        showStandaloneLiveOverlay = true,
-                                        onMinimizeToBottomBar = {
-                                            davidViewModel.minimizeDavidLive()
-                                            viewModel.closeModal()
-                                            appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
-                                            viewModel.markNotificationsAsRead()
-                                        },
-                                        onBack = {
-                                            viewModel.closeModal()
-                                            appPrefs.edit().putBoolean("has_opened_david_chat_before_$profileKey", true).apply()
-                                            viewModel.markNotificationsAsRead()
-                                        }
-                                    )
-                                }
-
-                                is com.example.ui.viewmodel.BottomCapsuleModal.SafeToSpend -> {
-                                    val todayEpochDay = remember(selectedDateDay) {
-                                        java.time.LocalDate.now().toEpochDay()
-                                    }
-                                    val safeToSpendSnapshot = remember(
-                                        transactions,
-                                        accounts,
-                                        goals,
-                                        categories,
-                                        recurringPayments,
-                                        recurringLogs,
-                                        userSafetyFloorRub,
-                                        userEssentialDailyNormRub,
-                                        todayEpochDay
-                                    ) {
-                                        com.example.data.safetospend.DavidFinancialIntelligenceProvider.computeSnapshot(
-                                            transactions = transactions,
-                                            accounts = accounts,
-                                            goals = goals,
-                                            categories = categories,
-                                            recurringPayments = recurringPayments,
-                                            executionLogs = recurringLogs,
-                                            todayEpochDay = todayEpochDay,
-                                            userSafetyFloorRub = userSafetyFloorRub,
-                                            userEssentialDailyNormRub = userEssentialDailyNormRub
-                                        )
-                                    }
-                                    com.example.ui.components.dialogs.SafeToSpendAndRecurringDialog(
-                                        safeToSpendResult = safeToSpendSnapshot.safeToSpendResult,
-                                        safeToSpendInput = safeToSpendSnapshot.safeToSpendInput,
-                                        recurringPayments = recurringPayments,
-                                        userSafetyFloorRub = userSafetyFloorRub,
-                                        userEssentialDailyNormRub = userEssentialDailyNormRub,
-                                        initialTab = modal.initialTab,
-                                        isEmbeddedInCapsule = true,
-                                        onSetUserSafetyFloor = { viewModel.setUserSafetyFloor(it) },
-                                        onSetUserEssentialDailyNorm = { viewModel.setUserEssentialDailyNorm(it) },
-                                        onAddRecurringPayment = { title, amount, type, category, frequency, nextDueDateIso, priority, incomeTier ->
-                                            viewModel.addRecurringPayment(
-                                                title = title,
-                                                amount = amount,
-                                                type = type,
-                                                category = category,
-                                                frequency = frequency,
-                                                nextDueDateIso = nextDueDateIso,
-                                                priority = priority,
-                                                incomeTier = incomeTier
-                                            )
-                                        },
-                                        onUpdateRecurringPayment = { id, title, amount, type, category, frequency, nextDueDateIso, priority, incomeTier ->
-                                            viewModel.updateRecurringPayment(
-                                                paymentId = id,
-                                                title = title,
-                                                amount = amount,
-                                                type = type,
-                                                category = category,
-                                                frequency = frequency,
-                                                nextDueDateIso = nextDueDateIso,
-                                                priority = priority,
-                                                incomeTier = incomeTier
-                                            )
-                                        },
-                                        onConfirmRecurringPayment = { viewModel.confirmRecurringPayment(it) },
-                                        onToggleRecurringStatus = { id, status -> viewModel.toggleRecurringPaymentStatus(id, status) },
-                                        onDeleteRecurringPayment = { viewModel.deleteRecurringPayment(it) },
-                                        onDismiss = { viewModel.closeModal() }
-                                    )
-                                }
-
-                                else -> {}
-                            }
+                            )
                         }
                     )
                 }
@@ -1360,7 +862,7 @@ fun NavTabButton(
     }
 }
 
-private fun filterTransactionsForPeriod(
+internal fun filterTransactionsForPeriod(
     list: List<TransactionEntity>,
     type: PeriodType,
     selectedDay: String,
@@ -1394,18 +896,5 @@ private fun filterTransactionsForPeriod(
         PeriodType.ALL -> {
             list.filter { it.date >= allStart && it.date <= allEnd }
         }
-    }
-}
-
-private fun getProfileInitials(name: String): String {
-    val clean = name.trim().uppercase()
-    if (clean.isEmpty()) return "Б"
-    val parts = clean.split("\\s+".toRegex()).filter { it.isNotBlank() }
-    return if (parts.size >= 2) {
-        "${parts[0].first()}${parts[1].first()}"
-    } else if (parts.isNotEmpty()) {
-        "${parts[0].first()}"
-    } else {
-        "Б"
     }
 }

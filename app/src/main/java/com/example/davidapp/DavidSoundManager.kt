@@ -195,14 +195,7 @@ class SoundManager(context: Context) {
 
             if (context != null) {
                 try {
-                    val appPrefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-                    val budgetPrefs = context.getSharedPreferences("budget_prefs", Context.MODE_PRIVATE)
-
-                    if (!appPrefs.getBoolean("sound_enabled", true) ||
-                        !appPrefs.getBoolean("is_sound_enabled", true) ||
-                        !budgetPrefs.getBoolean("sound_enabled", true) ||
-                        !budgetPrefs.getBoolean("is_sound_enabled", true)
-                    ) {
+                    if (!com.example.data.preferences.BudgetPreferencesRepository.isSoundEnabled(context)) {
                         return
                     }
 

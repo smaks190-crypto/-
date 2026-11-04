@@ -15,35 +15,23 @@
 ## Скачать последнюю версию
 
 <!-- LATEST_RELEASE_START -->
-### Версия v11.06 (сборка 247)
+### Версия v11.22 (сборка 370)
 
 [📥 Скачать последнюю версию APK](https://github.com/smaks190-crypto/-/releases/latest/download/app-release.apk)
 
 **Что изменилось:**
 
-## Что изменилось
-
 ### Исправлено
-- Mask voice API key, fix save-and-start transition, and sync AllTransactions month on scroll ([dc95092](https://github.com/smaks190-crypto/-/commit/dc95092fe80b0c424593cfc75ee153458dbfbeb2))
-- Remove nonexistent frequencyBands reference in voice visualizer ([00c7193](https://github.com/smaks190-crypto/-/commit/00c7193ceb152770ca367daaa76d72e16e8b93fb))
-- Restore category color helpers for dialog ([8f204c3](https://github.com/smaks190-crypto/-/commit/8f204c3a4744a5489a41f2e6917b0b83127c62cd))
-- Wire restored category color resolver ([3dcdba4](https://github.com/smaks190-crypto/-/commit/3dcdba4d8237b610d9ce97dc982dae583c6408bf))
-- Center cancel label and remove redundant close icon ([9b62e39](https://github.com/smaks190-crypto/-/commit/9b62e392aa360eb8d86f86ef8e098d2e063c4c4d))
-- Replace input controls with minimized Live capsule ([feb56f0](https://github.com/smaks190-crypto/-/commit/feb56f02a4eba0257688ac4ce17662f1d303b174))
-- Close input composable after AnimatedContent refactor ([31146c6](https://github.com/smaks190-crypto/-/commit/31146c60c95c0a67d6c1c17c68e61b061c7fcf63))
-- Restore MorphingBottomBar voice wiring from main, keep only API-key changes ([b2e5c6e](https://github.com/smaks190-crypto/-/commit/b2e5c6ee390a01edb82ebe8f65b9df539d4105bc))
-- Restore TransactionFilterUtils from main ([08580ac](https://github.com/smaks190-crypto/-/commit/08580ac82906798a37cfc25489306ee6f4ec8947))
-- Align dialog call signatures and restore initial date ([bd6ce95](https://github.com/smaks190-crypto/-/commit/bd6ce95816e935f45ec2d871395e7327240d73d1))
-- Pass category count threshold as Int ([614d85f](https://github.com/smaks190-crypto/-/commit/614d85f0b1feab632d73de4460d9e0707e55e342))
-- Sync unlocked period state with visible scroll month ([4e4234f](https://github.com/smaks190-crypto/-/commit/4e4234fc1777a9be0b1896e61b427c106c72f923))
-- Redact quoted JSON secret keys including PIN ([1baf056](https://github.com/smaks190-crypto/-/commit/1baf056a2d53cf968e4548292bc5fad91a8f3b4c))
+- Убраны фиктивные счётчики технических изменений из публичных заметок.
+- Если пользовательское изменение нельзя описать по-русски из PR notes / Release-Note, генератор завершает работу с понятной ошибкой.
+- Внутренние изменения без пользовательского эффекта не попадают в changelog; явное нет означает отсутствие пользовательской заметки.
+- Заметки генерируются и проверяются до создания GitHub Release. APK/AAB публикуются только после успешной проверки.
+- Добавлен запуск unit-тестов генератора заметок в GitHub Actions.
+- Генератор заметок теперь распознаёт заголовок ## Что изменено наряду с ## Заметки релиза.
+- Это закрывает сбой релиза после PR №92: русскоязычные пункты из описания PR больше не игнорируются из-за несовпадения заголовка.
+- Проверка по-прежнему завершается ошибкой, если для пользовательского изменения нет ни русскоязычной заметки, ни явного указания нет.
 
-### Документация и сборка
-- Construct dummy API keys without literal secret patterns ([3e00cdd](https://github.com/smaks190-crypto/-/commit/3e00cdd065039d3f39716c32bc0d48d14406eae4))
-- Align unit tests with current logger API ([ddee73e](https://github.com/smaks190-crypto/-/commit/ddee73e19ae546fa295f03afa77aae4278ac49d1))
-- Assert current redaction markers, pause policy and report sections ([5d57d10](https://github.com/smaks190-crypto/-/commit/5d57d10c87bd510f79b658de1ced01e8e00a97e4))
-
-**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.05-build.229...v11.06-build.247
+**Полная история изменений:** https://github.com/smaks190-crypto/-/compare/v11.21-build.342...v11.22-build.370
 <!-- LATEST_RELEASE_END -->
 
 ## Возможности
@@ -100,7 +88,7 @@
 
 1. Склонируйте **свой** репозиторий или распакуйте архив проекта.
 2. Откройте корневую папку в Android Studio и дождитесь Gradle Sync.
-3. Для функций Gemini создайте ключ в Google AI Studio. Скопируйте `.env.example` в `.env` и замените значение `GEMINI_API_KEY` либо используйте предусмотренный приложением ввод ключа.
+3. Для функций Gemini создайте ключ в Google AI Studio и введите его в настройках приложения. Ключи из `.env` больше не встраиваются в APK; после обновления введите свой ключ, если раньше использовался встроенный.
 4. Не коммитьте `.env`, реальные ключи, пароли подписи и keystore в публичный репозиторий.
 5. Соберите debug APK:
 
@@ -128,7 +116,7 @@
 ./gradlew :app:connectedDebugAndroidTest
 ```
 
-**Важно:** конфигурация релизной подписи в `app/build.gradle.kts` использует переменные окружения `STORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS` и файл `my-upload-key.jks`; при его отсутствии предусмотрен fallback на debug keystore. APK, подписанный debug-ключом, не следует публиковать как production-релиз. Перед выпуском настройте собственную безопасную релизную подпись и проверьте CI.
+**Важно:** релизная подпись использует `STORE_PASSWORD`, `KEY_PASSWORD`, `KEY_ALIAS` и файл из `KEYSTORE_PATH` (по умолчанию `my-upload-key.jks`). Без релизного ключа сборка релиза завершается ошибкой; подмена на debug-подпись отключена. Для debug-сборки используется стандартный автоматически создаваемый ключ Android.
 
 ## Технологии
 
@@ -160,14 +148,14 @@ app/
     assets/                 # В том числе демонстрационные данные
   build.gradle.kts
 .github/workflows/         # Автоматизация сборки
-.env.example               # Шаблон конфигурации API
+.env.example               # Старый шаблон; ключ теперь вводится в приложении
 PRIVACY_POLICY.md          # Политика конфиденциальности
 ```
 
 ## Приватность и ограничения безопасности
 
 - Финансовые записи хранятся локально в базе Room (обычный SQLite). **Шифрование файла базы данных на уровне SQLCipher или эквивалентного решения не заявляется.**
-- Для части настроек используется `EncryptedSharedPreferences`, но текущая реализация `SecurityManager` допускает fallback на обычный `SharedPreferences`, если инициализация защищённого хранилища завершилась ошибкой. Это требует исправления и отдельной проверки перед публичным релизом.
+- PIN и API-ключ хранятся в `EncryptedSharedPreferences`. При ошибке защищённого хранилища вход остаётся заблокированным; обычный `SharedPreferences` вместо него не используется. Старые настройки PIN переносятся только после подтверждённой записи в защищённое хранилище. Файлы настроек безопасности исключены из системного резервного копирования и переноса устройства.
 - PIN и биометрия ограничивают доступ через интерфейс приложения, но сами по себе не означают шифрование всех данных на устройстве.
 - При обращении к Gemini соответствующие данные запроса отправляются внешнему API. Не передавайте чувствительные сведения без понимания условий обработки данных и согласия пользователя.
 - JSON-экспорт может содержать личную финансовую информацию: храните резервные копии в безопасном месте и не публикуйте их.
@@ -175,9 +163,15 @@ PRIVACY_POLICY.md          # Политика конфиденциальност
 
 Подробнее: [PRIVACY_POLICY.md](PRIVACY_POLICY.md). Перед публикацией необходимо сверить этот документ с фактическим поведением приложения.
 
+## Резервные копии
+
+JSON-формат версии 2 сохраняет профили бюджетов, счета, операции, цели, категории, регулярные платежи и журнал их исполнения, а также достижения. Старые копии версии 1 принимаются, если содержат список `transactions`; отсутствующие в них регулярные платежи восстановить невозможно. Аудиты ИИ, уведомления, настройки и API-ключ в JSON-копию не входят.
+
+Перед импортом проверяются формат, суммы, уникальность идентификаторов и связи записей. Восстановление базы выполняется одной транзакцией: ошибка записи откатывает изменения. Импорт в выбранный бюджет заменяет только его данные; импорт как нового бюджета создаёт новые идентификаторы. Копию нескольких бюджетов можно восстановить целиком через полный импорт; для импорта в один бюджет используйте отдельный экспорт этого бюджета.
+
 ## Что проверить перед релизом
 
-- Убрать небезопасный fallback для секретов и определить стратегию обработки ошибок шифрования.
+- Проверить сценарий недоступности Android Keystore на реальном устройстве.
 - Проверить защиту локальной БД, экспортируемых резервных копий и журналов.
 - Добавить тесты финансовых расчётов, импорта/экспорта и миграций Room; рассмотреть `exportSchema = true`.
 - Проверить доступность используемых Gemini-моделей и поведение при ошибках API, отсутствии ключа и сети.

@@ -26,3 +26,4 @@ dependencyResolutionManagement {
 rootProject.name = "David Finance AI"
 
 include(":app")
+include(":core:database")

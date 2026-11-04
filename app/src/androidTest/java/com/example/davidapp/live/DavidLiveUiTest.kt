@@ -269,5 +269,84 @@ class DavidLiveUiTest {
         assertEquals(1, minimizedToBottomBarCount)
         assertEquals(1, minimizedToChatCount)
     }
+
+    @Test
+    fun davidLiveSphereTapTriggersReconnectInOfflineStateAndSettingsInApiMissingState() {
+        var retryCount = 0
+        var apiSettingsCount = 0
+        var currentVisualState by mutableStateOf(DavidLiveVisualState.OFFLINE)
+
+        composeTestRule.setContent {
+            DavidLiveSheet(
+                connectionState = if (currentVisualState == DavidLiveVisualState.OFFLINE) {
+                    DavidLiveConnectionState.OFFLINE
+                } else {
+                    DavidLiveConnectionState.NO_API_KEY
+                },
+                liveSubtitle = "Статус подключения",
+                rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.1f },
+                overallEnergy = 0.05f,
+                activeSpeaker = DavidLiveSpeaker.NONE,
+                isMicMuted = false,
+                errorMessage = null,
+                onToggleMicMute = {},
+                onRetryConnection = { retryCount++ },
+                onOpenApiKeySettings = { apiSettingsCount++ },
+                onEndSession = {},
+                visualState = currentVisualState
+            )
+        }
+
+        // 1. В состоянии OFFLINE прямое нажатие на сферу запускает reconnect
+        composeTestRule.onNodeWithTag("david_live_circular_visualizer").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(1, retryCount)
+        assertEquals(0, apiSettingsCount)
+
+        // 2. В состоянии API_MISSING прямое нажатие на сферу открывает настройки API
+        currentVisualState = DavidLiveVisualState.API_MISSING
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("david_live_circular_visualizer").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(1, retryCount)
+        assertEquals(1, apiSettingsCount)
+    }
+
+    @Test
+    fun davidLiveDebugStateSwitcherTogglesVisualStatesAndRendersMeshAccents() {
+        var selectedState by mutableStateOf<DavidLiveVisualState?>(null)
+
+        composeTestRule.setContent {
+            DavidLiveSheet(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                liveSubtitle = "Слушаю вас...",
+                rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.2f },
+                overallEnergy = 0.15f,
+                activeSpeaker = DavidLiveSpeaker.NONE,
+                isMicMuted = false,
+                errorMessage = null,
+                onToggleMicMute = {},
+                onRetryConnection = {},
+                onOpenApiKeySettings = {},
+                onEndSession = {},
+                visualState = selectedState,
+                debugOverrideVisualState = selectedState,
+                onSelectDebugVisualState = { selectedState = it },
+                enableDebugStateSwitcher = true
+            )
+        }
+
+        // Открываем отладочную панель переключения состояний и выбираем чип FINANCE_LOOKUP
+        composeTestRule.onNodeWithTag("david_live_debug_toggle_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("david_live_debug_chip_FINANCE_LOOKUP").performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(DavidLiveVisualState.FINANCE_LOOKUP, selectedState)
+        composeTestRule.onNodeWithTag("david_live_circular_visualizer").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("david_live_state_badge").assertIsDisplayed()
+    }
 }
+
 

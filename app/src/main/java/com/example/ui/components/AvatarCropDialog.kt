@@ -71,14 +71,24 @@ fun AvatarCropDialog(
     onDismiss: () -> Unit,
     onCropped: (android.graphics.Bitmap) -> Unit
 ) {
-    var scale by remember { mutableStateOf(1f) }
-    var offset by remember { mutableStateOf(Offset.Zero) }
-
     val density = LocalDensity.current
     val containerSizeDp = 300.dp
     val viewportSizeDp = 240.dp
     val containerSizePx = with(density) { containerSizeDp.toPx() }
     val viewportSizePx = with(density) { viewportSizeDp.toPx() }
+
+    val minScale = remember(bitmap.width, bitmap.height, containerSizePx, viewportSizePx) {
+        calculateAvatarMinScale(
+            bitmapWidth = bitmap.width,
+            bitmapHeight = bitmap.height,
+            containerSizePx = containerSizePx,
+            viewportSizePx = viewportSizePx
+        )
+    }
+    val maxScale = remember(minScale) { maxOf(4f, minScale * 3f) }
+
+    var scale by remember(bitmap, minScale) { mutableStateOf(minScale) }
+    var offset by remember(bitmap) { mutableStateOf(Offset.Zero) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -131,12 +141,20 @@ fun AvatarCropDialog(
                         .size(containerSizeDp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(DarkBg)
-                        .pointerInput(Unit) {
+                        .pointerInput(bitmap, minScale, maxScale) {
                             detectTransformGestures { _, pan, zoom, _ ->
-                                scale = (scale * zoom).coerceIn(1f, 4f)
-                                offset = Offset(
-                                    x = offset.x + pan.x,
-                                    y = offset.y + pan.y
+                                val newScale = (scale * zoom).coerceIn(minScale, maxScale)
+                                scale = newScale
+                                offset = clampAvatarOffset(
+                                    rawOffset = Offset(
+                                        x = offset.x + pan.x,
+                                        y = offset.y + pan.y
+                                    ),
+                                    bitmapWidth = bitmap.width,
+                                    bitmapHeight = bitmap.height,
+                                    scale = newScale,
+                                    containerSizePx = containerSizePx,
+                                    viewportSizePx = viewportSizePx
                                 )
                             }
                         },
@@ -154,7 +172,7 @@ fun AvatarCropDialog(
                                 translationX = offset.x,
                                 translationY = offset.y
                             ),
-                        contentScale = ContentScale.Crop
+                        contentScale = ContentScale.Fit
                     )
 
                     Canvas(modifier = Modifier.fillMaxSize()) {
@@ -202,12 +220,34 @@ fun AvatarCropDialog(
                         tint = Slate400,
                         modifier = Modifier
                             .size(24.dp)
-                            .clickable { scale = (scale - 0.15f).coerceAtLeast(1f) }
+                            .clickable {
+                                val newScale = (scale - 0.15f).coerceIn(minScale, maxScale)
+                                scale = newScale
+                                offset = clampAvatarOffset(
+                                    rawOffset = offset,
+                                    bitmapWidth = bitmap.width,
+                                    bitmapHeight = bitmap.height,
+                                    scale = newScale,
+                                    containerSizePx = containerSizePx,
+                                    viewportSizePx = viewportSizePx
+                                )
+                            }
                     )
                     Slider(
-                        value = scale,
-                        onValueChange = { scale = it },
-                        valueRange = 1f..4f,
+                        value = scale.coerceIn(minScale, maxScale),
+                        onValueChange = { newValue ->
+                            val newScale = newValue.coerceIn(minScale, maxScale)
+                            scale = newScale
+                            offset = clampAvatarOffset(
+                                rawOffset = offset,
+                                bitmapWidth = bitmap.width,
+                                bitmapHeight = bitmap.height,
+                                scale = newScale,
+                                containerSizePx = containerSizePx,
+                                viewportSizePx = viewportSizePx
+                            )
+                        },
+                        valueRange = minScale..maxScale,
                         colors = SliderDefaults.colors(
                             activeTrackColor = Emerald400,
                             inactiveTrackColor = Slate800,
@@ -223,7 +263,18 @@ fun AvatarCropDialog(
                         tint = Slate400,
                         modifier = Modifier
                             .size(24.dp)
-                            .clickable { scale = (scale + 0.15f).coerceIn(1f, 4f) }
+                            .clickable {
+                                val newScale = (scale + 0.15f).coerceIn(minScale, maxScale)
+                                scale = newScale
+                                offset = clampAvatarOffset(
+                                    rawOffset = offset,
+                                    bitmapWidth = bitmap.width,
+                                    bitmapHeight = bitmap.height,
+                                    scale = newScale,
+                                    containerSizePx = containerSizePx,
+                                    viewportSizePx = viewportSizePx
+                                )
+                            }
                     )
                 }
 
@@ -262,10 +313,19 @@ fun AvatarCropDialog(
 
                     Button(
                         onClick = {
+                            val clampedScale = scale.coerceIn(minScale, maxScale)
+                            val clampedOffset = clampAvatarOffset(
+                                rawOffset = offset,
+                                bitmapWidth = bitmap.width,
+                                bitmapHeight = bitmap.height,
+                                scale = clampedScale,
+                                containerSizePx = containerSizePx,
+                                viewportSizePx = viewportSizePx
+                            )
                             val cropped = cropAvatar(
                                 source = bitmap,
-                                scale = scale,
-                                offset = offset,
+                                scale = clampedScale,
+                                offset = clampedOffset,
                                 containerSizePx = containerSizePx,
                                 viewportSizePx = viewportSizePx
                             )
@@ -295,7 +355,57 @@ fun AvatarCropDialog(
     }
 }
 
-private fun cropAvatar(
+/**
+ * Рассчитывает минимальный масштаб (`minScale`) с учётом соотношения сторон исходного `Bitmap`,
+ * чтобы короткая сторона изображения при вписывании (`ContentScale.Fit`) полностью перекрывала
+ * круг обрезки (`viewportSizePx`) без пустых черных полей.
+ */
+internal fun calculateAvatarMinScale(
+    bitmapWidth: Int,
+    bitmapHeight: Int,
+    containerSizePx: Float,
+    viewportSizePx: Float
+): Float {
+    if (bitmapWidth <= 0 || bitmapHeight <= 0 || containerSizePx <= 0f || viewportSizePx <= 0f) {
+        return 1f
+    }
+    val bw = bitmapWidth.toFloat()
+    val bh = bitmapHeight.toFloat()
+    val baseScale = minOf(containerSizePx / bw, containerSizePx / bh)
+    val initialWidth = bw * baseScale
+    val initialHeight = bh * baseScale
+    return maxOf(
+        viewportSizePx / initialWidth,
+        viewportSizePx / initialHeight,
+        1f
+    )
+}
+
+internal fun clampAvatarOffset(
+    rawOffset: Offset,
+    bitmapWidth: Int,
+    bitmapHeight: Int,
+    scale: Float,
+    containerSizePx: Float,
+    viewportSizePx: Float
+): Offset {
+    if (bitmapWidth <= 0 || bitmapHeight <= 0 || containerSizePx <= 0f || viewportSizePx <= 0f) {
+        return Offset.Zero
+    }
+    val bw = bitmapWidth.toFloat()
+    val bh = bitmapHeight.toFloat()
+    val baseScale = minOf(containerSizePx / bw, containerSizePx / bh)
+    val scaledWidth = bw * baseScale * scale
+    val scaledHeight = bh * baseScale * scale
+    val maxOffsetX = ((scaledWidth - viewportSizePx) / 2f).coerceAtLeast(0f)
+    val maxOffsetY = ((scaledHeight - viewportSizePx) / 2f).coerceAtLeast(0f)
+    return Offset(
+        x = rawOffset.x.coerceIn(-maxOffsetX, maxOffsetX),
+        y = rawOffset.y.coerceIn(-maxOffsetY, maxOffsetY)
+    )
+}
+
+internal fun cropAvatar(
     source: android.graphics.Bitmap,
     scale: Float,
     offset: Offset,
@@ -315,7 +425,7 @@ private fun cropAvatar(
 
         val scaleX = containerSizePx / source.width.toFloat()
         val scaleY = containerSizePx / source.height.toFloat()
-        val baseScale = maxOf(scaleX, scaleY)
+        val baseScale = minOf(scaleX, scaleY)
 
         val initialWidth = source.width * baseScale
         val initialHeight = source.height * baseScale

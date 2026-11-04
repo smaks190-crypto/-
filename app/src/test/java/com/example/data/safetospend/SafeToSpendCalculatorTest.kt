@@ -1,7 +1,6 @@
 package com.example.data.safetospend
 
 import com.example.data.db.AccountEntity
-import com.example.data.db.CategoryEntity
 import com.example.data.db.GoalEntity
 import com.example.data.db.RecurringExecutionLogEntity
 import com.example.data.db.RecurringPaymentEntity
@@ -11,11 +10,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.time.LocalDate
 import com.example.ui.components.dialogs.buildFinancialStateUiModel
 import com.example.ui.components.dialogs.buildSafeToSpendBreakdownUiModel
-import com.example.ui.components.dialogs.localizeBottleneckReason
 import com.example.ui.components.dialogs.localizeWhatIfVerdict
+import java.time.LocalDate
 
 class SafeToSpendCalculatorTest {
 
@@ -1019,11 +1017,6 @@ class SafeToSpendCalculatorTest {
         )
         assertEquals(200.0, withEssSpend.canSpendTodayEssRub, 0.01)
     }
-
-    // =========================================================================
-    // IV. ТЕСТЫ МОДЕЛИ ОТОБРАЖЕНИЯ UI (ISSUE #64: FINANCIAL STATE & SAFE-TO-SPEND 2.0)
-    // =========================================================================
-
     @Test
     fun test_issue64_financialStateUiModel_separatesLiquidityNetWorthAndFreeMoneyWithExplicitDeficitWarning() {
         val todayStr = "2026-04-10"

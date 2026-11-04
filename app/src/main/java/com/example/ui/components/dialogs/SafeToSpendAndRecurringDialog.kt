@@ -87,8 +87,7 @@ fun buildFinancialStateUiModel(
 ): FinancialStateUiModel {
     val availableBalanceRub = result.availableBalanceRub
     val netWorthRub = availableBalanceRub - semantics.totalWeOweRub
-    val rawFreePoolRub = result.availableBalanceRub +
-        result.todayPendingGuaranteedIncomeRub -
+    val rawFreePoolRub = result.availableBalanceRub -
         result.lockedGoalsAndReserveRub -
         result.mandatorySafetyFloorRub -
         result.obligationsReservedTotalRub -
