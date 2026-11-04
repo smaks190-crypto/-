@@ -48,7 +48,8 @@ class DavidLiveSessionController(
     val audioEngine: DavidLiveAudioEngine = DavidLiveAudioEngine(),
     private val okHttpClient: OkHttpClient = defaultLiveHttpClient(),
     private val systemPromptExtrasProvider: () -> String = { "" },
-    private val externalUserMessagesProvider: () -> List<String> = { emptyList() }
+    private val externalUserMessagesProvider: () -> List<String> = { emptyList() },
+    controllerDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO
 ) {
     private var webSocketFactory: WebSocket.Factory = okHttpClient
     private var maxAutoReconnectAttempts: Int = DEFAULT_MAX_AUTO_RECONNECT_ATTEMPTS
@@ -78,7 +79,7 @@ class DavidLiveSessionController(
         this.readyFlashDurationMs = readyFlashDurationMs
     }
 
-    private val controllerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val controllerScope = CoroutineScope(SupervisorJob() + controllerDispatcher)
 
     @Volatile
     private var webSocket: WebSocket? = null

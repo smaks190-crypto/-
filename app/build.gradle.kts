@@ -157,6 +157,7 @@ val robolectricCacheDir = File(gradle.gradleUserHomeDir, "caches/robolectric-m2"
 
 // ЭТАП D: Параллельное выполнение Unit-тестов с переиспользованием JVM форков
 tasks.withType<Test>().configureEach {
+  testLogging.exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
   maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
   forkEvery = 0L
   systemProperty("maven.repo.local", robolectricCacheDir.absolutePath)
