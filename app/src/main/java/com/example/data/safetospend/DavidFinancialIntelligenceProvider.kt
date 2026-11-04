@@ -66,8 +66,19 @@ object DavidFinancialIntelligenceProvider {
             baseSemantics
         }
 
+        val existingTxIds = nonTransferTransactions.map { it.id }.toSet()
         val domainRecurring = recurringPayments.map { it.toDomain() }
-        val domainLogs = executionLogs.map { it.toDomain() }
+        val domainLogs = executionLogs.map { rawLog ->
+            val domain = rawLog.toDomain()
+            if (!domain.linkedTransactionId.isNullOrBlank() &&
+                domain.linkedTransactionId in existingTxIds &&
+                domain.status != ExecutionStatus.PAID
+            ) {
+                domain.copy(status = ExecutionStatus.PAID)
+            } else {
+                domain
+            }
+        }
         val logByTxId = domainLogs
             .filter { !it.linkedTransactionId.isNullOrBlank() }
             .associateBy { it.linkedTransactionId!! }
@@ -172,12 +183,23 @@ object DavidFinancialIntelligenceProvider {
             null
         }
 
-        // 6. Map scheduled debts from accounts (compatible with PR #58 FinancialSemanticsCalculator)
+        // 6. Map scheduled debts from accounts (compatible with PR #58 FinancialSemanticsCalculator),
+        //    deduplicating any we_owe debt that is already tracked as an active recurring expense with the same title
+        val activeRecurringExpenseTitles = domainRecurring
+            .filter { !it.isIncome && it.status == RecurringStatus.ACTIVE }
+            .map { normalizeObligationTitle(it.title) }
+            .filter { it.isNotEmpty() }
+            .toSet()
+
         val scheduledDebts = accounts
             .filter { FinancialSemanticsCalculator.isDebtAccount(it) }
             .mapNotNull { debtAccount ->
                 val snapshot = FinancialSemanticsCalculator.calculateRemainingDebt(debtAccount, transactions)
                 if (snapshot.remainingAmount <= 0.0) return@mapNotNull null
+                val normalizedDebtName = normalizeObligationTitle(debtAccount.name)
+                if (snapshot.isWeOwe && normalizedDebtName.isNotEmpty() && normalizedDebtName in activeRecurringExpenseTitles) {
+                    return@mapNotNull null
+                }
                 val parsedDueDate = parseDueDateFromComment(debtAccount.accountNumber)
                 ScheduledDebtObligation(
                     debtId = debtAccount.id,
@@ -255,6 +277,15 @@ object DavidFinancialIntelligenceProvider {
         return runCatching {
             LocalDate.parse(clean, ISO_DATE_FORMATTER).toEpochDay()
         }.getOrNull()
+    }
+
+    private fun normalizeObligationTitle(raw: String): String {
+        return raw.trim()
+            .lowercase(Locale("ru", "RU"))
+            .replace("ё", "е")
+            .replace(Regex("""^(долг|кредит|регулярный платеж|обязательство)[:\s-]+"""), "")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
     }
 
     private fun parseDueDateFromComment(rawComment: String): Long? {

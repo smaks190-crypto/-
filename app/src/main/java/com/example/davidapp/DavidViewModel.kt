@@ -82,7 +82,16 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         categoryDao = database.categoryDao(),
         goalDao = database.goalDao(),
         accountDao = database.accountDao(),
-        recurringPaymentDao = database.recurringPaymentDao()
+        recurringPaymentDao = database.recurringPaymentDao(),
+        userSafetyFloorProvider = { activeBudgetId ->
+            com.example.data.preferences.BudgetPreferencesRepository.getUserSafetyFloorRub(getApplication(), activeBudgetId)
+        },
+        userLockedReserveProvider = { activeBudgetId ->
+            com.example.data.preferences.BudgetPreferencesRepository.getUserLockedReserveRub(getApplication(), activeBudgetId)
+        },
+        userEssentialDailyNormProvider = { activeBudgetId ->
+            com.example.data.preferences.BudgetPreferencesRepository.getUserEssentialDailyNormRub(getApplication(), activeBudgetId)
+        }
     )
 
     val liveSessionController = DavidLiveSessionController(
@@ -167,10 +176,15 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun bindProfile(budgetId: String, profileName: String, apiKey: String) {
-        val isDifferentBudget = budgetId != currentBudgetId || profileName != currentProfileName
-        currentBudgetId = budgetId
+        val normalizedBudgetId = budgetId.ifBlank { "default" }
+        val isDifferentBudget = normalizedBudgetId != currentBudgetId || profileName != currentProfileName
+        currentBudgetId = normalizedBudgetId
         currentProfileName = if (profileName.isNotBlank()) profileName else "Пользователь"
-        liveFinancialToolsProvider.setBudgetId(currentBudgetId)
+        if (isDifferentBudget) {
+            liveSessionController.onBudgetProfileChanged(currentBudgetId)
+        } else {
+            liveFinancialToolsProvider.setBudgetId(currentBudgetId)
+        }
         val effectiveKey = resolveAndMigrateApiKey(
             legacyPrefs = prefs,
             securePrefs = obtainSecurePrefs(),

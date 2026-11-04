@@ -343,16 +343,31 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
             return "🐸 Ква-аудит сценария «Что если» для **$currentProfileName**:\n\n${whatIfResult.structuredSummaryForDavid}"
         }
 
-        val isSafeToSpendQuery =
+        val isSafeToSpendOrRecurringQuery =
             q.contains("можно потратить") ||
+            q.contains("безопасно потратить") ||
             q.contains("дневной лимит") ||
             q.contains("лимит на сегодня") ||
             q.contains("бюджет на сегодня") ||
             q.contains("safe to spend") ||
-            q.contains("сколько тратить сегодня")
+            q.contains("safe-to-spend") ||
+            q.contains("сколько тратить сегодня") ||
+            q.contains("сколько останется") ||
+            q.contains("останется после") ||
+            q.contains("аренд") ||
+            q.contains("жкх") ||
+            q.contains("коммунал") ||
+            q.contains("регулярн") ||
+            q.contains("расписан") ||
+            q.contains("когда зарплат") ||
+            q.contains("ближайшая зарплат") ||
+            q.contains("до зарплат")
 
-        if (isSafeToSpendQuery && precomputedUnified != null) {
-            return "🐸 Расчёт **Safe-to-Spend 2.0** для профиля **$currentProfileName**:\n\n${precomputedUnified.safeToSpendResult.toStructuredDavidSummary()}"
+        if (isSafeToSpendOrRecurringQuery && precomputedUnified != null) {
+            val baseBreakdown = precomputedSnapshot?.let {
+                "\n\n" + FinancialSemanticsCalculator.formatChatFinancialBreakdown(it)
+            }.orEmpty()
+            return "🐸 Расчёт **Safe-to-Spend 2.0 и расписание обязательств/доходов** для профиля **$currentProfileName**:\n\n${precomputedUnified.safeToSpendResult.toStructuredDavidSummary()}$baseBreakdown"
         }
 
         val isFinancialSemanticsQuery =
@@ -373,7 +388,8 @@ ${if (expenses.isNotEmpty()) "Твоя главная финансовая сл�
 
         if (isFinancialSemanticsQuery && precomputedSnapshot != null) {
             val breakdown = FinancialSemanticsCalculator.formatChatFinancialBreakdown(precomputedSnapshot)
-            return "$currentProfileName, мухи отдельно, котлеты отдельно! Я никогда не складываю зарплату, текущий баланс и чужие долги в один «общий доход»:\n\n$breakdown"
+            val stsSuffix = precomputedUnified?.let { "\n\n${it.safeToSpendResult.toStructuredDavidSummary()}" }.orEmpty()
+            return "$currentProfileName, мухи отдельно, котлеты отдельно! Я никогда не складываю зарплату, текущий баланс и чужие долги в один «общий доход»:\n\n$breakdown$stsSuffix"
         }
 
         return when {
