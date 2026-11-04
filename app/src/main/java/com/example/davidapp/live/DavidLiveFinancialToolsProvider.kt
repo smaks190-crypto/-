@@ -408,12 +408,9 @@ class DavidLiveFinancialToolsProvider(
             val summaryText = result.optString("humanSummary").takeIf { it.isNotBlank() }
                 ?: result.toString().take(240)
             synchronized(_verifiedFacts) {
-                _verifiedFacts.add(
-                    DavidLiveToolFact(
-                        toolName = toolName,
-                        summary = summaryText
-                    )
-                )
+                if (_verifiedFacts.none { it.toolName == toolName && it.summary == summaryText }) {
+                    _verifiedFacts.add(DavidLiveToolFact(toolName = toolName, summary = summaryText))
+                }
             }
         }
         return result

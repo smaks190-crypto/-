@@ -594,17 +594,17 @@ fun PeriodBudgetScreen(
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Row(
+                            Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                horizontalAlignment = Alignment.Start
                             ) {
                                 Text(
                                     text = when {
                                         safeToSpendResult.hasCashGap -> "Риск кассового разрыва"
                                         isReserveDeficit -> "Дефицит резерва безопасности"
                                         safeToSpendResult.todayOverspendRub > 0.0 -> "Дневной лимит превышен"
-                                        else -> "Можно потратить сегодня"
+                                        else -> "Ориентир расходов на сегодня"
                                     },
                                     color = Slate300,
                                     fontSize = 11.sp,
@@ -616,7 +616,7 @@ fun PeriodBudgetScreen(
                                         safeToSpendResult.todayOverspendRub > 0.0 ->
                                             "Перерасход ${formatShortCurrency(safeToSpendResult.todayOverspendRub)}"
                                         else ->
-                                            "${formatShortCurrency(safeRemainingToday)} (+${formatShortCurrency(safeToSpendResult.canSpendTodayEssRub)} база)"
+                                            "Свободные: ${formatShortCurrency(safeRemainingToday)} · базовые: ${formatShortCurrency(safeToSpendResult.canSpendTodayEssRub)}"
                                     },
                                     color = statusColor,
                                     fontSize = 12.sp,

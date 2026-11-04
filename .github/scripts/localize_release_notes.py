@@ -5,8 +5,8 @@
 1. Раздел «## Заметки релиза» в описании PR (см. .github/pull_request_template.md).
 2. Строка `Release-Note: ...` в сообщении коммита, отправленного прямо в main.
 3. Заголовок PR/коммита, если он уже написан по-русски.
-4. Нейтральная русская строка «Технические изменения без отдельного описания: N».
-   Английские заголовки коммитов в публичный список не попадают.
+4. Если пользовательское изменение нельзя достоверно описать, публикация останавливается.
+   Внутренние изменения без пользовательского эффекта не публикуются.
 
 Ссылки на отдельные коммиты и PR в списке не выводятся; остаётся одна ссылка
 «Полная история изменений». Заголовок «Что изменилось» не добавляется: в README он
@@ -20,8 +20,7 @@ import sys
 from pathlib import Path
 
 SECTIONS = ["Добавлено", "Изменено", "Исправлено", "Документация и сборка"]
-EMPTY_TEXT = "В этом выпуске нет автоматически описанных изменений."
-FALLBACK_TEXT = "Технические изменения без отдельного описания"
+EMPTY_TEXT = "В этом выпуске нет пользовательских изменений."
 
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
 PATTERNS = [
@@ -34,7 +33,7 @@ PREFIX_RE = re.compile(
     re.I,
 )
 NOTE_HEADING_RE = re.compile(
-    r"^#{1,6}\s*(заметки релиза|release notes(?:\s*\(ru\))?|что изменилось для пользователей?)\s*:?\s*$",
+    r"^#{1,6}\s*(заметки релиза|release notes(?:\s*\(ru\))?|что изменено|что изменилось для пользователей?)\s*:?\s*$",
     re.I,
 )
 HEADING_RE = re.compile(r"^#{1,6}\s")
@@ -174,7 +173,6 @@ def fetch_commits(repo, compare_ref):
 
 def build_notes(original, repo="", pr_body_loader=fetch_pr_body, commit_loader=fetch_commits):
     sections = {name: [] for name in SECTIONS}
-    fallback = {name: 0 for name in SECTIONS}
     seen = set()
 
     def add(section, text):
@@ -192,8 +190,13 @@ def build_notes(original, repo="", pr_body_loader=fetch_pr_body, commit_loader=f
         if notes is None:
             if has_cyrillic(title):
                 add(default, clean(title))
-            else:
-                fallback[default] += 1
+            elif default != "Документация и сборка":
+                raise ValueError(
+                    f"Не удалось сформировать заметку для изменения «{title}». "
+                    "Добавьте русскоязычный пункт в раздел «Заметки релиза» "
+                    "описания PR или строку Release-Note: в сообщение прямого коммита. "
+                    "Для внутренних изменений явно укажите «нет»."
+                )
             return
         for note in notes:
             section, text = split_category(note, default)
@@ -226,10 +229,6 @@ def build_notes(original, repo="", pr_body_loader=fetch_pr_body, commit_loader=f
                 continue  # squash-merge PR уже в списке
             register(classify(subject), subject, extract_commit_notes(message))
 
-    for name, count in fallback.items():
-        if count:
-            sections[name].append(f"- {FALLBACK_TEXT}: {count}")
-
     output = []
     for heading, entries in sections.items():
         if entries:
@@ -243,7 +242,11 @@ def build_notes(original, repo="", pr_body_loader=fetch_pr_body, commit_loader=f
 
 def main():
     original = Path(sys.argv[1]).read_text(encoding="utf-8")
-    result = build_notes(original, os.environ.get("GITHUB_REPOSITORY", ""))
+    try:
+        result = build_notes(original, os.environ.get("GITHUB_REPOSITORY", ""))
+    except ValueError as error:
+        print(f"ОШИБКА RELEASE NOTES: {error}", file=sys.stderr)
+        raise SystemExit(1)
     Path(sys.argv[2]).write_text(result, encoding="utf-8")
 
 

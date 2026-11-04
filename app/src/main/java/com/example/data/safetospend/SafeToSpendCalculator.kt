@@ -228,8 +228,11 @@ object SafeToSpendCalculator {
             else -> BottleneckReason.LIQUIDITY_HORIZON
         }
 
-        // 11. Today's protected essential allowance (clamped only if literal cash after today's mandatory bills is < rEssToday)
-        val cashAfterTodayMandatory = lNet - overdueObligationsRub - todayPendingObligationsRub
+        // 11. Essential spending must respect both the protected reserve and the projected obligations.
+        val cashAfterTodayMandatory = min(
+            l0 - overdueObligationsRub - todayPendingObligationsRub,
+            minFreeLiquidity + rEssToday
+        )
         val canSpendTodayEssRub = if (cashAfterTodayMandatory <= 0.0) {
             0.0
         } else {
@@ -368,7 +371,7 @@ object SafeToSpendCalculator {
 
         for (rule in activePayments) {
             if (rule.status != RecurringStatus.ACTIVE) continue
-            val effectiveAmount = rule.effectiveReservedAmountRub
+            val effectiveAmount = if (rule.isIncome) rule.amount else rule.effectiveReservedAmountRub
             if (effectiveAmount <= 0.0) continue
 
             if (!rule.isIncome) {

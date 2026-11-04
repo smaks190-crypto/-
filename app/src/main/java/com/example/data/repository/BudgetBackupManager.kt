@@ -1,297 +1,178 @@
 package com.example.data.repository
 
 import android.content.Context
-import com.example.data.db.AccountDao
-import com.example.data.db.AccountEntity
-import com.example.data.db.BudgetProfileDao
+import android.util.AtomicFile
+import androidx.room.withTransaction
+import com.example.data.db.AppDatabase
 import com.example.data.db.BudgetProfileEntity
-import com.example.data.db.CategoryDao
-import com.example.data.db.CategoryEntity
-import com.example.data.db.GoalDao
-import com.example.data.db.GoalEntity
-import com.example.data.db.TransactionDao
-import com.example.data.db.TransactionEntity
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import com.example.davidapp.AchievementManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.text.SimpleDateFormat
 import java.util.Calendar
-import java.util.Date
-import java.util.Locale
+import java.util.UUID
 
-/**
- * Менеджер резервного копирования (JSON Export/Import), файловой синхронизации и демо-данных (Issue #69, Этап 3).
- */
+/** Database changes commit together; preferences and cache files are updated after commit. */
 class BudgetBackupManager(
     private val context: Context,
-    private val budgetProfileDao: BudgetProfileDao,
-    private val transactionDao: TransactionDao,
-    private val goalDao: GoalDao,
-    private val categoryDao: CategoryDao,
-    private val accountDao: AccountDao,
-    private val allProfiles: Flow<List<BudgetProfileEntity>>,
-    private val allTransactions: Flow<List<TransactionEntity>>,
-    private val allGoals: Flow<List<GoalEntity>>,
-    private val allCategories: Flow<List<CategoryEntity>>,
-    private val allAccounts: Flow<List<AccountEntity>>,
-    private val createProfile: suspend (String) -> BudgetProfileEntity,
+    private val db: AppDatabase,
     private val clearAllData: suspend () -> Unit,
-    private val initializeDefaultCategories: suspend (String) -> Unit,
-    private val recurringPaymentDao: com.example.data.db.RecurringPaymentDao? = null
+    private val initializeDefaultCategories: suspend (String) -> Unit
 ) {
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-    private val backupAdapter = moshi.adapter(BudgetBackup::class.java)
+    private val codec = BudgetBackupCodec()
     private val storageFile = File(context.filesDir, "budget_storage.json")
 
     fun deleteStorageFile() {
-        if (storageFile.exists()) {
-            try { storageFile.delete() } catch (_: Exception) {}
-        }
+        AtomicFile(storageFile).delete()
     }
 
-    suspend fun syncToFile() {
+    private fun cacheBestEffort(file: File, json: String) {
+        val atomic = AtomicFile(file)
         try {
-            val profileName = allProfiles.first().firstOrNull()?.name
-            val txs = allTransactions.first()
-            val goals = allGoals.first()
-            val cats = allCategories.first()
-            val accs = allAccounts.first()
-            val backup = BudgetBackup(
-                profileName = profileName,
-                transactions = txs,
-                goals = goals,
-                categories = cats,
-                accounts = accs
-            )
-            val json = backupAdapter.toJson(backup)
-            storageFile.writeText(json)
-        } catch (_: Exception) {}
-    }
-
-    suspend fun seedRealisticTestBudget2026(
-        budgetId: String = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID
-    ) = withContext(Dispatchers.IO) {
-        val dataset = com.example.data.safetospend.RealisticTestBudget2026Seeder.buildDataset(budgetId = budgetId)
-        transactionDao.deleteTransactionsByBudgetId(budgetId)
-        goalDao.deleteGoalsByBudgetId(budgetId)
-        categoryDao.deleteCategoriesByBudgetId(budgetId)
-        accountDao.deleteAccountsByBudgetId(budgetId)
-        recurringPaymentDao?.deleteExecutionLogsByBudgetId(budgetId)
-        recurringPaymentDao?.deleteRecurringPaymentsByBudgetId(budgetId)
-
-        accountDao.insertAccounts(dataset.accounts)
-        categoryDao.insertCategories(dataset.categories)
-        goalDao.insertGoals(dataset.goals)
-        transactionDao.insertTransactions(dataset.transactions)
-        if (recurringPaymentDao != null) {
-            recurringPaymentDao.insertRecurringPayments(dataset.recurringPayments)
-            dataset.executionLogs.forEach { log ->
-                recurringPaymentDao.insertExecutionLog(log)
+            val stream = atomic.startWrite()
+            try {
+                stream.write(json.toByteArray(Charsets.UTF_8))
+                atomic.finishWrite(stream)
+            } catch (e: Exception) {
+                atomic.failWrite(stream)
+                throw e
             }
+        } catch (_: Exception) {
+            // Room is authoritative; a cache failure must not report a committed import as failed.
         }
     }
 
-    suspend fun loadDemoData(budgetId: String = "default") = withContext(Dispatchers.IO) {
-        if (budgetId == com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID) {
-            seedRealisticTestBudget2026(budgetId)
-            return@withContext
-        }
+    private suspend fun snapshot(budgetId: String? = null): BudgetBackup = db.withTransaction {
+        val profiles = db.budgetProfileDao().getAllProfiles().first()
+            .filter { budgetId == null || it.id == budgetId }
+        require(profiles.isNotEmpty()) { "Budget not found" }
+        BudgetBackup(
+            formatVersion = 2,
+            profiles = profiles,
+            profileName = profiles.first().name,
+            accounts = db.accountDao().getAllAccounts().first().filter { budgetId == null || it.budgetId == budgetId },
+            transactions = db.transactionDao().getAllTransactions().first().filter { budgetId == null || it.budgetId == budgetId },
+            goals = db.goalDao().getAllGoals().first().filter { budgetId == null || it.budgetId == budgetId },
+            categories = db.categoryDao().getAllCategories().first().filter { budgetId == null || it.budgetId == budgetId },
+            recurringPayments = db.recurringPaymentDao().getAllRecurringPayments().first().filter { budgetId == null || it.budgetId == budgetId },
+            executionLogs = db.recurringPaymentDao().getAllExecutionLogs().first().filter { budgetId == null || it.budgetId == budgetId },
+            achievements = AchievementManager.exportUnlockedIds(context)
+        )
+    }
+
+    suspend fun syncToFile() = withContext(Dispatchers.IO) {
         try {
-            val cal = Calendar.getInstance()
-            val currentYear = cal.get(Calendar.YEAR)
-            val assetJson = context.assets.open("demo_budget.json").bufferedReader().use { it.readText() }
-            val jsonWithYear = assetJson
-                .replace("{YEAR}", "$currentYear")
-                .replace("{YEAR-1}", "${currentYear - 1}")
-                .replace("{YEAR-2}", "${currentYear - 2}")
-            val backup = backupAdapter.fromJson(jsonWithYear)
-            if (backup != null) {
-                transactionDao.deleteTransactionsByBudgetId(budgetId)
-                goalDao.deleteGoalsByBudgetId(budgetId)
-                categoryDao.deleteCategoriesByBudgetId(budgetId)
-                accountDao.deleteAccountsByBudgetId(budgetId)
-
-                val accountIdMap = mutableMapOf<String, String>()
-                val accs = (backup.accounts ?: emptyList()).map { oldAcc ->
-                    val newId = if (budgetId == "default") oldAcc.id else "${oldAcc.id}_$budgetId"
-                    accountIdMap[oldAcc.id] = newId
-                    oldAcc.copy(id = newId, budgetId = budgetId)
-                }
-                val txs = (backup.transactions ?: emptyList()).map { oldTx ->
-                    val mappedAccId = oldTx.accountId?.let { accountIdMap[it] ?: it }
-                    oldTx.copy(budgetId = budgetId, accountId = mappedAccId)
-                }
-                val goals = (backup.goals ?: emptyList()).map { it.copy(budgetId = budgetId) }
-                val cats = (backup.categories ?: emptyList()).map { it.copy(budgetId = budgetId) }
-
-                if (accs.isNotEmpty()) accountDao.insertAccounts(accs)
-                if (cats.isNotEmpty()) categoryDao.insertCategories(cats)
-                if (goals.isNotEmpty()) goalDao.insertGoals(goals)
-                if (txs.isNotEmpty()) transactionDao.insertTransactions(txs)
-                syncToFile()
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-            initializeDefaultCategories(budgetId)
+            cacheBestEffort(storageFile, codec.encode(snapshot()))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Legacy cache only; normal edits persist directly in Room.
         }
     }
-
 
     suspend fun exportJson(): String = withContext(Dispatchers.IO) {
-        val currentProfiles = allProfiles.first()
-        val profile = currentProfiles.firstOrNull()
-        val txs = allTransactions.first()
-        val goals = allGoals.first()
-        val cats = allCategories.first()
-        val accs = allAccounts.first()
-        val backup = BudgetBackup(
-            profileName = profile?.name,
-            transactions = txs,
-            goals = goals,
-            categories = cats,
-            accounts = accs,
-            achievements = com.example.davidapp.AchievementManager.exportUnlockedIds(context)
-        )
-        val json = backupAdapter.toJson(backup)
-        try {
-            storageFile.writeText(json)
-        } catch (_: Exception) {}
-        json
+        codec.encode(snapshot()).also { cacheBestEffort(storageFile, it) }
     }
 
     suspend fun exportJsonForBudget(budgetId: String): String = withContext(Dispatchers.IO) {
-        val profile = allProfiles.first().firstOrNull { it.id == budgetId }
-        val profileName = profile?.name
-        val txs = transactionDao.getTransactionsByBudgetId(budgetId).first()
-        val goals = goalDao.getGoalsByBudgetId(budgetId).first()
-        val cats = categoryDao.getCategoriesByBudgetId(budgetId).first()
-        val accs = accountDao.getAccountsByBudgetId(budgetId).first()
-        val backup = BudgetBackup(
-            profileName = profileName,
-            transactions = txs,
-            goals = goals,
-            categories = cats,
-            accounts = accs,
-            achievements = com.example.davidapp.AchievementManager.exportUnlockedIds(context)
-        )
-        val json = backupAdapter.toJson(backup)
+        codec.encode(snapshot(budgetId)).also {
+            cacheBestEffort(File(context.filesDir, "budget_${budgetId}.json"), it)
+        }
+    }
+
+    private suspend fun deleteBudgetData(budgetId: String) {
+        db.recurringPaymentDao().deleteExecutionLogsByBudgetId(budgetId)
+        db.recurringPaymentDao().deleteRecurringPaymentsByBudgetId(budgetId)
+        db.transactionDao().deleteTransactionsByBudgetId(budgetId)
+        db.goalDao().deleteGoalsByBudgetId(budgetId)
+        db.categoryDao().deleteCategoriesByBudgetId(budgetId)
+        db.accountDao().deleteAccountsByBudgetId(budgetId)
+        db.notificationDao().deleteNotificationsByBudgetId(budgetId)
+        db.aiAuditDao().deleteAuditsByBudgetId(budgetId)
+    }
+
+    /** Runs inside the caller's Room transaction, including profile creation and recurrence ID remapping. */
+    private suspend fun insertBackup(backup: BudgetBackup): BudgetBackup {
+        backup.profiles.orEmpty().forEach { db.budgetProfileDao().insertProfile(it) }
+        db.accountDao().insertAccounts(backup.accounts.orEmpty())
+        db.categoryDao().insertCategories(backup.categories.orEmpty())
+        db.goalDao().insertGoals(backup.goals.orEmpty())
+        db.transactionDao().insertTransactions(backup.transactions.orEmpty())
+        val paymentIds = mutableMapOf<Long, Long>()
+        val payments = backup.recurringPayments.orEmpty().map { old ->
+            val id = db.recurringPaymentDao().insertRecurringPayment(old.copy(id = 0L))
+            paymentIds[old.id] = id
+            old.copy(id = id)
+        }
+        val logs = backup.executionLogs.orEmpty().map { old ->
+            val log = old.copy(id = 0L, recurringId = paymentIds.getValue(old.recurringId))
+            val id = db.recurringPaymentDao().insertExecutionLog(log)
+            log.copy(id = id)
+        }
+        return backup.copy(recurringPayments = payments, executionLogs = logs)
+    }
+
+    private fun restoreAchievementsBestEffort(backup: BudgetBackup) {
         try {
-            val file = java.io.File(context.filesDir, "budget_${budgetId}.json")
-            file.writeText(json)
-        } catch (_: Exception) {}
-        json
+            backup.achievements?.let { AchievementManager.importUnlockedIds(context, it) }
+        } catch (_: Exception) {
+            // Supplementary preferences live outside the financial database transaction.
+        }
     }
 
     suspend fun importBackupAsNewBudget(jsonStr: String, customName: String? = null): BudgetProfileEntity? = withContext(Dispatchers.IO) {
         try {
-            val backup = backupAdapter.fromJson(jsonStr) ?: return@withContext null
-            val dateStr = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date())
-            val name = customName ?: backup.profileName?.takeIf { it.isNotBlank() } ?: "Бюджет из копии ($dateStr)"
-            val profile = createProfile(name)
-            val newBudgetId = profile.id
-
-            val rawTxs = backup.transactions ?: emptyList()
-            val rawGoals = backup.goals ?: emptyList()
-            val rawCats = backup.categories ?: emptyList()
-            val rawAccs = backup.accounts ?: emptyList()
-
-            // Map old account IDs to new UUIDs to prevent collision and preserve foreign key relationships in transactions
-            val accountIdMap = mutableMapOf<String, String>()
-            val accs = rawAccs.map { oldAcc ->
-                val newId = java.util.UUID.randomUUID().toString()
-                accountIdMap[oldAcc.id] = newId
-                oldAcc.copy(id = newId, budgetId = newBudgetId)
-            }
-
-            val txs = rawTxs.map { oldTx ->
-                val mappedAccountId = oldTx.accountId?.let { accountIdMap[it] } ?: oldTx.accountId
-                oldTx.copy(
-                    id = java.util.UUID.randomUUID().toString(),
-                    budgetId = newBudgetId,
-                    accountId = mappedAccountId
-                )
-            }
-            val goals = rawGoals.map { it.copy(id = java.util.UUID.randomUUID().toString(), budgetId = newBudgetId) }
-            val cats = rawCats.map { it.copy(id = java.util.UUID.randomUUID().toString(), budgetId = newBudgetId) }
-
-            if (accs.isNotEmpty()) accountDao.insertAccounts(accs)
-            if (txs.isNotEmpty()) transactionDao.insertTransactions(txs)
-            if (goals.isNotEmpty()) goalDao.insertGoals(goals)
-            if (cats.isNotEmpty()) categoryDao.insertCategories(cats)
-
-            // Восстановление достижений с обратной совместимостью
-            if (backup.achievements != null && backup.achievements.isNotEmpty()) {
-                com.example.davidapp.AchievementManager.importUnlockedIds(context, backup.achievements)
-            } else {
-                com.example.utils.ExportImportHelper.extractAndImportAchievements(context, jsonStr)
-            }
-
-            val file = java.io.File(context.filesDir, "budget_${newBudgetId}.json")
-            val updatedBackup = BudgetBackup(
-                profileName = name,
-                transactions = txs,
-                goals = goals,
-                categories = cats,
-                accounts = accs,
-                achievements = com.example.davidapp.AchievementManager.exportUnlockedIds(context)
-            )
-            file.writeText(backupAdapter.toJson(updatedBackup))
+            val prepared = codec.prepare(codec.decode(jsonStr), UUID.randomUUID().toString(), customName)
+            val restored = db.withTransaction { insertBackup(prepared) }
+            restoreAchievementsBestEffort(restored)
+            val profile = restored.profiles.orEmpty().single()
+            cacheBestEffort(File(context.filesDir, "budget_${profile.id}.json"), codec.encode(restored))
             profile
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
             null
         }
     }
 
     suspend fun importJson(jsonStr: String, targetBudgetId: String? = null): Boolean = withContext(Dispatchers.IO) {
         try {
-            val backup = backupAdapter.fromJson(jsonStr) ?: return@withContext false
-            clearAllData()
-
-            val bId = targetBudgetId ?: "default"
-            val profileName = backup.profileName?.takeIf { it.isNotBlank() } ?: "Основной"
-            budgetProfileDao.insertProfile(BudgetProfileEntity(id = bId, name = profileName))
-
-            val rawTxs = backup.transactions ?: emptyList()
-            val rawGoals = backup.goals ?: emptyList()
-            val rawCats = backup.categories ?: emptyList()
-            val rawAccs = backup.accounts ?: emptyList()
-
-            val accs = rawAccs.map { if (it.budgetId.isBlank()) it.copy(budgetId = bId) else it }
-            val txs = rawTxs.map { if (it.budgetId.isBlank()) it.copy(budgetId = bId) else it }
-            val goals = rawGoals.map { if (it.budgetId.isBlank()) it.copy(budgetId = bId) else it }
-            val cats = rawCats.map { if (it.budgetId.isBlank()) it.copy(budgetId = bId) else it }
-
-            if (accs.isNotEmpty()) accountDao.insertAccounts(accs)
-            if (txs.isNotEmpty()) transactionDao.insertTransactions(txs)
-            if (goals.isNotEmpty()) goalDao.insertGoals(goals)
-            if (cats.isNotEmpty()) categoryDao.insertCategories(cats)
-
-            // Восстановление достижений с обратной совместимостью
-            if (backup.achievements != null && backup.achievements.isNotEmpty()) {
-                com.example.davidapp.AchievementManager.importUnlockedIds(context, backup.achievements)
-            } else {
-                com.example.utils.ExportImportHelper.extractAndImportAchievements(context, jsonStr)
+            val prepared = codec.prepare(codec.decode(jsonStr), targetBudgetId)
+            val restored = db.withTransaction {
+                if (targetBudgetId == null) clearAllData() else deleteBudgetData(targetBudgetId)
+                insertBackup(prepared)
             }
-
-            val updatedBackup = BudgetBackup(
-                profileName = profileName,
-                transactions = txs,
-                goals = goals,
-                categories = cats,
-                accounts = accs,
-                achievements = com.example.davidapp.AchievementManager.exportUnlockedIds(context)
-            )
-            val updatedJson = backupAdapter.toJson(updatedBackup)
-            storageFile.writeText(updatedJson)
+            restoreAchievementsBestEffort(restored)
+            if (targetBudgetId == null) cacheBestEffort(storageFile, codec.encode(restored))
+            else cacheBestEffort(File(context.filesDir, "budget_${targetBudgetId}.json"), codec.encode(restored))
             true
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
             false
+        }
+    }
+
+    suspend fun loadDemoData(budgetId: String = "default") = withContext(Dispatchers.IO) {
+        try {
+            val year = Calendar.getInstance().get(Calendar.YEAR)
+            val json = context.assets.open("demo_budget.json").bufferedReader().use { it.readText() }
+                .replace("{YEAR}", "$year")
+                .replace("{YEAR-1}", "${year - 1}")
+                .replace("{YEAR-2}", "${year - 2}")
+            val prepared = codec.prepare(codec.decode(json), budgetId)
+            db.withTransaction {
+                val existing = db.budgetProfileDao().getProfileById(budgetId)
+                deleteBudgetData(budgetId)
+                insertBackup(prepared.copy(profiles = listOf(existing ?: prepared.profiles.orEmpty().single())))
+            }
+            syncToFile()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            initializeDefaultCategories(budgetId)
         }
     }
 }

@@ -15,6 +15,7 @@ import com.example.data.db.NotificationEntity
 import com.example.data.db.TransactionEntity
 import com.example.data.repository.BudgetRepository
 import com.example.davidapp.live.DavidLiveAudioEngine
+import com.example.davidapp.live.DavidLiveConnectionFailureKind
 import com.example.davidapp.live.DavidLiveConnectionState
 import com.example.davidapp.live.DavidLiveDisplayMode
 import com.example.davidapp.live.DavidLiveFinancialToolsProvider
@@ -23,6 +24,7 @@ import com.example.davidapp.live.DavidLiveSpeaker
 import com.example.davidapp.live.DavidLiveSummaryGenerator
 import com.example.davidapp.live.DavidLiveToolFact
 import com.example.davidapp.live.DavidLiveTranscriptTurn
+import com.example.davidapp.live.DavidLiveVisualState
 import com.example.ui.components.extractOpsAndComment
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -111,6 +113,10 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         geminiApiService = RetrofitClient.service
     )
 
+    init {
+        liveSessionController.bindNetworkContext(application)
+    }
+
     private val _isLiveOverlayVisible = MutableStateFlow(false)
     val isLiveOverlayVisible: StateFlow<Boolean> = _isLiveOverlayVisible.asStateFlow()
 
@@ -126,12 +132,17 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     private var lastDisplayModeTransitionMs: Long = 0L
 
     val liveConnectionState: StateFlow<DavidLiveConnectionState> = liveSessionController.connectionState
-    val liveSubtitle: StateFlow<String> = liveSessionController.liveSubtitle
+    val liveSubtitle: StateFlow<String> = liveSessionController.spokenTranscript
+    val liveVisualPhase = liveSessionController.visualPhase
     val liveRayMagnitudes: StateFlow<List<Float>> = liveSessionController.audioEngine.rayMagnitudes
     val liveOverallEnergy: StateFlow<Float> = liveSessionController.audioEngine.overallEnergy
     val liveActiveSpeaker: StateFlow<DavidLiveSpeaker> = liveSessionController.audioEngine.activeSpeaker
     val isLiveMicMuted: StateFlow<Boolean> = liveSessionController.isMicMuted
     val liveErrorMessage: StateFlow<String?> = liveSessionController.errorMessage
+    val liveVisualState: StateFlow<DavidLiveVisualState> = liveSessionController.visualState
+    val liveFailureKind: StateFlow<DavidLiveConnectionFailureKind> = liveSessionController.failureKind
+    val liveActiveToolName: StateFlow<String?> = liveSessionController.activeToolName
+    val liveDebugOverrideVisualState: StateFlow<DavidLiveVisualState?> = liveSessionController.debugOverrideVisualState
 
     private val prefs: SharedPreferences =
         application.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
@@ -905,23 +916,17 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
         _isLiveSessionActive.value = true
     }
 
-    fun minimizeDavidLive(soundManager: SoundManager? = null) {
-        val now = System.currentTimeMillis()
-        if (now - lastDisplayModeTransitionMs < 180L) return
+    fun minimizeDavidLive(@Suppress("UNUSED_PARAMETER") soundManager: SoundManager? = null) {
         if (liveSessionController.displayMode.value != DavidLiveDisplayMode.EXPANDED) return
-        lastDisplayModeTransitionMs = now
-        soundManager?.playClick()
+        lastDisplayModeTransitionMs = System.currentTimeMillis()
         liveSessionController.minimizeSession()
         _isLiveOverlayVisible.value = false
         _isLiveSessionActive.value = true
     }
 
-    fun expandDavidLive(soundManager: SoundManager? = null) {
-        val now = System.currentTimeMillis()
-        if (now - lastDisplayModeTransitionMs < 180L) return
+    fun expandDavidLive(@Suppress("UNUSED_PARAMETER") soundManager: SoundManager? = null) {
         if (liveSessionController.displayMode.value != DavidLiveDisplayMode.MINIMIZED) return
-        lastDisplayModeTransitionMs = now
-        soundManager?.playClick()
+        lastDisplayModeTransitionMs = System.currentTimeMillis()
         liveSessionController.expandSession()
         _isLiveOverlayVisible.value = true
         _isLiveSessionActive.value = true
@@ -933,6 +938,22 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
 
     fun retryLiveConnection() {
         liveSessionController.retryConnection()
+    }
+
+    fun setDebugLiveVisualStateOverride(state: DavidLiveVisualState?) {
+        liveSessionController.setDebugVisualStateOverride(state)
+    }
+
+    fun triggerLiveSuccessPulse() {
+        liveSessionController.triggerSuccessPulse()
+    }
+
+    fun onDavidLiveAppBackgrounded() {
+        liveSessionController.onAppBackgrounded()
+    }
+
+    fun onDavidLiveAppForegrounded() {
+        liveSessionController.onAppForegrounded()
     }
 
     fun endDavidLiveSession(soundManager: SoundManager? = null) {

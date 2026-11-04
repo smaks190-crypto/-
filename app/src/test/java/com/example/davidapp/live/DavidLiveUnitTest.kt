@@ -11,9 +11,16 @@ import com.example.data.db.GoalEntity
 import com.example.data.db.TransactionDao
 import com.example.data.db.TransactionEntity
 import com.example.utils.VoiceInputManager
+import com.example.utils.VoiceParserHelper
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import okio.ByteString
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -24,12 +31,38 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import kotlin.math.PI
 import kotlin.math.sin
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class DavidLiveUnitTest {
+    @Test
+    fun `completed silent model turn clears thinking and returns sphere to listening`() {
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = DavidLiveFinancialToolsProvider("default", null, null, null, null)
+        )
+        controller.processServerMessageForTest("""{"setupComplete":{}}""")
+        controller.processServerMessageForTest("""{"serverContent":{"inputTranscription":{"text":"Привет"}}}""")
+        assertEquals(DavidLiveVisualState.THINKING, controller.visualState.value)
+        controller.processServerMessageForTest("""{"serverContent":{"turnComplete":true}}""")
+        assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
+        assertEquals("Привет", controller.spokenTranscript.value)
+    }
+
+    @Test
+    fun `spoken transcript excludes setup and processing status messages`() {
+        val controller = DavidLiveSessionController(financialToolsProvider = DavidLiveFinancialToolsProvider(
+            budgetId = "default", transactionDao = null, categoryDao = null, goalDao = null, accountDao = null
+        ))
+        assertEquals("", controller.spokenTranscript.value)
+        controller.startSession(null)
+        assertEquals("", controller.spokenTranscript.value)
+        controller.processServerMessageForTest("""{"serverContent":{"outputTranscription":{"text":"Ваш бюджет в порядке"}}}""")
+        assertEquals("Ваш бюджет в порядке", controller.spokenTranscript.value)
+    }
 
     @Test
     fun `send button gesture helper distinguishes short tap and 550ms long press without clearing draft`() {
@@ -867,6 +900,584 @@ class DavidLiveUnitTest {
     }
 
     @Test
+    fun `ping pong timeout during David speech immediately resets activeSpeaker to NONE performs bounded auto-reconnect and shows Russian error`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L
+        )
+
+        val testKey = "AIzaSyTestUserManualKey987654321"
+        controller.startSession(testKey)
+        assertEquals(1, fakeFactory.entries.size)
+        val firstSocket = fakeFactory.entries[0]
+
+        // 1. Setup complete -> LISTENING
+        firstSocket.simulateOpen()
+        firstSocket.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // 2. David starts speaking (outputTranscription + active audio visualizer frame)
+        firstSocket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Привет! Твой баланс в полном порядке."}}}"""
+        )
+        val davidSpeechSamples = ShortArray(1024) { i ->
+            (sin(2.0 * PI * 440.0 * i / 24_000.0) * 16000).toInt().toShort()
+        }
+        controller.audioEngine.feedTestPcmFrame(
+            samples = davidSpeechSamples,
+            sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+            speaker = DavidLiveSpeaker.DAVID
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertEquals(DavidLiveSpeaker.DAVID, controller.audioEngine.activeSpeaker.value)
+        assertEquals(
+            "Говорит Давид...",
+            resolveDavidLiveStatusLabel(
+                controller.connectionState.value,
+                controller.audioEngine.activeSpeaker.value,
+                controller.isMicMuted.value
+            )
+        )
+
+        // 3. Ping/pong timeout occurs mid-speech:
+        // "sent ping but didn't receive pong within 20000ms (after 0 successful ping/pongs)"
+        val pingTimeout = SocketTimeoutException(
+            "sent ping but didn't receive pong within 20000ms (after 0 successful ping/pongs)"
+        )
+        firstSocket.simulateFailure(pingTimeout)
+
+        // Immediately after failure: activeSpeaker MUST be reset to NONE, transcript preserved,
+        // and bounded auto-reconnect attempt #1 opens socket #2
+        assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
+        assertEquals(1, controller.transcriptTurns.size)
+        assertEquals("Привет! Твой баланс в полном порядке.", controller.transcriptTurns.first().text)
+        assertEquals(2, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.RECONNECTING, controller.connectionState.value)
+        assertEquals(
+            "Восстанавливаем связь...",
+            resolveDavidLiveStatusLabel(
+                controller.connectionState.value,
+                controller.audioEngine.activeSpeaker.value,
+                controller.isMicMuted.value
+            )
+        )
+
+        // 4. Auto-reconnect #1 also fails with ping timeout -> triggers auto-reconnect #2 (socket #3)
+        fakeFactory.entries[1].simulateFailure(pingTimeout)
+        assertEquals(3, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.RECONNECTING, controller.connectionState.value)
+        assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
+
+        // 5. Auto-reconnect #2 fails (retries exhausted) -> transitions to ERROR with Russian message
+        fakeFactory.entries[2].simulateFailure(pingTimeout)
+        assertEquals(3, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
+        assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
+        assertEquals(DavidLiveVisualPhase.CONNECTION_LOST, controller.visualPhase.value)
+
+        val errMsg = controller.errorMessage.value
+        assertNotNull(errMsg)
+        assertTrue(errMsg!!.contains("тайм-аут пинга"))
+        assertTrue(errMsg.contains("Повторить подключение"))
+        assertFalse("API key must never appear in error messages", errMsg.contains(testKey))
+
+        // Status label and visualizer capability must NEVER say "Говорит Давид..." in ERROR state,
+        // even if a caller passes a stale DavidLiveSpeaker.DAVID
+        assertEquals(
+            "Связь с Давидом прервана",
+            resolveDavidLiveStatusLabel(
+                controller.connectionState.value,
+                controller.audioEngine.activeSpeaker.value,
+                controller.isMicMuted.value
+            )
+        )
+        assertEquals(
+            "Связь с Давидом прервана",
+            resolveDavidLiveStatusLabel(
+                DavidLiveConnectionState.ERROR,
+                DavidLiveSpeaker.DAVID,
+                false
+            )
+        )
+        assertFalse(isDavidLiveVoiceCapableState(DavidLiveConnectionState.ERROR))
+        assertFalse(isDavidLiveVoiceCapableState(DavidLiveConnectionState.RECONNECTING))
+        assertFalse(isDavidLiveVoiceCapableState(DavidLiveConnectionState.CONNECTING))
+        controller.endSession()
+    }
+
+    @Test
+    fun `auto reconnect after unexpected onClosing restores LISTENING state and manual retry preserves conversation turns`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 1,
+            autoReconnectDelayMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val socket1 = fakeFactory.entries[0]
+        socket1.simulateOpen()
+        socket1.simulateServerText("""{"setupComplete": {}}""")
+        socket1.simulateServerText("""{"serverContent":{"inputTranscription":{"text":"Сколько я потратил за неделю?"}}}""")
+        socket1.simulateServerText("""{"serverContent":{"outputTranscription":{"text":"За неделю расходы составили 12 400 ₽."},"turnComplete":true}}""")
+        assertEquals(2, controller.transcriptTurns.size)
+
+        // 1. Server closes unexpectedly with code 1006 -> auto-reconnects on socket #2
+        socket1.simulateClosing(1006, "Abnormal closure")
+        assertEquals(2, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.RECONNECTING, controller.connectionState.value)
+        assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
+
+        // 2. Socket #2 completes setup -> session resumes in LISTENING with previous turns intact
+        val socket2 = fakeFactory.entries[1]
+        socket2.simulateOpen()
+        socket2.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertTrue(controller.liveSubtitle.value.contains("Связь восстановлена"))
+        assertEquals(2, controller.transcriptTurns.size)
+
+        // 3. Now simulate disconnect that exhausts auto-reconnect (attempt #1 fails on socket #3)
+        socket2.simulateClosing(1011, "Internal server error")
+        assertEquals(3, fakeFactory.entries.size)
+        fakeFactory.entries[2].simulateFailure(SocketTimeoutException("Read timed out"))
+        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
+
+        // 4. User taps "Повторить подключение" (retryConnection) -> opens socket #4 and preserves transcriptTurns!
+        controller.retryConnection()
+        assertEquals(4, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.CONNECTING, controller.connectionState.value)
+        assertEquals(DavidLiveVisualPhase.RECONNECTING, controller.visualPhase.value)
+        fakeFactory.entries[3].simulateOpen()
+        fakeFactory.entries[3].simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertEquals("Previous conversation turns must be preserved across manual retry", 2, controller.transcriptTurns.size)
+        controller.endSession()
+    }
+
+    @Test
+    fun `stale WebSocket callbacks from previous socket are ignored after reconnect or session close`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 1,
+            autoReconnectDelayMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val staleSocket = fakeFactory.entries[0]
+        staleSocket.simulateOpen()
+        staleSocket.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // Fast manual retry replaces staleSocket with activeSocket
+        controller.retryConnection()
+        assertEquals(2, fakeFactory.entries.size)
+        val activeSocket = fakeFactory.entries[1]
+        activeSocket.simulateOpen()
+        activeSocket.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // Stale callbacks arriving late from staleSocket must be completely ignored
+        staleSocket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Устаревшая реплика из закрытого сокета"}}}"""
+        )
+        staleSocket.simulateClosing(1006, "Late close from old socket")
+        staleSocket.simulateFailure(
+            SocketTimeoutException("sent ping but didn't receive pong within 20000ms (after 0 successful ping/pongs)")
+        )
+
+        assertEquals(
+            "Stale socket failure must not overwrite active session state",
+            DavidLiveConnectionState.LISTENING,
+            controller.connectionState.value
+        )
+        assertNull(controller.errorMessage.value)
+        assertTrue(controller.transcriptTurns.none { it.text.contains("Устаревшая") })
+        controller.endSession()
+    }
+
+    @Test
+    fun `offline network error skips futile model fallback and background transition resets speaking state`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L
+        )
+
+        // 1. Offline DNS failure -> immediately transitions to ERROR without cycling through 3 models
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        assertEquals(1, fakeFactory.entries.size)
+        fakeFactory.entries[0].simulateFailure(
+            UnknownHostException("Unable to resolve host \"generativelanguage.googleapis.com\": No address associated with hostname")
+        )
+        assertEquals("Offline error must not spin through fallback models", 1, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
+        assertTrue(controller.errorMessage.value!!.contains("Нет соединения с интернетом"))
+
+        // 2. Retry succeeds, David starts speaking, then app goes to background -> speaking state resets immediately
+        controller.retryConnection()
+        val socket2 = fakeFactory.entries[1]
+        socket2.simulateOpen()
+        socket2.simulateServerText("""{"setupComplete": {}}""")
+        socket2.simulateServerText("""{"serverContent":{"outputTranscription":{"text":"Проверяю твои лимиты..."}}}""")
+        controller.audioEngine.feedTestPcmFrame(
+            samples = ShortArray(512) { 4000 },
+            sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+            speaker = DavidLiveSpeaker.DAVID
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertEquals(DavidLiveSpeaker.DAVID, controller.audioEngine.activeSpeaker.value)
+
+        controller.onAppBackgrounded()
+        assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        controller.onAppForegrounded()
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        controller.endSession()
+    }
+
+    @Test
+    fun `visual connection phases and Russian labels strictly reflect setupComplete and never show ready on socket onOpen alone`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 1,
+            autoReconnectDelayMs = 0L,
+            readyFlashDurationMs = 0L
+        )
+
+        // 1. Первое подключение -> INITIAL_CONNECTING, подпись «Пробуждаем Давида...»
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        assertEquals(DavidLiveConnectionState.CONNECTING, controller.connectionState.value)
+        assertEquals(DavidLiveVisualPhase.INITIAL_CONNECTING, controller.visualPhase.value)
+        assertEquals(
+            "Пробуждаем Давида...",
+            resolveDavidLiveStatusLabel(
+                controller.connectionState.value,
+                controller.audioEngine.activeSpeaker.value,
+                controller.isMicMuted.value,
+                controller.visualPhase.value
+            )
+        )
+
+        // 2. Только открытие сокета (onOpen без setupComplete) НЕ должно показывать «Давид на связи»
+        val socket1 = fakeFactory.entries[0]
+        socket1.simulateOpen()
+        assertEquals(DavidLiveConnectionState.CONNECTING, controller.connectionState.value)
+        assertEquals(DavidLiveVisualPhase.INITIAL_CONNECTING, controller.visualPhase.value)
+        assertFalse(controller.isReadyFlashActive.value)
+        assertEquals(
+            "Пробуждаем Давида...",
+            resolveDavidLiveStatusLabel(
+                controller.connectionState.value,
+                controller.audioEngine.activeSpeaker.value,
+                controller.isMicMuted.value,
+                controller.visualPhase.value
+            )
+        )
+
+        // 3. Проверка READY_FLASH и подписи «Давид на связи» строго после setupComplete
+        assertEquals(
+            "Давид на связи",
+            resolveDavidLiveStatusLabel(
+                DavidLiveConnectionState.LISTENING,
+                DavidLiveSpeaker.NONE,
+                false,
+                DavidLiveVisualPhase.READY_FLASH
+            )
+        )
+
+        socket1.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // 4. Обрыв соединения -> RECONNECTING («Восстанавливаем связь...»), а после исчерпания попыток -> CONNECTION_LOST («Связь с Давидом прервана»)
+        socket1.simulateFailure(SocketTimeoutException("sent ping but didn't receive pong within 20000ms"))
+        assertEquals(DavidLiveConnectionState.RECONNECTING, controller.connectionState.value)
+        assertEquals(DavidLiveVisualPhase.RECONNECTING, controller.visualPhase.value)
+        assertEquals(
+            "Восстанавливаем связь...",
+            resolveDavidLiveStatusLabel(
+                controller.connectionState.value,
+                controller.audioEngine.activeSpeaker.value,
+                controller.isMicMuted.value,
+                controller.visualPhase.value
+            )
+        )
+
+        fakeFactory.entries[1].simulateFailure(SocketTimeoutException("sent ping but didn't receive pong within 20000ms"))
+        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
+        assertEquals(DavidLiveVisualPhase.CONNECTION_LOST, controller.visualPhase.value)
+        assertEquals(
+            "Связь с Давидом прервана",
+            resolveDavidLiveStatusLabel(
+                controller.connectionState.value,
+                controller.audioEngine.activeSpeaker.value,
+                controller.isMicMuted.value,
+                controller.visualPhase.value
+            )
+        )
+        controller.endSession()
+    }
+
+    @Test
+    fun `network switch during David speech transitions to CONNECTION_LOST avoids parallel reconnects and continues interrupted thought on new socket`() {
+        val now = System.currentTimeMillis()
+        val fakeTransactions = listOf(
+            TransactionEntity(
+                id = "tx1",
+                budgetId = "b1",
+                type = "expense",
+                date = "2026-10-26",
+                category = "Продукты",
+                subcategory = "Супермаркет",
+                amount = 15_000.0,
+                createdAt = now - 10_000L
+            )
+        )
+        val fakeCategories = listOf(
+            CategoryEntity(id = "c1", budgetId = "b1", type = "expense", name = "Продукты", monthlyLimit = 25_000.0)
+        )
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(fakeTransactions),
+            categoryDao = createReadOnlyCategoryDao(fakeCategories),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(emptyList())
+        )
+
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L,
+            readyFlashDurationMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val socket1 = fakeFactory.entries[0]
+        socket1.simulateOpen()
+        socket1.simulateServerText("""{"setupComplete": {}}""")
+
+        // Выполняем tool call во время активной сессии до обрыва и проверяем дедупликацию повторного вызова
+        runBlocking {
+            val firstToolRes = provider.executeToolCall(
+                DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING,
+                JSONObject().put("categoryQuery", "Продукты")
+            )
+            assertEquals("ok", firstToolRes.getString("status"))
+            assertEquals(1, provider.verifiedFacts.size)
+
+            val duplicateToolRes = provider.executeToolCall(
+                DavidLiveFinancialToolsProvider.TOOL_CATEGORY_SPENDING,
+                JSONObject().put("categoryQuery", "Продукты")
+            )
+            assertEquals("ok", duplicateToolRes.getString("status"))
+            assertEquals("Duplicate tool call after reconnect must not duplicate verifiedFacts", 1, provider.verifiedFacts.size)
+        }
+
+        // Пользователь задаёт вопрос, Давид начинает длинный ответ (без turnComplete)
+        socket1.simulateServerText(
+            """{"serverContent":{"inputTranscription":{"text":"Давид, разбери мои траты на продукты и посоветуй как сэкономить"}}}"""
+        )
+        socket1.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Смотри, по категории Продукты ты уже потратил 15 000 рублей из 25 000. Во-первых, стоит сократить спонтанные покупки, а во-вторых"}}}"""
+        )
+        controller.audioEngine.feedTestPcmFrame(
+            samples = ShortArray(512) { 6000 },
+            sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+            speaker = DavidLiveSpeaker.DAVID
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+
+        // 1. Происходит потеря сети (например, отключение Wi-Fi перед переключением на LTE)
+        controller.onNetworkLost()
+        assertEquals(DavidLiveConnectionState.RECONNECTING, controller.connectionState.value)
+        assertEquals(DavidLiveVisualPhase.CONNECTION_LOST, controller.visualPhase.value)
+        assertEquals(DavidLiveSpeaker.NONE, controller.audioEngine.activeSpeaker.value)
+        assertTrue(controller.isWaitingForNetwork.value)
+        assertEquals(
+            "Связь с Давидом прервана",
+            resolveDavidLiveStatusLabel(
+                controller.connectionState.value,
+                controller.audioEngine.activeSpeaker.value,
+                controller.isMicMuted.value,
+                controller.visualPhase.value
+            )
+        )
+
+        // Частичная реплика Давида сохранена и помечена как прерванная (wasInterrupted = true)
+        val lastDavidTurn = controller.transcriptTurns.last { it.speaker == DavidLiveSpeaker.DAVID }
+        assertTrue("Interrupted turn must be flagged with wasInterrupted = true", lastDavidTurn.wasInterrupted)
+        assertTrue(lastDavidTurn.text.contains("а во-вторых"))
+
+        // 2. Появляется мобильная сеть (и дублирующий колбэк onNetworkAvailable подряд)
+        controller.onNetworkAvailable()
+        controller.onNetworkAvailable() // Дубль не должен открывать параллельный сокет!
+        assertEquals("Duplicate onNetworkAvailable must not open parallel sockets", 2, fakeFactory.entries.size)
+        assertEquals(DavidLiveConnectionState.RECONNECTING, controller.connectionState.value)
+        assertEquals(DavidLiveVisualPhase.RECONNECTING, controller.visualPhase.value)
+        assertFalse(controller.isWaitingForNetwork.value)
+
+        // 3. Новая сессия на сокете #2 открывается: проверяем, что setup содержит контекст и прерванную реплику
+        val socket2 = fakeFactory.entries[1]
+        socket2.simulateOpen()
+        assertEquals(1, socket2.sentMessages.size)
+        val setupJson = JSONObject(socket2.sentMessages[0])
+        val systemInstructionText = setupJson
+            .getJSONObject("setup")
+            .getJSONObject("systemInstruction")
+            .getJSONArray("parts")
+            .getJSONObject(0)
+            .getString("text")
+        assertTrue("Setup message on reconnect must include conversation context", systemInstructionText.contains("КОНТЕКСТ ВОССТАНОВЛЕННОГО РАЗГОВОРА"))
+        assertTrue("Setup message on reconnect must include verified financial facts", systemInstructionText.contains("15000"))
+        assertTrue("Setup message on reconnect must include interrupted partial thought", systemInstructionText.contains("а во-вторых"))
+
+        // 4. После setupComplete контроллер автоматически отправляет одно сообщение clientContent для продолжения оборванной мысли
+        socket2.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertEquals("After setupComplete on interrupted turn, continuation clientContent must be sent", 2, socket2.sentMessages.size)
+        val continuationJson = JSONObject(socket2.sentMessages[1])
+        val continuationText = continuationJson
+            .getJSONObject("clientContent")
+            .getJSONArray("turns")
+            .getJSONObject(0)
+            .getJSONArray("parts")
+            .getJSONObject(0)
+            .getString("text")
+        assertTrue(continuationText.contains("восстановлении связи после обрыва сети"))
+        assertTrue(continuationText.contains("а во-вторых"))
+
+        // 5. Завершение сессии гарантированно снимает сетевую подписку и флаги ожидания
+        controller.endSession()
+        assertFalse(controller.isNetworkCallbackRegistered)
+        assertFalse(controller.isWaitingForNetwork.value)
+        assertEquals(DavidLiveDisplayMode.HIDDEN, controller.displayMode.value)
+    }
+
+    @Test
+    fun `live HTTP client keep-alive configuration and regular voice input parser remain intact`() {
+        val client = DavidLiveSessionController.defaultLiveHttpClient()
+        assertEquals(40_000, client.pingIntervalMillis)
+        assertEquals(15_000, client.connectTimeoutMillis)
+        assertEquals(0, client.readTimeoutMillis)
+        assertTrue(client.retryOnConnectionFailure)
+
+        // Regression check for regular voice input heuristic parser used on the main screen
+        val ops = VoiceParserHelper.parseHeuristically(
+            text = "Кофе 350 и такси 600",
+            expenseCategories = listOf("Кафе и рестораны", "Транспорт", "Продукты", "Прочее"),
+            incomeCategories = listOf("Зарплата")
+        )
+        assertEquals(2, ops.size)
+        assertEquals(350.0, ops[0].amount, 0.01)
+        assertEquals(600.0, ops[1].amount, 0.01)
+    }
+
+    private class FakeWebSocketEntry(
+        val request: Request,
+        val listener: WebSocketListener
+    ) : WebSocket {
+        val sentMessages: MutableList<String> = java.util.Collections.synchronizedList(mutableListOf())
+        var simulatedQueueSize: Long = 0L
+        var isClosedOrCancelled: Boolean = false
+
+        override fun request(): Request = request
+        override fun queueSize(): Long = simulatedQueueSize
+        override fun send(text: String): Boolean {
+            if (isClosedOrCancelled) return false
+            if (!text.contains("\"realtimeInput\"")) {
+                sentMessages.add(text)
+            }
+            return true
+        }
+        override fun send(bytes: ByteString): Boolean = !isClosedOrCancelled
+        override fun close(code: Int, reason: String?): Boolean {
+            isClosedOrCancelled = true
+            return true
+        }
+        override fun cancel() {
+            isClosedOrCancelled = true
+        }
+
+        fun simulateOpen() {
+            val response = Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(101)
+                .message("Switching Protocols")
+                .build()
+            listener.onOpen(this, response)
+        }
+
+        fun simulateServerText(json: String) {
+            listener.onMessage(this, json)
+        }
+
+        fun simulateClosing(code: Int, reason: String) {
+            listener.onClosing(this, code, reason)
+        }
+
+        fun simulateFailure(t: Throwable, response: Response? = null) {
+            listener.onFailure(this, t, response)
+        }
+    }
+
+    private class FakeWebSocketFactory : WebSocket.Factory {
+        val entries = mutableListOf<FakeWebSocketEntry>()
+
+        override fun newWebSocket(request: Request, listener: WebSocketListener): WebSocket {
+            val entry = FakeWebSocketEntry(request, listener)
+            entries.add(entry)
+            return entry
+        }
+    }
+
+    @Test
     fun `DavidViewModel migrates gemini_api_key from budget_prefs to secure_prefs and removes plaintext key`() {
         val context = ApplicationProvider.getApplicationContext<android.app.Application>()
         val legacyPrefs = context.getSharedPreferences(
@@ -1350,6 +1961,928 @@ class DavidLiveUnitTest {
             assertEquals(8500.0, db.accountDao().getAccountById("acc_1")?.balance ?: 0.0, 0.001)
         } finally {
             db.close()
+        }
+    }
+
+    @Test
+    fun `visual state resolver evaluates all 13 states strictly respecting priority hierarchy`() {
+        // 1. Отсутствие API-ключа имеет высший приоритет (никогда не начинает бесконечный reconnect)
+        val missingKey = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.NO_API_KEY,
+            activeSpeaker = DavidLiveSpeaker.DAVID,
+            failureKind = DavidLiveConnectionFailureKind.MISSING_API_KEY
+        )
+        assertEquals(DavidLiveVisualState.API_MISSING, missingKey)
+
+        // 2. Потеря интернет-соединения (Offline) имеет абсолютный приоритет над речью, поиском и мышлением
+        val offlinePrioritized = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.OFFLINE,
+            activeSpeaker = DavidLiveSpeaker.DAVID,
+            isToolLookupActive = true,
+            isAnalyzingToolData = true,
+            isModelThinking = true,
+            failureKind = DavidLiveConnectionFailureKind.NETWORK_OFFLINE
+        )
+        assertEquals(DavidLiveVisualState.OFFLINE, offlinePrioritized)
+
+        // 3. Критическая ошибка протокола/сервера
+        val protocolError = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.ERROR,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            failureKind = DavidLiveConnectionFailureKind.PROTOCOL_OR_SERVER_ERROR
+        )
+        assertEquals(DavidLiveVisualState.ERROR, protocolError)
+
+        // 4. Переподключение
+        val reconnecting = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.RECONNECTING,
+            activeSpeaker = DavidLiveSpeaker.NONE
+        )
+        assertEquals(DavidLiveVisualState.RECONNECTING, reconnecting)
+
+        // 5. Первичное подключение (пока сессия не подтвердила готовность)
+        val connectingUnready = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isSessionReady = false
+        )
+        assertEquals(DavidLiveVisualState.CONNECTING, connectingUnready)
+
+        // 6. Речь Давида (только при наличии незавершённого playback или окна удержания)
+        val davidSpeaking = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.DAVID_SPEAKING,
+            activeSpeaker = DavidLiveSpeaker.DAVID,
+            isPlaybackDrained = false,
+            isWithinDavidSpeechHold = true
+        )
+        assertEquals(DavidLiveVisualState.DAVID_SPEAKING, davidSpeaking)
+
+        // 7. Речь пользователя (с удержанием коротких пауз между словами)
+        val userSpeakingWithHold = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isWithinUserSpeechHold = true,
+            isMicMuted = false
+        )
+        assertEquals(DavidLiveVisualState.USER_SPEAKING, userSpeakingWithHold)
+
+        // 8. Поиск финансовых данных (активен СТРОГО только при реальном запуске инструмента)
+        val financeLookup = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isToolLookupActive = true,
+            activeToolName = DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW
+        )
+        assertEquals(DavidLiveVisualState.FINANCE_LOOKUP, financeLookup)
+
+        // 9. Анализ полученных данных
+        val analyzing = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isAnalyzingToolData = true
+        )
+        assertEquals(DavidLiveVisualState.ANALYZING, analyzing)
+
+        // 10. Подготовка голосового ответа
+        val preparing = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isPreparingResponse = true
+        )
+        assertEquals(DavidLiveVisualState.PREPARING_RESPONSE, preparing)
+
+        // 11. Размышление модели (Thinking)
+        val thinking = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.DAVID_THINKING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isModelThinking = true
+        )
+        assertEquals(DavidLiveVisualState.THINKING, thinking)
+
+        // 12. Кратковременный импульс успеха (Success)
+        val success = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isSuccessPulseActive = true
+        )
+        assertEquals(DavidLiveVisualState.SUCCESS, success)
+
+        // 13. Спокойное ожидание (Idle / Listening)
+        val idle = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isPlaybackDrained = true
+        )
+        assertEquals(DavidLiveVisualState.IDLE_LISTENING, idle)
+
+        // Debug override имеет приоритет над всеми событиями ТОЛЬКО в Debug-режиме
+        val overridden = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.OFFLINE,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            debugOverrideState = DavidLiveVisualState.FINANCE_LOOKUP,
+            isDebugModeEnabled = true
+        )
+        assertEquals(DavidLiveVisualState.FINANCE_LOOKUP, overridden)
+
+        // В Release-режиме (isDebugModeEnabled = false) debugOverrideState НЕ подменяет реальные состояния (Offline сохраняет приоритет)
+        val releaseNotOverridden = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.OFFLINE,
+            activeSpeaker = DavidLiveSpeaker.DAVID,
+            isToolLookupActive = true,
+            debugOverrideState = DavidLiveVisualState.FINANCE_LOOKUP,
+            isDebugModeEnabled = false
+        )
+        assertEquals(DavidLiveVisualState.OFFLINE, releaseNotOverridden)
+
+        // Все 13 состояний возвращают непустую пару цветов (Pair<Color, Color>) в resolveVisualStateColors
+        DavidLiveVisualState.values().forEach { state ->
+            val (primary, secondary) = resolveVisualStateColors(state, isMicMuted = false)
+            assertNotNull("Primary color must be defined for $state", primary)
+            assertNotNull("Secondary color must be defined for $state", secondary)
+        }
+    }
+
+    @Test
+    fun `visual state metadata generates authentic Russian labels actions and sphere tap flags`() {
+        // Ожидание
+        val idleMeta = DavidLiveVisualStateResolver.resolveMetadata(DavidLiveVisualState.IDLE_LISTENING)
+        assertEquals("Ожидание", idleMeta.title)
+        assertEquals("Я здесь, слушаю тебя", idleMeta.subtitle)
+        assertEquals("LIVE", idleMeta.badgeText)
+        assertFalse(idleMeta.sphereTapTriggersReconnect)
+        assertFalse(idleMeta.sphereTapOpensApiSettings)
+
+        // Поиск финансов с подсказкой конкретного инструмента
+        val financeMeta = DavidLiveVisualStateResolver.resolveMetadata(
+            visualState = DavidLiveVisualState.FINANCE_LOOKUP,
+            activeToolName = DavidLiveFinancialToolsProvider.TOOL_SAFE_TO_SPEND_FORECAST
+        )
+        assertEquals("Ищу финансы", financeMeta.title)
+        assertTrue(financeMeta.subtitle.contains("Safe-to-Spend"))
+        assertEquals("SCAN", financeMeta.badgeText)
+
+        // Анализ
+        val analyzeMeta = DavidLiveVisualStateResolver.resolveMetadata(DavidLiveVisualState.ANALYZING)
+        assertEquals("Анализирую", analyzeMeta.title)
+        assertEquals("ANALYZE", analyzeMeta.badgeText)
+
+        // Потеря связи (Offline): нажатие на сферу запускает reconnect, действие «Повторить»
+        val offlineMeta = DavidLiveVisualStateResolver.resolveMetadata(DavidLiveVisualState.OFFLINE)
+        assertEquals("Связь прервалась", offlineMeta.title)
+        assertEquals("OFFLINE", offlineMeta.badgeText)
+        assertEquals(DavidLiveVisualActionType.RECONNECT, offlineMeta.actionType)
+        assertEquals("Повторить", offlineMeta.actionLabel)
+        assertTrue(offlineMeta.sphereTapTriggersReconnect)
+        assertFalse(offlineMeta.sphereTapOpensApiSettings)
+
+        // Отсутствие ключа: нажатие на сферу открывает безопасные настройки, действие «Добавить API»
+        val noKeyMeta = DavidLiveVisualStateResolver.resolveMetadata(DavidLiveVisualState.API_MISSING)
+        assertEquals("Нет API-ключа", noKeyMeta.title)
+        assertEquals("Добавь API-ключ Gemini для продолжения", noKeyMeta.subtitle)
+        assertEquals("API KEY", noKeyMeta.badgeText)
+        assertEquals(DavidLiveVisualActionType.ADD_API_KEY, noKeyMeta.actionType)
+        assertEquals("Добавить API", noKeyMeta.actionLabel)
+        assertFalse(noKeyMeta.sphereTapTriggersReconnect)
+        assertTrue(noKeyMeta.sphereTapOpensApiSettings)
+
+        // Неверный API-ключ в ошибке
+        val invalidKeyMeta = DavidLiveVisualStateResolver.resolveMetadata(
+            visualState = DavidLiveVisualState.ERROR,
+            errorMessage = "API key not valid (403)",
+            failureKind = DavidLiveConnectionFailureKind.INVALID_API_KEY
+        )
+        assertEquals("Неверный API-ключ", invalidKeyMeta.title)
+        assertEquals(DavidLiveVisualActionType.UPDATE_API_KEY, invalidKeyMeta.actionType)
+        assertEquals("Настроить API", invalidKeyMeta.actionLabel)
+        assertTrue(invalidKeyMeta.sphereTapOpensApiSettings)
+    }
+
+    @Test
+    fun `session controller manages visual states across tool calling thinking and disconnect cycles`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+
+        // Начальное состояние
+        assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
+
+        // 1. Ручной override для отладки всех 13 состояний
+        controller.setDebugVisualStateOverride(DavidLiveVisualState.ANALYZING)
+        assertEquals(DavidLiveVisualState.ANALYZING, controller.visualState.value)
+        controller.setDebugVisualStateOverride(null)
+        assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
+
+        // 2. Имитация вызова финансового инструмента -> переход в FINANCE_LOOKUP
+        val toolCallMsg = """
+            {
+              "toolCall": {
+                "functionCalls": [
+                  {
+                    "id": "call_123",
+                    "name": "${DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW}",
+                    "args": {}
+                  }
+                ]
+              }
+            }
+        """.trimIndent()
+        controller.processServerMessageForTest(toolCallMsg)
+        assertTrue(controller.isToolLookupActive.value)
+        assertEquals(DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW, controller.activeToolName.value)
+        assertEquals(DavidLiveVisualState.FINANCE_LOOKUP, controller.visualState.value)
+
+        // 3. Импульс успешного завершения
+        controller.triggerSuccessPulse(durationMs = 500L)
+        assertTrue(controller.isSuccessPulseActive.value)
+        assertEquals(DavidLiveVisualState.SUCCESS, controller.visualState.value)
+    }
+
+    @Test
+    fun `mandatory transitions - User Speaking to Idle and David Speaking to Idle preserve smooth speech hold and playback drain`() {
+        val engine = DavidLiveAudioEngine()
+
+        // 1. Подаём активный голосовой сигнал пользователя (440 Гц тон высокой энергии)
+        val speechFrame = ShortArray(1024) { idx ->
+            (sin(2.0 * PI * 440.0 * idx / 16_000.0) * 19_000).toInt().toShort()
+        }
+        engine.feedTestPcmFrame(
+            samples = speechFrame,
+            sampleRateHz = 16_000,
+            speaker = DavidLiveSpeaker.USER
+        )
+        assertEquals(DavidLiveSpeaker.USER, engine.activeSpeaker.value)
+        assertTrue("User speech hold must be active during speech", engine.isWithinUserSpeechHold.value)
+
+        // Во время речи резолвер выдаёт USER_SPEAKING
+        assertEquals(
+            DavidLiveVisualState.USER_SPEAKING,
+            DavidLiveVisualStateResolver.resolve(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                activeSpeaker = engine.activeSpeaker.value,
+                overallEnergy = engine.overallEnergy.value,
+                isWithinUserSpeechHold = engine.isWithinUserSpeechHold.value
+            )
+        )
+
+        // 2. Короткая пауза между словами (тихий кадр сразу после речи):
+        // окно удержания (420 мс) не позволяет сфере мгновенно сбросить анимацию USER_SPEAKING
+        assertEquals(
+            DavidLiveVisualState.USER_SPEAKING,
+            DavidLiveVisualStateResolver.resolve(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                activeSpeaker = DavidLiveSpeaker.NONE,
+                overallEnergy = 0.02f,
+                isWithinUserSpeechHold = engine.isWithinUserSpeechHold.value
+            )
+        )
+
+        // 3. После истечения окна удержания сфера плавно возвращается в IDLE_LISTENING
+        val quietFrame = ShortArray(1024) { 0 }
+        engine.feedTestPcmFrame(
+            samples = quietFrame,
+            sampleRateHz = 16_000,
+            speaker = DavidLiveSpeaker.NONE
+        )
+        assertEquals(
+            DavidLiveVisualState.IDLE_LISTENING,
+            DavidLiveVisualStateResolver.resolve(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                activeSpeaker = DavidLiveSpeaker.NONE,
+                overallEnergy = 0.01f,
+                isWithinUserSpeechHold = false
+            )
+        )
+
+        // 4. David Speaking -> Idle: пока очередь воспроизведения не опустошена (isPlaybackDrained == false),
+        // состояние остаётся DAVID_SPEAKING; после полного воспроизведения (isPlaybackDrained == true)
+        // и завершения hold-окна переходит в IDLE_LISTENING без резкого обрыва.
+        assertEquals(
+            DavidLiveVisualState.DAVID_SPEAKING,
+            DavidLiveVisualStateResolver.resolve(
+                connectionState = DavidLiveConnectionState.DAVID_SPEAKING,
+                activeSpeaker = DavidLiveSpeaker.DAVID,
+                isPlaybackDrained = false,
+                isWithinDavidSpeechHold = true
+            )
+        )
+        assertEquals(
+            DavidLiveVisualState.IDLE_LISTENING,
+            DavidLiveVisualStateResolver.resolve(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                activeSpeaker = DavidLiveSpeaker.NONE,
+                isPlaybackDrained = true,
+                isWithinDavidSpeechHold = false
+            )
+        )
+    }
+
+    @Test
+    fun `mandatory transitions - full pipeline Thinking to Finance Lookup to Analyzing to Preparing Response to David Speaking and Offline recovery`() = runBlocking {
+        val fakeAccounts = listOf(
+            AccountEntity(id = "a1", budgetId = "b1", name = "Основная", balance = 150_000.0, type = "card")
+        )
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "b1",
+            transactionDao = createReadOnlyTransactionDao(emptyList()),
+            categoryDao = createReadOnlyCategoryDao(emptyList()),
+            goalDao = createReadOnlyGoalDao(emptyList()),
+            accountDao = createReadOnlyAccountDao(fakeAccounts)
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+
+        // 1. SetupComplete подтверждает готовность сессии и переводит CONNECTING -> IDLE_LISTENING
+        controller.processServerMessageForTest("""{"setupComplete": {}}""")
+        assertTrue(controller.isSessionReady.value)
+        assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
+
+        // 2. Пользователь произнёс фразу -> модель переходит к осмыслению (THINKING)
+        controller.processServerMessageForTest(
+            """{"serverContent": {"inputTranscription": {"text": "Сколько у меня денег на счетах?"}}}"""
+        )
+        assertEquals(DavidLiveVisualState.THINKING, controller.visualState.value)
+
+        // 3. Модель вызывает финансовый инструмент -> мгновенный переход в FINANCE_LOOKUP (и далее ANALYZING по завершении чтения БД)
+        controller.processServerMessageForTest(
+            """
+            {
+              "toolCall": {
+                "functionCalls": [
+                  {"id": "c1", "name": "${DavidLiveFinancialToolsProvider.TOOL_FINANCIAL_OVERVIEW}", "args": {}}
+                ]
+              }
+            }
+            """.trimIndent()
+        )
+        assertTrue(
+            "Visual state during/right after toolCall must be FINANCE_LOOKUP or ANALYZING",
+            controller.visualState.value == DavidLiveVisualState.FINANCE_LOOKUP ||
+                controller.visualState.value == DavidLiveVisualState.ANALYZING
+        )
+
+        // 4. После получения данных инструмента при приходе внутренней мысли модель переходит в ANALYZING -> PREPARING_RESPONSE
+        val analyzingResolved = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isAnalyzingToolData = true
+        )
+        assertEquals(DavidLiveVisualState.ANALYZING, analyzingResolved)
+
+        val preparingResolved = DavidLiveVisualStateResolver.resolve(
+            connectionState = DavidLiveConnectionState.LISTENING,
+            activeSpeaker = DavidLiveSpeaker.NONE,
+            isPreparingResponse = true
+        )
+        assertEquals(DavidLiveVisualState.PREPARING_RESPONSE, preparingResolved)
+
+        // 5. Начинается голосовой ответ Давида -> DAVID_SPEAKING
+        controller.processServerMessageForTest(
+            """{"serverContent": {"outputTranscription": {"text": "На твоём счёте 150 тысяч рублей."}}}"""
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+
+        // 6. Обрыв сети во время анализа или речи Давида немедленно переводит сферу в OFFLINE (приоритет Offline!)
+        controller.simulateFailureForTest(
+            failureKind = DavidLiveConnectionFailureKind.NETWORK_OFFLINE,
+            customMessage = "Unable to resolve host generativelanguage.googleapis.com"
+        )
+        assertEquals(DavidLiveConnectionFailureKind.NETWORK_OFFLINE, controller.failureKind.value)
+        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
+        assertEquals(DavidLiveVisualState.OFFLINE, controller.visualState.value)
+
+        // 7. Ошибка 403 Invalid API key переводит в отдельное состояние ERROR (а не OFFLINE)
+        controller.simulateFailureForTest(
+            failureKind = DavidLiveConnectionFailureKind.INVALID_API_KEY,
+            customMessage = "API key not valid. Please pass a valid API key."
+        )
+        assertEquals(DavidLiveConnectionFailureKind.INVALID_API_KEY, controller.failureKind.value)
+        assertEquals(DavidLiveConnectionState.ERROR, controller.connectionState.value)
+        assertEquals(DavidLiveVisualState.ERROR, controller.visualState.value)
+
+        // 8. Повторный setupComplete восстанавливает рабочее состояние IDLE_LISTENING
+        controller.processServerMessageForTest("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionFailureKind.NONE, controller.failureKind.value)
+        assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
+    }
+
+    @Test
+    fun `high speaker volume loudspeaker echo during long David speech does not trigger false barge-in while genuine user interruption succeeds`() {
+        val engine = DavidLiveAudioEngine()
+        engine.setExternalHeadsetConnectedForTest(false)
+        engine.setHardwareAecEnabledForTest(false)
+        engine.setSpeakerVolumeRatioForTest(0.95f) // 95% громкость динамика
+
+        var nowMs = 100_000L
+        var bargeInTriggeredCount = 0
+
+        // 0. Пользователь только что громко задал вопрос перед ответом Давида (проверка сброса счётчика кадров при старте речи Давида)
+        val userQuestionFrame = createTonePcmFrame(rmsTarget = 0.22f)
+        repeat(4) {
+            engine.evaluateCaptureFrame(
+                pcmSamples = userQuestionFrame,
+                nowMs = nowMs,
+                onUserBargeIn = { bargeInTriggeredCount++ }
+            )
+            nowMs += 64L
+        }
+        assertEquals(0, bargeInTriggeredCount)
+
+        // 1. Давид начинает длинный голосовой ответ на высокой громкости динамика (digital RMS ~0.28f..0.34f).
+        // Микрофон захватывает сильное эхо динамика (RMS ~0.12f..0.19f, что значительно выше старого порога 0.08f).
+        val davidLoudFrame = createTonePcmFrame(rmsTarget = 0.30f, sampleCount = 1024)
+        val speakerEchoFrame = createTonePcmFrame(rmsTarget = 0.16f, sampleCount = 1024)
+
+        repeat(20) { step ->
+            engine.feedTestPcmFrame(
+                samples = davidLoudFrame,
+                sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+                speaker = DavidLiveSpeaker.DAVID,
+                nowMs = nowMs
+            )
+            val decision = engine.evaluateCaptureFrame(
+                pcmSamples = speakerEchoFrame,
+                nowMs = nowMs + 10L,
+                onUserBargeIn = { bargeInTriggeredCount++ }
+            )
+            assertFalse(
+                "High-volume loudspeaker echo (step=$step, micRms=${decision.micRms}, threshold=${decision.adaptiveBargeInThresholdRms}) must NOT trigger false barge-in",
+                decision.triggeredBargeIn
+            )
+            assertFalse(
+                "Speaker echo must be gated and never forwarded to Gemini Live server",
+                decision.shouldForwardMicChunkToServer
+            )
+            assertTrue(decision.suppressedAsEcho)
+            nowMs += 64L
+        }
+        assertEquals("David must finish speaking without self-interruption", 0, bargeInTriggeredCount)
+        assertEquals(DavidLiveSpeaker.DAVID, engine.activeSpeaker.value)
+
+        // 2. Теперь во время ответа Давида пользователь действительно начинает говорить в микрофон (ближнее поле + межслоговые паузы Давида)
+        val davidSyllableDipFrame = createTonePcmFrame(rmsTarget = 0.04f, sampleCount = 1024)
+        val userBargeInFrame = createTonePcmFrame(rmsTarget = 0.34f, sampleCount = 1024)
+
+        var lastDecision: DavidLiveAudioEngine.CaptureFrameDecision? = null
+        repeat(5) { idx ->
+            val currentDavidOut = if (idx % 2 == 1) davidSyllableDipFrame else davidLoudFrame
+            if (bargeInTriggeredCount == 0) {
+                engine.feedTestPcmFrame(
+                    samples = currentDavidOut,
+                    sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+                    speaker = DavidLiveSpeaker.DAVID,
+                    nowMs = nowMs
+                )
+            }
+            lastDecision = engine.evaluateCaptureFrame(
+                pcmSamples = userBargeInFrame,
+                nowMs = nowMs + 10L,
+                onUserBargeIn = { bargeInTriggeredCount++ }
+            )
+            nowMs += 64L
+        }
+
+        assertEquals("Genuine user speech must reliably interrupt David even at high volume", 1, bargeInTriggeredCount)
+        assertNotNull(lastDecision)
+        assertTrue(lastDecision!!.shouldForwardMicChunkToServer)
+        assertEquals(DavidLiveSpeaker.NONE, engine.activeSpeaker.value)
+    }
+
+    @Test
+    fun `normal speaker volume and after reconnect allow responsive user barge-in and suppress spurious server echo interrupted signal`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L,
+            readyFlashDurationMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val socket1 = fakeFactory.entries[0]
+        socket1.simulateOpen()
+        socket1.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // Симулируем переподключение после сетевого сбоя и проверяем работу защиты от эха и barge-in на новом сокете
+        socket1.simulateFailure(SocketTimeoutException("sent ping but didn't receive pong within 20000ms"))
+        val socket2 = fakeFactory.entries[1]
+        socket2.simulateOpen()
+        socket2.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // Давид начинает отвечать на обычной громкости (40%)
+        controller.audioEngine.setExternalHeadsetConnectedForTest(false)
+        controller.audioEngine.setSpeakerVolumeRatioForTest(0.40f)
+        val nowMs = System.currentTimeMillis()
+        socket2.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Разбираю твои регулярные платежи и доступный остаток."}}}"""
+        )
+        val davidAudio = createTonePcmFrame(rmsTarget = 0.20f, sampleCount = 2400)
+        controller.audioEngine.feedTestPcmFrame(
+            samples = davidAudio,
+            sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+            speaker = DavidLiveSpeaker.DAVID,
+            nowMs = nowMs
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertTrue(controller.audioEngine.hasPendingOrActiveModelPlayback(nowMs))
+
+        // 1. Ложный серверный interrupted=true (без подтверждённой речи пользователя при активном воспроизведении) игнорируется
+        socket2.simulateServerText("""{"serverContent":{"interrupted": true}}""")
+        assertEquals(
+            "Spurious server interrupted=true without user speech must not cut off active playback",
+            DavidLiveConnectionState.DAVID_SPEAKING,
+            controller.connectionState.value
+        )
+
+        // 2. Реальное перебивание пользователем на обычной громкости (4 кадра речи RMS 0.14f)
+        val userNormalVoice = createTonePcmFrame(rmsTarget = 0.14f, sampleCount = 1024)
+        var t = nowMs + 250L
+        repeat(4) {
+            controller.audioEngine.evaluateCaptureFrame(
+                pcmSamples = userNormalVoice,
+                nowMs = t,
+                onUserBargeIn = { controller.handleConfirmedUserBargeIn() }
+            )
+            t += 64L
+        }
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertEquals("Слушаю вас...", controller.liveSubtitle.value)
+
+        // 3. Запоздавшие транзитные пакеты прерванной реплики Давида игнорируются до начала нового хода
+        socket2.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Хвост старой прерванной реплики"}}}"""
+        )
+        assertEquals(
+            "In-flight chunks of an already-interrupted model turn must not flip state back to DAVID_SPEAKING",
+            DavidLiveConnectionState.LISTENING,
+            controller.connectionState.value
+        )
+
+        // 4. Новый вопрос пользователя сбрасывает флаг перебивания и позволяет Давиду ответить на новый вопрос
+        socket2.simulateServerText(
+            """{"serverContent":{"inputTranscription":{"text":"А сколько осталось на кафе?"}}}"""
+        )
+        socket2.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"На кафе осталось 1 500 рублей."}}}"""
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertEquals("На кафе осталось 1 500 рублей.", controller.liveSubtitle.value)
+
+        controller.endSession()
+    }
+
+    @Test
+    fun `high volume inter-word pauses do not false barge-in post-barge-in speech forwards and minimizing during answer preserves playback`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L,
+            readyFlashDurationMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val socket = fakeFactory.entries[0]
+        socket.simulateOpen()
+        socket.simulateServerText("""{"setupComplete": {}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        val engine = controller.audioEngine
+        engine.setExternalHeadsetConnectedForTest(false)
+        engine.setHardwareAecEnabledForTest(false)
+        engine.setSpeakerVolumeRatioForTest(1.0f)
+
+        var nowMs = System.currentTimeMillis()
+        val loudDavidWord = createTonePcmFrame(rmsTarget = 0.24f, sampleCount = 1024, sampleRateHz = 24_000)
+        val interWordPause = createTonePcmFrame(rmsTarget = 0.015f, sampleCount = 1024, sampleRateHz = 24_000)
+        val delayedSpeakerEcho = createTonePcmFrame(rmsTarget = 0.12f, sampleCount = 1024, sampleRateHz = 16_000)
+
+        // 1. На полной громкости (100%) во время межсловных пауз задержка эха AudioTrack (0.12f) НЕ вызывает ложный barge-in
+        var falseBargeIns = 0
+        repeat(12) { step ->
+            val outFrame = if (step % 4 in 2..3) interWordPause else loudDavidWord
+            engine.feedTestPcmFrame(
+                samples = outFrame,
+                sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+                speaker = DavidLiveSpeaker.DAVID,
+                nowMs = nowMs
+            )
+            val decision = engine.evaluateCaptureFrame(
+                pcmSamples = delayedSpeakerEcho,
+                nowMs = nowMs + 15L,
+                onUserBargeIn = { falseBargeIns++ }
+            )
+            assertFalse("Inter-word pause echo at step=$step must not trigger false barge-in", decision.triggeredBargeIn)
+            assertFalse("Inter-word pause echo must not be forwarded to server", decision.shouldForwardMicChunkToServer)
+            nowMs += 64L
+        }
+        assertEquals(0, falseBargeIns)
+
+        // 2. Длинный ответ со свёрнутым окном (MINIMIZED) и ранним turnComplete при наличии очереди аудио НЕ прерывает ответ Давида
+        val pcmBytes24k = ByteArray(4800) { idx -> if (idx % 2 == 0) 0x20 else 0x10 }
+        val b64Audio = android.util.Base64.encodeToString(pcmBytes24k, android.util.Base64.NO_WRAP)
+        socket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Продолжаю подробный разбор твоих расходов по всем категориям."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertTrue(engine.hasQueuedPlaybackChunks())
+
+        // Сворачиваем David Live в главное меню во время ответа
+        controller.minimizeSession()
+        assertEquals(DavidLiveDisplayMode.MINIMIZED, controller.displayMode.value)
+        assertEquals("Minimizing to bottom capsule must keep DAVID_SPEAKING active", DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertTrue("Minimizing must not flush queued model audio", engine.hasQueuedPlaybackChunks())
+
+        // Приходит turnComplete от сервера раньше окончания воспроизведения очереди — состояние остаётся DAVID_SPEAKING
+        socket.simulateServerText("""{"serverContent":{"turnComplete":true}}""")
+        assertEquals(
+            "Early server turnComplete while audio queue is still non-empty must keep state as DAVID_SPEAKING",
+            DavidLiveConnectionState.DAVID_SPEAKING,
+            controller.connectionState.value
+        )
+
+        // 3. Пользователь реально перебивает Давида голосом (barge-in), и последующие кадры речи пользователя (даже тише порога 0.08f)
+        // в течение 320 мс окна НЕ блокируются фильтром хвостового эха
+        val strongUserVoice = createTonePcmFrame(rmsTarget = 0.34f, sampleCount = 1024, sampleRateHz = 16_000)
+        val trailingUserSyllable = createTonePcmFrame(rmsTarget = 0.05f, sampleCount = 1024, sampleRateHz = 16_000)
+        var userBargeInCount = 0
+        repeat(4) {
+            engine.evaluateCaptureFrame(
+                pcmSamples = strongUserVoice,
+                nowMs = nowMs,
+                onUserBargeIn = {
+                    userBargeInCount++
+                    controller.handleConfirmedUserBargeIn(nowMs)
+                }
+            )
+            nowMs += 64L
+        }
+        assertEquals(1, userBargeInCount)
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // Следующие 3 кадра речи пользователя (через +64, +128, +192 мс — внутри 320 мс окна BARGE_IN_TAIL_ECHO_SUPPRESS_MS)
+        repeat(3) {
+            val followUpDecision = engine.evaluateCaptureFrame(
+                pcmSamples = trailingUserSyllable,
+                nowMs = nowMs
+            )
+            assertFalse("Post-barge-in user speech must not be suppressed as tail echo", followUpDecision.suppressedAsEcho)
+            assertTrue("Post-barge-in user speech must be forwarded to Gemini Live server", followUpDecision.shouldForwardMicChunkToServer)
+            nowMs += 64L
+        }
+
+        controller.endSession()
+    }
+
+    @Test
+    fun `long high-volume 80-100 percent answer with 700ms AudioTrack echo delay and nominal HAL AEC never self-interrupts`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L,
+            readyFlashDurationMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val socket = fakeFactory.entries[0]
+        socket.simulateOpen()
+        socket.simulateServerText("""{"setupComplete": {}}""")
+
+        val engine = controller.audioEngine
+        engine.setExternalHeadsetConnectedForTest(false)
+        // Даже если HAL формально сообщает echoCanceler.enabled == true, на громкости 80-100% в MODE_NORMAL
+        // акустическая защита не должна занижать запас порога
+        engine.setHardwareAecEnabledForTest(true)
+        engine.setSpeakerVolumeRatioForTest(0.95f)
+
+        var nowMs = System.currentTimeMillis()
+        // 1. Пользователь громко задал вопрос перед ответом Давида
+        val userQuestionFrame = createTonePcmFrame(rmsTarget = 0.25f, sampleCount = 1024, sampleRateHz = 16_000)
+        repeat(4) {
+            engine.evaluateCaptureFrame(pcmSamples = userQuestionFrame, nowMs = nowMs)
+            nowMs += 64L
+        }
+        assertTrue(engine.hasRecentConfirmedUserSpeech(nowMs))
+
+        // 2. Давид начинает длинный ответ (аудио + текст). Метка прежней речи пользователя должна сброситься,
+        // чтобы в первые 1.8 с ответа ложный серверный interrupted=true не прервал Давида.
+        val pcmBytes24k = ByteArray(9600) { idx -> if (idx % 2 == 0) 0x30 else 0x18 }
+        val b64Audio = android.util.Base64.encodeToString(pcmBytes24k, android.util.Base64.NO_WRAP)
+        socket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"Начинаю полный разбор всех твоих расходов, доходов и обязательств за месяц."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
+        )
+        assertFalse(
+            "Pre-turn user speech timestamp must be cleared when David starts speaking",
+            engine.hasRecentConfirmedUserSpeech(nowMs)
+        )
+
+        // Ложный серверный interrupted=true через 300 мс после старта ответа Давида подавляется
+        socket.simulateServerText("""{"serverContent":{"interrupted":true}}""")
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+
+        // 3. Симулируем длинный (25 секунд) ответ Давида на громкости 95% с паузами между фразами по 640 мс (10 кадров),
+        // во время которых из буфера AudioTrack (латентность ~350-650 мс) продолжает звучать громкое эхо предыдущих слов (RMS 0.20f)
+        val loudWord24k = createTonePcmFrame(rmsTarget = 0.28f, sampleCount = 1024, sampleRateHz = 24_000)
+        val silencePause24k = createTonePcmFrame(rmsTarget = 0.008f, sampleCount = 1024, sampleRateHz = 24_000)
+        val delayedLoudEcho16k = createTonePcmFrame(rmsTarget = 0.20f, sampleCount = 1024, sampleRateHz = 16_000)
+
+        var falseBargeIns = 0
+        repeat(60) { frameIdx ->
+            val phase = frameIdx % 15
+            val davidOut = if (phase < 5) loudWord24k else silencePause24k
+            engine.feedTestPcmFrame(
+                samples = davidOut,
+                sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+                speaker = DavidLiveSpeaker.DAVID,
+                nowMs = nowMs
+            )
+            val decision = engine.evaluateCaptureFrame(
+                pcmSamples = delayedLoudEcho16k,
+                nowMs = nowMs + 10L,
+                onUserBargeIn = { falseBargeIns++ }
+            )
+            assertFalse(
+                "Delayed AudioTrack loudspeaker echo at frame=$frameIdx (phase=$phase, refRms=${decision.playbackReferenceRms}, threshold=${decision.adaptiveBargeInThresholdRms}) must never self-interrupt David",
+                decision.triggeredBargeIn
+            )
+            assertFalse(decision.shouldForwardMicChunkToServer)
+            nowMs += 64L
+        }
+        assertEquals(0, falseBargeIns)
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+
+        controller.endSession()
+    }
+
+    @Test
+    fun `barge-in during modelTurn PCM drops all delayed old-turn chunks after inputTranscription and answers only the new user request`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val fakeFactory = FakeWebSocketFactory()
+        val controller = DavidLiveSessionController(
+            financialToolsProvider = provider,
+            webSocketFactory = fakeFactory,
+            maxAutoReconnectAttempts = 2,
+            autoReconnectDelayMs = 0L,
+            readyFlashDurationMs = 0L
+        )
+
+        controller.startSession("AIzaSyTestUserManualKey987654321")
+        val socket = fakeFactory.entries[0]
+        socket.simulateOpen()
+        socket.simulateServerText("""{"setupComplete": {}}""")
+
+        val engine = controller.audioEngine
+        engine.setExternalHeadsetConnectedForTest(false)
+        engine.setSpeakerVolumeRatioForTest(0.85f)
+
+        var nowMs = System.currentTimeMillis()
+        val pcmBytes24k = ByteArray(4800) { idx -> if (idx % 2 == 0) 0x24 else 0x12 }
+        val b64Audio = android.util.Base64.encodeToString(pcmBytes24k, android.util.Base64.NO_WRAP)
+
+        // 1. Давид начинает длинный ответ (Turn #1) с реальными modelTurn PCM пакетами
+        socket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"За прошлый месяц твои расходы составили 84 тысячи рублей."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
+        )
+        val davidWord = createTonePcmFrame(rmsTarget = 0.22f, sampleCount = 1024, sampleRateHz = 24_000)
+        engine.feedTestPcmFrame(
+            samples = davidWord,
+            sampleRateHz = DavidLiveAudioEngine.OUTPUT_SAMPLE_RATE_HZ,
+            speaker = DavidLiveSpeaker.DAVID,
+            nowMs = nowMs
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+
+        // 2. Пользователь перебивает Давида в середине ответа ("Стоп, а сколько я потратил на такси?")
+        val userStrongSpeech = createTonePcmFrame(rmsTarget = 0.34f, sampleCount = 1024, sampleRateHz = 16_000)
+        var confirmDecision: DavidLiveAudioEngine.CaptureFrameDecision? = null
+        repeat(4) {
+            confirmDecision = engine.evaluateCaptureFrame(
+                pcmSamples = userStrongSpeech,
+                nowMs = nowMs,
+                onUserBargeIn = { controller.handleConfirmedUserBargeIn(nowMs) }
+            )
+            nowMs += 64L
+        }
+        assertNotNull(confirmDecision)
+        assertTrue("4th frame of strong user speech must trigger barge-in", confirmDecision!!.triggeredBargeIn)
+        assertTrue(
+            "Pre-roll buffer must preserve the initial 3 speech frames + 2 silence lead-in frames so the beginning of user's utterance is not clipped",
+            confirmDecision!!.preRollPcmFramesToForward.size >= 5
+        )
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // 3. Приходит первый фрагмент распознавания новой речи пользователя (inputTranscription) ДО того,
+        // как сервер успел прислать interrupted=true или turnComplete=true для старого ответа Давида
+        socket.simulateServerText(
+            """{"serverContent":{"inputTranscription":{"text":"Стоп, а сколько я потратил"}}}"""
+        )
+        assertEquals("Стоп, а сколько я потратил", controller.liveSubtitle.value)
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+
+        // 4. Через 900 мс и через 2 100 мс (позже прежнего лимита 1 500 мс!) по сети приходят запоздавшие
+        // пакеты modelTurn PCM и outputTranscription от СТАРОГО прерванного ответа Давида (Turn #1).
+        // Они ОБЯЗАНЫ быть полностью отброшены и не должны ни возобновлять речь Давида, ни закрывать микрофон!
+        assertTrue(controller.isModelTurnSuppressedByLocalBargeIn(nowMs + 2_100L))
+        socket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":" Продолжаю старый прерванный ответ про супермаркеты и подписки."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
+        )
+        assertEquals(
+            "Delayed modelTurn PCM from the old interrupted turn must NEVER flip state back to DAVID_SPEAKING",
+            DavidLiveConnectionState.LISTENING,
+            controller.connectionState.value
+        )
+        assertFalse(
+            "Delayed modelTurn PCM from the old interrupted turn must NEVER be enqueued into AudioTrack",
+            engine.hasQueuedPlaybackChunks()
+        )
+        assertEquals(
+            "Live subtitle must remain on the user's new utterance, not the old David answer",
+            "Стоп, а сколько я потратил",
+            controller.liveSubtitle.value
+        )
+
+        // Микрофон остаётся открытым для окончания фразы пользователя и финальной паузы
+        val userNextFrameDecision = engine.evaluateCaptureFrame(
+            pcmSamples = createTonePcmFrame(rmsTarget = 0.14f, sampleCount = 1024, sampleRateHz = 16_000),
+            nowMs = nowMs + 600L
+        )
+        assertTrue("Microphone must stay open for the rest of user's new utterance", userNextFrameDecision.shouldForwardMicChunkToServer)
+
+        // 5. Пользователь договаривает вопрос, после чего сервер закрывает старый прерванный ход (interrupted=true)
+        socket.simulateServerText(
+            """{"serverContent":{"inputTranscription":{"text":" на такси?"}}}"""
+        )
+        assertEquals("Стоп, а сколько я потратил на такси?", controller.liveSubtitle.value)
+
+        socket.simulateServerText("""{"serverContent":{"interrupted":true}}""")
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertEquals(
+            "Server interrupted=true for the old turn must preserve the user's new subtitle",
+            "Стоп, а сколько я потратил на такси?",
+            controller.liveSubtitle.value
+        )
+
+        // 6. Теперь сервер начинает НОВЫЙ ответ Давида (Turn #2) строго по новому запросу пользователя
+        socket.simulateServerText(
+            """{"serverContent":{"outputTranscription":{"text":"На такси в этом месяце ты потратил 3 400 рублей."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
+        )
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertEquals("На такси в этом месяце ты потратил 3 400 рублей.", controller.liveSubtitle.value)
+
+        socket.simulateServerText("""{"serverContent":{"turnComplete":true}}""")
+        val (turns, _) = controller.endSession()
+        val userTurns = turns.filter { it.speaker == DavidLiveSpeaker.USER }
+        assertTrue(
+            "Full new user request after barge-in must be recorded as a single intact turn",
+            userTurns.any { it.text.contains("Стоп, а сколько я потратил на такси?") }
+        )
+    }
+
+    private fun createTonePcmFrame(
+        rmsTarget: Float,
+        sampleCount: Int = 1024,
+        frequencyHz: Double = 440.0,
+        sampleRateHz: Int = 16_000
+    ): ShortArray {
+        val amplitude = (rmsTarget * kotlin.math.sqrt(2.0) * 32767.0).coerceIn(0.0, 32760.0)
+        return ShortArray(sampleCount) { i ->
+            (sin(2.0 * PI * frequencyHz * i / sampleRateHz) * amplitude).toInt().toShort()
         }
     }
 
@@ -2499,3 +4032,5 @@ class DavidLiveUnitTest {
         assertEquals(0L, otherOverview.getLong("regularExpense30dRub"))
     }
 }
+
+

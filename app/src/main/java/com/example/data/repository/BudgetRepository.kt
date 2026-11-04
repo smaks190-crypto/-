@@ -42,7 +42,11 @@ data class BudgetBackup(
     val goals: List<GoalEntity>? = emptyList(),
     val categories: List<CategoryEntity>? = emptyList(),
     val accounts: List<AccountEntity>? = emptyList(),
-    val achievements: Map<String, Long>? = null
+    val achievements: Map<String, Long>? = null,
+    val formatVersion: Int = 1,
+    val profiles: List<BudgetProfileEntity>? = null,
+    val recurringPayments: List<com.example.data.db.RecurringPaymentEntity>? = null,
+    val executionLogs: List<com.example.data.db.RecurringExecutionLogEntity>? = null
 )
 
 class BudgetRepository(
@@ -251,43 +255,12 @@ class BudgetRepository(
 
     private val backupManager = BudgetBackupManager(
         context = this.context,
-        budgetProfileDao = budgetProfileDao,
-        transactionDao = transactionDao,
-        goalDao = goalDao,
-        categoryDao = categoryDao,
-        accountDao = accountDao,
-        allProfiles = allProfiles,
-        allTransactions = allTransactions,
-        allGoals = allGoals,
-        allCategories = allCategories,
-        allAccounts = allAccounts,
-        createProfile = ::createProfile,
-        clearAllData = ::clearAllData,
-        initializeDefaultCategories = ::initializeDefaultCategories,
-        recurringPaymentDao = recurringPaymentDao
+        db = db,
+        clearAllData = ::clearDatabaseData,
+        initializeDefaultCategories = ::initializeDefaultCategories
     )
 
     suspend fun syncToFile() = backupManager.syncToFile()
-
-    suspend fun seedRealisticTestBudget2026(
-        budgetId: String = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID
-    ) = backupManager.seedRealisticTestBudget2026(budgetId)
-
-    suspend fun ensureRealisticTestProfileExists(): BudgetProfileEntity {
-        val testId = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_BUDGET_ID
-        val existingProfile = budgetProfileDao.getProfileById(testId)
-        val profile = existingProfile ?: BudgetProfileEntity(
-            id = testId,
-            name = com.example.data.safetospend.RealisticTestBudget2026Seeder.TEST_PROFILE_NAME
-        ).also { budgetProfileDao.insertProfile(it) }
-
-        val testTxs = transactionDao.getTransactionsByBudgetId(testId).first()
-        val testRecs = recurringPaymentDao.getRecurringPaymentsByBudgetId(testId).first()
-        if (testTxs.isEmpty() || testRecs.isEmpty()) {
-            backupManager.seedRealisticTestBudget2026(testId)
-        }
-        return profile
-    }
 
     suspend fun createProfile(name: String): BudgetProfileEntity {
         val profile = BudgetProfileEntity(name = name)
@@ -313,6 +286,11 @@ class BudgetRepository(
     }
 
     suspend fun clearAllData() {
+        db.withTransaction { clearDatabaseData() }
+        backupManager.deleteStorageFile()
+    }
+
+    private suspend fun clearDatabaseData() {
         transactionDao.deleteAllTransactions()
         goalDao.deleteAllGoals()
         categoryDao.deleteAllCategories()
@@ -322,45 +300,56 @@ class BudgetRepository(
         notificationDao.deleteAllNotifications()
         recurringPaymentDao.deleteAllExecutionLogs()
         recurringPaymentDao.deleteAllRecurringPayments()
-        backupManager.deleteStorageFile()
     }
 
     // budget_storage.json больше не поддерживается в актуальном состоянии на каждую запись и используется только для миграции легаси-данных
     suspend fun ensureDefaultProfileExists(): BudgetProfileEntity {
         val existing = allProfiles.first()
-        val primaryProfile = if (existing.isEmpty()) {
+        if (existing.isEmpty()) {
             val default = BudgetProfileEntity(id = "default", name = "Казума Сато")
             budgetProfileDao.insertProfile(default)
             loadDemoData("default")
-            default
-        } else {
-            val firstProfile = existing.first()
-            val currentTxs = allTransactions.first()
-            if (currentTxs.isEmpty()) {
-                loadDemoData(firstProfile.id)
-            } else if (firstProfile.name == "Казума Сато" && currentTxs.none { it.subcategory.contains("Белуга") }) {
-                // Автоматическое обновление старого неполного демо-бюджета на полный сатирический год
-                loadDemoData(firstProfile.id)
-            }
-            firstProfile
+            return default
         }
-        ensureRealisticTestProfileExists()
-        return primaryProfile
+        // An existing empty budget is valid. Never replace user/imported records with demo data.
+        return existing.first()
     }
 
+
+    /** Edit only user-controlled fields; preserve the account, budget, ID and creation time. */
+    suspend fun updateTransactionDetails(
+        id: String,
+        budgetId: String,
+        type: String,
+        date: String,
+        category: String,
+        subcategory: String,
+        amount: Double
+    ): Boolean = db.withTransaction {
+        require(type == "income" || type == "expense")
+        require(amount.isFinite() && amount >= 0.0)
+        val existing = transactionDao.getTransactionsByBudgetId(budgetId).first()
+            .firstOrNull { it.id == id } ?: return@withTransaction false
+        saveTransactionAndExecutionLog(existing.copy(
+            type = type, date = date, category = category, subcategory = subcategory, amount = amount
+        ))
+        true
+    }
+
+    private suspend fun saveTransactionAndExecutionLog(transaction: TransactionEntity) {
+        transactionDao.insertTransaction(transaction)
+        val linkedLog = recurringPaymentDao.getExecutionLogByTransactionId(transaction.id)
+        val syncedLog = com.example.data.safetospend.RecurringTransactionConsistencyManager
+            .buildEditTransactionSyncTransition(transaction, linkedLog)
+        if (syncedLog != null) recurringPaymentDao.insertExecutionLog(syncedLog)
+    }
 
     suspend fun insertTransaction(transaction: TransactionEntity) {
         val opId = GlobalConsoleLogger.newOperationId("DB")
         val startMs = System.currentTimeMillis()
         try {
             db.withTransaction {
-                transactionDao.insertTransaction(transaction)
-                val linkedLog = recurringPaymentDao.getExecutionLogByTransactionId(transaction.id)
-                val syncedLog = com.example.data.safetospend.RecurringTransactionConsistencyManager
-                    .buildEditTransactionSyncTransition(transaction, linkedLog)
-                if (syncedLog != null) {
-                    recurringPaymentDao.insertExecutionLog(syncedLog)
-                }
+                saveTransactionAndExecutionLog(transaction)
             }
             GlobalConsoleLogger.recordDbOperation(
                 operationName = "INSERT transaction",
