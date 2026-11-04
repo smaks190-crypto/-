@@ -808,13 +808,22 @@ class DavidLiveSessionController(
      * Clears profile-bound transcripts and verified facts when the user switches the active budget profile.
      */
     fun onBudgetProfileChanged(newBudgetId: String) {
+        endSession()
         financialToolsProvider.setBudgetId(newBudgetId)
         synchronized(_transcriptTurns) {
             _transcriptTurns.clear()
+            pendingUserTranscript.clear()
+            pendingDavidTranscript.clear()
         }
-        pendingUserTranscript.clear()
-        pendingDavidTranscript.clear()
+        activePendingUserTurnId = null
+        activePendingDavidTurnId = null
+        activePendingUserTurnTimestampMs = 0L
+        activePendingDavidTurnTimestampMs = 0L
         hasOutputTranscriptionInCurrentTurn = false
+        speechSyncTracker.reset()
+        pendingServerTurnComplete.set(false)
+        _spokenTranscript.value = ""
+        publishLiveTranscriptTurns()
     }
 
     /**
