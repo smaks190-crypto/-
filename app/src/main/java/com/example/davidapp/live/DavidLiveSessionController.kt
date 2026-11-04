@@ -1852,16 +1852,6 @@ class DavidLiveSessionController(
                 if (!shouldUseAudioSyncedSubtitles() || audioEngine.isPlaybackCurrentlyDrained()) {
                     completeDavidTurnAfterPlaybackDrain()
                 }
-                if (!audioEngine.hasQueuedPlaybackChunks()) {
-                    _connectionState.value = if (_isMicMuted.value) {
-                        DavidLiveConnectionState.MUTED
-                    } else {
-                        DavidLiveConnectionState.LISTENING
-                    }
-                    if (!_isMicMuted.value && _liveSubtitle.value.isBlank()) {
-                        _liveSubtitle.value = "Говорите, я слушаю..."
-                    }
-                }
             }
         }
     }
@@ -2160,6 +2150,9 @@ class DavidLiveSessionController(
     }
 
     internal fun completeDavidTurnAfterPlaybackDrain() {
+        // A queued flow notification can lag behind a newly enqueued audio chunk.
+        // Queue emptiness alone does not mean that AudioTrack has finished playing.
+        if (!audioEngine.isPlaybackCurrentlyDrained()) return
         pendingServerTurnComplete.set(false)
         val finalDavidText = sanitizeSpokenSubtitle(peekPendingDavidTranscript())
         if (finalDavidText.isNotBlank()) {

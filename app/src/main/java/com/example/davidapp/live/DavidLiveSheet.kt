@@ -224,14 +224,11 @@ internal fun resolveVisualStateColors(
     visualState: DavidLiveVisualState,
     isMicMuted: Boolean = false
 ): Pair<Color, Color> {
+    if (shouldApplyMutedVisualPalette(visualState, isMicMuted)) {
+        return MutedSlatePrimary to MutedSilverSecondary
+    }
     return when (visualState) {
-        DavidLiveVisualState.IDLE_LISTENING -> {
-            if (isMicMuted) {
-                Color(0xFF94A3B8) to Color(0xFF64748B)
-            } else {
-                EmeraldStatus to PeakMintWave
-            }
-        }
+        DavidLiveVisualState.IDLE_LISTENING -> EmeraldStatus to PeakMintWave
         DavidLiveVisualState.USER_SPEAKING -> TurquoiseUser to CyanSpeaking
         DavidLiveVisualState.THINKING -> CyanSpeaking to TurquoiseUser
         DavidLiveVisualState.FINANCE_LOOKUP -> PeakMintWave to TurquoiseUser

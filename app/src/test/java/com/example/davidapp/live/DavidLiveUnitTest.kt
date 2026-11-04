@@ -2545,6 +2545,11 @@ class DavidLiveUnitTest {
             """{"serverContent":{"outputTranscription":{"text":"На кафе осталось 1 500 рублей."}}}"""
         )
         assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        // Text is revealed with the new answer's audible audio, never ahead of playback.
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 24_000L, audibleSamples24k = 24_000L, isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
         assertEquals("На кафе осталось 1 500 рублей.", controller.liveSubtitle.value)
 
         controller.endSession()
@@ -2869,6 +2874,11 @@ class DavidLiveUnitTest {
             """{"serverContent":{"outputTranscription":{"text":"На такси в этом месяце ты потратил 3 400 рублей."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
         )
         assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        // Text is revealed with the new answer's audible audio, never ahead of playback.
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 24_000L, audibleSamples24k = 24_000L, isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
         assertEquals("На такси в этом месяце ты потратил 3 400 рублей.", controller.liveSubtitle.value)
 
         socket.simulateServerText("""{"serverContent":{"turnComplete":true}}""")
@@ -4376,7 +4386,7 @@ class DavidLiveUnitTest {
             goalDao = null,
             accountDao = null
         )
-        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+        val controller = DavidLiveSessionController(financialToolsProvider = provider, controllerDispatcher = QueuedLiveDispatcher())
 
         // 1. Проверка компенсации буфера AudioTrack (200 мс) и старта ЦАП (100 мс) в computeAudibleSamplesAt
         val startMs = 10_000L
