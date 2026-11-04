@@ -103,6 +103,17 @@ object BudgetPreferencesRepository {
             bPrefs.getBoolean("is_sound_enabled", true)
     }
 
+    fun setSoundEnabled(context: Context, enabled: Boolean) {
+        appPrefs(context).edit()
+            .putBoolean("sound_enabled", enabled)
+            .putBoolean("is_sound_enabled", enabled)
+            .commit()
+        budgetPrefs(context).edit()
+            .putBoolean("sound_enabled", enabled)
+            .putBoolean("is_sound_enabled", enabled)
+            .commit()
+    }
+
     fun getUserSafetyFloorRub(context: Context, budgetId: String? = null): Double {
         val prefs = budgetPrefs(context)
         if (!budgetId.isNullOrBlank() && prefs.contains("safety_floor_rub_$budgetId")) {

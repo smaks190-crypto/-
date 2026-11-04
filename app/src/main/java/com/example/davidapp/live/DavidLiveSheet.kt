@@ -104,6 +104,32 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import com.example.ui.components.BrandFrogAvatar
+import kotlinx.coroutines.delay
+import kotlin.math.cos
+
 private val LiveScreenBgTop = Color(0xFF060A12)
 private val LiveScreenBgBottom = Color(0xFF090F1B)
 private val SubtitleBubbleSurface = Color(0xFF101826)
@@ -198,14 +224,11 @@ internal fun resolveVisualStateColors(
     visualState: DavidLiveVisualState,
     isMicMuted: Boolean = false
 ): Pair<Color, Color> {
+    if (shouldApplyMutedVisualPalette(visualState, isMicMuted)) {
+        return MutedSlatePrimary to MutedSilverSecondary
+    }
     return when (visualState) {
-        DavidLiveVisualState.IDLE_LISTENING -> {
-            if (isMicMuted) {
-                ErrorCrimson to IdleWaveSlate
-            } else {
-                EmeraldStatus to PeakMintWave
-            }
-        }
+        DavidLiveVisualState.IDLE_LISTENING -> EmeraldStatus to PeakMintWave
         DavidLiveVisualState.USER_SPEAKING -> TurquoiseUser to CyanSpeaking
         DavidLiveVisualState.THINKING -> CyanSpeaking to TurquoiseUser
         DavidLiveVisualState.FINANCE_LOOKUP -> PeakMintWave to TurquoiseUser
@@ -246,14 +269,17 @@ fun DavidLiveHorizontalWaveVisualizer(
     val isDavidSpeaking = effectiveVisualState == DavidLiveVisualState.DAVID_SPEAKING ||
         connectionState == DavidLiveConnectionState.DAVID_SPEAKING ||
         activeSpeaker == DavidLiveSpeaker.DAVID
-    val isUserSpeaking = effectiveVisualState == DavidLiveVisualState.USER_SPEAKING ||
-        activeSpeaker == DavidLiveSpeaker.USER ||
-        (!isMicMuted && energyClamped > 0.16f)
+    val isUserSpeaking = !isMicMuted && (
+        effectiveVisualState == DavidLiveVisualState.USER_SPEAKING ||
+            activeSpeaker == DavidLiveSpeaker.USER ||
+            energyClamped > 0.08f
+        )
     val isProcessing = effectiveVisualState == DavidLiveVisualState.THINKING ||
         effectiveVisualState == DavidLiveVisualState.FINANCE_LOOKUP ||
         effectiveVisualState == DavidLiveVisualState.ANALYZING ||
         effectiveVisualState == DavidLiveVisualState.PREPARING_RESPONSE
-    val isVoiceOrProcessActive = (isDavidSpeaking || isUserSpeaking || isProcessing) &&
+    val isIdleListeningUnmuted = effectiveVisualState == DavidLiveVisualState.IDLE_LISTENING && !isMicMuted
+    val isVoiceOrProcessActive = (isDavidSpeaking || isUserSpeaking || isProcessing || isIdleListeningUnmuted) &&
         effectiveVisualState != DavidLiveVisualState.OFFLINE &&
         effectiveVisualState != DavidLiveVisualState.ERROR &&
         effectiveVisualState != DavidLiveVisualState.API_MISSING
@@ -262,20 +288,46 @@ fun DavidLiveHorizontalWaveVisualizer(
     val waveActivity by animateFloatAsState(
         targetValue = when {
             isDavidSpeaking || isUserSpeaking -> 1f
-            isProcessing -> 0.48f
-            else -> 0.14f
+            isProcessing -> 0.52f
+            isIdleListeningUnmuted -> 0.50f
+            else -> 0.12f
         },
         animationSpec = tween(
-            durationMillis = if (isVoiceOrProcessActive) 95 else 380,
+            durationMillis = if (isDavidSpeaking || isUserSpeaking) 75 else 380,
             easing = FastOutSlowInEasing
         ),
         label = "horizontal_wave_activity"
     )
 
+    // Continuous 60fps wave phase so the horizontal visualizer animates fluidly during speech
+    val infiniteTransition = rememberInfiniteTransition(label = "horizontal_wave_phase_transition")
+    val wavePhaseRad by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2.0 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1650, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "horizontal_wave_phase_rad"
+    )
+
     val radialEnvelope = remember { DavidLiveSpectrumAnalyzer().getRadialSpatialEnvelope() }
-    val (statePrimaryColor, stateSecondaryColor) = remember(effectiveVisualState, isMicMuted) {
+    val (targetPrimaryColor, targetSecondaryColor) = remember(effectiveVisualState, isMicMuted) {
         resolveVisualStateColors(effectiveVisualState, isMicMuted)
     }
+    val statePrimaryColor by animateColorAsState(
+        targetValue = targetPrimaryColor,
+        animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
+        label = "wave_primary_color"
+    )
+    val stateSecondaryColor by animateColorAsState(
+        targetValue = targetSecondaryColor,
+        animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
+        label = "wave_secondary_color"
+    )
+
+    val totalBars = barCount.coerceIn(12, 36)
+    val smoothedBarMagnitudes = remember(totalBars) { FloatArray(totalBars) { 0.08f } }
 
     Canvas(
         modifier = modifier
@@ -283,47 +335,38 @@ fun DavidLiveHorizontalWaveVisualizer(
                 contentDescription = "Горизонтальная звуковая волна David Live"
             }
     ) {
-        val totalBars = barCount.coerceIn(12, 36)
         val widthPx = size.width
         val heightPx = size.height
         val centerY = heightPx / 2f
         val stepX = widthPx / (totalBars + 1).toFloat()
-        val strokeWidth = (stepX * 0.52f).coerceIn(2.4.dp.toPx(), 4.5.dp.toPx())
+        val strokeWidth = (stepX * 0.48f).coerceIn(2.0.dp.toPx(), 4.0.dp.toPx())
         val minBarHalfHeight = (heightPx * 0.08f).coerceAtLeast(1.8.dp.toPx())
-        val maxBarHalfHeight = (heightPx * 0.46f).coerceAtLeast(minBarHalfHeight + 2f)
+        val maxBarHalfHeight = (heightPx * 0.47f).coerceAtLeast(minBarHalfHeight + 2f)
 
-        if (waveActivity > 0.2f && (!isMicMuted || isDavidSpeaking || isProcessing)) {
-            drawRoundRect(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        statePrimaryColor.copy(alpha = (0.18f + 0.22f * energyClamped) * waveActivity),
-                        Color.Transparent
-                    ),
-                    center = Offset(widthPx / 2f, centerY),
-                    radius = (widthPx * 0.48f).coerceAtLeast(16f)
-                ),
-                topLeft = Offset.Zero,
-                size = Size(widthPx, heightPx),
-                cornerRadius = CornerRadius(heightPx / 2f, heightPx / 2f)
-            )
-        }
-
-        val rayCount = DavidLiveSpectrumAnalyzer.RAY_COUNT
         for (i in 0 until totalBars) {
             val normPos = (i + 0.5f) / totalBars.toFloat()
-            val centerEnvelope = sin(PI * normPos.toDouble()).toFloat().pow(1.28f)
+            val centerEnvelope = sin(PI * normPos.toDouble()).toFloat().pow(1.22f)
 
-            val distFromCenter = kotlin.math.abs(normPos - 0.5f) * 2f
-            val rayIdx = ((distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
-            val env = radialEnvelope.getOrElse(rayIdx) { 0.7f }.coerceAtLeast(0.38f)
-            val rawRay = (rayMagnitudes.getOrElse(rayIdx) { 0.08f } / env).coerceIn(0f, 1f)
+            val targetMagnitude = computeHorizontalWaveBarTargetMagnitude(
+                barIndex = i,
+                totalBars = totalBars,
+                rayMagnitudes = rayMagnitudes,
+                radialEnvelope = radialEnvelope,
+                overallEnergy = energyClamped,
+                wavePhaseRad = wavePhaseRad,
+                waveActivity = waveActivity,
+                isMicMuted = isMicMuted,
+                isUserSpeaking = isUserSpeaking,
+                isDavidSpeaking = isDavidSpeaking,
+                isProcessing = isProcessing,
+                isIdleListeningUnmuted = isIdleListeningUnmuted
+            )
 
-            val activeMagnitude = if (isMicMuted && !isDavidSpeaking && !isProcessing) {
-                0.06f
-            } else {
-                (rawRay.coerceAtLeast(if (isProcessing) 0.32f else 0.08f) *
-                    (0.35f + 0.85f * centerEnvelope) * waveActivity).coerceIn(0.06f, 1f)
-            }
+            // Fast elastic attack (0.58f) when speaking, smooth organic decay (0.24f)
+            val prevMag = smoothedBarMagnitudes[i]
+            val smoothingFactor = if (targetMagnitude > prevMag) 0.58f else 0.24f
+            val activeMagnitude = (prevMag + (targetMagnitude - prevMag) * smoothingFactor).coerceIn(0.06f, 1f)
+            smoothedBarMagnitudes[i] = activeMagnitude
 
             val halfBar = minBarHalfHeight + (maxBarHalfHeight - minBarHalfHeight) * activeMagnitude
             val x = stepX * (i + 1)
@@ -331,9 +374,9 @@ fun DavidLiveHorizontalWaveVisualizer(
             val barColor = when {
                 effectiveVisualState == DavidLiveVisualState.OFFLINE -> ErrorCrimson.copy(alpha = 0.65f)
                 effectiveVisualState == DavidLiveVisualState.API_MISSING -> GoldApiMissing.copy(alpha = 0.68f)
-                effectiveVisualState == DavidLiveVisualState.ERROR -> PurpleCriticalError.copy(alpha = 0.68f)
-                isMicMuted && !isDavidSpeaking -> IdleWaveSlate.copy(alpha = 0.65f)
-                !isVoiceOrProcessActive -> statePrimaryColor.copy(alpha = 0.48f)
+                effectiveVisualState == DavidLiveVisualState.ERROR -> ErrorCrimson.copy(alpha = 0.68f)
+                isMicMuted && !isDavidSpeaking -> IdleWaveSlate.copy(alpha = 0.58f)
+                !isVoiceOrProcessActive -> statePrimaryColor.copy(alpha = 0.46f)
                 else -> lerp(
                     statePrimaryColor,
                     stateSecondaryColor,
@@ -341,10 +384,43 @@ fun DavidLiveHorizontalWaveVisualizer(
                 )
             }
 
+            val topY = centerY - halfBar
+            val bottomY = centerY + halfBar
+
+            // Soft diffused per-bar aura instead of a rectangular background glow
+            if (waveActivity > 0.18f && (!isMicMuted || isDavidSpeaking || isProcessing)) {
+                val haloHalfBar = (halfBar * 1.32f).coerceAtMost(heightPx * 0.49f)
+                val haloAlpha = (0.08f + 0.18f * activeMagnitude * centerEnvelope) * waveActivity
+                drawLine(
+                    brush = Brush.verticalGradient(
+                        0.0f to Color.Transparent,
+                        0.28f to statePrimaryColor.copy(alpha = haloAlpha * 0.65f),
+                        0.50f to barColor.copy(alpha = haloAlpha),
+                        0.72f to statePrimaryColor.copy(alpha = haloAlpha * 0.65f),
+                        1.0f to Color.Transparent,
+                        startY = centerY - haloHalfBar,
+                        endY = centerY + haloHalfBar
+                    ),
+                    start = Offset(x, centerY - haloHalfBar),
+                    end = Offset(x, centerY + haloHalfBar),
+                    strokeWidth = strokeWidth * 2.35f,
+                    cap = StrokeCap.Round
+                )
+            }
+
+            // Soft vertical gradient bar with tapered luminous tips
             drawLine(
-                color = barColor,
-                start = Offset(x, centerY - halfBar),
-                end = Offset(x, centerY + halfBar),
+                brush = Brush.verticalGradient(
+                    0.0f to barColor.copy(alpha = barColor.alpha * 0.42f),
+                    0.22f to barColor.copy(alpha = barColor.alpha * 0.88f),
+                    0.50f to lerp(barColor, Color.White, 0.22f * activeMagnitude).copy(alpha = barColor.alpha),
+                    0.78f to barColor.copy(alpha = barColor.alpha * 0.88f),
+                    1.0f to barColor.copy(alpha = barColor.alpha * 0.42f),
+                    startY = topY,
+                    endY = bottomY
+                ),
+                start = Offset(x, topY),
+                end = Offset(x, bottomY),
                 strokeWidth = strokeWidth,
                 cap = StrokeCap.Round
             )
@@ -1162,7 +1238,7 @@ fun DavidLiveSheet(
                                 modifier = Modifier.fillMaxWidth().testTag("david_live_subtitle_bubble")
                             ) {
                                 Text(
-                                    text = speech,
+                                    text = extractActiveSpeechBubbleSegment(speech).activeText,
                                     style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
                                     color = com.example.ui.theme.Slate100,
                                     maxLines = 4,
@@ -1283,11 +1359,11 @@ fun DavidLiveSheet(
                                     .size(50.dp)
                                     .clip(CircleShape)
                                     .background(
-                                        if (isMicMuted) ErrorCrimson.copy(alpha = 0.18f) else CancelPillSurface
+                                        if (isMicMuted) Color(0xFF94A3B8).copy(alpha = 0.16f) else CancelPillSurface
                                     )
                                     .border(
                                         width = 1.dp,
-                                        color = if (isMicMuted) ErrorCrimson.copy(alpha = 0.72f) else CancelPillBorder,
+                                        color = if (isMicMuted) Color(0xFF94A3B8).copy(alpha = 0.64f) else CancelPillBorder,
                                         shape = CircleShape
                                     )
                                     .clickable(
@@ -1500,4 +1576,93 @@ fun DavidLiveDebugStateStrip(
             }
         }
     }
+}
+
+internal fun isDefaultStatusSubtitlePlaceholder(text: String?): Boolean {
+    val trimmed = text?.trim().orEmpty()
+    return trimmed.isEmpty() ||
+        trimmed == "Я здесь, слушаю тебя" ||
+        trimmed == "Слушаю..." ||
+        trimmed == "Говорю..." ||
+        trimmed == "Вот что я думаю..." ||
+        trimmed == "Говорите, я слушаю..." ||
+        trimmed == "Давид отвечает..." ||
+        trimmed == "Слушаю вас" ||
+        trimmed == "Слушаю вас..." ||
+        trimmed == "Слушаю тебя..." ||
+        trimmed == "Микрофон отключён" ||
+        trimmed == "Подключаюсь к Давиду..."
+}
+internal fun computeHorizontalWaveBarTargetMagnitude(
+    barIndex: Int,
+    totalBars: Int,
+    rayMagnitudes: List<Float>,
+    radialEnvelope: FloatArray,
+    overallEnergy: Float,
+    wavePhaseRad: Float,
+    waveActivity: Float,
+    isMicMuted: Boolean,
+    isUserSpeaking: Boolean,
+    isDavidSpeaking: Boolean,
+    isProcessing: Boolean,
+    isIdleListeningUnmuted: Boolean
+): Float {
+    if (isMicMuted && !isDavidSpeaking && !isProcessing) {
+        return 0.06f
+    }
+
+    val normPos = (barIndex + 0.5f) / totalBars.coerceAtLeast(1).toFloat()
+    val centerEnvelope = sin(PI * normPos.toDouble()).toFloat().pow(1.22f)
+    val distFromCenter = kotlin.math.abs(normPos - 0.5f) * 2f
+
+    val rayCount = DavidLiveSpectrumAnalyzer.RAY_COUNT
+    // Направляем центральные столбики на голосовые форманты (индексы 6..20 и 30..44 соответствуют 140–2800 Гц),
+    // где сосредоточена основная энергия живого голоса пользователя
+    val vocalRayIdx = (8 + (distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
+    val neighborRayIdx = (vocalRayIdx + 2) % rayCount
+    val highRayIdx = ((distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
+
+    val envVocal = radialEnvelope.getOrElse(vocalRayIdx) { 0.65f }.coerceAtLeast(0.38f)
+    val envNeighbor = radialEnvelope.getOrElse(neighborRayIdx) { 0.65f }.coerceAtLeast(0.38f)
+    val envHigh = radialEnvelope.getOrElse(highRayIdx) { 0.70f }.coerceAtLeast(0.38f)
+    val vocalRay = maxOf(
+        (rayMagnitudes.getOrElse(vocalRayIdx) { 0.06f } / envVocal).coerceIn(0f, 1f),
+        (rayMagnitudes.getOrElse(neighborRayIdx) { 0.06f } / envNeighbor).coerceIn(0f, 1f) * 0.92f
+    )
+    val highRay = (rayMagnitudes.getOrElse(highRayIdx) { 0.06f } / envHigh).coerceIn(0f, 1f)
+    val rawRay = (0.76f * vocalRay + 0.24f * highRay).coerceIn(0f, 1f)
+
+    var peakRay = 0f
+    var sumRay = 0f
+    for (r in rayMagnitudes) {
+        if (r > peakRay) peakRay = r
+        sumRay += r
+    }
+    val meanRay = if (rayMagnitudes.isNotEmpty()) sumRay / rayMagnitudes.size else 0f
+    val rawVoiceEnergy = maxOf(overallEnergy.coerceIn(0f, 1f), peakRay * 0.90f, meanRay * 1.55f).coerceIn(0f, 1f)
+
+    val isSpeakingActive = isUserSpeaking || isDavidSpeaking || (isIdleListeningUnmuted && rawVoiceEnergy > 0.045f)
+    if (isSpeakingActive) {
+        // Нелинейное усиление чувствительности для живого голоса (нормальная речь даёт 62%–96% амплитуды в центре)
+        val curvedEnergy = rawVoiceEnergy.coerceAtLeast(0.08f).pow(0.50f).coerceIn(0.24f, 1f)
+        val harmonicFloor = maxOf(rawRay, peakRay * 0.78f).coerceIn(0.12f, 1f)
+        val combinedSignal = maxOf(
+            curvedEnergy * 0.88f,
+            0.44f * harmonicFloor.pow(0.65f) + 0.62f * curvedEnergy
+        ).coerceIn(0.24f, 1f)
+
+        // Бегущая артикуляционная волна создаёт живое движение соседних столбиков в такт слогам речи
+        val waveA = ((sin(wavePhaseRad * 3.0 + barIndex * 0.78) + 1.0) * 0.5).toFloat()
+        val waveB = ((cos(wavePhaseRad * 5.0 - barIndex * 1.24) + 1.0) * 0.5).toFloat()
+        val dynamicArticulation = 0.74f + 0.52f * (0.62f * waveA + 0.38f * waveB)
+
+        val shaped = combinedSignal * dynamicArticulation * (0.36f + 0.78f * centerEnvelope) * waveActivity
+        return shaped.coerceIn(0.10f, 1f)
+    }
+
+    // Спокойное плавное дыхание волн в режиме ожидания (IDLE_LISTENING)
+    val idleBreathing = 0.55f + 0.45f * ((sin(wavePhaseRad * 1.0 + barIndex * 0.65) + 1.0) * 0.5).toFloat()
+    val idleContour = 0.10f + 0.24f * centerEnvelope * idleBreathing
+    val baseSignal = maxOf(rawRay * 0.65f, if (isIdleListeningUnmuted) idleContour else 0.08f)
+    return (baseSignal * (0.32f + 0.76f * centerEnvelope) * waveActivity).coerceIn(0.06f, 1f)
 }

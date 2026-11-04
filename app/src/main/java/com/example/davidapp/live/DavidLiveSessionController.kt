@@ -182,6 +182,21 @@ class DavidLiveSessionController(
     val transcriptTurns: List<DavidLiveTranscriptTurn>
         get() = synchronized(_transcriptTurns) { _transcriptTurns.toList() }
 
+    private val _liveTranscriptTurns = MutableStateFlow<List<DavidLiveTranscriptTurn>>(emptyList())
+    val liveTranscriptTurns: StateFlow<List<DavidLiveTranscriptTurn>> = _liveTranscriptTurns.asStateFlow()
+
+    var onTranscriptTurnsChanged: ((List<DavidLiveTranscriptTurn>) -> Unit)? = null
+
+    private val liveSessionEpoch = AtomicInteger(0)
+    private val liveTurnSequence = AtomicInteger(0)
+    private var activePendingUserTurnId: String? = null
+    private var activePendingUserTurnTimestampMs: Long = 0L
+    private var activePendingDavidTurnId: String? = null
+    private var activePendingDavidTurnTimestampMs: Long = 0L
+
+    internal val speechSyncTracker = DavidLiveSpeechSyncTracker()
+    private val pendingServerTurnComplete = AtomicBoolean(false)
+
     private val pendingUserTranscript = StringBuilder()
     private val pendingDavidTranscript = StringBuilder()
     private var hasOutputTranscriptionInCurrentTurn: Boolean = false
@@ -261,7 +276,11 @@ class DavidLiveSessionController(
 
     init {
         controllerScope.launch { audioEngine.activeSpeaker.collect { recomputeVisualState() } }
-        controllerScope.launch { audioEngine.isPlaybackDrained.collect { recomputeVisualState() } }
+        controllerScope.launch { audioEngine.isPlaybackDrained.collect { drained ->
+            if (drained && pendingServerTurnComplete.get()) completeDavidTurnAfterPlaybackDrain()
+            else recomputeVisualState()
+        } }
+        controllerScope.launch { audioEngine.audibleDavidTurnSamples.collect { syncDavidSpokenSubtitleWithAudio() } }
         controllerScope.launch { audioEngine.isWithinUserSpeechHold.collect { recomputeVisualState() } }
         controllerScope.launch { audioEngine.isWithinDavidSpeechHold.collect { recomputeVisualState() } }
         controllerScope.launch { _connectionState.collect { recomputeVisualState() } }
@@ -511,6 +530,11 @@ class DavidLiveSessionController(
             _transcriptTurns.clear()
         }
         clearPendingTranscripts()
+        liveSessionEpoch.incrementAndGet()
+        speechSyncTracker.reset()
+        pendingServerTurnComplete.set(false)
+        audioEngine.resetDavidTurnSampleCounters()
+        publishLiveTranscriptTurns()
         _spokenTranscript.value = ""
         financialToolsProvider.clearVerifiedFacts()
         _isMicMuted.value = false
@@ -784,13 +808,22 @@ class DavidLiveSessionController(
      * Clears profile-bound transcripts and verified facts when the user switches the active budget profile.
      */
     fun onBudgetProfileChanged(newBudgetId: String) {
+        endSession()
         financialToolsProvider.setBudgetId(newBudgetId)
         synchronized(_transcriptTurns) {
             _transcriptTurns.clear()
+            pendingUserTranscript.clear()
+            pendingDavidTranscript.clear()
         }
-        pendingUserTranscript.clear()
-        pendingDavidTranscript.clear()
+        activePendingUserTurnId = null
+        activePendingDavidTurnId = null
+        activePendingUserTurnTimestampMs = 0L
+        activePendingDavidTurnTimestampMs = 0L
         hasOutputTranscriptionInCurrentTurn = false
+        speechSyncTracker.reset()
+        pendingServerTurnComplete.set(false)
+        _spokenTranscript.value = ""
+        publishLiveTranscriptTurns()
     }
 
     /**
@@ -799,8 +832,12 @@ class DavidLiveSessionController(
     fun recordTranscriptTurn(
         speaker: DavidLiveSpeaker,
         text: String,
-        wasInterrupted: Boolean = false
+        wasInterrupted: Boolean = false,
+        explicitId: String? = null,
+        explicitTimestampMs: Long? = null
     ) {
+        val pendingId = if (speaker == DavidLiveSpeaker.USER) activePendingUserTurnId else activePendingDavidTurnId
+        val pendingTs = if (speaker == DavidLiveSpeaker.USER) activePendingUserTurnTimestampMs else activePendingDavidTurnTimestampMs
         val clean = sanitizeSpokenSubtitle(text)
         if (clean.isEmpty()) return
         synchronized(_transcriptTurns) {
@@ -817,13 +854,23 @@ class DavidLiveSessionController(
             } else {
                 _transcriptTurns.add(
                     DavidLiveTranscriptTurn(
+                        id = explicitId ?: pendingId ?: "live_turn_${liveSessionEpoch.get()}_${liveTurnSequence.incrementAndGet()}_${speaker.name.lowercase()}",
                         speaker = speaker,
                         text = clean,
+                        timestampMs = explicitTimestampMs ?: pendingTs.takeIf { it > 0L } ?: maxOf(System.currentTimeMillis(), (_transcriptTurns.lastOrNull()?.timestampMs ?: 0L) + 1L),
                         wasInterrupted = wasInterrupted
                     )
                 )
             }
         }
+        if (speaker == DavidLiveSpeaker.USER) {
+            activePendingUserTurnId = null
+            activePendingUserTurnTimestampMs = 0L
+        } else {
+            activePendingDavidTurnId = null
+            activePendingDavidTurnTimestampMs = 0L
+        }
+        publishLiveTranscriptTurns()
     }
 
     /**
@@ -974,7 +1021,7 @@ class DavidLiveSessionController(
     private fun handleModelPlaybackDrained(connectionGen: Int) {
         if (intentionalClose.get() || connectionGen != sessionGeneration.get() || !setupCompleted.get()) return
         if (_connectionState.value == DavidLiveConnectionState.DAVID_SPEAKING) {
-            flushPendingTranscripts(markDavidInterrupted = false)
+            completeDavidTurnAfterPlaybackDrain()
             _connectionState.value = if (_isMicMuted.value) {
                 DavidLiveConnectionState.MUTED
             } else {
@@ -1641,6 +1688,7 @@ class DavidLiveSessionController(
             if (cleanedUserText.isNotBlank()) {
                 _liveSubtitle.value = cleanedUserText
                 _spokenTranscript.value = cleanedUserText
+                publishLiveTranscriptTurns()
                 _isModelThinking.value = true
                 recomputeVisualState()
             }
@@ -1676,8 +1724,9 @@ class DavidLiveSessionController(
             _connectionState.value = DavidLiveConnectionState.DAVID_SPEAKING
             val cleanedDavidText = sanitizeSpokenSubtitle(currentDavidText)
             if (cleanedDavidText.isNotBlank()) {
-                _liveSubtitle.value = cleanedDavidText
-                _spokenTranscript.value = cleanedDavidText
+                speechSyncTracker.updateTranscript(cleanedDavidText,
+                    audioEngine.enqueuedDavidTurnSamples.value, audioEngine.audibleDavidTurnSamples.value)
+                syncDavidSpokenSubtitleWithAudio()
                 resetProcessingFlags()
                 recomputeVisualState()
             }
@@ -1726,7 +1775,7 @@ class DavidLiveSessionController(
                             pendingDavidTranscript.toString()
                         }
                         _liveSubtitle.value = sanitizeSpokenSubtitle(currentDavidText)
-                        _spokenTranscript.value = _liveSubtitle.value
+                        syncDavidSpokenSubtitleWithAudio()
                     }
                 }
 
@@ -1764,6 +1813,7 @@ class DavidLiveSessionController(
         }
 
         if (serverContent.optBoolean("turnComplete", false)) {
+            pendingServerTurnComplete.set(true)
             resetProcessingFlags()
             recomputeVisualState()
             val wasClosingInterruptedTurn = awaitingInterruptedServerTurnClose.get() ||
@@ -1799,16 +1849,8 @@ class DavidLiveSessionController(
                     scheduleBargeInFollowUpWatchdog(ws, connectionGen)
                 }
             } else {
-                flushPendingTranscripts(markDavidInterrupted = false)
-                if (!audioEngine.hasQueuedPlaybackChunks()) {
-                    _connectionState.value = if (_isMicMuted.value) {
-                        DavidLiveConnectionState.MUTED
-                    } else {
-                        DavidLiveConnectionState.LISTENING
-                    }
-                    if (!_isMicMuted.value && _liveSubtitle.value.isBlank()) {
-                        _liveSubtitle.value = "Говорите, я слушаю..."
-                    }
+                if (!shouldUseAudioSyncedSubtitles() || audioEngine.isPlaybackCurrentlyDrained()) {
+                    completeDavidTurnAfterPlaybackDrain()
                 }
             }
         }
@@ -2004,6 +2046,8 @@ class DavidLiveSessionController(
     }
 
     internal fun handleConfirmedUserBargeIn(nowMs: Long = System.currentTimeMillis()) {
+        pendingServerTurnComplete.set(false)
+        speechSyncTracker.reset()
         resetProcessingFlags()
         val hadUnclosedServerPcm = unclosedServerPcmTurnActive.get() || audioEngine.hasQueuedPlaybackChunks()
         userInterruptedCurrentModelTurn.set(true)
@@ -2059,6 +2103,163 @@ class DavidLiveSessionController(
             }
         }
         hasOutputTranscriptionInCurrentTurn = false
+        speechSyncTracker.reset()
+        pendingServerTurnComplete.set(false)
+        audioEngine.resetDavidTurnSampleCounters()
+        publishLiveTranscriptTurns()
+    }
+
+    internal fun shouldUseAudioSyncedSubtitles(): Boolean {
+        return audioEngine.isEngineRunning() || audioEngine.enqueuedDavidTurnSamples.value > 0L
+    }
+
+    internal fun syncDavidSpokenSubtitleWithAudio() {
+        val fullCleaned = sanitizeSpokenSubtitle(peekPendingDavidTranscript())
+        if (fullCleaned.isBlank()) return
+
+        if (!shouldUseAudioSyncedSubtitles()) {
+            _liveSubtitle.value = fullCleaned
+            _spokenTranscript.value = fullCleaned
+            publishLiveTranscriptTurns()
+            return
+        }
+
+        val enqueuedSamples = audioEngine.enqueuedDavidTurnSamples.value
+        val audibleSamples = audioEngine.audibleDavidTurnSamples.value
+        speechSyncTracker.updateTranscript(
+            sanitizedFullText = fullCleaned,
+            enqueuedSamples24k = enqueuedSamples,
+            currentAudibleSamples24k = audibleSamples
+        )
+
+        val forceAll = pendingServerTurnComplete.get() &&
+            (audioEngine.isPlaybackCurrentlyDrained() || enqueuedSamples == 0L)
+        val visibleText = speechSyncTracker.resolveVisibleSubtitle(
+            audibleSamples24k = audibleSamples,
+            forceRevealAll = forceAll
+        )
+        if (visibleText.isNotBlank()) {
+            _liveSubtitle.value = visibleText
+            _spokenTranscript.value = visibleText
+        } else if (_connectionState.value == DavidLiveConnectionState.DAVID_SPEAKING) {
+            // Пока первые ~50 мс голоса Давида ещё находятся в буфере DAC, не показываем будущие слова заранее
+            _liveSubtitle.value = "Давид отвечает..."
+            _spokenTranscript.value = ""
+        }
+        publishLiveTranscriptTurns()
+    }
+
+    internal fun completeDavidTurnAfterPlaybackDrain() {
+        // A queued flow notification can lag behind a newly enqueued audio chunk.
+        // Queue emptiness alone does not mean that AudioTrack has finished playing.
+        if (!audioEngine.isPlaybackCurrentlyDrained()) return
+        pendingServerTurnComplete.set(false)
+        val finalDavidText = sanitizeSpokenSubtitle(peekPendingDavidTranscript())
+        if (finalDavidText.isNotBlank()) {
+            _liveSubtitle.value = finalDavidText
+            _spokenTranscript.value = finalDavidText
+        }
+        flushPendingTranscripts()
+        resetProcessingFlags()
+        _connectionState.value = if (_isMicMuted.value) DavidLiveConnectionState.MUTED else DavidLiveConnectionState.LISTENING
+        if (!_isMicMuted.value && _liveSubtitle.value.isBlank()) {
+            _liveSubtitle.value = "Говорите, я слушаю..."
+        }
+        recomputeVisualState()
+    }
+
+    internal fun publishLiveTranscriptTurns() {
+        val snapshot = synchronized(_transcriptTurns) {
+            val list = ArrayList<DavidLiveTranscriptTurn>(_transcriptTurns.size + 2)
+            list.addAll(_transcriptTurns)
+            val now = System.currentTimeMillis()
+
+            val cleanPendingUser = sanitizeSpokenSubtitle(pendingUserTranscript.toString())
+            if (cleanPendingUser.isNotBlank()) {
+                val lastFinal = list.lastOrNull()
+                if (lastFinal != null &&
+                    lastFinal.speaker == DavidLiveSpeaker.USER &&
+                    now - lastFinal.timestampMs < 3500L
+                ) {
+                    list[list.lastIndex] = lastFinal.copy(
+                        text = "${lastFinal.text} $cleanPendingUser".trim(),
+                        isFinal = false
+                    )
+                } else {
+                    val prevTs = lastFinal?.timestampMs ?: 0L
+                    val userId = activePendingUserTurnId ?: run {
+                        "live_turn_${liveSessionEpoch.get()}_${liveTurnSequence.incrementAndGet()}_user".also {
+                            activePendingUserTurnId = it
+                        }
+                    }
+                    val userTs = activePendingUserTurnTimestampMs.takeIf { it > prevTs } ?: run {
+                        maxOf(now, prevTs + 1L).also {
+                            activePendingUserTurnTimestampMs = it
+                        }
+                    }
+                    list.add(
+                        DavidLiveTranscriptTurn(
+                            id = userId,
+                            speaker = DavidLiveSpeaker.USER,
+                            text = cleanPendingUser,
+                            timestampMs = userTs,
+                            isFinal = false
+                        )
+                    )
+                }
+            }
+
+            val cleanPendingDavid = sanitizeSpokenSubtitle(peekPendingDavidTranscript())
+            if (cleanPendingDavid.isNotBlank()) {
+                val visibleDavidText = if (shouldUseAudioSyncedSubtitles()) {
+                    val forceAll = pendingServerTurnComplete.get() &&
+                        (audioEngine.isPlaybackCurrentlyDrained() || audioEngine.enqueuedDavidTurnSamples.value == 0L)
+                    speechSyncTracker.resolveVisibleSubtitle(
+                        audibleSamples24k = audioEngine.audibleDavidTurnSamples.value,
+                        forceRevealAll = forceAll
+                    )
+                } else {
+                    cleanPendingDavid
+                }
+                if (visibleDavidText.isNotBlank()) {
+                    val lastItem = list.lastOrNull()
+                    if (lastItem != null &&
+                        lastItem.speaker == DavidLiveSpeaker.DAVID &&
+                        lastItem.isFinal &&
+                        now - lastItem.timestampMs < 3500L
+                    ) {
+                        list[list.lastIndex] = lastItem.copy(
+                            text = "${lastItem.text} $visibleDavidText".trim(),
+                            isFinal = false
+                        )
+                    } else {
+                        val prevTs = lastItem?.timestampMs ?: 0L
+                        val davidId = activePendingDavidTurnId ?: run {
+                            "live_turn_${liveSessionEpoch.get()}_${liveTurnSequence.incrementAndGet()}_david".also {
+                                activePendingDavidTurnId = it
+                            }
+                        }
+                        val davidTs = activePendingDavidTurnTimestampMs.takeIf { it > prevTs } ?: run {
+                            maxOf(now, prevTs + 1L).also {
+                                activePendingDavidTurnTimestampMs = it
+                            }
+                        }
+                        list.add(
+                            DavidLiveTranscriptTurn(
+                                id = davidId,
+                                speaker = DavidLiveSpeaker.DAVID,
+                                text = visibleDavidText,
+                                timestampMs = davidTs,
+                                isFinal = false
+                            )
+                        )
+                    }
+                }
+            }
+            list.toList()
+        }
+        _liveTranscriptTurns.value = snapshot
+        onTranscriptTurnsChanged?.invoke(snapshot)
     }
 
     companion object {
@@ -2220,3 +2421,189 @@ class DavidLiveSessionController(
         }
     }
 }
+
+internal class DavidLiveSpeechSyncTracker {
+
+    data class ScheduledWord(
+        val word: String,
+        val revealAtSample24k: Long,
+        val estimatedEndSample24k: Long
+    )
+
+    private val lock = Any()
+    private var currentTranscript: String = ""
+    private var lastScheduledEnqueuedSamples24k: Long = -1L
+    private var scheduledWords: List<ScheduledWord> = emptyList()
+    private var maxRevealedWordCount: Int = 0
+    private var lastObservedAudibleSamples24k: Long = 0L
+
+    fun reset() {
+        synchronized(lock) {
+            currentTranscript = ""
+            lastScheduledEnqueuedSamples24k = -1L
+            scheduledWords = emptyList()
+            maxRevealedWordCount = 0
+            lastObservedAudibleSamples24k = 0L
+        }
+    }
+
+    fun getScheduledWordsForTest(): List<ScheduledWord> = synchronized(lock) { scheduledWords }
+
+    /**
+     * Обновляет расписание появления слов на шкале 24 кГц сэмплов.
+     *
+     * Гарантирует строго монотонное поведение без ретроактивных прыжков:
+     * 1. Если ни текст `sanitizedFullText`, ни объём буферизованного аудио `enqueuedSamples24k`
+     *    не изменились, существующее расписание не пересчитывается и не сдвигается во время проигрывания.
+     * 2. Уже открытые слова (`index < maxRevealedWordCount`) сохраняют свои зафиксированные отметки
+     *    `revealAtSample24k` и никогда не скрываются обратно, когда по WebSocket приходят новые пакеты
+     *    транскрипции (`outputTranscription`) или аудио (`enqueuedSamples24k`).
+     */
+    fun updateTranscript(
+        sanitizedFullText: String,
+        enqueuedSamples24k: Long,
+        currentAudibleSamples24k: Long = -1L
+    ) {
+        val cleaned = sanitizedFullText.trim()
+        if (cleaned.isEmpty()) {
+            reset()
+            return
+        }
+        val words = cleaned.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        if (words.isEmpty()) {
+            reset()
+            return
+        }
+
+        synchronized(lock) {
+            if (currentAudibleSamples24k >= 0L) {
+                lastObservedAudibleSamples24k = maxOf(lastObservedAudibleSamples24k, currentAudibleSamples24k)
+            }
+            if (cleaned == currentTranscript &&
+                enqueuedSamples24k == lastScheduledEnqueuedSamples24k &&
+                scheduledWords.size == words.size
+            ) {
+                return
+            }
+
+            val previousWords = scheduledWords
+            var sharedPrefixCount = 0
+            val maxShared = minOf(previousWords.size, words.size)
+            while (sharedPrefixCount < maxShared && previousWords[sharedPrefixCount].word == words[sharedPrefixCount]) {
+                sharedPrefixCount++
+            }
+            val lockedCount = minOf(maxRevealedWordCount, sharedPrefixCount)
+            maxRevealedWordCount = lockedCount
+
+            currentTranscript = cleaned
+            lastScheduledEnqueuedSamples24k = enqueuedSamples24k
+
+            val rawDurations = LongArray(words.size) { idx ->
+                estimateWordSpokenSamples24k(words[idx])
+            }
+
+            if (lockedCount >= words.size) {
+                scheduledWords = previousWords.take(words.size)
+                return
+            }
+
+            val result = ArrayList<ScheduledWord>(words.size)
+            for (i in 0 until lockedCount) {
+                result.add(previousWords[i])
+            }
+
+            val anchorSample = if (lockedCount > 0) {
+                result.last().estimatedEndSample24k
+            } else {
+                INITIAL_VOICE_ONSET_SAMPLES_24K
+            }
+
+            var remainingRawSpan = 0L
+            for (i in lockedCount until words.size) {
+                remainingRawSpan += rawDurations[i]
+            }
+            val safeRemainingRawSpan = remainingRawSpan.coerceAtLeast(1L)
+            val remainingAudioSpan = (enqueuedSamples24k - anchorSample).coerceAtLeast(0L)
+
+            // Масштабируем только ещё НЕ открытый хвост реплики в пределах (0.45..2.25),
+            // чтобы приход нового чанка никогда не сжимал и не растягивал уже показанные слова.
+            val tailScaleFactor = if (remainingAudioSpan > INITIAL_VOICE_ONSET_SAMPLES_24K) {
+                (remainingAudioSpan.toDouble() / safeRemainingRawSpan.toDouble()).coerceIn(0.45, 2.25)
+            } else {
+                1.0
+            }
+
+            var cursor = anchorSample
+            for (i in lockedCount until words.size) {
+                val startSample = cursor
+                val scaledDuration = (rawDurations[i] * tailScaleFactor).toLong().coerceAtLeast(1_200L)
+                val endSample = startSample + scaledDuration
+                result.add(
+                    ScheduledWord(
+                        word = words[i],
+                        revealAtSample24k = startSample,
+                        estimatedEndSample24k = endSample
+                    )
+                )
+                cursor = endSample
+            }
+
+            scheduledWords = result
+        }
+    }
+
+    /**
+     * Возвращает префикс транскрипции Давида, который уже реально прозвучал к отметке [audibleSamples24k].
+     * Гарантирует, что число открытых слов в рамках текущей реплики никогда не уменьшается.
+     */
+    fun resolveVisibleSubtitle(
+        audibleSamples24k: Long,
+        forceRevealAll: Boolean = false
+    ): String {
+        synchronized(lock) {
+            if (scheduledWords.isEmpty()) return ""
+            if (audibleSamples24k > lastObservedAudibleSamples24k) {
+                lastObservedAudibleSamples24k = audibleSamples24k
+            }
+            if (forceRevealAll) {
+                maxRevealedWordCount = scheduledWords.size
+                return currentTranscript
+            }
+            if (audibleSamples24k < INITIAL_VOICE_ONSET_SAMPLES_24K && maxRevealedWordCount == 0) {
+                return ""
+            }
+
+            val newlyEligibleCount = scheduledWords.count { it.revealAtSample24k <= audibleSamples24k }
+            val effectiveCount = maxOf(maxRevealedWordCount, newlyEligibleCount).coerceIn(0, scheduledWords.size)
+            maxRevealedWordCount = effectiveCount
+            if (effectiveCount <= 0) return ""
+
+            return scheduledWords
+                .subList(0, effectiveCount)
+                .joinToString(" ") { it.word }
+        }
+    }
+
+    companion object {
+        // Первое слово появляется только после того, как из динамика реально прозвучали первые ~50 мс речи (1200 сэмплов @ 24 кГц)
+        internal const val INITIAL_VOICE_ONSET_SAMPLES_24K = 1_200L
+        // ~55 мс (1320 сэмплов @ 24 кГц) на произнесение одного символа русской речи (~18 символов/сек)
+        internal const val SAMPLES_PER_CHAR_24K = 1_320L
+        // Естественная интонационная пауза между предложениями (. ! ? …): ~220 мс (5280 сэмплов)
+        internal const val SENTENCE_PAUSE_SAMPLES_24K = 5_280L
+        // Интонационная пауза на запятых и тире (, ; : —): ~90 мс (2160 сэмплов)
+        internal const val CLAUSE_PAUSE_SAMPLES_24K = 2_160L
+
+        internal fun estimateWordSpokenSamples24k(word: String): Long {
+            val coreChars = word.count { it.isLetterOrDigit() }.coerceAtLeast(2)
+            val lastChar = word.lastOrNull()
+            val punctuationPause = when (lastChar) {
+                '.', '!', '?', '…' -> SENTENCE_PAUSE_SAMPLES_24K
+                ',', ';', ':', '—', '–' -> CLAUSE_PAUSE_SAMPLES_24K
+                else -> 480L // ~20 мс межсловная связка
+            }
+            return coreChars * SAMPLES_PER_CHAR_24K + punctuationPause
+        }
+    }
+}
+

@@ -2545,6 +2545,11 @@ class DavidLiveUnitTest {
             """{"serverContent":{"outputTranscription":{"text":"На кафе осталось 1 500 рублей."}}}"""
         )
         assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        // Text is revealed with the new answer's audible audio, never ahead of playback.
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 24_000L, audibleSamples24k = 24_000L, isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
         assertEquals("На кафе осталось 1 500 рублей.", controller.liveSubtitle.value)
 
         controller.endSession()
@@ -2869,6 +2874,11 @@ class DavidLiveUnitTest {
             """{"serverContent":{"outputTranscription":{"text":"На такси в этом месяце ты потратил 3 400 рублей."},"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"$b64Audio"}}]}}}"""
         )
         assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        // Text is revealed with the new answer's audible audio, never ahead of playback.
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 24_000L, audibleSamples24k = 24_000L, isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
         assertEquals("На такси в этом месяце ты потратил 3 400 рублей.", controller.liveSubtitle.value)
 
         socket.simulateServerText("""{"serverContent":{"turnComplete":true}}""")
@@ -4042,6 +4052,790 @@ class DavidLiveUnitTest {
         override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) = Unit
     }
 
-}
+    @Test
+    fun `mute visual palette applies dimmed silver-slate colors to mic states without masking priority states or David speaking`() {
+        val micDrivenStates = listOf(
+            DavidLiveVisualState.IDLE_LISTENING,
+            DavidLiveVisualState.USER_SPEAKING,
+            DavidLiveVisualState.THINKING,
+            DavidLiveVisualState.FINANCE_LOOKUP,
+            DavidLiveVisualState.ANALYZING,
+            DavidLiveVisualState.PREPARING_RESPONSE
+        )
 
+        for (state in micDrivenStates) {
+            assertTrue(
+                "Muted visual palette must apply to $state when isMicMuted=true",
+                shouldApplyMutedVisualPalette(state, isMicMuted = true)
+            )
+            val unmutedPalette = resolveSpherePalette(state, isMicMuted = false)
+            val mutedPalette = resolveSpherePalette(state, isMicMuted = true)
+            assertEquals(MutedSlatePrimary, mutedPalette.primary)
+            assertEquals(MutedSilverSecondary, mutedPalette.secondary)
+            assertFalse(
+                "Sphere primary color for $state must change when mic is muted",
+                unmutedPalette.primary == mutedPalette.primary
+            )
+
+            val (sheetPrimary, sheetSecondary) = resolveVisualStateColors(state, isMicMuted = true)
+            assertEquals(MutedSlatePrimary, sheetPrimary)
+            assertEquals(MutedSilverSecondary, sheetSecondary)
+        }
+
+        // Приоритетные системные состояния и исходящая речь Давида НЕ маскируются mute-оформлением
+        val nonMaskedStates = listOf(
+            DavidLiveVisualState.DAVID_SPEAKING,
+            DavidLiveVisualState.OFFLINE,
+            DavidLiveVisualState.API_MISSING,
+            DavidLiveVisualState.ERROR,
+            DavidLiveVisualState.CONNECTING,
+            DavidLiveVisualState.RECONNECTING,
+            DavidLiveVisualState.SUCCESS
+        )
+
+        for (state in nonMaskedStates) {
+            assertFalse(
+                "Priority or outgoing speech state $state must NOT be masked by mic mute",
+                shouldApplyMutedVisualPalette(state, isMicMuted = true)
+            )
+            val unmutedPalette = resolveSpherePalette(state, isMicMuted = false)
+            val mutedPalette = resolveSpherePalette(state, isMicMuted = true)
+            assertEquals(
+                "Palette for $state must remain unchanged when mic is muted",
+                unmutedPalette,
+                mutedPalette
+            )
+            assertEquals(
+                resolveVisualStateColors(state, isMicMuted = false),
+                resolveVisualStateColors(state, isMicMuted = true)
+            )
+        }
+    }
+
+    @Test
+    fun `orbital motion speed hierarchy and continuous phase accumulator transition without resetting phase`() {
+        val offlineSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.OFFLINE)
+        val mutedIdleSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.IDLE_LISTENING, isMicMuted = true)
+        val idleSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.IDLE_LISTENING, isMicMuted = false)
+        val thinkingSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.THINKING)
+        val analyzingSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.ANALYZING)
+        val financeSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.FINANCE_LOOKUP)
+        val userQuietSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.USER_SPEAKING, audioEnergy = 0.1f)
+        val userLoudSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.USER_SPEAKING, audioEnergy = 0.9f)
+        val davidSpeakingSpeed = resolveTargetOrbitAngularSpeed(DavidLiveVisualState.DAVID_SPEAKING, audioEnergy = 0.85f)
+
+        assertTrue(offlineSpeed < mutedIdleSpeed)
+        assertTrue(mutedIdleSpeed < idleSpeed)
+        assertTrue(idleSpeed < thinkingSpeed)
+        assertTrue(thinkingSpeed < analyzingSpeed)
+        assertTrue(analyzingSpeed < financeSpeed)
+        assertTrue(financeSpeed < userQuietSpeed)
+        assertTrue("Audio energy must boost user speaking orbit speed", userLoudSpeed > userQuietSpeed)
+        assertTrue(davidSpeakingSpeed > thinkingSpeed)
+
+        // Непрерывное накопление фазы при смене состояний без сброса в 0
+        var phase = 0f
+        phase = advanceContinuousOrbitPhase(phase, deltaMs = 16L, angularSpeedRadPerSec = idleSpeed)
+        val afterIdle = phase
+        assertTrue(afterIdle > 0f)
+
+        phase = advanceContinuousOrbitPhase(phase, deltaMs = 16L, angularSpeedRadPerSec = userLoudSpeed)
+        val afterUserSpeech = phase
+        assertTrue("Phase must continue advancing from current value on state change", afterUserSpeech > afterIdle)
+
+        phase = advanceContinuousOrbitPhase(phase, deltaMs = 16L, angularSpeedRadPerSec = thinkingSpeed)
+        val afterThinking = phase
+        assertTrue("Phase must continue advancing during Thinking without resetting", afterThinking > afterUserSpeech)
+
+        // При включённом системном ограничении анимаций (reduceMotion = true) фаза остаётся стабильной
+        val frozenPhase = advanceContinuousOrbitPhase(
+            currentPhaseRad = afterThinking,
+            deltaMs = 16L,
+            angularSpeedRadPerSec = davidSpeakingSpeed,
+            reduceMotion = true
+        )
+        assertEquals(afterThinking, frozenPhase, 0.0001f)
+    }
+
+    @Test
+    fun `extractActiveSpeechBubbleSegment prevents completed phrase accumulation and splits long streams cleanly`() {
+        val singlePhrase = extractActiveSpeechBubbleSegment("Привет! ")
+        assertEquals("Привет!", singlePhrase.activeText)
+        assertEquals(0, singlePhrase.segmentIndex)
+
+        // Когда начинается следующее предложение в потоке транскрипции, в облачке отображается только новая активная фраза
+        val multiSentence = extractActiveSpeechBubbleSegment(
+            "Привет! Я проверил твой бюджет за октябрь. Сейчас расскажу про подписки"
+        )
+        assertEquals("Сейчас расскажу про подписки", multiSentence.activeText)
+        assertEquals(2, multiSentence.segmentIndex)
+
+        // Если все предложения уже закрыты знаками препинания, показывается последнее актуальное предложение без склейки со старыми
+        val twoCompletedSentences = extractActiveSpeechBubbleSegment(
+            "Записал расход 450 рублей в кафе. Баланс обновлён!"
+        )
+        assertEquals("Баланс обновлён!", twoCompletedSentences.activeText)
+        assertEquals(1, twoCompletedSentences.segmentIndex)
+
+        // Длинная фраза без точек автоматически делится по естественным границам синтагм, чтобы не копить простыню текста
+        val longRunOnClause = extractActiveSpeechBubbleSegment(
+            "Смотри внимательно на свои расходы за прошлую неделю, потому что в категории ресторанов и доставки мы вышли за лимит, а вот по супермаркетам всё идёт отлично"
+        )
+        assertTrue(
+            "Long unpunctuated stream must segment into a readable active clause",
+            longRunOnClause.activeText.length <= 138
+        )
+        assertTrue(longRunOnClause.segmentIndex >= 1)
+        assertTrue(longRunOnClause.activeText.contains("супермаркетам"))
+    }
+
+    @Test
+    fun `shouldDismissCompletedSpokenSubtitle clears finished speech when David finishes speaking and resets on next phrase`() {
+        val completedSpeech = "Записал 500 рублей на такси."
+
+        // 1. Во время активной речи Давида субтитр НЕ скрывается
+        assertFalse(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.DAVID_SPEAKING,
+                currentLiveSubtitle = completedSpeech,
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+
+        // 2. Сразу после завершения речи и перехода в IDLE_LISTENING отговорившая фраза уходит вверх и исчезает
+        assertTrue(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.IDLE_LISTENING,
+                currentLiveSubtitle = completedSpeech,
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+
+        // 3. Когда начинается следующая фраза (или пользователь начинает говорить), новое сообщение снова отображается
+        assertFalse(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.IDLE_LISTENING,
+                currentLiveSubtitle = "Слушаю следующий вопрос",
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+
+        // 4. Приоритетные карточки (OFFLINE / API_MISSING / ERROR) отображают собственные системные метаданные
+        assertTrue(
+            shouldDismissCompletedSpokenSubtitle(
+                visualState = DavidLiveVisualState.OFFLINE,
+                currentLiveSubtitle = completedSpeech,
+                lastCompletedSpokenSubtitle = completedSpeech
+            )
+        )
+    }
+
+    @Test
+    fun `evaluateSphereTouchGesture separates short tap action from hold and drag 3D energy attraction`() {
+        val touchSlopPx = 18f
+
+        // Короткий тап (< 165 мс и без сдвига) -> выполняется действие (Mute / Retry / API), без залипания притяжения
+        val shortTapOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = 95L,
+            maxDragDistancePx = 4f,
+            touchSlopPx = touchSlopPx,
+            wasCancelled = false
+        )
+        assertEquals(SphereTouchGestureOutcome.SHORT_TAP_ACTION, shortTapOutcome)
+
+        // Удержание пальца (>= 165 мс) на сфере -> активируется только притяжение света/сгустков без срабатывания тапа
+        val holdOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = SPHERE_TOUCH_HOLD_ACTIVATION_MS + 40L,
+            maxDragDistancePx = 3f,
+            touchSlopPx = touchSlopPx,
+            wasCancelled = false
+        )
+        assertEquals(SphereTouchGestureOutcome.HOLD_OR_DRAG_ATTRACTION, holdOutcome)
+
+        // Перемещение пальца по сфере (drag > touchSlop) даже за короткое время -> 3D-притяжение без ложного тапа
+        val dragOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = 80L,
+            maxDragDistancePx = touchSlopPx + 6f,
+            touchSlopPx = touchSlopPx,
+            wasCancelled = false
+        )
+        assertEquals(SphereTouchGestureOutcome.HOLD_OR_DRAG_ATTRACTION, dragOutcome)
+
+        // Отменённый жест (например, перехват скролла или сворачивание) -> безопасно игнорируется
+        val canceledOutcome = evaluateSphereTouchGesture(
+            pressDurationMs = 60L,
+            maxDragDistancePx = 2f,
+            touchSlopPx = touchSlopPx,
+            wasCancelled = true
+        )
+        assertEquals(SphereTouchGestureOutcome.CANCELLED, canceledOutcome)
+    }
+
+    @Test
+    fun `volumetric 3D sphere projection and cluster attraction respond to finger tracking and disperse smoothly`() {
+        val center = androidx.compose.ui.geometry.Offset(200f, 200f)
+        val sphereRadius = 120f
+
+        // 1. Проекция точки касания на переднюю полусферу сохраняет выпуклую глубину normZ > 0
+        val centerTouch = projectTouchTo3DSphere(
+            touchOffset = androidx.compose.ui.geometry.Offset(200f, 200f),
+            sphereCenter = center,
+            sphereRadius = sphereRadius
+        )
+        assertEquals(0f, centerTouch.normX, 0.001f)
+        assertEquals(0f, centerTouch.normY, 0.001f)
+        assertTrue("Center touch on convex sphere must have maximal positive Z depth", centerTouch.normZ > 0.99f)
+
+        val edgeTouch = projectTouchTo3DSphere(
+            touchOffset = androidx.compose.ui.geometry.Offset(350f, 200f),
+            sphereCenter = center,
+            sphereRadius = sphereRadius
+        )
+        val clampedRadialNorm = kotlin.math.hypot(edgeTouch.normX.toDouble(), edgeTouch.normY.toDouble()).toFloat()
+        assertTrue("Touch outside sphere rim must be clamped to convex surface boundary", clampedRadialNorm <= 0.96f)
+        assertTrue("Clamped rim touch must retain positive Z depth on front hemisphere", edgeTouch.normZ > 0.2f)
+
+        // 2. Плавное следование за пальцем по сфере и мягкое нарастание/рассеивание силы притяжения
+        val trackedX = interpolateTouchSurfaceCoordinate(currentValue = 0f, targetValue = 0.6f, deltaMs = 16L)
+        assertTrue(trackedX in 0.1f..0.55f)
+
+        var attraction = 0f
+        repeat(12) {
+            attraction = advanceTouchAttractionStrength(
+                currentStrength = attraction,
+                isTouchActive = true,
+                deltaMs = 16L
+            )
+        }
+        assertTrue("Holding finger on sphere must smoothly build attraction strength", attraction > 0.5f)
+
+        // 3. Внутренние 3D-сгустки распределены по передней и задней полусферам и стягиваются к точке касания
+        val spec = DefaultVolumetricClusters.first()
+        val unattractedCluster = computeVolumetricCluster3D(
+            clusterIndex = 0,
+            spec = spec,
+            center = center,
+            sphereRadius = sphereRadius,
+            phaseRad = 1.1f,
+            energy = 0.35f,
+            touchPoint3D = edgeTouch,
+            touchAttractionStrength = 0f
+        )
+        val attractedCluster = computeVolumetricCluster3D(
+            clusterIndex = 0,
+            spec = spec,
+            center = center,
+            sphereRadius = sphereRadius,
+            phaseRad = 1.1f,
+            energy = 0.35f,
+            touchPoint3D = edgeTouch,
+            touchAttractionStrength = 0.85f
+        )
+
+        val distBefore = kotlin.math.hypot(
+            (unattractedCluster.screenOffset.x - edgeTouch.projectedScreenOffset.x).toDouble(),
+            (unattractedCluster.screenOffset.y - edgeTouch.projectedScreenOffset.y).toDouble()
+        )
+        val distAfter = kotlin.math.hypot(
+            (attractedCluster.screenOffset.x - edgeTouch.projectedScreenOffset.x).toDouble(),
+            (attractedCluster.screenOffset.y - edgeTouch.projectedScreenOffset.y).toDouble()
+        )
+        assertTrue(
+            "3D light cluster must move closer to the finger touch point when attraction is active",
+            distAfter < distBefore
+        )
+        assertTrue(
+            "Attracted cluster must have positive touchPullFactor near the touch point",
+            attractedCluster.touchPullFactor > unattractedCluster.touchPullFactor
+        )
+
+        // Проверяем, что в ансамбле 3D-сгустков одновременно присутствуют элементы как передней (worldZ >= 0), так и задней (worldZ < 0) полусферы
+        val allClustersAtPhase = DefaultVolumetricClusters.mapIndexed { idx, clusterSpec ->
+            computeVolumetricCluster3D(
+                clusterIndex = idx,
+                spec = clusterSpec,
+                center = center,
+                sphereRadius = sphereRadius,
+                phaseRad = 0.75f,
+                energy = 0.25f,
+                touchPoint3D = null,
+                touchAttractionStrength = 0f
+            )
+        }
+        assertTrue("Sphere must have front-hemisphere 3D clusters", allClustersAtPhase.any { it.worldZ >= 0f })
+        assertTrue("Sphere must have back-hemisphere 3D clusters for volumetric depth", allClustersAtPhase.any { it.worldZ < 0f })
+
+        // 4. После отпускания пальца сгустки мягко расходятся обратно в обычный режим
+        var dispersed = attraction
+        repeat(60) {
+            dispersed = advanceTouchAttractionStrength(
+                currentStrength = dispersed,
+                isTouchActive = false,
+                deltaMs = 16L
+            )
+        }
+        assertTrue("Releasing finger must softly disperse touch attraction back toward 0", dispersed < 0.08f)
+    }
+
+    @Test
+    fun `david live speech sync tracker and session controller synchronize subtitle text with audible 24kHz audio playback`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val controller = DavidLiveSessionController(financialToolsProvider = provider, controllerDispatcher = QueuedLiveDispatcher())
+
+        // 1. Проверка компенсации буфера AudioTrack (200 мс) и старта ЦАП (100 мс) в computeAudibleSamplesAt
+        val startMs = 10_000L
+        // В момент t = startMs + 50ms (до завершения 100 мс старта ЦАП) реально услышанных сэмплов ещё 0
+        val beforeDacOnset = DavidLiveAudioEngine.computeAudibleSamplesAt(
+            writtenSamples24k = 24_000L,
+            turnStartWallMs = startMs,
+            lastWriteWallMs = startMs + 50L,
+            nowWallMs = startMs + 50L,
+            hasMoreQueuedAudio = true
+        )
+        assertEquals(0L, beforeDacOnset)
+
+        // В момент t = startMs + 600ms (500 мс реального звучания = 12 000 сэмплов @ 24 кГц),
+        // даже если в буфер уже записано 48 000 сэмплов, прозвучало ровно 12 000 сэмплов
+        val at500msAudible = DavidLiveAudioEngine.computeAudibleSamplesAt(
+            writtenSamples24k = 48_000L,
+            turnStartWallMs = startMs,
+            lastWriteWallMs = startMs + 600L,
+            nowWallMs = startMs + 600L,
+            hasMoreQueuedAudio = true
+        )
+        assertEquals(12_000L, at500msAudible)
+
+        // 2. Сервер Gemini Live присылает сразу два предложения в outputTranscription и 3.5 секунды аудио (84 000 сэмплов),
+        // плюс преждевременный turnComplete, пока AudioTrack только начинает озвучивать первое слово.
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = 0L,
+            isDrained = false
+        )
+
+        controller.processServerMessageForTest(
+            """
+            {
+              "serverContent": {
+                "outputTranscription": {
+                  "text": "Привет! Я проверил твой бюджет за октябрь. Сейчас расскажу про подписки."
+                },
+                "turnComplete": true
+              }
+            }
+            """.trimIndent()
+        )
+
+        // Пока audibleSamples24k == 0 (звук ещё не вышел из динамика), текст следующих предложений НЕ появляется заранее,
+        // а состояние остаётся DAVID_SPEAKING несмотря на пришедший с сервера turnComplete!
+        assertEquals(DavidLiveConnectionState.DAVID_SPEAKING, controller.connectionState.value)
+        assertEquals("Давид отвечает...", controller.liveSubtitle.value)
+        assertFalse(controller.liveSubtitle.value.contains("подписки"))
+
+        val scheduled = controller.speechSyncTracker.getScheduledWordsForTest()
+        assertTrue(scheduled.size >= 9)
+        val firstWordSample = scheduled.first().revealAtSample24k
+        val secondSentenceWord = scheduled.first { it.word.startsWith("Я") }
+        val thirdSentenceWord = scheduled.first { it.word.startsWith("Сейчас") }
+
+        // 3. Давид произносит первое слово («Привет!») -> в облачке появляется только «Привет!»
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = firstWordSample + 100L,
+            isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
+        assertEquals("Привет!", controller.liveSubtitle.value)
+        assertEquals("Привет!", extractActiveSpeechBubbleSegment(controller.liveSubtitle.value).activeText)
+
+        // 4. Давид произносит второе предложение («Я проверил твой бюджет за октябрь.») ->
+        // в облачке отображается второе предложение, а третье («Сейчас расскажу про подписки.») ещё НЕ появилось!
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = thirdSentenceWord.revealAtSample24k - 500L,
+            isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
+        assertTrue(controller.liveSubtitle.value.contains("Я проверил твой бюджет за октябрь."))
+        assertFalse(
+            "Third sentence must NOT appear in subtitle bubble before David's voice reaches it",
+            controller.liveSubtitle.value.contains("Сейчас")
+        )
+        assertEquals(
+            "Я проверил твой бюджет за октябрь.",
+            extractActiveSpeechBubbleSegment(controller.liveSubtitle.value).activeText
+        )
+        assertTrue(secondSentenceWord.revealAtSample24k < thirdSentenceWord.revealAtSample24k)
+
+        // 5. Голос Давида доходит до третьего предложения («Сейчас расскажу про подписки.») ->
+        // облачко синхронно переключается на третье предложение!
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = 84_000L,
+            isDrained = false
+        )
+        controller.syncDavidSpokenSubtitleWithAudio()
+        assertEquals(
+            "Сейчас расскажу про подписки.",
+            extractActiveSpeechBubbleSegment(controller.liveSubtitle.value).activeText
+        )
+
+        // 6. Когда воспроизведение аудио реально завершилось (isDrained = true), реплика фиксируется в истории и режим переходит в LISTENING
+        controller.audioEngine.simulateEnqueuedAndAudibleSamplesForTest(
+            enqueuedSamples24k = 84_000L,
+            audibleSamples24k = 84_000L,
+            isDrained = true
+        )
+        controller.completeDavidTurnAfterPlaybackDrain()
+        assertEquals(DavidLiveConnectionState.LISTENING, controller.connectionState.value)
+        assertEquals(1, controller.transcriptTurns.size)
+        assertEquals(
+            "Привет! Я проверил твой бюджет за октябрь. Сейчас расскажу про подписки.",
+            controller.transcriptTurns.first().text
+        )
+    }
+
+    @Test
+    fun `david live horizontal wave visualizer responds vividly to conversational user microphone levels and preserves spoken slot snapshots`() {
+        val analyzer = DavidLiveSpectrumAnalyzer()
+        // Имитируем реальный тихий сигнал микрофона после аппаратного шумоподавления VOICE_COMMUNICATION (RMS ~ 0.032, 320 Гц голос)
+        val rawMicSamples = ShortArray(512) { idx ->
+            val t = idx.toDouble() / 16_000.0
+            (kotlin.math.sin(2.0 * Math.PI * 320.0 * t) * 1450.0).toInt().toShort()
+        }
+        var sumSq = 0.0
+        for (sample in rawMicSamples) {
+            val norm = sample / 32768.0
+            sumSq += norm * norm
+        }
+        val rawRms = kotlin.math.sqrt(sumSq / rawMicSamples.size).toFloat()
+        assertTrue("Conversational VOICE_COMMUNICATION mic RMS should be in 0.015..0.06 range", rawRms in 0.015f..0.06f)
+
+        val boostedSamples = ShortArray(512)
+        DavidLiveAudioEngine.boostMicSamplesForVisualizer(
+            source = rawMicSamples,
+            destination = boostedSamples,
+            count = rawMicSamples.size,
+            rms = rawRms
+        )
+        val rays = analyzer.analyzePcmFrame(
+            pcmSamples = boostedSamples,
+            sampleCount = boostedSamples.size,
+            sampleRateHz = 16_000
+        )
+        val boostedEnergy = DavidLiveAudioEngine.computeUserVisualizerEnergy(
+            fftEnergy = analyzer.overallEnergy,
+            micRms = rawRms
+        )
+        assertTrue(
+            "Boosted user visualizer energy ($boostedEnergy) must be vivid (> 0.42f) for conversational speech",
+            boostedEnergy > 0.42f
+        )
+
+        val totalBars = 29
+        val radialEnvelope = analyzer.getRadialSpatialEnvelope()
+
+        val idleCenterBar = computeHorizontalWaveBarTargetMagnitude(
+            barIndex = 14,
+            totalBars = totalBars,
+            rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.02f },
+            radialEnvelope = radialEnvelope,
+            overallEnergy = 0.02f,
+            wavePhaseRad = 0.8f,
+            waveActivity = 0.25f,
+            isMicMuted = false,
+            isUserSpeaking = false,
+            isDavidSpeaking = false,
+            isProcessing = false,
+            isIdleListeningUnmuted = true
+        )
+        val userSpeakingCenterBarPhaseA = computeHorizontalWaveBarTargetMagnitude(
+            barIndex = 14,
+            totalBars = totalBars,
+            rayMagnitudes = rays,
+            radialEnvelope = radialEnvelope,
+            overallEnergy = boostedEnergy,
+            wavePhaseRad = 0.4f,
+            waveActivity = 1f,
+            isMicMuted = false,
+            isUserSpeaking = true,
+            isDavidSpeaking = false,
+            isProcessing = false,
+            isIdleListeningUnmuted = false
+        )
+        val userSpeakingCenterBarPhaseB = computeHorizontalWaveBarTargetMagnitude(
+            barIndex = 14,
+            totalBars = totalBars,
+            rayMagnitudes = rays,
+            radialEnvelope = radialEnvelope,
+            overallEnergy = boostedEnergy,
+            wavePhaseRad = 1.9f,
+            waveActivity = 1f,
+            isMicMuted = false,
+            isUserSpeaking = true,
+            isDavidSpeaking = false,
+            isProcessing = false,
+            isIdleListeningUnmuted = false
+        )
+
+        assertTrue(
+            "User speaking center bar ($userSpeakingCenterBarPhaseA) must be significantly taller than idle ($idleCenterBar)",
+            userSpeakingCenterBarPhaseA > idleCenterBar * 2.2f && userSpeakingCenterBarPhaseA > 0.55f
+        )
+        assertTrue(
+            "Traveling wave phase must actively articulate bar height during user speech",
+            kotlin.math.abs(userSpeakingCenterBarPhaseA - userSpeakingCenterBarPhaseB) > 0.02f
+        )
+
+        assertTrue(isDefaultStatusSubtitlePlaceholder("Я здесь, слушаю тебя"))
+        assertTrue(isDefaultStatusSubtitlePlaceholder("Говорю..."))
+        assertTrue(isDefaultStatusSubtitlePlaceholder("Слушаю..."))
+        assertFalse(isDefaultStatusSubtitlePlaceholder("Записал расход 450 рублей в категорию кафе."))
+    }
+
+    @Test
+    fun `david live conversation duplicates user and david turns into chat in real time and preserves them after session ends`() {
+        val provider = DavidLiveFinancialToolsProvider(
+            budgetId = "default",
+            transactionDao = null,
+            categoryDao = null,
+            goalDao = null,
+            accountDao = null
+        )
+        val mirroredSnapshots = mutableListOf<List<DavidLiveTranscriptTurn>>()
+        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+        controller.onTranscriptTurnsChanged = { turns ->
+            mirroredSnapshots.add(turns)
+        }
+
+        // 1. Пользователь произносит фразу по частям (streaming inputTranscription)
+        controller.processServerMessageForTest(
+            """{"serverContent":{"inputTranscription":{"text":"Давид, запиши кофе "}}}"""
+        )
+        assertTrue("Streaming user turn must be emitted immediately", controller.liveTranscriptTurns.value.isNotEmpty())
+        assertEquals(1, controller.liveTranscriptTurns.value.size)
+        assertEquals(DavidLiveSpeaker.USER, controller.liveTranscriptTurns.value[0].speaker)
+        assertEquals("Давид, запиши кофе", controller.liveTranscriptTurns.value[0].text)
+        assertFalse("Streaming user turn is not final yet", controller.liveTranscriptTurns.value[0].isFinal)
+        val firstUserTurnId = controller.liveTranscriptTurns.value[0].id
+
+        controller.processServerMessageForTest(
+            """{"serverContent":{"inputTranscription":{"text":"за 350 рублей"}}}"""
+        )
+        assertEquals(1, controller.liveTranscriptTurns.value.size)
+        assertEquals(
+            "Streaming user turn must update in-place with the same turn id",
+            firstUserTurnId,
+            controller.liveTranscriptTurns.value[0].id
+        )
+        assertEquals("Давид, запиши кофе за 350 рублей", controller.liveTranscriptTurns.value[0].text)
+
+        // 2. Давид начинает отвечать — реплика пользователя фиксируется (isFinal = true), а реплика Давида стримится с единым ID
+        controller.processServerMessageForTest(
+            """{"serverContent":{"outputTranscription":{"text":"Записал 350 рублей "}}}"""
+        )
+        assertEquals(2, controller.liveTranscriptTurns.value.size)
+        assertTrue("User turn must become final when David starts speaking", controller.liveTranscriptTurns.value[0].isFinal)
+        assertEquals(firstUserTurnId, controller.liveTranscriptTurns.value[0].id)
+        assertEquals(DavidLiveSpeaker.DAVID, controller.liveTranscriptTurns.value[1].speaker)
+        assertEquals("Записал 350 рублей", controller.liveTranscriptTurns.value[1].text)
+        assertFalse(controller.liveTranscriptTurns.value[1].isFinal)
+        val firstDavidTurnId = controller.liveTranscriptTurns.value[1].id
+
+        controller.processServerMessageForTest(
+            """{"serverContent":{"outputTranscription":{"text":"в категорию Кафе!"},"turnComplete":true}}"""
+        )
+        assertEquals(2, controller.liveTranscriptTurns.value.size)
+        assertEquals(
+            "David turn must keep the same ID when finalized on turnComplete",
+            firstDavidTurnId,
+            controller.liveTranscriptTurns.value[1].id
+        )
+        assertEquals("Записал 350 рублей в категорию Кафе!", controller.liveTranscriptTurns.value[1].text)
+        assertTrue("David turn must be marked final on turnComplete", controller.liveTranscriptTurns.value[1].isFinal)
+
+        // 3. При завершении сессии обе реплики (пользователя и Давида) возвращаются с теми же стабильными ID и хронологией
+        val (completedTurns, _) = controller.endSession()
+        assertEquals(2, completedTurns.size)
+        assertEquals(firstUserTurnId, completedTurns[0].id)
+        assertEquals("Давид, запиши кофе за 350 рублей", completedTurns[0].text)
+        assertEquals(firstDavidTurnId, completedTurns[1].id)
+        assertEquals("Записал 350 рублей в категорию Кафе!", completedTurns[1].text)
+        assertTrue(completedTurns[0].timestampMs < completedTurns[1].timestampMs)
+        assertTrue("onTranscriptTurnsChanged listener must have been notified during the call", mirroredSnapshots.size >= 4)
+    }
+
+    @Test
+    fun `speech sync tracker preserves already revealed words monotonically when new audio and transcript chunks arrive`() {
+        val tracker = DavidLiveSpeechSyncTracker()
+
+        // 1. Первая порция текста приходит с небольшим буфером аудио
+        tracker.updateTranscript(
+            sanitizedFullText = "Привет, я внимательно проверил твои расходы",
+            enqueuedSamples24k = 12_000L,
+            currentAudibleSamples24k = 0L
+        )
+        val initialWords = tracker.getScheduledWordsForTest()
+        assertEquals(6, initialWords.size)
+
+        // Прозвучало 3 слова ("Привет, я внимательно")
+        val thirdWordSample = initialWords[2].revealAtSample24k + 200L
+        val visibleAfter3Words = tracker.resolveVisibleSubtitle(audibleSamples24k = thirdWordSample)
+        assertEquals("Привет, я внимательно", visibleAfter3Words)
+
+        // 2. По WebSocket прилетает крупный чанк аудио (enqueuedSamples24k скачет до 96 000L) и продолжение текста.
+        // Уже открытые 3 слова НЕ должны прятаться обратно из-за пересчёта масштаба!
+        tracker.updateTranscript(
+            sanitizedFullText = "Привет, я внимательно проверил твои расходы за этот месяц, и баланс в полном порядке.",
+            enqueuedSamples24k = 96_000L,
+            currentAudibleSamples24k = thirdWordSample
+        )
+        val visibleImmediatelyAfterChunk = tracker.resolveVisibleSubtitle(audibleSamples24k = thirdWordSample)
+        assertTrue(
+            "Already revealed words must never disappear when enqueuedSamples24k jumps: got '$visibleImmediatelyAfterChunk'",
+            visibleImmediatelyAfterChunk.startsWith("Привет, я внимательно")
+        )
+
+        // 3. Предложение длиной до 138 символов с запятой не разрезается посреди фразы на сегменты
+        val singleSentenceWithComma =
+            "Привет, я внимательно проверил твои расходы за этот месяц, и твой свободный баланс в полном порядке."
+        assertTrue(singleSentenceWithComma.length in 97..138)
+        val segment = extractActiveSpeechBubbleSegment(singleSentenceWithComma)
+        assertEquals(0, segment.segmentIndex)
+        assertEquals(1, segment.totalSegments)
+        assertEquals(singleSentenceWithComma, segment.activeText)
+    }
+
+    @Test
+    fun `streaming text fade split index computes exact prefix boundary for live sheet and minimized chat bubbles`() {
+        // 1. Первое слово в новом голосовом облачке чата (previousText = "") проявляется целиком с индекса 0
+        assertEquals(
+            0,
+            computeStreamingTextFadeSplitIndex(
+                previousText = "",
+                currentText = "Привет!"
+            )
+        )
+
+        // 2. Переход от системной заглушки ("Слушаю...") к первому слову речи проявляется с индекса 0
+        assertEquals(
+            0,
+            computeStreamingTextFadeSplitIndex(
+                previousText = "Слушаю...",
+                currentText = "Давай проверим бюджет",
+                isPreviousPlaceholder = true
+            )
+        )
+
+        // 3. Пословное дописывание в облачке чата при свёрнутом разговоре в капсулу:
+        // уже показанный префикс остаётся на 100% альфе, а проявляется только новый хвост
+        val prev = "Давай проверим"
+        val next = "Давай проверим твой баланс"
+        val splitIdx = computeStreamingTextFadeSplitIndex(previousText = prev, currentText = next)
+        assertEquals(prev.length, splitIdx)
+        assertEquals(" твой баланс", next.substring(splitIdx))
+
+        // 4. Неизменившийся текст возвращает полную длину (0 символов для повторной анимации)
+        assertEquals(
+            next.length,
+            computeStreamingTextFadeSplitIndex(previousText = next, currentText = next)
+        )
+    }
+
+    @Test
+    fun `procedural sound manager synthesizes click-free PCM buffers for coins, frog SMS, voice chat open-close and respects sound preference`() {
+        val context = ApplicationProvider.getApplicationContext<android.app.Application>()
+
+        val buffers = mapOf(
+            "singleCoin" to com.example.davidapp.SoundManager.cachedCoinPcm,
+            "transactionCoins" to com.example.davidapp.SoundManager.cachedTransactionCoinsPcm,
+            "voiceCapture" to com.example.davidapp.SoundManager.cachedVoiceCapturePcm,
+            "frogReceive" to com.example.davidapp.SoundManager.cachedFrogReceivePcm,
+            "sendBubble" to com.example.davidapp.SoundManager.cachedSendBubblePcm,
+            "voiceOpen" to com.example.davidapp.SoundManager.cachedVoiceOpenPcm,
+            "voiceClose" to com.example.davidapp.SoundManager.cachedVoiceClosePcm,
+            "achievement" to com.example.davidapp.SoundManager.cachedAchievementPcm,
+            "click" to com.example.davidapp.SoundManager.cachedClickPcm
+        )
+
+        for ((name, pcm) in buffers) {
+            assertTrue("$name PCM buffer must not be empty", pcm.isNotEmpty())
+            val peakAbs = pcm.maxOf { kotlin.math.abs(it.toInt()) }
+            if (name == "singleCoin") {
+                assertTrue(
+                    "singleCoin splash PCM buffer must retain original delicate amplitude (got $peakAbs)",
+                    peakAbs in 5000..18000
+                )
+            } else {
+                assertTrue(
+                    "$name PCM buffer must have strong normalized peak >= 24000 for clear loudness (got $peakAbs)",
+                    peakAbs >= 24000
+                )
+            }
+            // First and last samples must be zero or near-zero to prevent hardware speaker clicks
+            assertTrue(
+                "$name first sample must start smoothly near zero (got ${pcm.first()})",
+                kotlin.math.abs(pcm.first().toInt()) <= 60
+            )
+            assertTrue(
+                "$name last sample must fade out smoothly near zero (got ${pcm.last()})",
+                kotlin.math.abs(pcm.last().toInt()) <= 60
+            )
+        }
+
+        // Verify soft voice capture sound is shorter and gentler than cascading transaction coins
+        assertTrue(
+            com.example.davidapp.SoundManager.cachedVoiceCapturePcm.size <
+                com.example.davidapp.SoundManager.cachedTransactionCoinsPcm.size
+        )
+
+        // Verify cascading transaction coins buffer is longer than a single coin toss
+        assertTrue(
+            com.example.davidapp.SoundManager.cachedTransactionCoinsPcm.size >
+                com.example.davidapp.SoundManager.cachedCoinPcm.size
+        )
+
+        // Verify frog receive buffer has two distinct vocal syllables (energy dip around 104..112 ms)
+        val frogPcm = com.example.davidapp.SoundManager.cachedFrogReceivePcm
+        val sampleRate = com.example.davidapp.SoundManager.SAMPLE_RATE
+        val syllable1Peak = (10 * sampleRate / 1000 until 90 * sampleRate / 1000)
+            .maxOf { kotlin.math.abs(frogPcm[it].toInt()) }
+        val interSyllableGapPeak = (104 * sampleRate / 1000 until 112 * sampleRate / 1000)
+            .maxOf { kotlin.math.abs(frogPcm[it].toInt()) }
+        val syllable2Peak = (125 * sampleRate / 1000 until 220 * sampleRate / 1000)
+            .maxOf { kotlin.math.abs(frogPcm[it].toInt()) }
+        assertTrue("Frog syllable 1 must be strongly audible", syllable1Peak > 15000)
+        assertEquals("Gap between frog syllables must be silent", 0, interSyllableGapPeak)
+        assertTrue("Frog syllable 2 must be strongly audible", syllable2Peak > 15000)
+
+        // Verify sound preference gate blocks playback when sound is disabled in settings,
+        // and preserves high playback gain (>= 0.65f) when enabled
+        val prevEnabled = com.example.data.preferences.BudgetPreferencesRepository.isSoundEnabled(context)
+        try {
+            com.example.data.preferences.BudgetPreferencesRepository.setSoundEnabled(context, true)
+            val activeGain = com.example.davidapp.SoundManager.resolvePlaybackGain(
+                context = null,
+                baseGain = 0.94f,
+                maxGain = 1.00f
+            )
+            assertTrue("Active playback gain must be loud (>= 0.80f), got $activeGain", activeGain >= 0.80f)
+
+            com.example.data.preferences.BudgetPreferencesRepository.setSoundEnabled(context, false)
+            val mutedGain = com.example.davidapp.SoundManager.resolvePlaybackGain(
+                context = context,
+                baseGain = 0.94f,
+                maxGain = 1.00f
+            )
+            assertEquals("Playback gain must be 0f when sound is disabled in preferences", 0f, mutedGain, 0.0001f)
+        } finally {
+            com.example.data.preferences.BudgetPreferencesRepository.setSoundEnabled(context, prevEnabled)
+        }
+    }
+}
 

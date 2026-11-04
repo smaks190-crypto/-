@@ -4,8 +4,10 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -28,6 +30,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -51,7 +55,6 @@ import androidx.compose.material.icons.filled.AutoGraph
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Refresh
@@ -60,54 +63,54 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
-import com.example.davidapp.live.DavidSendButtonGestureHelper
-import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.davidapp.live.DavidSendButtonGestureHelper
+import com.example.davidapp.live.computeStreamingTextFadeSplitIndex
+import kotlin.math.roundToInt
 import com.example.ui.components.BrandFrogAvatar
-import com.example.ui.components.BrandFrogPaths
 import com.example.ui.components.CategoryIconBadge
 import com.example.ui.components.MarkdownFormattedText
-import com.example.ui.components.drawBrandFrogVector
 import com.example.ui.components.formatRublesCompact
-import kotlin.math.PI
-import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.sin
 import com.example.ui.theme.Amber400
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.Emerald400
@@ -126,6 +129,7 @@ import com.example.ui.theme.SpaceGroteskFontFamily
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.util.Locale
+import kotlinx.coroutines.withTimeoutOrNull
 
 // --- Obsidian Neo-Bank Design Tokens ---
 val NeonEmerald = Emerald400
@@ -139,12 +143,29 @@ val SlateBorder = Slate700
 val TextLight = Color(0xFFF8FAFC)
 val TextMuted = Slate400
 
+private val UserBubbleGradient = Brush.linearGradient(
+    colors = listOf(
+        Color(0xFF0C262B),
+        Color(0xFF10203B),
+        Color(0xFF131B36)
+    )
+)
+
+private val DavidBubbleGradient = Brush.verticalGradient(
+    colors = listOf(
+        Color(0xFF0E172A),
+        Color(0xFF091020)
+    )
+)
+
 val CyberpunkGradient = Brush.linearGradient(
     colors = listOf(Emerald400, Indigo500)
 )
 
 /**
- * Верхняя панель чата Давида Жабова в стиле Obsidian Neo-Bank
+ * Верхняя панель чата Давида Жабова в обновлённой эстетике Obsidian Neo-Bank:
+ * стеклянная шапка с тонким изумрудно-сапфировым бликом, живым ореолом вокруг аватара
+ * и сбалансированными капсулами действий.
  */
 @Composable
 fun DavidChatTopBar(
@@ -158,22 +179,41 @@ fun DavidChatTopBar(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "avatar_pulse")
     val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 0.65f,
+        initialValue = 0.22f,
+        targetValue = 0.58f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = FastOutSlowInEasing),
+            animation = tween(1600, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "glow_alpha"
     )
 
-    Surface(
-        color = DarkBg.copy(alpha = 0.96f),
+    val topBarBgBrush = remember {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFF0B1324).copy(alpha = 0.96f),
+                DarkBg.copy(alpha = 0.94f)
+            )
+        )
+    }
+    val bottomHairlineBrush = remember {
+        Brush.horizontalGradient(
+            colors = listOf(
+                Color.Transparent,
+                Emerald400.copy(alpha = 0.32f),
+                Indigo400.copy(alpha = 0.25f),
+                Color.Transparent
+            )
+        )
+    }
+
+    Box(
         modifier = modifier
             .fillMaxWidth()
+            .background(topBarBgBrush)
             .drawBehind {
                 drawLine(
-                    color = GlassBorder,
+                    brush = bottomHairlineBrush,
                     start = Offset(0f, size.height),
                     end = Offset(size.width, size.height),
                     strokeWidth = 1.dp.toPx()
@@ -184,15 +224,15 @@ fun DavidChatTopBar(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             if (onBack != null) {
                 Box(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(ObsidianSurface)
-                        .border(1.dp, GlassBorder, CircleShape)
+                        .background(ObsidianSurface.copy(alpha = 0.9f))
+                        .border(1.dp, GlassHighlight, CircleShape)
                         .clickable(onClick = onBack)
                         .testTag("david_chat_back_button"),
                     contentAlignment = Alignment.Center
@@ -207,7 +247,7 @@ fun DavidChatTopBar(
                 Spacer(modifier = Modifier.width(10.dp))
             }
 
-            // Obsidian Avatar with Emerald Glow
+            // Obsidian Avatar with Emerald-Cyan Halo
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.size(44.dp)
@@ -218,7 +258,11 @@ fun DavidChatTopBar(
                         .clip(CircleShape)
                         .background(
                             Brush.radialGradient(
-                                colors = listOf(Emerald400.copy(alpha = glowAlpha), Color.Transparent)
+                                colors = listOf(
+                                    Emerald400.copy(alpha = glowAlpha),
+                                    Color(0xFF06B6D4).copy(alpha = glowAlpha * 0.45f),
+                                    Color.Transparent
+                                )
                             )
                         )
                 )
@@ -227,11 +271,15 @@ fun DavidChatTopBar(
                     modifier = Modifier
                         .size(38.dp)
                         .clip(CircleShape)
-                        .background(ObsidianSurface)
+                        .background(Color(0xFF0B1426))
                         .border(
-                            width = 1.5.dp,
+                            width = 1.4.dp,
                             brush = Brush.linearGradient(
-                                listOf(Emerald400.copy(alpha = 0.85f), Indigo500.copy(alpha = 0.5f))
+                                listOf(
+                                    Emerald400.copy(alpha = 0.9f),
+                                    Color(0xFF22D3EE).copy(alpha = 0.65f),
+                                    Indigo500.copy(alpha = 0.55f)
+                                )
                             ),
                             shape = CircleShape
                         )
@@ -241,10 +289,10 @@ fun DavidChatTopBar(
 
                 Box(
                     modifier = Modifier
-                        .size(10.dp)
+                        .size(10.5.dp)
                         .clip(CircleShape)
                         .background(if (hasApiKey) Emerald400 else Amber400)
-                        .border(1.5.dp, DarkBg, CircleShape)
+                        .border(1.8.dp, DarkBg, CircleShape)
                         .align(Alignment.BottomEnd)
                 )
             }
@@ -268,16 +316,27 @@ fun DavidChatTopBar(
                     Text(
                         text = "Давид Жабов",
                         color = TextLight,
-                        fontSize = 15.sp,
+                        fontSize = 15.5.sp,
                         fontFamily = ManropeFontFamily,
                         fontWeight = FontWeight.ExtraBold
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(7.dp))
                     Box(
                         modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Emerald400.copy(alpha = 0.14f))
-                            .border(0.5.dp, Emerald400.copy(alpha = 0.45f), RoundedCornerShape(6.dp))
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Emerald400.copy(alpha = 0.18f),
+                                        Color(0xFF06B6D4).copy(alpha = 0.12f)
+                                    )
+                                )
+                            )
+                            .border(
+                                width = 0.7.dp,
+                                color = Emerald400.copy(alpha = 0.48f),
+                                shape = RoundedCornerShape(7.dp)
+                            )
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
@@ -285,28 +344,43 @@ fun DavidChatTopBar(
                             color = Emerald400,
                             fontSize = 9.sp,
                             fontFamily = ManropeFontFamily,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.ExtraBold
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(1.dp))
-                Text(
-                    text = when {
-                        isTyping -> "анализирует бюджет..."
-                        hasApiKey -> "Gemini 3.8 • Готов к разбору трат"
-                        else -> "Офлайн-режим • Нажмите для ввода ключа"
-                    },
-                    color = when {
-                        isTyping -> Emerald400
-                        hasApiKey -> Slate400
-                        else -> Amber400
-                    },
-                    fontSize = 11.sp,
-                    fontFamily = ManropeFontFamily,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(5.5.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when {
+                                    isTyping -> Emerald400
+                                    hasApiKey -> Emerald400.copy(alpha = 0.75f)
+                                    else -> Amber400
+                                }
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text(
+                        text = when {
+                            isTyping -> "анализирует бюджет..."
+                            hasApiKey -> "Gemini 3.8 • Готов к разбору трат"
+                            else -> "Офлайн-режим • Нажмите для ключа"
+                        },
+                        color = when {
+                            isTyping -> Emerald400
+                            hasApiKey -> Slate400
+                            else -> Amber400
+                        },
+                        fontSize = 11.sp,
+                        fontFamily = ManropeFontFamily,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             if (onOpenAchievements != null) {
@@ -316,11 +390,11 @@ fun DavidChatTopBar(
                 Box(
                     modifier = Modifier
                         .height(36.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(ObsidianSurface)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(ObsidianSurface.copy(alpha = 0.9f))
+                        .border(1.dp, GlassHighlight, RoundedCornerShape(18.dp))
                         .clickable(onClick = onOpenAchievements)
-                        .padding(horizontal = 10.dp)
+                        .padding(horizontal = 11.dp)
                         .testTag("david_chat_achievements_button"),
                     contentAlignment = Alignment.Center
                 ) {
@@ -328,7 +402,7 @@ fun DavidChatTopBar(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text(text = "🏆", fontSize = 14.sp)
+                        Text(text = "🏆", fontSize = 13.5.sp)
                         Text(
                             text = unlockedCount.toString(),
                             color = Amber400,
@@ -338,15 +412,15 @@ fun DavidChatTopBar(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(7.dp))
             }
 
             Box(
                 modifier = Modifier
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(ObsidianSurface)
-                    .border(1.dp, GlassBorder, CircleShape)
+                    .background(ObsidianSurface.copy(alpha = 0.9f))
+                    .border(1.dp, GlassHighlight, CircleShape)
                     .clickable(onClick = onReset)
                     .testTag("david_chat_reset_button"),
                 contentAlignment = Alignment.Center
@@ -355,7 +429,7 @@ fun DavidChatTopBar(
                     imageVector = Icons.Default.Refresh,
                     contentDescription = "Очистить чат",
                     tint = Slate400,
-                    modifier = Modifier.size(17.dp)
+                    modifier = Modifier.size(16.5.dp)
                 )
             }
         }
@@ -374,6 +448,7 @@ fun DavidMessageItem(
     modifier: Modifier = Modifier
 ) {
     val alignment = if (message.isUser) Alignment.End else Alignment.Start
+    val isLiveVoiceTurn = message.id.startsWith(DavidViewModel.LIVE_CHAT_MSG_PREFIX)
 
     Column(
         horizontalAlignment = alignment,
@@ -386,7 +461,9 @@ fun DavidMessageItem(
                 DavidTextBubble(
                     content = type.content,
                     timestamp = message.timestamp,
-                    isUser = message.isUser
+                    isUser = message.isUser,
+                    isLiveVoiceTurn = isLiveVoiceTurn,
+                    messageId = message.id
                 )
             }
             is ChatMessageType.File -> {
@@ -438,17 +515,30 @@ fun DavidLiveSummaryBubble(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 8.dp, bottomEnd = 22.dp)
+    val borderBrush = remember {
+        Brush.linearGradient(
+            colors = listOf(
+                Emerald400.copy(alpha = 0.55f),
+                Color(0xFF06B6D4).copy(alpha = 0.35f),
+                Indigo500.copy(alpha = 0.38f)
+            )
+        )
+    }
+
     Surface(
-        shape = RoundedCornerShape(22.dp),
-        color = ObsidianSurface,
-        border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.45f)),
+        shape = shape,
+        color = Color(0xFF0C1527),
+        border = BorderStroke(1.dp, borderBrush),
         modifier = modifier
             .widthIn(min = 250.dp, max = 355.dp)
-            .shadow(8.dp, RoundedCornerShape(22.dp))
+            .shadow(10.dp, shape)
             .testTag("david_live_summary_card")
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+            modifier = Modifier
+                .background(DavidBubbleGradient)
+                .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -459,10 +549,17 @@ fun DavidLiveSummaryBubble(
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(30.dp)
+                            .size(32.dp)
                             .clip(CircleShape)
-                            .background(Emerald400.copy(alpha = 0.16f))
-                            .border(1.dp, Emerald400.copy(alpha = 0.45f), CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        Emerald400.copy(alpha = 0.24f),
+                                        Emerald400.copy(alpha = 0.08f)
+                                    )
+                                )
+                            )
+                            .border(1.dp, Emerald400.copy(alpha = 0.5f), CircleShape)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Mic,
@@ -471,7 +568,7 @@ fun DavidLiveSummaryBubble(
                             modifier = Modifier.size(16.dp)
                         )
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(9.dp))
                     Column {
                         Text(
                             text = "Итоги разговора • David Live",
@@ -597,7 +694,7 @@ fun DavidLiveSummaryBubble(
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = timestamp,
-                color = Slate400.copy(alpha = 0.7f),
+                color = Slate400.copy(alpha = 0.72f),
                 fontSize = 10.sp,
                 fontFamily = ManropeFontFamily,
                 modifier = Modifier.align(Alignment.End)
@@ -614,9 +711,9 @@ private fun LiveSummarySectionBlock(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(DarkBg.copy(alpha = 0.6f))
-            .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(13.dp))
+            .background(Color(0xFF060B16).copy(alpha = 0.72f))
+            .border(1.dp, GlassBorder, RoundedCornerShape(13.dp))
             .padding(horizontal = 12.dp, vertical = 9.dp)
     ) {
         Text(
@@ -641,7 +738,7 @@ private fun LiveSummarySectionBlock(
 }
 
 /**
- * Интерактивная карточка распознанной в чате операции с кнопками «Добавить» / «Отмена»
+ * Интерактивная карточка распознанной в чате операции с кнопками «Записать» / «Отмена»
  */
 @Composable
 fun DavidParsedTransactionProposalBubble(
@@ -652,15 +749,28 @@ fun DavidParsedTransactionProposalBubble(
 ) {
     val tx = proposal.operation
     val isExpense = tx.type == "expense"
+    val shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp)
     Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = ObsidianSurface,
-        border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.45f)),
+        shape = shape,
+        color = Color(0xFF0C1527),
+        border = BorderStroke(
+            width = 1.dp,
+            brush = Brush.linearGradient(
+                listOf(
+                    Emerald400.copy(alpha = 0.52f),
+                    Indigo500.copy(alpha = 0.32f)
+                )
+            )
+        ),
         modifier = modifier
             .widthIn(min = 240.dp, max = 340.dp)
-            .shadow(8.dp, RoundedCornerShape(20.dp))
+            .shadow(8.dp, shape)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(
+            modifier = Modifier
+                .background(DavidBubbleGradient)
+                .padding(14.dp)
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CategoryIconBadge(
                     categoryName = tx.category,
@@ -742,6 +852,8 @@ fun DavidParsedTransactionProposalBubble(
     }
 }
 
+private val SmoothChatTextEnterEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
+
 /**
  * Карточка добавленной операции от пользователя в стиле Obsidian Neo-Bank
  */
@@ -758,24 +870,35 @@ fun DavidOperationBubble(
 
     Surface(
         shape = bubbleShape,
-        color = ObsidianElevated,
-        border = BorderStroke(1.dp, GlassHighlight),
+        color = Color(0xFF0E1D2F),
+        border = BorderStroke(
+            width = 1.dp,
+            brush = Brush.linearGradient(
+                listOf(
+                    Emerald400.copy(alpha = 0.36f),
+                    Indigo400.copy(alpha = 0.36f)
+                )
+            )
+        ),
         modifier = modifier
-            .widthIn(min = 140.dp, max = 320.dp)
+            .widthIn(min = 148.dp, max = 288.dp)
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+            modifier = Modifier
+                .width(IntrinsicSize.Max)
+                .background(UserBubbleGradient)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
             if (operation.userPhrase.isNotBlank()) {
                 Text(
                     text = operation.userPhrase,
                     color = TextLight,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontFamily = ManropeFontFamily,
                     fontWeight = FontWeight.Medium,
-                    lineHeight = 18.sp
+                    lineHeight = 18.5.sp
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
             }
 
             Row(
@@ -784,21 +907,20 @@ fun DavidOperationBubble(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(DarkBg.copy(alpha = 0.65f))
+                    .background(Color(0xFF050B16).copy(alpha = 0.72f))
                     .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .padding(horizontal = 9.dp, vertical = 6.dp)
             ) {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     CategoryIconBadge(
                         categoryName = operation.category,
                         type = operation.type,
-                        size = 28.dp,
-                        iconSize = 14.dp
+                        size = 26.dp,
+                        iconSize = 13.dp
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(7.dp))
                     Column {
                         Text(
                             text = operation.category,
@@ -817,26 +939,26 @@ fun DavidOperationBubble(
                         }
                     }
                 }
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = "$amountPrefix${operation.amount.toInt()} ₽",
                     color = accentColor,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontFamily = SpaceGroteskFontFamily,
                     fontWeight = FontWeight.Bold
                 )
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(3.dp))
 
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.align(Alignment.End),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = timestamp,
-                    color = Slate400.copy(alpha = 0.75f),
+                    color = Slate400.copy(alpha = 0.78f),
                     fontSize = 10.sp,
                     fontFamily = ManropeFontFamily
                 )
@@ -853,86 +975,354 @@ fun DavidOperationBubble(
 }
 
 /**
- * Текстовое сообщение в эстетике Obsidian Neo-Bank
+ * Текстовое сообщение в обновлённой эстетике Obsidian Neo-Bank.
+ * - Компактно адаптирует ширину и высоту облачка под фактический размер текста
+ *   (без принудительного растягивания на всю ширину экрана для коротких реплик).
+ * - При потоковой голосовой транскрипции (в том числе когда разговор David Live свёрнут в капсулу)
+ *   обеспечивает такое же плавное пословное проявление текста и мягкий вход облачка,
+ *   как и на полноэкранном визуализаторе David Live.
  */
 @Composable
 fun DavidTextBubble(
     content: String,
     timestamp: String,
     isUser: Boolean,
+    isLiveVoiceTurn: Boolean = false,
+    messageId: String = "",
     modifier: Modifier = Modifier
 ) {
+    val useRichMarkdownBlock = !isUser &&
+        !isLiveVoiceTurn &&
+        (content.contains("#") || content.contains("\n- ") || (content.contains("**") && (content.length > 90 || content.contains('\n'))))
+
+    val isShortSingleLine = !isLiveVoiceTurn && content.length <= 36 && !content.contains('\n') && !useRichMarkdownBlock
+
     val bubbleShape = if (isUser) {
-        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 6.dp)
+        RoundedCornerShape(
+            topStart = if (isShortSingleLine) 16.dp else 20.dp,
+            topEnd = if (isShortSingleLine) 16.dp else 20.dp,
+            bottomStart = if (isShortSingleLine) 16.dp else 20.dp,
+            bottomEnd = 6.dp
+        )
     } else {
-        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 6.dp, bottomEnd = 20.dp)
+        RoundedCornerShape(
+            topStart = if (isShortSingleLine) 16.dp else 20.dp,
+            topEnd = if (isShortSingleLine) 16.dp else 20.dp,
+            bottomStart = 6.dp,
+            bottomEnd = if (isShortSingleLine) 16.dp else 20.dp
+        )
     }
 
-    val containerColor = if (isUser) {
-        Indigo500.copy(alpha = 0.18f)
-    } else {
-        ObsidianSurface
+    val borderBrush = remember(isUser, isLiveVoiceTurn) {
+        if (isUser) {
+            Brush.linearGradient(
+                colors = listOf(
+                    Emerald400.copy(alpha = if (isLiveVoiceTurn) 0.52f else 0.36f),
+                    Color(0xFF38BDF8).copy(alpha = 0.34f),
+                    Indigo400.copy(alpha = 0.42f)
+                )
+            )
+        } else {
+            Brush.linearGradient(
+                colors = listOf(
+                    Emerald400.copy(alpha = if (isLiveVoiceTurn) 0.46f else 0.30f),
+                    GlassHighlight,
+                    GlassBorder
+                )
+            )
+        }
     }
 
-    val borderStroke = if (isUser) {
-        BorderStroke(1.dp, Indigo500.copy(alpha = 0.45f))
-    } else {
-        BorderStroke(1.dp, GlassBorder)
+    val backgroundBrush = if (isUser) UserBubbleGradient else DavidBubbleGradient
+
+    // Плавный вход нового облачка в ленту чата без рывков по вертикали
+    val entryProgress = remember { Animatable(if (isLiveVoiceTurn) 0.35f else 1f) }
+    LaunchedEffect(Unit) {
+        if (entryProgress.value < 1f) {
+            entryProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 220,
+                    easing = SmoothChatTextEnterEasing
+                )
+            )
+        }
     }
+
+    // Пословное мягкое проявление нового текста при потоковой речи (аналогично DavidLiveSheet):
+    // уже произнесённый префикс остаётся на 100% непрозрачности, а только что открытое по аудио слово
+    // мгновенно занимает своё финальное место в строке и мягко набирает альфу за 180 мс.
+    val msgKey = remember(messageId, isLiveVoiceTurn) {
+        if (messageId.isNotBlank()) messageId else "turn_${isLiveVoiceTurn}_${isUser}"
+    }
+    var previousRenderedText by remember(msgKey) {
+        mutableStateOf(if (isLiveVoiceTurn) "" else content)
+    }
+    var fadeStartIndex by remember(msgKey) {
+        mutableIntStateOf(if (isLiveVoiceTurn) 0 else content.length)
+    }
+    val latestTailAlpha = remember(msgKey) {
+        Animatable(if (isLiveVoiceTurn) 0.24f else 1f)
+    }
+
+    LaunchedEffect(content, msgKey) {
+        val prev = previousRenderedText
+        if (content != prev) {
+            val splitIdx = computeStreamingTextFadeSplitIndex(
+                previousText = prev,
+                currentText = content
+            )
+            previousRenderedText = content
+            if (isLiveVoiceTurn && splitIdx < content.length) {
+                fadeStartIndex = splitIdx
+                latestTailAlpha.snapTo(0.24f)
+                latestTailAlpha.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(
+                        durationMillis = 180,
+                        easing = SmoothChatTextEnterEasing
+                    )
+                )
+                fadeStartIndex = content.length
+            } else {
+                fadeStartIndex = content.length
+                latestTailAlpha.snapTo(1f)
+            }
+        } else if (isLiveVoiceTurn && latestTailAlpha.value < 1f) {
+            latestTailAlpha.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 180,
+                    easing = SmoothChatTextEnterEasing
+                )
+            )
+            fadeStartIndex = content.length
+        }
+    }
+
+    val styledContent = remember(
+        content,
+        fadeStartIndex,
+        latestTailAlpha.value,
+        isLiveVoiceTurn
+    ) {
+        val safeSplit = fadeStartIndex.coerceIn(0, content.length)
+        if (!isLiveVoiceTurn || safeSplit >= content.length || latestTailAlpha.value >= 0.99f) {
+            AnnotatedString(content)
+        } else {
+            buildAnnotatedString {
+                append(content.substring(0, safeSplit))
+                pushStyle(
+                    SpanStyle(
+                        color = TextLight.copy(
+                            alpha = latestTailAlpha.value.coerceIn(0.24f, 1f)
+                        )
+                    )
+                )
+                append(content.substring(safeSplit))
+                pop()
+            }
+        }
+    }
+
+    val bubbleAlpha = entryProgress.value
+    val bubbleScale = 0.98f + 0.02f * entryProgress.value
 
     Surface(
         shape = bubbleShape,
-        color = containerColor,
-        border = borderStroke,
+        color = Color.Transparent,
+        border = BorderStroke(1.dp, borderBrush),
         modifier = modifier
-            .widthIn(min = 80.dp, max = if (isUser) 305.dp else 355.dp)
+            .widthIn(min = 40.dp, max = if (isUser) 292.dp else 332.dp)
+            .alpha(bubbleAlpha)
+            .scale(bubbleScale)
+            .shadow(if (isUser) 3.dp else 5.dp, bubbleShape)
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-        ) {
-            if (!isUser) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(bottom = 5.dp)
-                ) {
-                    BrandFrogAvatar(size = 16.dp)
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(
-                        text = "Давид Жабов",
-                        color = Emerald400,
-                        fontSize = 11.sp,
-                        fontFamily = ManropeFontFamily,
-                        fontWeight = FontWeight.ExtraBold
+        if (isShortSingleLine) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .background(backgroundBrush)
+                    .animateContentSize(
+                        animationSpec = tween(
+                            durationMillis = 220,
+                            easing = SmoothChatTextEnterEasing
+                        )
+                    )
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                if (!isUser) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(Emerald400.copy(alpha = 0.14f))
+                            .border(0.8.dp, Emerald400.copy(alpha = 0.45f), CircleShape)
+                    ) {
+                        BrandFrogAvatar(size = 11.dp)
+                    }
+                }
+
+                Text(
+                    text = styledContent,
+                    color = TextLight,
+                    fontSize = 14.sp,
+                    fontFamily = ManropeFontFamily,
+                    lineHeight = 19.sp,
+                    fontWeight = FontWeight.Normal,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+
+                Spacer(modifier = Modifier.width(2.dp))
+
+                if (isLiveVoiceTurn) {
+                    LiveVoiceTurnBadge()
+                }
+
+                Text(
+                    text = timestamp,
+                    color = Slate400.copy(alpha = 0.72f),
+                    fontSize = 9.5.sp,
+                    fontFamily = ManropeFontFamily,
+                    maxLines = 1,
+                    softWrap = false
+                )
+
+                if (isUser) {
+                    Icon(
+                        imageVector = Icons.Default.DoneAll,
+                        contentDescription = null,
+                        tint = Emerald400.copy(alpha = 0.82f),
+                        modifier = Modifier.size(11.5.dp)
                     )
                 }
             }
+        } else {
+            Column(
+                modifier = Modifier
+                    .background(backgroundBrush)
+                    .animateContentSize(
+                        animationSpec = tween(
+                            durationMillis = 220,
+                            easing = SmoothChatTextEnterEasing
+                        )
+                    )
+                    .padding(horizontal = 13.dp, vertical = 8.dp)
+            ) {
+                if (!isUser) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(bottom = 3.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .background(Emerald400.copy(alpha = 0.14f))
+                                    .border(0.8.dp, Emerald400.copy(alpha = 0.45f), CircleShape)
+                            ) {
+                                BrandFrogAvatar(size = 13.dp)
+                            }
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = "Давид Жабов",
+                                color = Emerald400,
+                                fontSize = 11.sp,
+                                fontFamily = ManropeFontFamily,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
 
-            if (!isUser && (content.contains("#") || content.contains("**") || content.contains("- "))) {
-                MarkdownFormattedText(
-                    markdownText = content,
-                    fontSize = 13.sp
-                )
-            } else {
-                Text(
-                    text = content,
-                    color = TextLight,
-                    fontSize = 13.5.sp,
-                    fontFamily = ManropeFontFamily,
-                    lineHeight = 19.sp,
-                    fontWeight = FontWeight.Normal
-                )
+                        if (isLiveVoiceTurn) {
+                            LiveVoiceTurnBadge()
+                        }
+                    }
+                }
+
+                if (useRichMarkdownBlock) {
+                    MarkdownFormattedText(
+                        markdownText = content,
+                        fontSize = 13.5.sp
+                    )
+                } else {
+                    Text(
+                        text = styledContent,
+                        color = TextLight,
+                        fontSize = 14.sp,
+                        fontFamily = ManropeFontFamily,
+                        lineHeight = 19.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    if (isUser && isLiveVoiceTurn) {
+                        LiveVoiceTurnBadge()
+                    }
+                    Text(
+                        text = timestamp,
+                        color = Slate400.copy(alpha = 0.72f),
+                        fontSize = 9.5.sp,
+                        fontFamily = ManropeFontFamily,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                    if (isUser) {
+                        Icon(
+                            imageVector = Icons.Default.DoneAll,
+                            contentDescription = null,
+                            tint = Emerald400.copy(alpha = 0.82f),
+                            modifier = Modifier.size(11.5.dp)
+                        )
+                    }
+                }
             }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Text(
-                text = timestamp,
-                color = Slate400.copy(alpha = 0.7f),
-                fontSize = 10.sp,
-                fontFamily = ManropeFontFamily,
-                modifier = Modifier.align(Alignment.End)
-            )
         }
+    }
+}
+
+@Composable
+private fun LiveVoiceTurnBadge() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .requiredWidth(IntrinsicSize.Max)
+            .clip(RoundedCornerShape(6.dp))
+            .background(Emerald400.copy(alpha = 0.14f))
+            .border(0.6.dp, Emerald400.copy(alpha = 0.42f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 5.dp, vertical = 1.5.dp)
+            .testTag("david_chat_live_badge")
+    ) {
+        Icon(
+            imageVector = Icons.Default.Mic,
+            contentDescription = "David Live",
+            tint = Emerald400,
+            modifier = Modifier.size(10.dp)
+        )
+        Spacer(modifier = Modifier.width(3.dp))
+        Text(
+            text = "LIVE",
+            color = Emerald400,
+            fontSize = 8.5.sp,
+            fontFamily = SpaceGroteskFontFamily,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.testTag("david_chat_live_badge_text")
+        )
     }
 }
 
@@ -948,16 +1338,23 @@ fun DavidFileBubble(
     isUser: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val bubbleShape = RoundedCornerShape(18.dp)
+    val bubbleShape = RoundedCornerShape(20.dp)
 
     Surface(
         shape = bubbleShape,
-        color = ObsidianSurface,
-        border = BorderStroke(1.dp, if (isUser) Indigo500.copy(alpha = 0.45f) else Emerald400.copy(alpha = 0.4f)),
-        modifier = modifier.widthIn(max = 310.dp)
+        color = Color(0xFF0C1527),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (isUser) Indigo400.copy(alpha = 0.45f) else Emerald400.copy(alpha = 0.42f)
+        ),
+        modifier = modifier
+            .widthIn(max = 315.dp)
+            .shadow(6.dp, bubbleShape)
     ) {
         Column(
-            modifier = Modifier.padding(12.dp)
+            modifier = Modifier
+                .background(if (isUser) UserBubbleGradient else DavidBubbleGradient)
+                .padding(13.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -965,8 +1362,8 @@ fun DavidFileBubble(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Emerald400.copy(alpha = 0.14f))
-                        .border(1.dp, Emerald400.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                        .background(Emerald400.copy(alpha = 0.15f))
+                        .border(1.dp, Emerald400.copy(alpha = 0.38f), RoundedCornerShape(12.dp))
                 ) {
                     Icon(
                         imageVector = Icons.Default.PictureAsPdf,
@@ -1008,7 +1405,7 @@ fun DavidFileBubble(
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(7.dp))
 
             Row(
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1034,7 +1431,7 @@ fun DavidFileBubble(
 
                 Text(
                     text = timestamp,
-                    color = Slate400.copy(alpha = 0.7f),
+                    color = Slate400.copy(alpha = 0.72f),
                     fontSize = 10.sp,
                     fontFamily = ManropeFontFamily
                 )
@@ -1052,19 +1449,30 @@ fun DavidChartBubble(
     timestamp: String,
     modifier: Modifier = Modifier
 ) {
-    val shape = RoundedCornerShape(22.dp)
+    val shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomStart = 8.dp, bottomEnd = 22.dp)
     val rubleFormatter = DecimalFormat("#,###", DecimalFormatSymbols(Locale.GERMAN))
 
     Surface(
         shape = shape,
-        color = ObsidianSurface,
-        border = BorderStroke(1.dp, GlassHighlight),
+        color = Color(0xFF0C1527),
+        border = BorderStroke(
+            width = 1.dp,
+            brush = Brush.linearGradient(
+                listOf(
+                    Emerald400.copy(alpha = 0.42f),
+                    GlassHighlight,
+                    Indigo500.copy(alpha = 0.35f)
+                )
+            )
+        ),
         modifier = modifier
-            .widthIn(max = 345.dp)
+            .widthIn(max = 350.dp)
             .shadow(10.dp, shape)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp)
+            modifier = Modifier
+                .background(DavidBubbleGradient)
+                .padding(15.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -1080,7 +1488,8 @@ fun DavidChartBubble(
                         modifier = Modifier
                             .size(30.dp)
                             .clip(CircleShape)
-                            .background(Emerald400.copy(alpha = 0.15f))
+                            .background(Emerald400.copy(alpha = 0.16f))
+                            .border(0.8.dp, Emerald400.copy(alpha = 0.42f), CircleShape)
                     ) {
                         Icon(
                             imageVector = Icons.Default.AutoGraph,
@@ -1107,7 +1516,8 @@ fun DavidChartBubble(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
-                        .background(deltaColor.copy(alpha = 0.14f))
+                        .background(deltaColor.copy(alpha = 0.15f))
+                        .border(0.6.dp, deltaColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
                         .padding(horizontal = 6.dp, vertical = 3.dp)
                 ) {
                     Icon(
@@ -1133,9 +1543,9 @@ fun DavidChartBubble(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(92.dp)
+                    .height(94.dp)
                     .clip(RoundedCornerShape(14.dp))
-                    .background(DarkBg)
+                    .background(Color(0xFF050A14))
                     .border(1.dp, GlassBorder, RoundedCornerShape(14.dp))
                     .padding(10.dp)
             ) {
@@ -1224,7 +1634,7 @@ fun DavidChartBubble(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(DarkBg.copy(alpha = 0.65f))
+                    .background(Color(0xFF050A14).copy(alpha = 0.72f))
                     .border(1.dp, GlassBorder, RoundedCornerShape(12.dp))
                     .padding(vertical = 8.dp, horizontal = 10.dp),
                 horizontalArrangement = Arrangement.SpaceAround,
@@ -1277,16 +1687,16 @@ fun DavidChartBubble(
                 Text(
                     text = chartData.summary,
                     color = TextLight,
-                    fontSize = 12.sp,
+                    fontSize = 12.5.sp,
                     fontFamily = ManropeFontFamily,
-                    lineHeight = 17.sp
+                    lineHeight = 18.sp
                 )
             }
 
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = timestamp,
-                color = Slate400.copy(alpha = 0.7f),
+                color = Slate400.copy(alpha = 0.72f),
                 fontSize = 10.sp,
                 fontFamily = ManropeFontFamily,
                 modifier = Modifier.align(Alignment.End)
@@ -1296,469 +1706,7 @@ fun DavidChartBubble(
 }
 
 /**
- * Анимационный индикатор ожидания ответа Давида Жабова без какого-либо текста:
- * фирменная жаба циклично подбрасывает двустороннюю объемную 3D золотую монетку
- * (Аверс: знак рубля ₽, Реверс: чеканный золотой барельеф жабы Давида) с вертикальным кувырком и ловит её обратно.
- */
-@Composable
-fun DavidCoinTossLoader(modifier: Modifier = Modifier) {
-    val infiniteTransition = rememberInfiniteTransition(label = "david_coin_toss_loader")
-    val tossPhase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "coin_toss_phase"
-    )
-
-    val frogPaths = remember { BrandFrogPaths() }
-    val rubleShadowPath = remember { Path() }
-    val rubleBowlPath = remember { Path() }
-    val rubleHighlightPath = remember { Path() }
-    val embossedFrogSmilePath = remember { Path() }
-    val shinePath = remember { Path() }
-
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = ObsidianSurface,
-        border = BorderStroke(1.dp, Emerald400.copy(alpha = 0.45f)),
-        modifier = modifier
-            .padding(horizontal = 14.dp, vertical = 4.dp)
-            .testTag("david_coin_toss_loader")
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
-        ) {
-            Canvas(modifier = Modifier.size(64.dp)) {
-                val p = tossPhase
-                val w = size.width
-                val h = size.height
-
-                // Парабола полета монетки (0f = во рту жабы, 1f = пик взлета над головой)
-                val flightHeight = sin(p * PI.toFloat()).coerceIn(0f, 1f)
-
-                // Упругая деформация жабы (Squash & Stretch) при броске и ловле монетки
-                val frogScaleX: Float
-                val frogScaleY: Float
-                when {
-                    p < 0.16f -> {
-                        val k = p / 0.16f
-                        val s = sin(k * PI.toFloat())
-                        frogScaleX = 1f - 0.08f * s
-                        frogScaleY = 1f + 0.10f * s
-                    }
-                    p > 0.82f -> {
-                        val k = (p - 0.82f) / 0.18f
-                        val s = sin(k * PI.toFloat())
-                        frogScaleX = 1f + 0.10f * s
-                        frogScaleY = 1f - 0.09f * s
-                    }
-                    else -> {
-                        frogScaleX = 1f
-                        frogScaleY = 1f
-                    }
-                }
-
-                // Открытие рта в момент вылета и ловли монетки
-                val mouthOpen = when {
-                    p < 0.22f -> sin((p / 0.22f) * PI.toFloat())
-                    p > 0.78f -> sin(((p - 0.78f) / 0.22f) * PI.toFloat())
-                    else -> 0.15f
-                }.coerceIn(0f, 1f)
-
-                // Зрачки жабы следят за высотой монетки
-                val pupilOffset = -flightHeight * 0.95f
-
-                // Отрисовка фирменной жабы в нижней части мини-холста
-                withTransform({
-                    translate(left = 0f, top = h * 0.18f)
-                    scale(
-                        scaleX = frogScaleX * 0.76f,
-                        scaleY = frogScaleY * 0.76f,
-                        pivot = Offset(w / 2f, h * 0.56f)
-                    )
-                }) {
-                    drawBrandFrogVector(
-                        paths = frogPaths,
-                        mouthOpenProgress = mouthOpen,
-                        pupilOffsetYRatio = pupilOffset
-                    )
-                }
-
-                // --- ВЕРТИКАЛЬНОЕ 3D-ВРАЩЕНИЕ ДВУСТОРОННЕЙ МОНЕТКИ (вокруг горизонтальной оси X) ---
-                val coinStartY = h * 0.67f
-                val coinPeakY = h * 0.15f
-                val coinY = coinStartY - (coinStartY - coinPeakY) * flightHeight
-                val coinX = w / 2f
-                val coinRadius = w * 0.165f
-
-                // 2 полных оборота по вертикали за один цикл броска: ширина всегда = 1f, сжимается только высота scaleY
-                val spinAngle = p * 4.0f * PI.toFloat()
-                val flipCos = cos(spinAngle)
-                val flipSin = sin(spinAngle)
-                val faceScaleY = abs(flipCos).coerceAtLeast(0.04f)
-
-                // Толщина 3D-гурта монеты и его вертикальный сдвиг
-                val rimThickness = coinRadius * 0.36f
-                val rimOffsetY = flipSin * rimThickness
-                val ovalHeight = coinRadius * 2f * faceScaleY
-
-                // Золотое свечение вокруг подлетающей монетки
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFFFBBF24).copy(alpha = 0.26f + 0.26f * flightHeight),
-                            Color.Transparent
-                        ),
-                        center = Offset(coinX, coinY),
-                        radius = coinRadius * 1.95f
-                    ),
-                    radius = coinRadius * 1.95f,
-                    center = Offset(coinX, coinY)
-                )
-
-                // --- СЛОЙ 1: Объемный 3D-гурт (цилиндрическое ребро монеты из 7 промежуточных овалов + 7 насечек) ---
-                val rimGradientBrush = Brush.horizontalGradient(
-                    colors = listOf(
-                        Color(0xFF78350F),
-                        Color(0xFFB45309),
-                        Color(0xFFF59E0B),
-                        Color(0xFFB45309),
-                        Color(0xFF78350F)
-                    ),
-                    startX = coinX - coinRadius,
-                    endX = coinX + coinRadius
-                )
-
-                for (step in 0..6) {
-                    val fraction = step / 6f
-                    val layerCenterY = coinY + rimOffsetY * (1f - fraction)
-                    drawOval(
-                        brush = rimGradientBrush,
-                        topLeft = Offset(coinX - coinRadius, layerCenterY - ovalHeight / 2f),
-                        size = Size(coinRadius * 2f, ovalHeight)
-                    )
-                }
-
-                // 7 вертикальных насечек гурта вдоль боковой стенки монеты
-                val notchStrokeW = (coinRadius * 0.095f).coerceAtLeast(1f)
-                for (notchIdx in 0..6) {
-                    val normX = -0.78f + (1.56f * notchIdx / 6f)
-                    val nx = coinX + normX * coinRadius
-                    val curveFactor = kotlin.math.sqrt((1f - normX * normX).coerceAtLeast(0f))
-                    val arcOffsetY = (ovalHeight * 0.5f) * curveFactor * (if (rimOffsetY >= 0f) 1f else -1f)
-                    drawLine(
-                        color = Color(0xFFFDE047).copy(alpha = 0.55f),
-                        start = Offset(nx, coinY - rimOffsetY * 0.25f + arcOffsetY),
-                        end = Offset(nx, coinY + rimOffsetY + arcOffsetY),
-                        strokeWidth = notchStrokeW,
-                        cap = StrokeCap.Round
-                    )
-                }
-
-                // --- СЛОЙ 2: Лицевая / оборотная грань монеты ---
-                val faceCenterY = coinY - rimOffsetY * 0.25f
-                withTransform({
-                    translate(left = coinX, top = faceCenterY)
-                    scale(scaleX = 1f, scaleY = faceScaleY, pivot = Offset.Zero)
-                }) {
-                    // Внешний золотой обод (#FDE047 -> #F59E0B -> #D97706)
-                    drawCircle(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFFFDE047),
-                                Color(0xFFF59E0B),
-                                Color(0xFFD97706)
-                            ),
-                            start = Offset(-coinRadius, -coinRadius),
-                            end = Offset(coinRadius, coinRadius)
-                        ),
-                        radius = coinRadius,
-                        center = Offset.Zero
-                    )
-
-                    // Утопленное внутреннее кольцо (#B45309) со светлой фаской (#FEF08A)
-                    val innerRingRadius = coinRadius * 0.82f
-                    drawCircle(
-                        color = Color(0xFFB45309),
-                        radius = innerRingRadius,
-                        center = Offset.Zero
-                    )
-                    drawCircle(
-                        color = Color(0xFFFEF08A).copy(alpha = 0.70f),
-                        radius = innerRingRadius,
-                        center = Offset(0f, -coinRadius * 0.03f),
-                        style = Stroke(width = (coinRadius * 0.06f).coerceAtLeast(0.8f))
-                    )
-
-                    // Центральное золотое поле
-                    val coreFieldRadius = coinRadius * 0.75f
-                    drawCircle(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFFFEF08A),
-                                Color(0xFFFBBF24),
-                                Color(0xFFF59E0B)
-                            ),
-                            start = Offset(-coreFieldRadius * 0.5f, -coreFieldRadius),
-                            end = Offset(coreFieldRadius * 0.5f, coreFieldRadius)
-                        ),
-                        radius = coreFieldRadius,
-                        center = Offset.Zero
-                    )
-
-                    // Диагональный пробегающий блик света при каждом кувырке
-                    val glintShift = flipSin * coinRadius * 0.52f
-                    shinePath.reset()
-                    shinePath.moveTo(-coinRadius * 0.50f + glintShift, -coinRadius * 0.58f)
-                    shinePath.lineTo(-coinRadius * 0.16f + glintShift, -coinRadius * 0.70f)
-                    shinePath.lineTo(coinRadius * 0.46f + glintShift, coinRadius * 0.54f)
-                    shinePath.lineTo(coinRadius * 0.14f + glintShift, coinRadius * 0.68f)
-                    shinePath.close()
-
-                    drawPath(
-                        path = shinePath,
-                        color = Color(0xFFFEF9C3).copy(alpha = 0.44f)
-                    )
-
-                    // Двусторонняя чеканка монеты:
-                    // Аверс (flipCos >= 0f) — рельефный символ рубля ₽
-                    // Реверс (flipCos < 0f) — чеканный золотой барельеф жабы Давида
-                    if (abs(flipCos) > 0.14f) {
-                        if (flipCos >= 0f) {
-                            val strokeW = (coinRadius * 0.18f).coerceAtLeast(1.3f)
-                            val shadowShift = 1.2.dp.toPx().coerceAtMost(coinRadius * 0.13f)
-                            val highlightShift = 0.55.dp.toPx().coerceAtMost(coinRadius * 0.065f)
-
-                            val stemX = -coinRadius * 0.14f
-                            val topY = -coinRadius * 0.38f
-                            val botY = coinRadius * 0.40f
-                            val midY = coinRadius * 0.04f
-                            val barY = coinRadius * 0.20f
-
-                            // 1. Темная тень рельефа (#78350F) со сдвигом +1.2.dp
-                            val reliefShadowColor = Color(0xFF78350F).copy(alpha = 0.78f)
-                            drawLine(
-                                color = reliefShadowColor,
-                                start = Offset(stemX + shadowShift, topY + shadowShift),
-                                end = Offset(stemX + shadowShift, botY + shadowShift),
-                                strokeWidth = strokeW,
-                                cap = StrokeCap.Round
-                            )
-                            rubleShadowPath.reset()
-                            rubleShadowPath.moveTo(stemX + shadowShift, topY + shadowShift)
-                            rubleShadowPath.lineTo(coinRadius * 0.08f + shadowShift, topY + shadowShift)
-                            rubleShadowPath.arcTo(
-                                rect = Rect(
-                                    left = -coinRadius * 0.08f + shadowShift,
-                                    top = topY + shadowShift,
-                                    right = coinRadius * 0.30f + shadowShift,
-                                    bottom = midY + shadowShift
-                                ),
-                                startAngleDegrees = -90f,
-                                sweepAngleDegrees = 180f,
-                                forceMoveTo = false
-                            )
-                            rubleShadowPath.lineTo(stemX + shadowShift, midY + shadowShift)
-                            drawPath(
-                                path = rubleShadowPath,
-                                color = reliefShadowColor,
-                                style = Stroke(width = strokeW, cap = StrokeCap.Round)
-                            )
-                            drawLine(
-                                color = reliefShadowColor,
-                                start = Offset(-coinRadius * 0.28f + shadowShift, barY + shadowShift),
-                                end = Offset(coinRadius * 0.16f + shadowShift, barY + shadowShift),
-                                strokeWidth = strokeW * 0.85f,
-                                cap = StrokeCap.Round
-                            )
-
-                            // 2. Золотисто-бронзовый символ ₽ (#92400E)
-                            val mainSymbolColor = Color(0xFF92400E)
-                            drawLine(
-                                color = mainSymbolColor,
-                                start = Offset(stemX, topY),
-                                end = Offset(stemX, botY),
-                                strokeWidth = strokeW,
-                                cap = StrokeCap.Round
-                            )
-                            rubleBowlPath.reset()
-                            rubleBowlPath.moveTo(stemX, topY)
-                            rubleBowlPath.lineTo(coinRadius * 0.08f, topY)
-                            rubleBowlPath.arcTo(
-                                rect = Rect(
-                                    left = -coinRadius * 0.08f,
-                                    top = topY,
-                                    right = coinRadius * 0.30f,
-                                    bottom = midY
-                                ),
-                                startAngleDegrees = -90f,
-                                sweepAngleDegrees = 180f,
-                                forceMoveTo = false
-                            )
-                            rubleBowlPath.lineTo(stemX, midY)
-                            drawPath(
-                                path = rubleBowlPath,
-                                color = mainSymbolColor,
-                                style = Stroke(width = strokeW, cap = StrokeCap.Round)
-                            )
-                            drawLine(
-                                color = mainSymbolColor,
-                                start = Offset(-coinRadius * 0.28f, barY),
-                                end = Offset(coinRadius * 0.16f, barY),
-                                strokeWidth = strokeW * 0.85f,
-                                cap = StrokeCap.Round
-                            )
-
-                            // 3. Яркий верхний блик чеканки (#FEF9C3)
-                            val highlightColor = Color(0xFFFEF9C3).copy(alpha = 0.82f)
-                            val highlightW = (strokeW * 0.38f).coerceAtLeast(0.75f)
-                            drawLine(
-                                color = highlightColor,
-                                start = Offset(stemX - highlightShift, topY - highlightShift),
-                                end = Offset(stemX - highlightShift, botY - highlightShift),
-                                strokeWidth = highlightW,
-                                cap = StrokeCap.Round
-                            )
-                            rubleHighlightPath.reset()
-                            rubleHighlightPath.moveTo(stemX - highlightShift, topY - highlightShift)
-                            rubleHighlightPath.lineTo(coinRadius * 0.08f - highlightShift, topY - highlightShift)
-                            rubleHighlightPath.arcTo(
-                                rect = Rect(
-                                    left = -coinRadius * 0.08f - highlightShift,
-                                    top = topY - highlightShift,
-                                    right = coinRadius * 0.30f - highlightShift,
-                                    bottom = midY - highlightShift
-                                ),
-                                startAngleDegrees = -90f,
-                                sweepAngleDegrees = 180f,
-                                forceMoveTo = false
-                            )
-                            rubleHighlightPath.lineTo(stemX - highlightShift, midY - highlightShift)
-                            drawPath(
-                                path = rubleHighlightPath,
-                                color = highlightColor,
-                                style = Stroke(width = highlightW, cap = StrokeCap.Round)
-                            )
-                        } else {
-                            // Реверс (flipCos < 0f): чеканный золотой барельеф головы жабы Давида
-                            val r = coinRadius
-                            val highlightColor = Color(0xFFFEF08A).copy(alpha = 0.7f)
-                            val shadowStampColor = Color(0xFF78350F)
-                            val mainStampColor = Color(0xFF92400E)
-                            val innerStampColor = Color(0xFFB45309)
-
-                            val highlightOffset = Offset(-r * 0.02f, -r * 0.02f)
-                            val leftEyeCenter = Offset(-r * 0.24f, -r * 0.22f)
-                            val rightEyeCenter = Offset(r * 0.24f, -r * 0.22f)
-                            val eyeBumpRadius = r * 0.20f
-                            val headTopLeft = Offset(-r * 0.48f, -r * 0.20f)
-                            val headSize = Size(r * 0.96f, r * 0.62f)
-
-                            // 1) Светло-золотой блик барельефа со сдвигом (-r * 0.02f, -r * 0.02f)
-                            drawCircle(
-                                color = highlightColor,
-                                radius = eyeBumpRadius,
-                                center = leftEyeCenter + highlightOffset
-                            )
-                            drawCircle(
-                                color = highlightColor,
-                                radius = eyeBumpRadius,
-                                center = rightEyeCenter + highlightOffset
-                            )
-                            drawOval(
-                                color = highlightColor,
-                                topLeft = headTopLeft + highlightOffset,
-                                size = headSize
-                            )
-
-                            // 2) Основной штамп бугорков глаз и овала головы (#92400E / #B45309)
-                            drawCircle(
-                                color = mainStampColor,
-                                radius = eyeBumpRadius,
-                                center = leftEyeCenter
-                            )
-                            drawCircle(
-                                color = mainStampColor,
-                                radius = eyeBumpRadius,
-                                center = rightEyeCenter
-                            )
-                            drawOval(
-                                color = mainStampColor,
-                                topLeft = headTopLeft,
-                                size = headSize
-                            )
-                            drawOval(
-                                color = innerStampColor,
-                                topLeft = Offset(-r * 0.43f, -r * 0.16f),
-                                size = Size(r * 0.86f, r * 0.54f)
-                            )
-
-                            // 3) Внутри глазниц — светло-золотые радужки (#FDE047, r * 0.12f) и темные чеканные зрачки (#78350F, r * 0.07f)
-                            drawCircle(
-                                color = Color(0xFFFDE047),
-                                radius = r * 0.12f,
-                                center = leftEyeCenter
-                            )
-                            drawCircle(
-                                color = Color(0xFFFDE047),
-                                radius = r * 0.12f,
-                                center = rightEyeCenter
-                            )
-                            drawCircle(
-                                color = shadowStampColor,
-                                radius = r * 0.07f,
-                                center = leftEyeCenter
-                            )
-                            drawCircle(
-                                color = shadowStampColor,
-                                radius = r * 0.07f,
-                                center = rightEyeCenter
-                            )
-
-                            // 4) Две ноздри по центру и широкая довольная улыбка Давида
-                            val nostrilRadius = (r * 0.035f).coerceAtLeast(0.6f)
-                            drawCircle(
-                                color = shadowStampColor,
-                                radius = nostrilRadius,
-                                center = Offset(-r * 0.08f, -r * 0.04f)
-                            )
-                            drawCircle(
-                                color = shadowStampColor,
-                                radius = nostrilRadius,
-                                center = Offset(r * 0.08f, -r * 0.04f)
-                            )
-
-                            embossedFrogSmilePath.reset()
-                            embossedFrogSmilePath.moveTo(-r * 0.30f, r * 0.12f)
-                            embossedFrogSmilePath.quadraticTo(0f, r * 0.30f, r * 0.30f, r * 0.12f)
-                            drawPath(
-                                path = embossedFrogSmilePath,
-                                color = shadowStampColor,
-                                style = Stroke(width = (r * 0.065f).coerceAtLeast(1f), cap = StrokeCap.Round)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun DavidTypingBubble(modifier: Modifier = Modifier) {
-    DavidCoinTossLoader(modifier = modifier)
-}
-
-/**
  * Единая трансформирующаяся лента умных действий и выбора периода разбора (Morphing Smart Action Strip).
- * Заменяет устаревшие дублирующиеся панели DavidQuickActionsBar + DavidSuggestionChipsRow:
- * - В обычном режиме показывает единую горизонтальную ленту чипов в стиле Obsidian Neo-Bank.
- * - При нажатии на «🔥 Разбор трат» эта же полоса плавно трансформируется в компактный селектор периода:
- *   [✕] Период: [День] [Неделя] [Месяц] [Год].
  */
 @Composable
 fun DavidSmartActionStrip(
@@ -1798,14 +1746,22 @@ fun DavidSmartActionStrip(
             label = "david_smart_strip_morph"
         ) { selectingPeriod ->
             if (selectingPeriod) {
-                // Встроенная капсула выбора периода без лишних этажей и дублирования
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(40.dp)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(ObsidianSurface)
-                        .border(1.dp, Emerald400.copy(alpha = 0.45f), RoundedCornerShape(20.dp))
+                        .height(42.dp)
+                        .clip(RoundedCornerShape(21.dp))
+                        .background(Color(0xFF0B1426).copy(alpha = 0.96f))
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.horizontalGradient(
+                                listOf(
+                                    Emerald400.copy(alpha = 0.55f),
+                                    Color(0xFF06B6D4).copy(alpha = 0.42f)
+                                )
+                            ),
+                            shape = RoundedCornerShape(21.dp)
+                        )
                         .padding(horizontal = 6.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -1842,9 +1798,16 @@ fun DavidSmartActionStrip(
                             modifier = Modifier
                                 .weight(1f)
                                 .height(30.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Emerald400.copy(alpha = 0.14f))
-                                .border(1.dp, Emerald400.copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                                .clip(RoundedCornerShape(15.dp))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(
+                                            Emerald400.copy(alpha = 0.18f),
+                                            Color(0xFF06B6D4).copy(alpha = 0.12f)
+                                        )
+                                    )
+                                )
+                                .border(1.dp, Emerald400.copy(alpha = 0.42f), RoundedCornerShape(15.dp))
                                 .clickable {
                                     onTogglePeriodSelector(false)
                                     onPeriodSelect(period)
@@ -1864,7 +1827,6 @@ fun DavidSmartActionStrip(
                     }
                 }
             } else {
-                // Единая горизонтальная лента быстрых чипов
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1872,7 +1834,6 @@ fun DavidSmartActionStrip(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // 1. Главный акцентный чип запуска разбора с выбором периода
                     ObsidianQuickChip(
                         text = "🔥 Разбор трат",
                         isAccent = true,
@@ -1880,40 +1841,35 @@ fun DavidSmartActionStrip(
                         tag = "action_start_report"
                     )
 
-                    // 2. Если аудит уже проведен — компактный чип экспорта в PDF прямо в этом же ряду
                     if (stage == DavidStage.FOLLOW_UP) {
                         ObsidianQuickChip(
                             text = "📄 Скачать PDF",
                             isAccent = false,
-                            borderColor = Indigo500.copy(alpha = 0.5f),
+                            borderColor = Indigo500.copy(alpha = 0.55f),
                             textColor = Indigo400,
                             onClick = onExportPdf,
                             tag = "action_download_pdf"
                         )
                     }
 
-                    // 3. Поиск утечек бюджета
                     ObsidianQuickChip(
                         text = "💡 Где утечки бюджета?",
                         onClick = { onSendPrompt("На чём мне сэкономить и какие главные утечки бюджета?") }
                     )
 
-                    // 4. Финансовые цели
                     ObsidianQuickChip(
                         text = "🎯 Статус целей",
                         onClick = { onActionClick("GOALS") }
                     )
 
-                    // 5. Сводка баланса и трендов
                     ObsidianQuickChip(
                         text = "📊 Баланс и тренды",
                         onClick = { onSendPrompt("Покажи мой баланс и аналитику трендов") }
                     )
 
-                    // 6. Настройка API ключа
                     ObsidianQuickChip(
                         text = if (hasApiKey) "🔑 API ключ" else "🔑 Подключить Gemini",
-                        borderColor = if (!hasApiKey) Amber400.copy(alpha = 0.55f) else GlassBorder,
+                        borderColor = if (!hasApiKey) Amber400.copy(alpha = 0.58f) else GlassHighlight,
                         textColor = if (!hasApiKey) Amber400 else Slate400,
                         onClick = onOpenApiKeyDialog
                     )
@@ -1929,24 +1885,36 @@ private fun ObsidianQuickChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     isAccent: Boolean = false,
-    borderColor: Color = if (isAccent) Emerald400.copy(alpha = 0.55f) else GlassBorder,
+    borderColor: Color = if (isAccent) Emerald400.copy(alpha = 0.62f) else GlassHighlight,
     textColor: Color = if (isAccent) Emerald400 else TextLight,
     tag: String = "obsidian_quick_chip"
 ) {
-    val containerColor = if (isAccent) {
-        Emerald400.copy(alpha = 0.14f)
-    } else {
-        ObsidianSurface
+    val backgroundBrush = remember(isAccent) {
+        if (isAccent) {
+            Brush.horizontalGradient(
+                colors = listOf(
+                    Emerald400.copy(alpha = 0.20f),
+                    Color(0xFF06B6D4).copy(alpha = 0.14f)
+                )
+            )
+        } else {
+            Brush.verticalGradient(
+                colors = listOf(
+                    Color(0xFF111C33).copy(alpha = 0.94f),
+                    Color(0xFF0A1222).copy(alpha = 0.94f)
+                )
+            )
+        }
     }
 
     Box(
         modifier = modifier
             .height(36.dp)
             .clip(RoundedCornerShape(18.dp))
-            .background(containerColor)
+            .background(backgroundBrush)
             .border(1.dp, borderColor, RoundedCornerShape(18.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 13.dp)
+            .padding(horizontal = 13.5.dp)
             .testTag(tag),
         contentAlignment = Alignment.Center
     ) {
@@ -1955,16 +1923,16 @@ private fun ObsidianQuickChip(
             color = textColor,
             fontSize = 12.sp,
             fontFamily = ManropeFontFamily,
-            fontWeight = if (isAccent) FontWeight.Bold else FontWeight.SemiBold,
+            fontWeight = if (isAccent) FontWeight.ExtraBold else FontWeight.SemiBold,
             maxLines = 1
         )
     }
 }
 
 /**
- * Нижняя капсула ввода сообщения в едином стиле с MorphingBottomBar (Obsidian Neo-Bank).
+ * Нижняя капсула ввода сообщения в обновлённой эстетике Obsidian Neo-Bank.
  *
- * Поддерживает распознавание короткого и долгого нажатия (~550 мс) на существующую кнопку отправки:
+ * Поддерживает распознавание короткого и долгого нажатия (~550 мс) на кнопку отправки:
  * - Короткое нажатие (< 550 мс) сохраняет обычную отправку сообщения.
  * - Удержание (~550 мс) запускает голосовой режим **David Live** с лёгким haptic feedback,
  *   исключает случайную отправку сообщения при отпускании пальца и сохраняет уже набранный текст нетронутым.
@@ -1990,10 +1958,19 @@ fun DavidChatInputBar(
 
     val isEnabled = text.isNotBlank()
     val borderColor by animateColorAsState(
-        targetValue = if (isEnabled) Emerald400.copy(alpha = 0.5f) else GlassHighlight,
-        animationSpec = tween(200),
+        targetValue = if (isEnabled) Emerald400.copy(alpha = 0.58f) else GlassHighlight,
+        animationSpec = tween(220),
         label = "chat_input_border"
     )
+
+    val capsuleBrush = remember {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFF101A30).copy(alpha = 0.98f),
+                Color(0xFF0A1120).copy(alpha = 0.98f)
+            )
+        )
+    }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -2006,10 +1983,21 @@ fun DavidChatInputBar(
                 .height(54.dp)
                 .shadow(16.dp, RoundedCornerShape(27.dp))
                 .clip(RoundedCornerShape(27.dp))
-                .background(ObsidianSurface.copy(alpha = 0.98f))
+                .background(capsuleBrush)
                 .border(1.dp, borderColor, RoundedCornerShape(27.dp))
-                .padding(start = 16.dp, end = 6.dp)
+                .padding(start = 15.dp, end = 6.dp)
         ) {
+            // Subtle glowing emerald prompt dot when idle
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isEnabled) Emerald400 else Emerald400.copy(alpha = 0.55f)
+                    )
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+
             Box(
                 modifier = Modifier.weight(1f),
                 contentAlignment = Alignment.CenterStart
@@ -2058,14 +2046,33 @@ fun DavidChatInputBar(
                     .clip(CircleShape)
                     .background(
                         if (isEnabled) {
-                            Brush.linearGradient(listOf(Emerald400, NeonEmerald))
+                            Brush.linearGradient(
+                                listOf(
+                                    Emerald400,
+                                    Color(0xFF10B981)
+                                )
+                            )
                         } else {
-                            Brush.linearGradient(listOf(Slate800, Slate800))
+                            Brush.linearGradient(
+                                listOf(
+                                    Color(0xFF132238),
+                                    Color(0xFF0D1729)
+                                )
+                            )
                         }
                     )
                     .border(
                         width = 1.dp,
-                        color = if (isEnabled) Color.Transparent else Emerald400.copy(alpha = 0.35f),
+                        brush = if (isEnabled) {
+                            Brush.linearGradient(listOf(Color.White.copy(alpha = 0.25f), Color.Transparent))
+                        } else {
+                            Brush.linearGradient(
+                                listOf(
+                                    Emerald400.copy(alpha = 0.48f),
+                                    Color(0xFF06B6D4).copy(alpha = 0.35f)
+                                )
+                            )
+                        },
                         shape = CircleShape
                     )
                     .pointerInput(Unit) {
@@ -2117,7 +2124,6 @@ fun DavidChatInputBar(
             }
         }
 
-        // Небольшая ненавязчивая подсказка о возможности долгого нажатия для запуска David Live
         if (onStartDavidLive != null) {
             Text(
                 text = "Удерживайте отправку ~0.5 сек для голосового диалога David Live",
