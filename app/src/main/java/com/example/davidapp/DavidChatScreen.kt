@@ -111,6 +111,10 @@ fun DavidChatScreen(
     val liveActiveSpeaker by viewModel.liveActiveSpeaker.collectAsState()
     val isLiveMicMuted by viewModel.isLiveMicMuted.collectAsState()
     val liveErrorMessage by viewModel.liveErrorMessage.collectAsState()
+    val liveVisualState by viewModel.liveVisualState.collectAsState()
+    val liveFailureKind by viewModel.liveFailureKind.collectAsState()
+    val liveActiveToolName by viewModel.liveActiveToolName.collectAsState()
+    val liveDebugOverrideVisualState by viewModel.liveDebugOverrideVisualState.collectAsState()
 
     // Persisted draft text in DavidViewModel so minimizing/closing chat never loses typed text
     val inputText by viewModel.chatDraftText.collectAsState()
@@ -158,20 +162,7 @@ fun DavidChatScreen(
         viewModel.bindProfile(budgetId, profileName, apiKey)
     }
 
-    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, viewModel) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            when (event) {
-                androidx.lifecycle.Lifecycle.Event.ON_STOP -> viewModel.onDavidLiveAppBackgrounded()
-                androidx.lifecycle.Lifecycle.Event.ON_START -> viewModel.onDavidLiveAppForegrounded()
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
+
 
     DisposableEffect(effectiveSoundManager) {
         onDispose {
@@ -237,7 +228,9 @@ fun DavidChatScreen(
                             onToggleMicMute = { viewModel.toggleLiveMicMute() },
                             onEndSession = { viewModel.endDavidLiveSession(effectiveSoundManager) },
                             embeddedInBottomBar = true,
-                            visualPhase = liveVisualPhase
+                            visualState = liveVisualState,
+                            failureKind = liveFailureKind,
+                                    visualPhase = liveVisualPhase
                         )
                         } else {
                             Column(
@@ -362,7 +355,12 @@ fun DavidChatScreen(
                 onExpand = { viewModel.expandDavidLive(effectiveSoundManager) },
                 isEmbeddedInModalCard = isEmbeddedInCapsule,
                 renderEmbeddedMinimizedCapsule = false,
-                visualPhase = liveVisualPhase
+                visualState = liveVisualState,
+                failureKind = liveFailureKind,
+                activeToolName = liveActiveToolName,
+                debugOverrideVisualState = liveDebugOverrideVisualState,
+                onSelectDebugVisualState = { viewModel.setDebugLiveVisualStateOverride(it) },
+                                    visualPhase = liveVisualPhase
             )
         }
     }

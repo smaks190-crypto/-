@@ -24,6 +24,13 @@ val SpaceGroteskFontFamily = FontFamily(
 )
 
 val Typography = Typography(
+    displayMedium = TextStyle(fontFamily = SpaceGroteskFontFamily, fontSize = 32.sp, lineHeight = 40.sp),
+    displaySmall = TextStyle(fontFamily = SpaceGroteskFontFamily, fontSize = 28.sp, lineHeight = 36.sp),
+    headlineMedium = TextStyle(fontFamily = ManropeFontFamily, fontSize = 24.sp, lineHeight = 32.sp),
+    headlineSmall = TextStyle(fontFamily = ManropeFontFamily, fontSize = 22.sp, lineHeight = 28.sp),
+    titleSmall = TextStyle(fontFamily = ManropeFontFamily, fontSize = 14.sp, lineHeight = 20.sp),
+    bodySmall = TextStyle(fontFamily = ManropeFontFamily, fontSize = 12.sp, lineHeight = 16.sp),
+    labelMedium = TextStyle(fontFamily = ManropeFontFamily, fontSize = 12.sp, lineHeight = 16.sp),
     displayLarge = TextStyle(
         fontFamily = SpaceGroteskFontFamily,
         fontWeight = FontWeight.Bold,

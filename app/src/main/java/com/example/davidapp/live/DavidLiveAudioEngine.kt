@@ -109,6 +109,18 @@ class DavidLiveAudioEngine(
     private val _activeSpeaker = MutableStateFlow(DavidLiveSpeaker.NONE)
     val activeSpeaker: StateFlow<DavidLiveSpeaker> = _activeSpeaker.asStateFlow()
 
+    private val _isPlaybackDrained = MutableStateFlow(true)
+    val isPlaybackDrained: StateFlow<Boolean> = _isPlaybackDrained.asStateFlow()
+
+    private val _isWithinUserSpeechHold = MutableStateFlow(false)
+    val isWithinUserSpeechHold: StateFlow<Boolean> = _isWithinUserSpeechHold.asStateFlow()
+
+    private val _isWithinDavidSpeechHold = MutableStateFlow(false)
+    val isWithinDavidSpeechHold: StateFlow<Boolean> = _isWithinDavidSpeechHold.asStateFlow()
+
+    private val lastUserSpeechDetectedMs = AtomicLong(0L)
+    private val lastDavidPlaybackActiveMs = AtomicLong(0L)
+
     internal data class CaptureFrameDecision(
         val micRms: Float,
         val playbackReferenceRms: Float,
@@ -419,6 +431,9 @@ class DavidLiveAudioEngine(
         estimatedPlayoutEndEpochMs.set(0L)
         playbackBurstStartEpochMs.set(0L)
         bargeInEchoSuppressUntilMs.set(0L)
+        _isPlaybackDrained.value = true
+        _isWithinUserSpeechHold.value = false
+        _isWithinDavidSpeechHold.value = false
         serverTurnSpeakingActive.set(false)
         userBargedInActive.set(false)
         wasDavidPlayingPrevFrame.set(false)
@@ -437,6 +452,7 @@ class DavidLiveAudioEngine(
         isMicMuted.set(muted)
         if (muted && _activeSpeaker.value == DavidLiveSpeaker.USER) {
             _activeSpeaker.value = DavidLiveSpeaker.NONE
+            _isWithinUserSpeechHold.value = false
             _rayMagnitudes.value = spectrumAnalyzer.decayFrame()
             _overallEnergy.value = spectrumAnalyzer.overallEnergy
         }
@@ -458,6 +474,7 @@ class DavidLiveAudioEngine(
             samples[i] = ((high shl 8) or low).toShort()
             byteIdx += 2
         }
+        _isPlaybackDrained.value = false
         queuedPlaybackSamples.addAndGet(sampleCount.toLong())
         // Seed the reference envelope immediately only when no playback reference is active yet;
         // once startPlaybackWorker is actively writing windows to AudioTrack, the playback worker
@@ -510,6 +527,9 @@ class DavidLiveAudioEngine(
         playbackQueue.clear()
         queuedPlaybackSamples.set(0L)
         lastOutputChunkTimestamp.set(0L)
+        lastDavidPlaybackActiveMs.set(0L)
+        _isPlaybackDrained.value = true
+        _isWithinDavidSpeechHold.value = false
         estimatedPlayoutEndEpochMs.set(0L)
         playbackBurstStartEpochMs.set(0L)
         serverTurnSpeakingActive.set(false)
@@ -768,13 +788,28 @@ class DavidLiveAudioEngine(
         speaker: DavidLiveSpeaker = DavidLiveSpeaker.USER,
         nowMs: Long = System.currentTimeMillis()
     ) {
+        val now = System.currentTimeMillis()
         if (speaker == DavidLiveSpeaker.DAVID) {
             recordModelOutputActivity(samples, sampleRateHz, nowMs, updateEnvelope = true)
         }
         _activeSpeaker.value = speaker
+        if (speaker == DavidLiveSpeaker.USER) {
+            lastUserSpeechDetectedMs.set(now)
+            _isWithinUserSpeechHold.value = true
+        } else if (speaker == DavidLiveSpeaker.DAVID) {
+            lastDavidPlaybackActiveMs.set(now)
+            _isPlaybackDrained.value = false
+            _isWithinDavidSpeechHold.value = true
+        } else {
+            _isWithinUserSpeechHold.value = false
+            _isWithinDavidSpeechHold.value = false
+            _isPlaybackDrained.value = true
+        }
         _rayMagnitudes.value = spectrumAnalyzer.analyzePcmFrame(samples, samples.size, sampleRateHz)
         _overallEnergy.value = spectrumAnalyzer.overallEnergy
     }
+
+    fun isPlaybackCurrentlyDrained(): Boolean = _isPlaybackDrained.value && playbackQueue.isEmpty()
 
     /**
      * Unconditionally resets speaker and visualizer state and stops active audio workers if running.
@@ -833,6 +868,11 @@ class DavidLiveAudioEngine(
 
         spectrumAnalyzer.reset()
         _activeSpeaker.value = DavidLiveSpeaker.NONE
+        _isPlaybackDrained.value = true
+        _isWithinUserSpeechHold.value = false
+        _isWithinDavidSpeechHold.value = false
+        lastUserSpeechDetectedMs.set(0L)
+        lastDavidPlaybackActiveMs.set(0L)
         _rayMagnitudes.value = defaultRestingRays()
         _overallEnergy.value = 0.14f
     }
@@ -905,6 +945,7 @@ class DavidLiveAudioEngine(
                             _rayMagnitudes.value = spectrumAnalyzer.decayFrame()
                             _overallEnergy.value = spectrumAnalyzer.overallEnergy
                             _activeSpeaker.value = DavidLiveSpeaker.NONE
+                            _isWithinUserSpeechHold.value = false
                         }
                         if (System.currentTimeMillis() - readStartMs < 10L) {
                             delay(32L)
@@ -933,6 +974,7 @@ class DavidLiveAudioEngine(
                         _rayMagnitudes.value = spectrumAnalyzer.decayFrame()
                         _overallEnergy.value = spectrumAnalyzer.overallEnergy
                         _activeSpeaker.value = DavidLiveSpeaker.NONE
+                        _isWithinUserSpeechHold.value = false
                         continue
                     }
 
@@ -944,11 +986,21 @@ class DavidLiveAudioEngine(
                             sampleRateHz = INPUT_SAMPLE_RATE_HZ
                         )
                         _overallEnergy.value = spectrumAnalyzer.overallEnergy
+                        if (decision.micRms > USER_SPEECH_RMS_THRESHOLD) {
+                            lastUserSpeechDetectedMs.set(nowMs)
+                            _isWithinUserSpeechHold.value = true
+                        }
                         _activeSpeaker.value = if (decision.micRms > USER_SPEECH_RMS_THRESHOLD) {
                             DavidLiveSpeaker.USER
                         } else {
-                            DavidLiveSpeaker.NONE
+                            val withinHold =
+                                lastUserSpeechDetectedMs.get() > 0L &&
+                                    nowMs - lastUserSpeechDetectedMs.get() <= DavidLiveVisualStateResolver.SPEECH_PAUSE_HOLD_MS
+                            _isWithinUserSpeechHold.value = withinHold
+                            if (withinHold) DavidLiveSpeaker.USER else DavidLiveSpeaker.NONE
                         }
+                    } else {
+                        _isWithinUserSpeechHold.value = false
                     }
 
                     if (!decision.shouldForwardMicChunkToServer) continue
@@ -1102,6 +1154,8 @@ class DavidLiveAudioEngine(
                             playoutFinished &&
                             _activeSpeaker.value == DavidLiveSpeaker.DAVID
                         ) {
+                            _isPlaybackDrained.value = true
+                            _isWithinDavidSpeechHold.value = false
                             _activeSpeaker.value = DavidLiveSpeaker.NONE
                             setPlaybackReferenceRms(0f)
                             setRecentLoudPeakRms(0f)
@@ -1130,6 +1184,9 @@ class DavidLiveAudioEngine(
                         estimatedPlayoutEndEpochMs.updateAndGet { maxOf(it, minPlayoutEnd) }
                         lastOutputChunkTimestamp.set(writeStartMs)
                         updatePlaybackReferenceEnvelope(computePcmRms(window, window.size), writeStartMs)
+                        lastDavidPlaybackActiveMs.set(writeStartMs)
+                        _isPlaybackDrained.value = false
+                        _isWithinDavidSpeechHold.value = true
                         _activeSpeaker.value = DavidLiveSpeaker.DAVID
                         _rayMagnitudes.value = spectrumAnalyzer.analyzePcmFrame(
                             pcmSamples = window,

@@ -11,55 +11,58 @@ import java.security.SecureRandom
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
-class SecurityManager(context: Context) {
+class SecurityManager internal constructor(context: Context, encryptedCreator: (Context) -> SharedPreferences) {
+    constructor(context: Context) : this(context, ::createEncryptedPrefs)
     private val appContext = context.applicationContext
     private val oldPrefs: SharedPreferences =
         appContext.getSharedPreferences("app_security_prefs", Context.MODE_PRIVATE)
 
+    private var securePrefs: SharedPreferences? = null
     private val prefs: SharedPreferences
+        get() = checkNotNull(securePrefs) { "Защищённое хранилище недоступно. Перезапустите приложение." }
+
+    val isStorageAvailable: Boolean
+        get() = securePrefs != null
 
     init {
-        val securePrefs = try {
-            val masterKey = MasterKey.Builder(appContext)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            EncryptedSharedPreferences.create(
-                appContext,
-                "app_security_prefs_secure",
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-            )
-        } catch (e: Exception) {
-            // Fallback to standard SharedPreferences if encrypted initialization fails
-            appContext.getSharedPreferences("app_security_prefs_secure_fallback", Context.MODE_PRIVATE)
-        }
-        prefs = securePrefs
-
-        // One-time migration
-        if (oldPrefs.contains(KEY_PIN_HASH)) {
-            val oldHash = oldPrefs.getString(KEY_PIN_HASH, "") ?: ""
-            val oldEnabled = oldPrefs.getBoolean(KEY_PIN_ENABLED, false)
-            val oldBiometric = oldPrefs.getBoolean(KEY_BIOMETRIC_ENABLED, false)
-            val oldAttempts = oldPrefs.getInt(KEY_FAILED_ATTEMPTS, 0)
-            val oldBlockedUntil = oldPrefs.getLong(KEY_BLOCKED_UNTIL, 0L)
-
-            prefs.edit().apply {
-                putString(KEY_PIN_HASH, oldHash)
-                putBoolean(KEY_PIN_ENABLED, oldEnabled)
-                putBoolean(KEY_BIOMETRIC_ENABLED, oldBiometric)
-                putInt(KEY_FAILED_ATTEMPTS, oldAttempts)
-                putLong(KEY_BLOCKED_UNTIL, oldBlockedUntil)
-                apply()
+        try {
+            val encrypted = encryptedCreator(appContext)
+            val legacyFallback = appContext.getSharedPreferences("app_security_prefs_secure_fallback", Context.MODE_PRIVATE)
+            val source = listOf(legacyFallback, oldPrefs).firstOrNull { it.contains(KEY_PIN_HASH) }
+            if (!encrypted.contains(KEY_PIN_HASH) && source != null) {
+                val editor = encrypted.edit()
+                source.all.forEach { (key, value) ->
+                    when (value) {
+                        is String -> editor.putString(key, value)
+                        is Boolean -> editor.putBoolean(key, value)
+                        is Int -> editor.putInt(key, value)
+                        is Long -> editor.putLong(key, value)
+                    }
+                }
+                check(editor.commit()) { "Security migration failed" }
+                check(encrypted.getString(KEY_PIN_HASH, null) == source.getString(KEY_PIN_HASH, null))
+                source.edit().clear().commit()
             }
-
-            // Clear old preferences to ensure one-time execution
-            oldPrefs.edit().clear().apply()
+            // Force a read now: restored/corrupt encrypted files must never look like PIN is disabled.
+            encrypted.all
+            securePrefs = encrypted
+        } catch (_: Exception) {
+            // Fail closed: no plaintext fallback and no changes to the legacy security state.
+            securePrefs = null
         }
     }
 
+    private fun <T> read(default: T, action: (SharedPreferences) -> T): T = try {
+        securePrefs?.let(action) ?: default
+    } catch (_: Exception) {
+        securePrefs = null
+        default
+    }
+
     fun isPinEnabled(): Boolean {
-        return prefs.getBoolean(KEY_PIN_ENABLED, false) && getPinHash().isNotEmpty()
+        return read(true) {
+            it.getBoolean(KEY_PIN_ENABLED, false) && !it.getString(KEY_PIN_HASH, "").isNullOrEmpty()
+        }
     }
 
     fun setPinEnabled(enabled: Boolean) {
@@ -94,9 +97,10 @@ class SecurityManager(context: Context) {
 
     // --- Guest / Decoy PIN support ---
     fun isGuestPinEnabled(): Boolean {
-        return isPinEnabled() &&
-            prefs.getBoolean(KEY_GUEST_PIN_ENABLED, false) &&
-            getGuestPinHash().isNotEmpty()
+        return read(false) {
+            it.getBoolean(KEY_PIN_ENABLED, false) && it.getBoolean(KEY_GUEST_PIN_ENABLED, false) &&
+                !it.getString(KEY_PIN_HASH, "").isNullOrEmpty() && !it.getString(KEY_GUEST_PIN_HASH, "").isNullOrEmpty()
+        }
     }
 
     fun setGuestPin(pin: String) {
@@ -117,7 +121,7 @@ class SecurityManager(context: Context) {
     }
 
     fun isGuestSessionActive(): Boolean {
-        return prefs.getBoolean(KEY_GUEST_SESSION_ACTIVE, false)
+        return read(false) { it.getBoolean(KEY_GUEST_SESSION_ACTIVE, false) }
     }
 
     fun setGuestSessionActive(active: Boolean) {
@@ -186,15 +190,18 @@ class SecurityManager(context: Context) {
     }
 
     private fun getPinHash(): String {
-        return prefs.getString(KEY_PIN_HASH, "") ?: ""
+        return read("") { it.getString(KEY_PIN_HASH, "") ?: "" }
     }
 
     private fun getGuestPinHash(): String {
-        return prefs.getString(KEY_GUEST_PIN_HASH, "") ?: ""
+        return read("") { it.getString(KEY_GUEST_PIN_HASH, "") ?: "" }
     }
 
     fun isBiometricEnabled(): Boolean {
-        return prefs.getBoolean(KEY_BIOMETRIC_ENABLED, false) && isPinEnabled()
+        return read(false) {
+            it.getBoolean(KEY_BIOMETRIC_ENABLED, false) && it.getBoolean(KEY_PIN_ENABLED, false) &&
+                !it.getString(KEY_PIN_HASH, "").isNullOrEmpty()
+        }
     }
 
     fun setBiometricEnabled(enabled: Boolean) {
@@ -231,15 +238,15 @@ class SecurityManager(context: Context) {
 
     // Brute-force protection functions
     fun getFailedAttempts(): Int {
-        return prefs.getInt(KEY_FAILED_ATTEMPTS, 0)
+        return read(0) { it.getInt(KEY_FAILED_ATTEMPTS, 0) }
     }
 
     fun getBlockedUntil(): Long {
-        return prefs.getLong(KEY_BLOCKED_UNTIL, 0L)
+        return read(0L) { it.getLong(KEY_BLOCKED_UNTIL, 0L) }
     }
 
     fun isBlocked(): Boolean {
-        return System.currentTimeMillis() < getBlockedUntil()
+        return !isStorageAvailable || System.currentTimeMillis() < getBlockedUntil()
     }
 
     fun getRemainingBlockTimeSeconds(): Long {
@@ -248,6 +255,7 @@ class SecurityManager(context: Context) {
     }
 
     fun handleFailedAttempt() {
+        if (!isStorageAvailable) return
         val currentAttempts = getFailedAttempts() + 1
         val editor = prefs.edit().putInt(KEY_FAILED_ATTEMPTS, currentAttempts)
 
@@ -263,6 +271,7 @@ class SecurityManager(context: Context) {
     }
 
     fun resetFailedAttempts() {
+        if (!isStorageAvailable) return
         prefs.edit()
             .putInt(KEY_FAILED_ATTEMPTS, 0)
             .putLong(KEY_BLOCKED_UNTIL, 0L)
@@ -270,6 +279,15 @@ class SecurityManager(context: Context) {
     }
 
     companion object {
+        private fun createEncryptedPrefs(context: Context): SharedPreferences {
+            val masterKey = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+            return EncryptedSharedPreferences.create(
+                context, "app_security_prefs_secure", masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }
+
         private const val KEY_PIN_ENABLED = "key_pin_enabled"
         private const val KEY_PIN_HASH = "key_pin_hash"
         private const val KEY_GUEST_PIN_ENABLED = "key_guest_pin_enabled"

@@ -481,7 +481,7 @@ class TransactionStateDelegate(
         val currentBudgetId = selectedBudgetId.value ?: "default"
         scope.launch {
             ensureCategoryExists(category, type)
-            val tx = TransactionEntity(
+            val updated = repository.updateTransactionDetails(
                 id = id,
                 budgetId = currentBudgetId,
                 type = type,
@@ -490,8 +490,7 @@ class TransactionStateDelegate(
                 subcategory = subcategory,
                 amount = amount
             )
-            repository.insertTransaction(tx)
-            toastMessage.emit("Операция обновлена!")
+            toastMessage.emit(if (updated) "Операция обновлена!" else "Операция не найдена в текущем бюджете")
         }
     }
 
