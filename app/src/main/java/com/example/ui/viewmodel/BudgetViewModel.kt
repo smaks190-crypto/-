@@ -897,6 +897,7 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         priority: String = "MANDATORY",
         incomeTier: String = "GUARANTEED"
     ) {
+        if (!amount.isFinite() || amount <= 0.0) return
         val currentBudgetId = _selectedBudgetId.value ?: "default"
         val dueEpochDay = com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(nextDueDateIso)
             ?: java.time.LocalDate.now().toEpochDay()

@@ -377,7 +377,7 @@ fun DavidLiveHorizontalWaveVisualizer(
             val barColor = when {
                 effectiveVisualState == DavidLiveVisualState.OFFLINE -> ErrorCrimson.copy(alpha = 0.65f)
                 effectiveVisualState == DavidLiveVisualState.API_MISSING -> GoldApiMissing.copy(alpha = 0.68f)
-                effectiveVisualState == DavidLiveVisualState.ERROR -> CrimsonMagentaError.copy(alpha = 0.68f)
+                effectiveVisualState == DavidLiveVisualState.ERROR -> ErrorCrimson.copy(alpha = 0.68f)
                 isMicMuted && !isDavidSpeaking -> IdleWaveSlate.copy(alpha = 0.58f)
                 !isVoiceOrProcessActive -> statePrimaryColor.copy(alpha = 0.46f)
                 else -> lerp(
