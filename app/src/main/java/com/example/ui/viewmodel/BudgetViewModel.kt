@@ -733,6 +733,34 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private var documentImportInProgress = false
+
+    /** Runs in ViewModel scope so a configuration change cannot cancel a selected document. */
+    fun importBackupDocument(uri: android.net.Uri) {
+        if (documentImportInProgress) return
+        documentImportInProgress = true
+        viewModelScope.launch {
+            try {
+                val json = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.data.repository.BudgetDocumentReader.read(getApplication(), uri)
+                }
+                val profile = repository.importBackupAsNewBudget(json)
+                if (profile != null) {
+                    selectBudget(profile.id)
+                    _toastMessage.emit("Бюджет «${profile.name}» загружен")
+                } else {
+                    _toastMessage.emit("Не удалось загрузить бюджет. Проверьте, что выбрана JSON-копия приложения.")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _toastMessage.emit("Не удалось прочитать файл. Выберите доступную JSON-копию бюджета размером до 10 МБ.")
+            } finally {
+                documentImportInProgress = false
+            }
+        }
+    }
+
     fun importBackupAsNewBudget(json: String, customName: String? = null, onCompleted: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
             val newProfile = repository.importBackupAsNewBudget(json, customName)
