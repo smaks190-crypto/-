@@ -18,6 +18,7 @@ jobs:
     timeout-minutes: 25
     env:
       CI_EXTERNAL_EMULATOR: 'true'
+      CI_STAGED_PIPELINE: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -51,3 +52,4 @@ jobs:
             app/build/reports/androidTests/connected
             app/build/outputs/androidTest-results/connected
             screenshots
+            build/test-artifacts

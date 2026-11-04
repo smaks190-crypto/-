@@ -5,6 +5,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.ui.theme.BudgetTheme
 import org.junit.Assert.assertEquals
@@ -31,12 +33,22 @@ class DavidLivePresentationUiTest {
                 )
             }
         }
+        compose.mainClock.advanceTimeBy(1000)
+        screenshot("voice-initial-layout")
+        try {
+            compose.waitUntil(5000) {
+                runCatching { compose.onNodeWithTag("david_live_connection_notice").assertIsDisplayed(); true }.getOrDefault(false)
+            }
+        } catch (e: Throwable) {
+            throw AssertionError(compose.onRoot(useUnmergedTree = true).printToString(), e)
+        }
         compose.onNodeWithTag("david_live_connection_notice").assertIsDisplayed()
         compose.onNodeWithTag("david_live_subtitle_bubble").assertDoesNotExist()
         compose.onNodeWithTag("david_live_contextual_action_button").performClick()
         assertEquals(1, settingsOpened)
         screenshot("voice-needs-key")
         compose.runOnIdle { state.value = DavidLiveConnectionState.DAVID_SPEAKING }
+        compose.mainClock.advanceTimeBy(1000)
         compose.onNodeWithTag("david_live_connection_notice").assertDoesNotExist()
         compose.onNodeWithTag("david_live_subtitle_bubble").assertIsDisplayed()
         screenshot("voice-conversation")
