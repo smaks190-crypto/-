@@ -287,10 +287,16 @@ class DavidLiveSessionController(
     fun triggerSuccessPulse(durationMs: Long = DavidLiveVisualStateResolver.SUCCESS_PULSE_DURATION_MS) {
         resetProcessingFlags()
         _isSuccessPulseActive.value = true
+        if (isDavidLiveVoiceCapableState(_connectionState.value)) {
+            _connectionState.value = DavidLiveConnectionState.SUCCESS
+        }
         recomputeVisualState()
         controllerScope.launch {
             kotlinx.coroutines.delay(durationMs.coerceAtLeast(300L))
             _isSuccessPulseActive.value = false
+            if (_connectionState.value == DavidLiveConnectionState.SUCCESS) {
+                _connectionState.value = if (_isMicMuted.value) DavidLiveConnectionState.MUTED else DavidLiveConnectionState.LISTENING
+            }
             recomputeVisualState()
         }
     }
