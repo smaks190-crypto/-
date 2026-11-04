@@ -134,6 +134,9 @@ fun resolveDavidLiveStatusLabel(
     visualState: DavidLiveVisualState? = null,
     failureKind: DavidLiveConnectionFailureKind = DavidLiveConnectionFailureKind.NONE
 ): String {
+    if (visualState == null && failureKind == DavidLiveConnectionFailureKind.NONE) {
+        return resolveDavidLiveStatusLabel(connectionState, activeSpeaker, isMicMuted, DavidLiveVisualPhase.IDLE)
+    }
     val effectiveVisualState = visualState ?: DavidLiveVisualStateResolver.resolve(
         connectionState = connectionState,
         activeSpeaker = activeSpeaker,
@@ -364,6 +367,7 @@ fun DavidLiveMinimizedCapsule(
     onEndSession: () -> Unit,
     modifier: Modifier = Modifier,
     embeddedInBottomBar: Boolean = false,
+    visualPhase: DavidLiveVisualPhase? = null,
     visualState: DavidLiveVisualState? = null,
     failureKind: DavidLiveConnectionFailureKind = DavidLiveConnectionFailureKind.NONE
 ) {
@@ -683,6 +687,7 @@ fun DavidLiveSheet(
     isEmbeddedInModalCard: Boolean = false,
     renderEmbeddedMinimizedCapsule: Boolean = true,
     minimizedBottomOffsetDp: Dp = 14.dp,
+    visualPhase: DavidLiveVisualPhase? = null,
     visualState: DavidLiveVisualState? = null,
     failureKind: DavidLiveConnectionFailureKind = DavidLiveConnectionFailureKind.NONE,
     activeToolName: String? = null,

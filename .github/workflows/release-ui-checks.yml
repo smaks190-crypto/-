@@ -2,7 +2,7 @@ name: Release UI checks
 
 on:
   pull_request:
-    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   workflow_dispatch:
 
 permissions:
@@ -51,7 +51,7 @@ jobs:
             ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.ui.components.BudgetDocumentImportUiTest,com.example.davidapp.live.DavidLivePresentationUiTest
       - name: Collect screenshots
         if: always()
-        run: adb pull /sdcard/Android/data/ru.personalbudget.app.aadece.preview/files/release-screenshots screenshots || true
+        run: adb pull /sdcard/Download/release-screenshots screenshots || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -127,9 +127,6 @@ import com.example.ui.screens.PeriodBudgetScreen
 import com.example.ui.screens.RecentTransactionsScreen
 import com.example.ui.components.ReportDetailsDialog
 import com.example.ui.theme.BudgetTheme
-import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Indigo500
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
@@ -178,6 +175,7 @@ class MainActivity : FragmentActivity() {
 
 @Composable
 fun MainAppScreen(viewModel: BudgetViewModel) {
+    val davidViewModel: com.example.davidapp.DavidViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -287,8 +285,13 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, securityManager) {
+    DisposableEffect(lifecycleOwner, securityManager, davidViewModel) {
         val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> davidViewModel.onDavidLiveAppBackgrounded()
+                Lifecycle.Event.ON_START -> davidViewModel.onDavidLiveAppForegrounded()
+                else -> Unit
+            }
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
                 if (securityManager.isPinEnabled()) {
                     isAppLocked = true
@@ -614,9 +617,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             }
 
             // --- SHARED DAVID LIVE SESSION & UNIFIED MORPHING BOTTOM BAR ---
-            val davidViewModel: com.example.davidapp.DavidViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
             val liveDisplayMode by davidViewModel.liveDisplayMode.collectAsState()
             val liveConnectionState by davidViewModel.liveConnectionState.collectAsState()
+            val liveVisualPhase by davidViewModel.liveVisualPhase.collectAsState()
             val liveSubtitle by davidViewModel.liveSubtitle.collectAsState()
             val liveRayMagnitudes by davidViewModel.liveRayMagnitudes.collectAsState()
             val liveOverallEnergy by davidViewModel.liveOverallEnergy.collectAsState()
@@ -708,7 +711,8 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     onEndSession = { davidViewModel.endDavidLiveSession() },
                                     embeddedInBottomBar = true,
                                     visualState = liveVisualState,
-                                    failureKind = liveFailureKind
+                                    failureKind = liveFailureKind,
+                                    visualPhase = liveVisualPhase
                                 )
                             }
                         } else {

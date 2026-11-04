@@ -22,6 +22,7 @@ fun DavidLiveCircularVisualizer(
     onToggleMicMute: () -> Unit,
     modifier: Modifier = Modifier,
     visualizerSize: Dp = 276.dp,
+    visualPhase: DavidLiveVisualPhase? = null,
     visualState: DavidLiveVisualState? = null,
     failureKind: DavidLiveConnectionFailureKind = DavidLiveConnectionFailureKind.NONE,
     activeToolName: String? = null,
