@@ -1,6 +1,8 @@
 package com.example.davidapp.live
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 
 import android.app.Activity
 import android.media.AudioManager
@@ -861,11 +863,8 @@ fun DavidLiveSheet(
                             )
                         )
                     )
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}
-                    )
+                    // Block background taps without merging the whole screen into one accessibility button.
+                    .pointerInput(Unit) { detectTapGestures(onTap = {}) }
                     .then(
                         if (isEmbeddedInModalCard) {
                             Modifier
