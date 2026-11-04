@@ -474,15 +474,33 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun clearAllDataAndResetSecurity(securityManager: com.example.data.SecurityManager) {
-        com.example.davidapp.AchievementManager.resetAll(getApplication())
+    private var securityResetInProgress = false
+
+    fun clearAllDataAndResetSecurity(
+        securityManager: com.example.data.SecurityManager,
+        onCompleted: (Boolean) -> Unit = {}
+    ) {
+        if (securityResetInProgress) return
+        securityResetInProgress = true
         viewModelScope.launch {
-            securityManager.removePin()
-            repository.clearAllData()
-            com.example.data.preferences.BudgetPreferencesRepository.resetBudgetSelectionOnClear(getApplication())
-            _selectedBudgetId.value = null
-            repository.ensureDefaultProfileExists()
-            _toastMessage.emit("Защита сброшена, данные операций удалены!")
+            try {
+                // Keep the PIN until erasure succeeds. A failed deletion must never expose old records.
+                repository.clearAllData()
+                securityManager.removePin()
+                com.example.davidapp.AchievementManager.resetAll(getApplication())
+                com.example.data.preferences.BudgetPreferencesRepository.resetBudgetSelectionOnClear(getApplication())
+                _selectedBudgetId.value = null
+                repository.ensureDefaultProfileExists()
+                _toastMessage.emit("Защита сброшена, данные операций удалены!")
+                onCompleted(true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _toastMessage.emit("Не удалось завершить сброс. Перезапустите приложение и повторите попытку.")
+                onCompleted(false)
+            } finally {
+                securityResetInProgress = false
+            }
         }
     }
 
@@ -730,6 +748,34 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
             com.example.davidapp.AchievementManager.unlock(getApplication(), "security_backup")
             val json = repository.exportJsonForBudget(budgetId)
             onExported(json)
+        }
+    }
+
+    private var documentImportInProgress = false
+
+    /** Runs in ViewModel scope so a configuration change cannot cancel a selected document. */
+    fun importBackupDocument(uri: android.net.Uri) {
+        if (documentImportInProgress) return
+        documentImportInProgress = true
+        viewModelScope.launch {
+            try {
+                val json = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.data.repository.BudgetDocumentReader.read(getApplication(), uri)
+                }
+                val profile = repository.importBackupAsNewBudget(json)
+                if (profile != null) {
+                    selectBudget(profile.id)
+                    _toastMessage.emit("Бюджет «${profile.name}» загружен")
+                } else {
+                    _toastMessage.emit("Не удалось загрузить бюджет. Проверьте, что выбрана JSON-копия приложения.")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _toastMessage.emit("Не удалось прочитать файл. Выберите доступную JSON-копию бюджета размером до 10 МБ.")
+            } finally {
+                documentImportInProgress = false
+            }
         }
     }
 

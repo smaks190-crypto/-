@@ -30,6 +30,17 @@ import kotlin.math.sin
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class DavidLiveUnitTest {
+    @Test
+    fun `spoken transcript excludes setup and processing status messages`() {
+        val controller = DavidLiveSessionController(financialToolsProvider = DavidLiveFinancialToolsProvider(
+            budgetId = "default", transactionDao = null, categoryDao = null, goalDao = null, accountDao = null
+        ))
+        assertEquals("", controller.spokenTranscript.value)
+        controller.startSession(null)
+        assertEquals("", controller.spokenTranscript.value)
+        controller.processServerMessageForTest("""{"serverContent":{"outputTranscription":{"text":"Ваш бюджет в порядке"}}}""")
+        assertEquals("Ваш бюджет в порядке", controller.spokenTranscript.value)
+    }
 
     @Test
     fun `send button gesture helper distinguishes short tap and 550ms long press without clearing draft`() {

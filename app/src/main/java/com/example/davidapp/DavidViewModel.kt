@@ -119,7 +119,7 @@ class DavidViewModel(application: Application) : AndroidViewModel(application) {
     private var lastDisplayModeTransitionMs: Long = 0L
 
     val liveConnectionState: StateFlow<DavidLiveConnectionState> = liveSessionController.connectionState
-    val liveSubtitle: StateFlow<String> = liveSessionController.liveSubtitle
+    val liveSubtitle: StateFlow<String> = liveSessionController.spokenTranscript
     val liveRayMagnitudes: StateFlow<List<Float>> = liveSessionController.audioEngine.rayMagnitudes
     val liveOverallEnergy: StateFlow<Float> = liveSessionController.audioEngine.overallEnergy
     val liveActiveSpeaker: StateFlow<DavidLiveSpeaker> = liveSessionController.audioEngine.activeSpeaker

@@ -96,6 +96,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.withResumed
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -309,6 +311,11 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
         }
     }
 
+    val chooseBudgetDocument = com.example.ui.components.rememberBudgetDocumentImport(
+        isLocked = isAppLocked,
+        onImport = viewModel::importBackupDocument
+    )
+
     var pendingExportJson by remember { mutableStateOf<String?>(null) }
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
@@ -419,8 +426,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                     }
                 },
                 onResetSecurity = {
-                    viewModel.clearAllDataAndResetSecurity(securityManager)
-                    isAppLocked = false
+                    viewModel.clearAllDataAndResetSecurity(securityManager) { success ->
+                        if (success) isAppLocked = false
+                    }
                 },
                 onSuccess = {
                     isAppLocked = false
@@ -430,8 +438,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         com.example.ui.security.BiometricPromptHelper.showBiometricOrDevicePrompt(
                             activity = activity,
                             onSuccess = {
-                                viewModel.clearAllDataAndResetSecurity(securityManager)
-                                isAppLocked = false
+                                viewModel.clearAllDataAndResetSecurity(securityManager) { success ->
+                                    if (success) isAppLocked = false
+                                }
                             },
                             onError = { err ->
                                 Toast.makeText(
@@ -464,7 +473,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                             onRenameBudget = { id, name -> viewModel.renameBudget(id, name) },
                             onDeleteBudget = { id -> viewModel.deleteBudget(id) },
                             onExportBudget = { budgetId -> triggerDirectExport(budgetId) },
-                            onImportFromBackup = { json, nameHint -> viewModel.importBackupAsNewBudget(json, nameHint) },
+                            onChooseBackup = chooseBudgetDocument,
                             onOpenApiKeyModal = {
                                 viewModel.openModal(
                                     com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(

@@ -1,5 +1,9 @@
 package com.example.davidapp.live
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+
 import android.app.Activity
 import android.media.AudioManager
 import android.provider.Settings
@@ -684,7 +688,7 @@ fun DavidLiveSheet(
     activeToolName: String? = null,
     debugOverrideVisualState: DavidLiveVisualState? = null,
     onSelectDebugVisualState: ((DavidLiveVisualState?) -> Unit)? = null,
-    enableDebugStateSwitcher: Boolean = com.example.BuildConfig.DEBUG
+    enableDebugStateSwitcher: Boolean = false
 ) {
     val context = LocalContext.current
 
@@ -859,11 +863,8 @@ fun DavidLiveSheet(
                             )
                         )
                     )
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}
-                    )
+                    // Block background taps without merging the whole screen into one accessibility button.
+                    .pointerInput(Unit) { detectTapGestures(onTap = {}) }
                     .then(
                         if (isEmbeddedInModalCard) {
                             Modifier
@@ -1109,123 +1110,60 @@ fun DavidLiveSheet(
 
                         Spacer(modifier = Modifier.height(if (isEmbeddedInModalCard) 8.dp else 12.dp))
 
-                        // Contextual Speech / Status Cloud (`david_live_subtitle_bubble`)
-                        // Matches the reference design: crisp state-tinted border, clear explanation,
-                        // and contextual action pill ("Повторить", "Добавить API", "Настроить API")
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            val isAlertState = effectiveVisualState == DavidLiveVisualState.OFFLINE ||
-                                effectiveVisualState == DavidLiveVisualState.API_MISSING ||
-                                effectiveVisualState == DavidLiveVisualState.ERROR
-
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(min = if (isEmbeddedInModalCard) 48.dp else 54.dp)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .background(
-                                        Brush.linearGradient(
-                                            colors = listOf(
-                                                SubtitleBubbleSurface,
-                                                lerp(SubtitleBubbleSurface, statePrimaryColor, if (isAlertState) 0.12f else 0.05f)
-                                            )
-                                        )
-                                    )
-                                    .border(
-                                        width = 1.1.dp,
-                                        color = if (isAlertState || effectiveVisualState == DavidLiveVisualState.SUCCESS) {
-                                            statePrimaryColor.copy(alpha = 0.58f)
-                                        } else {
-                                            lerp(SubtitleBubbleBorder, statePrimaryColor, 0.28f)
-                                        },
-                                        shape = RoundedCornerShape(18.dp)
-                                    )
-                                    .padding(horizontal = 16.dp, vertical = if (isEmbeddedInModalCard) 10.dp else 13.dp)
-                                    .testTag("david_live_subtitle_bubble")
+                        // Connection problems have a single quiet notice. The speech bubble is for dialogue only.
+                        val hasConnectionProblem = effectiveVisualState == DavidLiveVisualState.OFFLINE ||
+                            effectiveVisualState == DavidLiveVisualState.API_MISSING ||
+                            effectiveVisualState == DavidLiveVisualState.ERROR
+                        if (hasConnectionProblem) {
+                            Surface(
+                                color = com.example.ui.theme.ObsidianSurface,
+                                shape = androidx.compose.material3.MaterialTheme.shapes.medium,
+                                border = BorderStroke(1.dp, com.example.ui.theme.GlassBorder),
+                                modifier = Modifier.fillMaxWidth().testTag("david_live_connection_notice")
                             ) {
-                                Column {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
                                     Text(
-                                        text = visualMetadata.subtitle,
-                                        color = when (effectiveVisualState) {
-                                            DavidLiveVisualState.OFFLINE -> Color(0xFFFECACA)
-                                            DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
-                                            DavidLiveVisualState.ERROR -> Color(0xFFE9D5FF)
-                                            DavidLiveVisualState.SUCCESS -> Color(0xFFBBF7D0)
-                                            else -> Color(0xFFF1F5F9)
+                                        text = when (effectiveVisualState) {
+                                            DavidLiveVisualState.API_MISSING -> "Для голосового диалога добавьте личный ключ в настройках."
+                                            DavidLiveVisualState.OFFLINE -> "Нет соединения. Проверьте интернет."
+                                            else -> "Голосовой диалог недоступен. Попробуйте подключиться снова."
                                         },
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        lineHeight = 20.5.sp,
-                                        maxLines = 3,
-                                        overflow = TextOverflow.Ellipsis
+                                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                                        color = com.example.ui.theme.Slate300,
+                                        modifier = Modifier.weight(1f)
                                     )
-
-                                    AnimatedVisibility(
-                                        visible = visualMetadata.actionType != DavidLiveVisualActionType.NONE &&
-                                            visualMetadata.actionLabel != null,
-                                        enter = fadeIn(),
-                                        exit = fadeOut()
+                                    androidx.compose.material3.TextButton(
+                                        onClick = {
+                                            if (visualMetadata.sphereTapOpensApiSettings) onOpenApiKeySettings()
+                                            else onRetryConnection()
+                                        },
+                                        modifier = Modifier.testTag("david_live_contextual_action_button")
                                     ) {
-                                        Row(
-                                            modifier = Modifier.padding(top = 10.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            val actionLabel = visualMetadata.actionLabel ?: ""
-                                            val isApiAction = visualMetadata.actionType == DavidLiveVisualActionType.OPEN_API_SETTINGS ||
-                                                visualMetadata.actionType == DavidLiveVisualActionType.ADD_API_KEY ||
-                                                visualMetadata.actionType == DavidLiveVisualActionType.UPDATE_API_KEY
-                                            Button(
-                                                onClick = {
-                                                    if (isApiAction) {
-                                                        onOpenApiKeySettings()
-                                                    } else {
-                                                        onRetryConnection()
-                                                    }
-                                                },
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = statePrimaryColor.copy(alpha = 0.20f),
-                                                    contentColor = statePrimaryColor
-                                                ),
-                                                shape = RoundedCornerShape(14.dp),
-                                                modifier = Modifier
-                                                    .height(36.dp)
-                                                    .border(
-                                                        width = 1.dp,
-                                                        color = statePrimaryColor.copy(alpha = 0.65f),
-                                                        shape = RoundedCornerShape(14.dp)
-                                                    )
-                                                    .testTag("david_live_contextual_action_button")
-                                            ) {
-                                                Icon(
-                                                    imageVector = if (isApiAction) Icons.Default.Key else Icons.Default.Refresh,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(15.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(
-                                                    text = actionLabel,
-                                                    fontSize = 12.5.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        }
+                                        Text(if (visualMetadata.sphereTapOpensApiSettings) "Настройки" else "Повторить")
                                     }
                                 }
                             }
-
-                            // Speech bubble pointer tail
-                            Canvas(
-                                modifier = Modifier
-                                    .padding(start = 26.dp)
-                                    .size(width = 16.dp, height = 8.dp)
+                        }
+                        val speech = resolveDavidLiveSpeech(effectiveVisualState, liveSubtitle)
+                        if (speech != null) {
+                            Surface(
+                                color = com.example.ui.theme.ObsidianSurface,
+                                shape = androidx.compose.material3.MaterialTheme.shapes.medium,
+                                border = BorderStroke(1.dp, com.example.ui.theme.GlassBorder),
+                                modifier = Modifier.fillMaxWidth().testTag("david_live_subtitle_bubble")
                             ) {
-                                val path = Path().apply {
-                                    moveTo(0f, 0f)
-                                    lineTo(size.width, 0f)
-                                    lineTo(size.width * 0.35f, size.height)
-                                    close()
-                                }
-                                drawPath(path = path, color = SubtitleBubbleSurface)
+                                Text(
+                                    text = speech,
+                                    style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
+                                    color = com.example.ui.theme.Slate100,
+                                    maxLines = 4,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(16.dp)
+                                )
                             }
                         }
                     }
@@ -1261,34 +1199,7 @@ fun DavidLiveSheet(
                                     onOpenApiKeySettings = onOpenApiKeySettings
                                 )
 
-                                Spacer(modifier = Modifier.height(8.dp))
 
-                                // Bottom status caption under the sphere
-                                Text(
-                                    text = statusText,
-                                    color = when (effectiveVisualState) {
-                                        DavidLiveVisualState.OFFLINE -> Color(0xFFFCA5A5)
-                                        DavidLiveVisualState.API_MISSING -> Color(0xFFFCD34D)
-                                        DavidLiveVisualState.ERROR -> Color(0xFFD8B4FE)
-                                        DavidLiveVisualState.SUCCESS -> Color(0xFF86EFAC)
-                                        else -> if (isMicMuted) Color(0xFFFCA5A5) else statePrimaryColor.copy(alpha = 0.90f)
-                                    },
-                                    fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.testTag("david_live_sphere_status_caption")
-                                )
-
-                                if (effectiveVisualState == DavidLiveVisualState.OFFLINE) {
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = "Нажмите на сферу для переподключения",
-                                        color = Color(0xFF94A3B8),
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
                             }
                         }
 
