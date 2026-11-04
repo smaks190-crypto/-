@@ -1,7 +1,8 @@
 package com.example.ui.components
 
 import android.content.Context
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.SecurityManager
 import com.example.data.db.AccountEntity
 import com.example.data.db.BudgetProfileEntity
@@ -38,6 +39,39 @@ fun BottomCapsuleModalHost(
     onUnlockAppIfPinDisabled: () -> Unit
 ) {
     when (modal) {
+        is BottomCapsuleModal.SafeToSpend -> {
+            val goals by viewModel.goals.collectAsStateWithLifecycle()
+            val recurring by viewModel.recurringPayments.collectAsStateWithLifecycle()
+            val logs by viewModel.recurringExecutionLogs.collectAsStateWithLifecycle()
+            val floor by viewModel.userSafetyFloorRub.collectAsStateWithLifecycle()
+            val essentialNorm by viewModel.userEssentialDailyNormRub.collectAsStateWithLifecycle()
+            val today = java.time.LocalDate.now().toEpochDay()
+            val snapshot = remember(transactions, accounts, categories, goals, recurring, logs, floor, essentialNorm, today) {
+                com.example.data.safetospend.DavidFinancialIntelligenceProvider.computeSnapshot(
+                    transactions = transactions, accounts = accounts, goals = goals, categories = categories,
+                    recurringPayments = recurring, executionLogs = logs, todayEpochDay = today,
+                    userSafetyFloorRub = floor, userEssentialDailyNormRub = essentialNorm
+                )
+            }
+            com.example.ui.components.dialogs.SafeToSpendAndRecurringDialog(
+                safeToSpendResult = snapshot.safeToSpendResult,
+                safeToSpendInput = snapshot.safeToSpendInput,
+                recurringPayments = recurring,
+                userSafetyFloorRub = floor,
+                userEssentialDailyNormRub = essentialNorm,
+                initialTab = modal.initialTab,
+                isEmbeddedInCapsule = true,
+                onSetUserSafetyFloor = viewModel::setUserSafetyFloor,
+                onSetUserEssentialDailyNorm = viewModel::setUserEssentialDailyNorm,
+                onAddRecurringPayment = viewModel::addRecurringPayment,
+                onUpdateRecurringPayment = viewModel::updateRecurringPayment,
+                onConfirmRecurringPayment = viewModel::confirmRecurringPayment,
+                onToggleRecurringStatus = viewModel::toggleRecurringPaymentStatus,
+                onDeleteRecurringPayment = viewModel::deleteRecurringPayment,
+                onDismiss = viewModel::closeModal
+            )
+        }
+
         is BottomCapsuleModal.EditTransaction -> {
             AddTransactionDialog(
                 initialType = modal.transaction.type,

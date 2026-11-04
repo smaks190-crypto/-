@@ -474,15 +474,33 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun clearAllDataAndResetSecurity(securityManager: com.example.data.SecurityManager) {
-        com.example.davidapp.AchievementManager.resetAll(getApplication())
+    private var securityResetInProgress = false
+
+    fun clearAllDataAndResetSecurity(
+        securityManager: com.example.data.SecurityManager,
+        onCompleted: (Boolean) -> Unit = {}
+    ) {
+        if (securityResetInProgress) return
+        securityResetInProgress = true
         viewModelScope.launch {
-            securityManager.removePin()
-            repository.clearAllData()
-            com.example.data.preferences.BudgetPreferencesRepository.resetBudgetSelectionOnClear(getApplication())
-            _selectedBudgetId.value = null
-            repository.ensureDefaultProfileExists()
-            _toastMessage.emit("Защита сброшена, данные операций удалены!")
+            try {
+                // Keep the PIN until erasure succeeds. A failed deletion must never expose old records.
+                repository.clearAllData()
+                securityManager.removePin()
+                com.example.davidapp.AchievementManager.resetAll(getApplication())
+                com.example.data.preferences.BudgetPreferencesRepository.resetBudgetSelectionOnClear(getApplication())
+                _selectedBudgetId.value = null
+                repository.ensureDefaultProfileExists()
+                _toastMessage.emit("Защита сброшена, данные операций удалены!")
+                onCompleted(true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _toastMessage.emit("Не удалось завершить сброс. Перезапустите приложение и повторите попытку.")
+                onCompleted(false)
+            } finally {
+                securityResetInProgress = false
+            }
         }
     }
 
@@ -733,6 +751,34 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private var documentImportInProgress = false
+
+    /** Runs in ViewModel scope so a configuration change cannot cancel a selected document. */
+    fun importBackupDocument(uri: android.net.Uri) {
+        if (documentImportInProgress) return
+        documentImportInProgress = true
+        viewModelScope.launch {
+            try {
+                val json = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.example.data.repository.BudgetDocumentReader.read(getApplication(), uri)
+                }
+                val profile = repository.importBackupAsNewBudget(json)
+                if (profile != null) {
+                    selectBudget(profile.id)
+                    _toastMessage.emit("Бюджет «${profile.name}» загружен")
+                } else {
+                    _toastMessage.emit("Не удалось загрузить бюджет. Проверьте, что выбрана JSON-копия приложения.")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _toastMessage.emit("Не удалось прочитать файл. Выберите доступную JSON-копию бюджета размером до 10 МБ.")
+            } finally {
+                documentImportInProgress = false
+            }
+        }
+    }
+
     fun importBackupAsNewBudget(json: String, customName: String? = null, onCompleted: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
             val newProfile = repository.importBackupAsNewBudget(json, customName)
@@ -877,6 +923,38 @@ class BudgetViewModel(application: Application) : AndroidViewModel(application) 
                 )
             )
             _toastMessage.emit("Регулярный платёж «${title.ifBlank { category }}» добавлен!")
+        }
+    }
+
+    fun updateRecurringPayment(
+        paymentId: Long,
+        title: String,
+        amount: Double,
+        type: String,
+        category: String,
+        frequency: String,
+        nextDueDateIso: String,
+        priority: String,
+        incomeTier: String
+    ) {
+        val budgetId = _selectedBudgetId.value ?: return
+        val dueDay = com.example.data.safetospend.DavidFinancialIntelligenceProvider.parseTransactionEpochDay(nextDueDateIso) ?: return
+        if (!amount.isFinite() || amount <= 0.0) return
+        viewModelScope.launch {
+            val updated = repository.updateRecurringPaymentDetails(paymentId, budgetId) { existing ->
+                existing.copy(
+                    title = title.trim().ifBlank { category },
+                    amount = amount,
+                    isIncome = type.equals("INCOME", ignoreCase = true),
+                    incomeCertainty = incomeTier,
+                    categoryName = category,
+                    frequency = frequency,
+                    anchorDayOfMonth = java.time.LocalDate.ofEpochDay(dueDay).dayOfMonth,
+                    nextDueDateEpochDay = dueDay,
+                    priority = priority
+                )
+            }
+            _toastMessage.emit(if (updated) "Регулярная операция обновлена" else "Операция уже удалена или бюджет изменён")
         }
     }
 

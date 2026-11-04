@@ -105,6 +105,7 @@ fun DavidChatScreen(
     // David Live states (shared single session)
     val liveDisplayMode by viewModel.liveDisplayMode.collectAsState()
     val liveConnectionState by viewModel.liveConnectionState.collectAsState()
+    val liveVisualPhase by viewModel.liveVisualPhase.collectAsState()
     val liveSubtitle by viewModel.liveSubtitle.collectAsState()
     val liveRayMagnitudes by viewModel.liveRayMagnitudes.collectAsState()
     val liveOverallEnergy by viewModel.liveOverallEnergy.collectAsState()
@@ -161,6 +162,8 @@ fun DavidChatScreen(
     LaunchedEffect(budgetId, profileName, apiKey) {
         viewModel.bindProfile(budgetId, profileName, apiKey)
     }
+
+
 
     DisposableEffect(effectiveSoundManager) {
         onDispose {
@@ -274,7 +277,8 @@ fun DavidChatScreen(
                             onEndSession = { viewModel.endDavidLiveSession(effectiveSoundManager) },
                             embeddedInBottomBar = true,
                             visualState = liveVisualState,
-                            failureKind = liveFailureKind
+                            failureKind = liveFailureKind,
+                                    visualPhase = liveVisualPhase
                         )
                         } else {
                             Column(
@@ -403,7 +407,8 @@ fun DavidChatScreen(
                 failureKind = liveFailureKind,
                 activeToolName = liveActiveToolName,
                 debugOverrideVisualState = liveDebugOverrideVisualState,
-                onSelectDebugVisualState = { viewModel.setDebugLiveVisualStateOverride(it) }
+                onSelectDebugVisualState = { viewModel.setDebugLiveVisualStateOverride(it) },
+                                    visualPhase = liveVisualPhase
             )
         }
     }

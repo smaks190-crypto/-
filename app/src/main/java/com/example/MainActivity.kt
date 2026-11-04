@@ -96,6 +96,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.withResumed
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -125,9 +127,6 @@ import com.example.ui.screens.PeriodBudgetScreen
 import com.example.ui.screens.RecentTransactionsScreen
 import com.example.ui.components.ReportDetailsDialog
 import com.example.ui.theme.BudgetTheme
-import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Emerald400
-import com.example.ui.theme.Indigo500
 import com.example.ui.theme.Slate400
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate900
@@ -176,6 +175,7 @@ class MainActivity : FragmentActivity() {
 
 @Composable
 fun MainAppScreen(viewModel: BudgetViewModel) {
+    val davidViewModel: com.example.davidapp.DavidViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -285,8 +285,13 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, securityManager) {
+    DisposableEffect(lifecycleOwner, securityManager, davidViewModel) {
         val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> davidViewModel.onDavidLiveAppBackgrounded()
+                Lifecycle.Event.ON_START -> davidViewModel.onDavidLiveAppForegrounded()
+                else -> Unit
+            }
             if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
                 if (securityManager.isPinEnabled()) {
                     isAppLocked = true
@@ -308,6 +313,11 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             )
         }
     }
+
+    val chooseBudgetDocument = com.example.ui.components.rememberBudgetDocumentImport(
+        isLocked = isAppLocked,
+        onImport = viewModel::importBackupDocument
+    )
 
     var pendingExportJson by remember { mutableStateOf<String?>(null) }
 
@@ -419,8 +429,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                     }
                 },
                 onResetSecurity = {
-                    viewModel.clearAllDataAndResetSecurity(securityManager)
-                    isAppLocked = false
+                    viewModel.clearAllDataAndResetSecurity(securityManager) { success ->
+                        if (success) isAppLocked = false
+                    }
                 },
                 onSuccess = {
                     isAppLocked = false
@@ -430,8 +441,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                         com.example.ui.security.BiometricPromptHelper.showBiometricOrDevicePrompt(
                             activity = activity,
                             onSuccess = {
-                                viewModel.clearAllDataAndResetSecurity(securityManager)
-                                isAppLocked = false
+                                viewModel.clearAllDataAndResetSecurity(securityManager) { success ->
+                                    if (success) isAppLocked = false
+                                }
                             },
                             onError = { err ->
                                 Toast.makeText(
@@ -464,7 +476,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                             onRenameBudget = { id, name -> viewModel.renameBudget(id, name) },
                             onDeleteBudget = { id -> viewModel.deleteBudget(id) },
                             onExportBudget = { budgetId -> triggerDirectExport(budgetId) },
-                            onImportFromBackup = { json, nameHint -> viewModel.importBackupAsNewBudget(json, nameHint) },
+                            onChooseBackup = chooseBudgetDocument,
                             onOpenApiKeyModal = {
                                 viewModel.openModal(
                                     com.example.ui.viewmodel.BottomCapsuleModal.SettingsHub(
@@ -605,9 +617,9 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             }
 
             // --- SHARED DAVID LIVE SESSION & UNIFIED MORPHING BOTTOM BAR ---
-            val davidViewModel: com.example.davidapp.DavidViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
             val liveDisplayMode by davidViewModel.liveDisplayMode.collectAsState()
             val liveConnectionState by davidViewModel.liveConnectionState.collectAsState()
+            val liveVisualPhase by davidViewModel.liveVisualPhase.collectAsState()
             val liveSubtitle by davidViewModel.liveSubtitle.collectAsState()
             val liveRayMagnitudes by davidViewModel.liveRayMagnitudes.collectAsState()
             val liveOverallEnergy by davidViewModel.liveOverallEnergy.collectAsState()
@@ -620,7 +632,7 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
             val currentBudgetProfile = budgetProfiles.find { it.id == selectedBudgetId }
             LaunchedEffect(selectedBudgetId, currentBudgetProfile?.name, apiKey) {
                 davidViewModel.bindProfile(
-                    budgetId = currentBudgetProfile?.id ?: "default",
+                    budgetId = selectedBudgetId?.takeIf { it.isNotBlank() } ?: currentBudgetProfile?.id ?: "default",
                     profileName = currentBudgetProfile?.name ?: "Максим",
                     apiKey = apiKey
                 )
@@ -699,7 +711,8 @@ fun MainAppScreen(viewModel: BudgetViewModel) {
                                     onEndSession = { davidViewModel.endDavidLiveSession() },
                                     embeddedInBottomBar = true,
                                     visualState = liveVisualState,
-                                    failureKind = liveFailureKind
+                                    failureKind = liveFailureKind,
+                                    visualPhase = liveVisualPhase
                                 )
                             }
                         } else {

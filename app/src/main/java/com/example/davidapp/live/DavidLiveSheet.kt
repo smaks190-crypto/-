@@ -1,32 +1,23 @@
 package com.example.davidapp.live
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+
 import android.app.Activity
 import android.media.AudioManager
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -48,7 +39,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,8 +58,7 @@ import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -79,10 +68,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -97,8 +83,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -106,8 +92,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -115,40 +99,55 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.BrandFrogAvatar
-import kotlinx.coroutines.delay
 import kotlin.math.PI
-import kotlin.math.cos
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private val LiveScreenBgTop = Color(0xFF04070E)
-private val LiveScreenBgMid = Color(0xFF070D19)
-private val LiveScreenBgBottom = Color(0xFF050912)
-private val SubtitleBubbleSurface = Color(0xFF0E1624)
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import com.example.ui.components.BrandFrogAvatar
+import kotlinx.coroutines.delay
+import kotlin.math.cos
+
+private val LiveScreenBgTop = Color(0xFF060A12)
+private val LiveScreenBgBottom = Color(0xFF090F1B)
+private val SubtitleBubbleSurface = Color(0xFF101826)
 private val SubtitleBubbleBorder = Color(0xFF1E2D42)
 private val CapsuleSurfaceStart = Color(0xFF0B121E)
 private val CapsuleSurfaceEnd = Color(0xFF101928)
-private val ControlCircleSurface = Color(0xFF121A28)
-private val ControlCircleBorder = Color(0xFF223147)
+private val CancelPillSurface = Color(0xFF111824)
+private val CancelPillBorder = Color(0xFF223044)
 private val EmeraldStatus = Color(0xFF00E5A8)
 private val TurquoiseUser = Color(0xFF00D9F5)
 private val CyanSpeaking = Color(0xFF00B4FF)
-private val ThinkingVioletAccent = Color(0xFF8B5CF6)
-private val ThinkingCyanAccent = Color(0xFF38BDF8)
 private val PeakMintWave = Color(0xFF00F0A0)
 private val NeonAquaWave = Color(0xFF00D9F5)
-private val IdleWaveSlate = Color(0xFF64748B)
+private val IdleWaveSlate = Color(0xFF2A2F3A)
 private val ErrorCrimson = Color(0xFFEF4444)
 private val GoldApiMissing = Color(0xFFF59E0B)
 private val PurpleCriticalError = Color(0xFFA855F7)
-private val CrimsonMagentaError = Color(0xFFF43F5E)
 private val GreenSuccess = Color(0xFF22C55E)
-
-private val SmoothSubtitleEnterEasing = CubicBezierEasing(0.22f, 1.0f, 0.36f, 1.0f)
-private val SmoothSubtitleExitEasing = CubicBezierEasing(0.4f, 0.0f, 0.2f, 1.0f)
-internal const val SPEECH_SUBTITLE_LINGER_MS = 680L
 
 /**
  * Resolves the human-readable Russian status label for the David Live session,
@@ -161,6 +160,9 @@ fun resolveDavidLiveStatusLabel(
     visualState: DavidLiveVisualState? = null,
     failureKind: DavidLiveConnectionFailureKind = DavidLiveConnectionFailureKind.NONE
 ): String {
+    if (visualState == null && failureKind == DavidLiveConnectionFailureKind.NONE) {
+        return resolveDavidLiveStatusLabel(connectionState, activeSpeaker, isMicMuted, DavidLiveVisualPhase.IDLE)
+    }
     val effectiveVisualState = visualState ?: DavidLiveVisualStateResolver.resolve(
         connectionState = connectionState,
         activeSpeaker = activeSpeaker,
@@ -186,9 +188,7 @@ fun resolveDavidLiveStatusLabel(
         DavidLiveVisualState.PREPARING_RESPONSE -> "Готовлю ответ..."
         DavidLiveVisualState.SUCCESS -> "Готово!"
         DavidLiveVisualState.DAVID_SPEAKING -> "Говорит Давид..."
-        DavidLiveVisualState.USER_SPEAKING -> {
-            if (isMicMuted) "Микрофон выключен" else "Ты говоришь..."
-        }
+        DavidLiveVisualState.USER_SPEAKING -> "Ты говоришь..."
         DavidLiveVisualState.IDLE_LISTENING -> {
             if (isMicMuted) "Микрофон выключен" else "Слушаю тебя..."
         }
@@ -196,14 +196,11 @@ fun resolveDavidLiveStatusLabel(
 }
 
 /**
- * Resolves the state icon for the top status badge and under-sphere indicator.
+ * Resolves the state icon for the top status badge and contextual cloud.
  */
 private fun resolveVisualStateIcon(visualState: DavidLiveVisualState, isMicMuted: Boolean): ImageVector {
-    if (shouldApplyMutedVisualPalette(visualState, isMicMuted)) {
-        return Icons.Default.MicOff
-    }
     return when (visualState) {
-        DavidLiveVisualState.IDLE_LISTENING -> Icons.Default.Mic
+        DavidLiveVisualState.IDLE_LISTENING -> if (isMicMuted) Icons.Default.MicOff else Icons.Default.Mic
         DavidLiveVisualState.USER_SPEAKING -> Icons.Default.GraphicEq
         DavidLiveVisualState.THINKING -> Icons.Default.Psychology
         DavidLiveVisualState.FINANCE_LOOKUP -> Icons.Default.Search
@@ -213,7 +210,7 @@ private fun resolveVisualStateIcon(visualState: DavidLiveVisualState, isMicMuted
         DavidLiveVisualState.CONNECTING,
         DavidLiveVisualState.RECONNECTING -> Icons.Default.Refresh
         DavidLiveVisualState.OFFLINE -> Icons.Default.WifiOff
-        DavidLiveVisualState.API_MISSING -> Icons.Default.Warning
+        DavidLiveVisualState.API_MISSING -> Icons.Default.Key
         DavidLiveVisualState.ERROR -> Icons.Default.PriorityHigh
         DavidLiveVisualState.SUCCESS -> Icons.Default.Check
     }
@@ -222,135 +219,37 @@ private fun resolveVisualStateIcon(visualState: DavidLiveVisualState, isMicMuted
 /**
  * Resolves the primary and secondary accent colors (`Pair<Color, Color>`) for all 13
  * [DavidLiveVisualState] states across the full-screen sheet, compact capsule, and debug strip.
- *
- * When `isMicMuted == true`, states governed by user microphone input (`IDLE_LISTENING`,
- * `USER_SPEAKING`, `THINKING`, `FINANCE_LOOKUP`, `ANALYZING`, `PREPARING_RESPONSE`)
- * transition to a distinct muted silver-slate palette (`MutedSlatePrimary` to `MutedSilverSecondary`),
- * while priority system states (`OFFLINE`, `API_MISSING`, `ERROR`, `CONNECTING`, `RECONNECTING`, `SUCCESS`)
- * and outgoing speech (`DAVID_SPEAKING`) preserve their own colors.
  */
 internal fun resolveVisualStateColors(
     visualState: DavidLiveVisualState,
     isMicMuted: Boolean = false
 ): Pair<Color, Color> {
-    if (shouldApplyMutedVisualPalette(visualState, isMicMuted)) {
-        return MutedSlatePrimary to MutedSilverSecondary
-    }
     return when (visualState) {
-        DavidLiveVisualState.IDLE_LISTENING -> EmeraldStatus to PeakMintWave
+        DavidLiveVisualState.IDLE_LISTENING -> {
+            if (isMicMuted) {
+                Color(0xFF94A3B8) to Color(0xFF64748B)
+            } else {
+                EmeraldStatus to PeakMintWave
+            }
+        }
         DavidLiveVisualState.USER_SPEAKING -> TurquoiseUser to CyanSpeaking
-        DavidLiveVisualState.THINKING -> ThinkingVioletAccent to ThinkingCyanAccent
+        DavidLiveVisualState.THINKING -> CyanSpeaking to TurquoiseUser
         DavidLiveVisualState.FINANCE_LOOKUP -> PeakMintWave to TurquoiseUser
-        DavidLiveVisualState.ANALYZING -> ThinkingCyanAccent to ThinkingVioletAccent
+        DavidLiveVisualState.ANALYZING -> CyanSpeaking to EmeraldStatus
         DavidLiveVisualState.PREPARING_RESPONSE -> TurquoiseUser to EmeraldStatus
         DavidLiveVisualState.DAVID_SPEAKING -> EmeraldStatus to TurquoiseUser
         DavidLiveVisualState.CONNECTING -> CyanSpeaking to TurquoiseUser
         DavidLiveVisualState.RECONNECTING -> CyanSpeaking to TurquoiseUser
         DavidLiveVisualState.OFFLINE -> ErrorCrimson to Color(0xFFF87171)
         DavidLiveVisualState.API_MISSING -> GoldApiMissing to Color(0xFFFBBF24)
-        DavidLiveVisualState.ERROR -> CrimsonMagentaError to PurpleCriticalError
+        DavidLiveVisualState.ERROR -> PurpleCriticalError to Color(0xFFC084FC)
         DavidLiveVisualState.SUCCESS -> GreenSuccess to PeakMintWave
     }
 }
 
-internal fun isDefaultStatusSubtitlePlaceholder(text: String?): Boolean {
-    val trimmed = text?.trim().orEmpty()
-    return trimmed.isEmpty() ||
-        trimmed == "Я здесь, слушаю тебя" ||
-        trimmed == "Слушаю..." ||
-        trimmed == "Говорю..." ||
-        trimmed == "Вот что я думаю..." ||
-        trimmed == "Говорите, я слушаю..." ||
-        trimmed == "Давид отвечает..." ||
-        trimmed == "Слушаю вас" ||
-        trimmed == "Слушаю вас..." ||
-        trimmed == "Слушаю тебя..." ||
-        trimmed == "Микрофон отключён" ||
-        trimmed == "Подключаюсь к Давиду..."
-}
-
 /**
- * Вычисляет целевую амплитуду столбика `barIndex` горизонтального визуализатора под сферой.
- * Обеспечивает высокую чувствительность и выразительное движение волн при речи пользователя (`USER_SPEAKING`),
- * отображая центральные столбики на основной речевой диапазон частот (180 Гц – 2800 Гц).
- */
-internal fun computeHorizontalWaveBarTargetMagnitude(
-    barIndex: Int,
-    totalBars: Int,
-    rayMagnitudes: List<Float>,
-    radialEnvelope: FloatArray,
-    overallEnergy: Float,
-    wavePhaseRad: Float,
-    waveActivity: Float,
-    isMicMuted: Boolean,
-    isUserSpeaking: Boolean,
-    isDavidSpeaking: Boolean,
-    isProcessing: Boolean,
-    isIdleListeningUnmuted: Boolean
-): Float {
-    if (isMicMuted && !isDavidSpeaking && !isProcessing) {
-        return 0.06f
-    }
-
-    val normPos = (barIndex + 0.5f) / totalBars.coerceAtLeast(1).toFloat()
-    val centerEnvelope = sin(PI * normPos.toDouble()).toFloat().pow(1.22f)
-    val distFromCenter = kotlin.math.abs(normPos - 0.5f) * 2f
-
-    val rayCount = DavidLiveSpectrumAnalyzer.RAY_COUNT
-    // Направляем центральные столбики на голосовые форманты (индексы 6..20 и 30..44 соответствуют 140–2800 Гц),
-    // где сосредоточена основная энергия живого голоса пользователя
-    val vocalRayIdx = (8 + (distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
-    val neighborRayIdx = (vocalRayIdx + 2) % rayCount
-    val highRayIdx = ((distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
-
-    val envVocal = radialEnvelope.getOrElse(vocalRayIdx) { 0.65f }.coerceAtLeast(0.38f)
-    val envNeighbor = radialEnvelope.getOrElse(neighborRayIdx) { 0.65f }.coerceAtLeast(0.38f)
-    val envHigh = radialEnvelope.getOrElse(highRayIdx) { 0.70f }.coerceAtLeast(0.38f)
-    val vocalRay = maxOf(
-        (rayMagnitudes.getOrElse(vocalRayIdx) { 0.06f } / envVocal).coerceIn(0f, 1f),
-        (rayMagnitudes.getOrElse(neighborRayIdx) { 0.06f } / envNeighbor).coerceIn(0f, 1f) * 0.92f
-    )
-    val highRay = (rayMagnitudes.getOrElse(highRayIdx) { 0.06f } / envHigh).coerceIn(0f, 1f)
-    val rawRay = (0.76f * vocalRay + 0.24f * highRay).coerceIn(0f, 1f)
-
-    var peakRay = 0f
-    var sumRay = 0f
-    for (r in rayMagnitudes) {
-        if (r > peakRay) peakRay = r
-        sumRay += r
-    }
-    val meanRay = if (rayMagnitudes.isNotEmpty()) sumRay / rayMagnitudes.size else 0f
-    val rawVoiceEnergy = maxOf(overallEnergy.coerceIn(0f, 1f), peakRay * 0.90f, meanRay * 1.55f).coerceIn(0f, 1f)
-
-    val isSpeakingActive = isUserSpeaking || isDavidSpeaking || (isIdleListeningUnmuted && rawVoiceEnergy > 0.045f)
-    if (isSpeakingActive) {
-        // Нелинейное усиление чувствительности для живого голоса (нормальная речь даёт 62%–96% амплитуды в центре)
-        val curvedEnergy = rawVoiceEnergy.coerceAtLeast(0.08f).pow(0.50f).coerceIn(0.24f, 1f)
-        val harmonicFloor = maxOf(rawRay, peakRay * 0.78f).coerceIn(0.12f, 1f)
-        val combinedSignal = maxOf(
-            curvedEnergy * 0.88f,
-            0.44f * harmonicFloor.pow(0.65f) + 0.62f * curvedEnergy
-        ).coerceIn(0.24f, 1f)
-
-        // Бегущая артикуляционная волна создаёт живое движение соседних столбиков в такт слогам речи
-        val waveA = ((sin(wavePhaseRad * 3.0 + barIndex * 0.78) + 1.0) * 0.5).toFloat()
-        val waveB = ((cos(wavePhaseRad * 5.0 - barIndex * 1.24) + 1.0) * 0.5).toFloat()
-        val dynamicArticulation = 0.74f + 0.52f * (0.62f * waveA + 0.38f * waveB)
-
-        val shaped = combinedSignal * dynamicArticulation * (0.36f + 0.78f * centerEnvelope) * waveActivity
-        return shaped.coerceIn(0.10f, 1f)
-    }
-
-    // Спокойное плавное дыхание волн в режиме ожидания (IDLE_LISTENING)
-    val idleBreathing = 0.55f + 0.45f * ((sin(wavePhaseRad * 1.0 + barIndex * 0.65) + 1.0) * 0.5).toFloat()
-    val idleContour = 0.10f + 0.24f * centerEnvelope * idleBreathing
-    val baseSignal = maxOf(rawRay * 0.65f, if (isIdleListeningUnmuted) idleContour else 0.08f)
-    return (baseSignal * (0.32f + 0.76f * centerEnvelope) * waveActivity).coerceIn(0.06f, 1f)
-}
-
-/**
- * Horizontal multi-band spectral wave visualizer for the full-screen under-sphere audio wave,
- * morphing transition, and compact bottom voice capsule (`DavidLiveMinimizedCapsule`).
+ * Horizontal multi-band spectral wave visualizer for the David Live morphing transition
+ * and compact bottom voice capsule (`DavidLiveMinimizedCapsule`).
  */
 @Composable
 fun DavidLiveHorizontalWaveVisualizer(
@@ -547,6 +446,7 @@ fun DavidLiveMinimizedCapsule(
     onEndSession: () -> Unit,
     modifier: Modifier = Modifier,
     embeddedInBottomBar: Boolean = false,
+    visualPhase: DavidLiveVisualPhase? = null,
     visualState: DavidLiveVisualState? = null,
     failureKind: DavidLiveConnectionFailureKind = DavidLiveConnectionFailureKind.NONE
 ) {
@@ -580,23 +480,18 @@ fun DavidLiveMinimizedCapsule(
         failureKind = failureKind
     )
 
-    val (targetPrimaryColor, _) = remember(effectiveVisualState, isMicMuted) {
+    val (statePrimaryColor, _) = remember(effectiveVisualState, isMicMuted) {
         resolveVisualStateColors(effectiveVisualState, isMicMuted)
     }
-    val statePrimaryColor by animateColorAsState(
-        targetValue = targetPrimaryColor,
-        animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
-        label = "capsule_state_primary_color"
-    )
 
     val capsuleCornerRadius = if (embeddedInBottomBar) 22.dp else 26.dp
 
     val capsuleBorderColor = when (effectiveVisualState) {
         DavidLiveVisualState.OFFLINE -> ErrorCrimson.copy(alpha = 0.72f)
         DavidLiveVisualState.API_MISSING -> GoldApiMissing.copy(alpha = 0.72f)
-        DavidLiveVisualState.ERROR -> CrimsonMagentaError.copy(alpha = 0.72f)
+        DavidLiveVisualState.ERROR -> PurpleCriticalError.copy(alpha = 0.72f)
         else -> if (isMicMuted && !isDavidSpeaking) {
-            MutedSlatePrimary.copy(alpha = 0.55f)
+            Color(0xFF283548)
         } else {
             statePrimaryColor.copy(alpha = 0.50f + 0.30f * energyClamped)
         }
@@ -678,7 +573,10 @@ fun DavidLiveMinimizedCapsule(
                         ),
                     contentAlignment = Alignment.Center
                 ) {
-                    BrandFrogAvatar(size = 28.dp)
+                    Text(
+                        text = "🐸",
+                        fontSize = 20.sp
+                    )
                 }
 
                 Spacer(modifier = Modifier.width(10.dp))
@@ -695,8 +593,7 @@ fun DavidLiveMinimizedCapsule(
                             color = Color.White,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
+                            maxLines = 1
                         )
                         Box(
                             modifier = Modifier
@@ -710,33 +607,16 @@ fun DavidLiveMinimizedCapsule(
                             fontSize = 10.sp,
                             fontWeight = FontWeight.ExtraBold,
                             letterSpacing = 0.5.sp,
-                            maxLines = 1,
-                            softWrap = false
+                            maxLines = 1
                         )
                     }
 
                     Spacer(modifier = Modifier.height(2.dp))
 
-                    val capsuleStatusAlpha = remember { Animatable(1f) }
-                    var previousCapsuleStatus by remember { mutableStateOf(statusText) }
-                    LaunchedEffect(statusText) {
-                        if (statusText != previousCapsuleStatus) {
-                            previousCapsuleStatus = statusText
-                            capsuleStatusAlpha.snapTo(0.35f)
-                            capsuleStatusAlpha.animateTo(
-                                targetValue = 1f,
-                                animationSpec = tween(
-                                    durationMillis = 180,
-                                    easing = SmoothSubtitleEnterEasing
-                                )
-                            )
-                        }
-                    }
-
                     Text(
                         text = statusText,
                         color = if (isMicMuted && !isDavidSpeaking) {
-                            MutedSilverSecondary
+                            Color(0xFFFCA5A5)
                         } else {
                             Color(0xFF94A3B8)
                         },
@@ -744,9 +624,7 @@ fun DavidLiveMinimizedCapsule(
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .alpha(capsuleStatusAlpha.value)
-                            .testTag("david_live_capsule_status")
+                        modifier = Modifier.testTag("david_live_capsule_status")
                     )
                 }
             }
@@ -776,16 +654,16 @@ fun DavidLiveMinimizedCapsule(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 val micBgColor = when {
-                    isMicMuted -> Color(0xFF263244)
+                    isMicMuted -> ErrorCrimson.copy(alpha = 0.20f)
                     isDavidSpeaking -> CyanSpeaking.copy(alpha = 0.20f)
                     else -> statePrimaryColor.copy(alpha = 0.16f)
                 }
                 val micBorderColor = when {
-                    isMicMuted -> MutedSlatePrimary.copy(alpha = 0.78f)
+                    isMicMuted -> ErrorCrimson.copy(alpha = 0.75f)
                     else -> statePrimaryColor.copy(alpha = 0.72f)
                 }
                 val micIconTint = when {
-                    isMicMuted -> MutedSilverSecondary
+                    isMicMuted -> ErrorCrimson
                     isDavidSpeaking -> CyanSpeaking
                     else -> NeonAquaWave
                 }
@@ -859,11 +737,13 @@ fun DavidLiveMinimizedCapsule(
 
 /**
  * Full-screen voice conversation screen for **David Live** (Issue #56 Redesign):
- * - Matches the approved Obsidian Neo-Bank "David Live — Живая сфера" design reference:
- *   1. Top Header with David Frog Avatar + Gold Coin badge, verified title, live status badge, and Settings gear;
- *   2. Central Translucent 3D Energy Sphere with multi-depth continuous orbital ribbons ([DavidLiveCircularVisualizer]);
- *   3. Under-Sphere Indicator (Audio Waveform / Orbital Spinner / State Icon), Status Label, and Contextual Cloud (`david_live_subtitle_bubble`);
- *   4. Bottom 3-Button Control Bar: Chat (`💬`), Large Focal Microphone Toggle (`🎤`/`🔇`), and End Call (`📞`).
+ * - Centralized 13-state visual model ([DavidLiveVisualState] + [DavidLiveVisualMetadata]);
+ * - Interactive 3D glowing Mesh Sphere ([DavidLiveCircularVisualizer]) with direct tap-to-reconnect
+ *   in `OFFLINE` and tap-to-configure-API in `API_MISSING` / `INVALID_API_KEY`;
+ * - Contextual status cloud (`david_live_subtitle_bubble`) with state badge, short title,
+ *   contextual explanation, and action pill (`"Повторить"`, `"Добавить API"`, `"Настроить API"`);
+ * - Debug/Test state switcher (`enableDebugStateSwitcher`) to manually inspect all 13 visual states
+ *   and transitions without a live Gemini connection.
  */
 @Composable
 fun DavidLiveSheet(
@@ -886,15 +766,17 @@ fun DavidLiveSheet(
     isEmbeddedInModalCard: Boolean = false,
     renderEmbeddedMinimizedCapsule: Boolean = true,
     minimizedBottomOffsetDp: Dp = 14.dp,
+    visualPhase: DavidLiveVisualPhase? = null,
     visualState: DavidLiveVisualState? = null,
     failureKind: DavidLiveConnectionFailureKind = DavidLiveConnectionFailureKind.NONE,
     activeToolName: String? = null,
     debugOverrideVisualState: DavidLiveVisualState? = null,
     onSelectDebugVisualState: ((DavidLiveVisualState?) -> Unit)? = null,
-    enableDebugStateSwitcher: Boolean = com.example.BuildConfig.DEBUG
+    enableDebugStateSwitcher: Boolean = false
 ) {
     val context = LocalContext.current
 
+    // Local fallback override when tested standalone in Compose UI tests without a controller callback
     var localDebugOverride by remember { mutableStateOf<DavidLiveVisualState?>(null) }
     val activeDebugOverride = if (enableDebugStateSwitcher) {
         debugOverrideVisualState ?: localDebugOverride
@@ -902,7 +784,6 @@ fun DavidLiveSheet(
         null
     }
     var isDebugBarExpanded by remember { mutableStateOf(false) }
-    var apiCloudHighlightCount by remember { mutableIntStateOf(0) }
 
     val effectiveVisualState = remember(
         activeDebugOverride,
@@ -933,96 +814,11 @@ fun DavidLiveSheet(
         }
     }
 
-    // Синхронизация смены фраз в облачке речи с реальными сегментами и плавным затуханием после озвучки
-    var previousVisualStateForSpeech by remember { mutableStateOf(effectiveVisualState) }
-    var lastSpeakingVisualState by remember { mutableStateOf(DavidLiveVisualState.DAVID_SPEAKING) }
-    var lastSpokenSubtitleWhileSpeaking by remember { mutableStateOf<String?>(null) }
-    var lastCompletedSpokenSubtitle by remember { mutableStateOf<String?>(null) }
-    var isLingeringCompletedSpeech by remember { mutableStateOf(false) }
-    var speechTurnEpoch by remember { mutableIntStateOf(0) }
-
-    val isCurrentlySpeakingState = effectiveVisualState == DavidLiveVisualState.DAVID_SPEAKING ||
-        effectiveVisualState == DavidLiveVisualState.USER_SPEAKING
-    val wasPreviouslySpeakingState = previousVisualStateForSpeech == DavidLiveVisualState.DAVID_SPEAKING ||
-        previousVisualStateForSpeech == DavidLiveVisualState.USER_SPEAKING
-
-    if (isCurrentlySpeakingState) {
-        lastSpeakingVisualState = effectiveVisualState
-        if (isLingeringCompletedSpeech) {
-            isLingeringCompletedSpeech = false
-        }
-        if (!wasPreviouslySpeakingState || previousVisualStateForSpeech != effectiveVisualState) {
-            speechTurnEpoch++
-        }
-        val trimmedLive = liveSubtitle.trim()
-        if (trimmedLive.isNotEmpty()) {
-            lastSpokenSubtitleWhileSpeaking = trimmedLive
-        }
-    } else if (wasPreviouslySpeakingState) {
-        val finishedPhrase = lastSpokenSubtitleWhileSpeaking ?: liveSubtitle.trim()
-        lastCompletedSpokenSubtitle = finishedPhrase
-        if (effectiveVisualState == DavidLiveVisualState.IDLE_LISTENING &&
-            finishedPhrase.isNotEmpty()
-        ) {
-            // Удерживаем завершённую фразу на короткую паузу чтения перед плавным исчезновением
-            isLingeringCompletedSpeech = true
-        } else {
-            isLingeringCompletedSpeech = false
-            speechTurnEpoch++
-        }
-    } else if (isLingeringCompletedSpeech && effectiveVisualState != DavidLiveVisualState.IDLE_LISTENING) {
-        isLingeringCompletedSpeech = false
-        speechTurnEpoch++
-    }
-    if (previousVisualStateForSpeech != effectiveVisualState) {
-        previousVisualStateForSpeech = effectiveVisualState
-    }
-
-    LaunchedEffect(isLingeringCompletedSpeech, effectiveVisualState) {
-        if (isLingeringCompletedSpeech && effectiveVisualState == DavidLiveVisualState.IDLE_LISTENING) {
-            delay(SPEECH_SUBTITLE_LINGER_MS)
-            isLingeringCompletedSpeech = false
-            speechTurnEpoch++
-        }
-    }
-
-    val effectiveLiveSubtitleForBubble = remember(
-        effectiveVisualState,
-        liveSubtitle,
-        lastCompletedSpokenSubtitle,
-        isLingeringCompletedSpeech
-    ) {
-        if (isLingeringCompletedSpeech && effectiveVisualState == DavidLiveVisualState.IDLE_LISTENING) {
-            lastSpokenSubtitleWhileSpeaking ?: liveSubtitle
-        } else if (shouldDismissCompletedSpokenSubtitle(
-                visualState = effectiveVisualState,
-                currentLiveSubtitle = liveSubtitle,
-                lastCompletedSpokenSubtitle = lastCompletedSpokenSubtitle
-            )
-        ) {
-            null
-        } else {
-            liveSubtitle
-        }
-    }
-
-    val activeSpeechSegment = remember(effectiveLiveSubtitleForBubble) {
-        extractActiveSpeechBubbleSegment(effectiveLiveSubtitleForBubble.orEmpty())
-    }
-
-    val bubbleMetadataVisualState = if (
-        isLingeringCompletedSpeech && effectiveVisualState == DavidLiveVisualState.IDLE_LISTENING
-    ) {
-        lastSpeakingVisualState
-    } else {
-        effectiveVisualState
-    }
-
     val visualMetadata = remember(
         effectiveVisualState,
         effectiveFailureKind,
         isMicMuted,
-        effectiveLiveSubtitleForBubble,
+        liveSubtitle,
         errorMessage,
         activeToolName
     ) {
@@ -1030,24 +826,10 @@ fun DavidLiveSheet(
             visualState = effectiveVisualState,
             failureKind = effectiveFailureKind,
             isMicMuted = isMicMuted,
-            liveSubtitle = effectiveLiveSubtitleForBubble,
+            liveSubtitle = liveSubtitle,
             errorMessage = errorMessage,
             activeToolName = activeToolName
         )
-    }
-
-    val hasActiveSpokenPhrase = activeSpeechSegment.activeText.isNotBlank() &&
-        !isDefaultStatusSubtitlePlaceholder(activeSpeechSegment.activeText)
-    // Не включаем hasActiveSpokenPhrase в ключ AnimatedContent для одного и того же хода речи,
-    // чтобы переход от стартовой заглушки ("Слушаю..." / "Вот что я думаю...") к первому слову
-    // не вызывал двойной 520-мс перезапуск slideIn/slideOut на 50-й миллисекунде речи.
-    val speechPhraseSlotKey = remember(
-        speechTurnEpoch,
-        bubbleMetadataVisualState,
-        isMicMuted,
-        activeSpeechSegment.segmentIndex
-    ) {
-        "$speechTurnEpoch:${bubbleMetadataVisualState.name}:$isMicMuted:${activeSpeechSegment.segmentIndex}"
     }
 
     val (targetStatePrimaryColor, targetStateSecondaryColor) = remember(effectiveVisualState, isMicMuted) {
@@ -1055,12 +837,12 @@ fun DavidLiveSheet(
     }
     val statePrimaryColor by animateColorAsState(
         targetValue = targetStatePrimaryColor,
-        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
         label = "sheet_state_primary_color"
     )
     val stateSecondaryColor by animateColorAsState(
         targetValue = targetStateSecondaryColor,
-        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+        animationSpec = tween(durationMillis = 360, easing = FastOutSlowInEasing),
         label = "sheet_state_secondary_color"
     )
 
@@ -1139,6 +921,7 @@ fun DavidLiveSheet(
         failureKind = effectiveFailureKind
     )
 
+    // Contextual synthetic energy for debug preview of USER_SPEAKING / DAVID_SPEAKING when no real mic input is active
     val effectiveEnergy = if (activeDebugOverride == DavidLiveVisualState.USER_SPEAKING ||
         activeDebugOverride == DavidLiveVisualState.DAVID_SPEAKING
     ) {
@@ -1146,21 +929,6 @@ fun DavidLiveSheet(
     } else {
         overallEnergy
     }
-
-    val isMutedVisual = shouldApplyMutedVisualPalette(effectiveVisualState, isMicMuted)
-    val isVoiceWaveUnderSphere = !isMutedVisual && (
-        effectiveVisualState == DavidLiveVisualState.IDLE_LISTENING ||
-            effectiveVisualState == DavidLiveVisualState.USER_SPEAKING ||
-            effectiveVisualState == DavidLiveVisualState.DAVID_SPEAKING
-        )
-    val isSpinnerUnderSphere = !isMutedVisual && (
-        effectiveVisualState == DavidLiveVisualState.THINKING ||
-            effectiveVisualState == DavidLiveVisualState.FINANCE_LOOKUP ||
-            effectiveVisualState == DavidLiveVisualState.ANALYZING ||
-            effectiveVisualState == DavidLiveVisualState.PREPARING_RESPONSE ||
-            effectiveVisualState == DavidLiveVisualState.CONNECTING ||
-            effectiveVisualState == DavidLiveVisualState.RECONNECTING
-        )
 
     Box(
         modifier = modifier.fillMaxSize(),
@@ -1175,16 +943,12 @@ fun DavidLiveSheet(
                         Brush.verticalGradient(
                             colors = listOf(
                                 LiveScreenBgTop,
-                                LiveScreenBgMid,
                                 LiveScreenBgBottom
                             )
                         )
                     )
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}
-                    )
+                    // Block background taps without merging the whole screen into one accessibility button.
+                    .pointerInput(Unit) { detectTapGestures(onTap = {}) }
                     .then(
                         if (isEmbeddedInModalCard) {
                             Modifier
@@ -1201,11 +965,11 @@ fun DavidLiveSheet(
                         .fillMaxSize()
                         .padding(
                             horizontal = if (isEmbeddedInModalCard) 18.dp else 22.dp,
-                            vertical = if (isEmbeddedInModalCard) 10.dp else 14.dp
+                            vertical = if (isEmbeddedInModalCard) 12.dp else 14.dp
                         ),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // 1. Top Header Bar (matches reference mockup: Avatar + Gold Coin + "Давид Жабов" ✓ + Status Badge + Settings ⚙)
+                    // 1. Top Navigation & Identity Header + Contextual Cloud
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1216,127 +980,56 @@ fun DavidLiveSheet(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
+                            // Minimize `<` button
+                            IconButton(
+                                onClick = onMinimize,
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF111927))
+                                    .border(1.dp, Color(0xFF1F2D42), CircleShape)
+                                    .testTag("david_live_minimize_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ChevronLeft,
+                                    contentDescription = "Свернуть David Live в компактный режим",
+                                    tint = Color(0xFFCBD5E1),
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            // Center "David Live • LIVE" pill with live state indicator dot
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f, fill = false)
-                            ) {
-                                // Minimize `<` button
-                                IconButton(
-                                    onClick = onMinimize,
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFF111927))
-                                        .border(1.dp, Color(0xFF1F2D42), CircleShape)
-                                        .testTag("david_live_minimize_button")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.ChevronLeft,
-                                        contentDescription = "Свернуть David Live в компактный режим",
-                                        tint = Color(0xFFCBD5E1),
-                                        modifier = Modifier.size(20.dp)
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0xFF0E1624))
+                                    .border(
+                                        width = 1.dp,
+                                        color = statePrimaryColor.copy(alpha = 0.42f),
+                                        shape = RoundedCornerShape(16.dp)
                                     )
-                                }
-
-                                Spacer(modifier = Modifier.width(10.dp))
-
-                                // Чистый аватар Давида без декоративной монетки (Дополнение к ТЗ п. 2)
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "David Live",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                                 Box(
                                     modifier = Modifier
-                                        .size(46.dp)
+                                        .size(7.dp)
                                         .clip(CircleShape)
-                                        .background(
-                                            Brush.radialGradient(
-                                                colors = listOf(
-                                                    statePrimaryColor.copy(alpha = 0.32f),
-                                                    Color(0xFF0A1622)
-                                                )
-                                            )
-                                        )
-                                        .border(
-                                            width = 1.6.dp,
-                                            color = statePrimaryColor.copy(alpha = 0.82f),
-                                            shape = CircleShape
-                                        )
-                                        .testTag("david_live_header_avatar"),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    BrandFrogAvatar(size = 33.dp)
-                                }
-
-                                Spacer(modifier = Modifier.width(10.dp))
-
-                                Column {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                    ) {
-                                        Text(
-                                            text = "Давид Жабов",
-                                            color = Color.White,
-                                            fontSize = 16.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        // Verified green check badge next to David's name (as in reference)
-                                        Box(
-                                            modifier = Modifier
-                                                .size(15.dp)
-                                                .clip(CircleShape)
-                                                .background(EmeraldStatus),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = Color(0xFF022C22),
-                                                modifier = Modifier.size(10.5.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Text(
-                                        text = "AI-помощник по финансам",
-                                        color = Color(0xFF7E92AC),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1
-                                    )
-
-                                    Spacer(modifier = Modifier.height(2.dp))
-
-                                    // Connection / State pill directly under name (matching reference top status)
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(statePrimaryColor.copy(alpha = 0.12f))
-                                            .border(
-                                                width = 0.8.dp,
-                                                color = statePrimaryColor.copy(alpha = 0.42f),
-                                                shape = RoundedCornerShape(10.dp)
-                                            )
-                                            .padding(horizontal = 7.dp, vertical = 2.dp)
-                                            .testTag("david_live_state_badge")
-                                    ) {
-                                        Icon(
-                                            imageVector = resolveVisualStateIcon(effectiveVisualState, isMicMuted),
-                                            contentDescription = null,
-                                            tint = statePrimaryColor,
-                                            modifier = Modifier.size(11.dp)
-                                        )
-                                        Text(
-                                            text = visualMetadata.title,
-                                            color = statePrimaryColor,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            softWrap = false
-                                        )
-                                    }
-                                }
+                                        .background(statePrimaryColor)
+                                )
+                                Text(
+                                    text = "LIVE",
+                                    color = statePrimaryColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
                             }
 
                             Row(
@@ -1386,9 +1079,9 @@ fun DavidLiveSheet(
                                         .testTag("david_live_settings_button")
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.Settings,
+                                        imageVector = Icons.Default.Tune,
                                         contentDescription = "Настройки API-ключа и голоса",
-                                        tint = Color(0xFFCBD5E1),
+                                        tint = Color(0xFF94A3B8),
                                         modifier = Modifier.size(19.dp)
                                     )
                                 }
@@ -1412,22 +1105,167 @@ fun DavidLiveSheet(
                                     .testTag("david_live_debug_state_switcher")
                             )
                         }
+
+                        Spacer(modifier = Modifier.height(if (isEmbeddedInModalCard) 8.dp else 12.dp))
+
+                        // David Avatar + "Давид Жабов" / "AI-помощник по финансам" + State Badge Pill
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f, fill = false)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            Brush.radialGradient(
+                                                colors = listOf(
+                                                    statePrimaryColor.copy(alpha = 0.35f),
+                                                    Color(0xFF0B1522)
+                                                )
+                                            )
+                                        )
+                                        .border(
+                                            width = 1.5.dp,
+                                            color = statePrimaryColor.copy(alpha = 0.78f),
+                                            shape = CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "🐸",
+                                        fontSize = 23.sp
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(11.dp))
+
+                                Column {
+                                    Text(
+                                        text = "Давид Жабов",
+                                        color = Color.White,
+                                        fontSize = 17.5.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "AI-помощник по финансам",
+                                        color = Color(0xFF7E92AC),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+
+                            // State Header Pill matching the top-of-card badge in the reference design
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(statePrimaryColor.copy(alpha = 0.14f))
+                                    .border(
+                                        width = 1.dp,
+                                        color = statePrimaryColor.copy(alpha = 0.48f),
+                                        shape = RoundedCornerShape(14.dp)
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    .testTag("david_live_state_badge")
+                            ) {
+                                Icon(
+                                    imageVector = resolveVisualStateIcon(effectiveVisualState, isMicMuted),
+                                    contentDescription = null,
+                                    tint = statePrimaryColor,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = visualMetadata.title,
+                                    color = statePrimaryColor,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(if (isEmbeddedInModalCard) 8.dp else 12.dp))
+
+                        // Connection problems have a single quiet notice. The speech bubble is for dialogue only.
+                        val hasConnectionProblem = effectiveVisualState == DavidLiveVisualState.OFFLINE ||
+                            effectiveVisualState == DavidLiveVisualState.API_MISSING ||
+                            effectiveVisualState == DavidLiveVisualState.ERROR
+                        if (hasConnectionProblem) {
+                            Surface(
+                                color = com.example.ui.theme.ObsidianSurface,
+                                shape = androidx.compose.material3.MaterialTheme.shapes.medium,
+                                border = BorderStroke(1.dp, com.example.ui.theme.GlassBorder),
+                                modifier = Modifier.fillMaxWidth().testTag("david_live_connection_notice")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text(
+                                        text = when (effectiveVisualState) {
+                                            DavidLiveVisualState.API_MISSING -> "Для голосового диалога добавьте личный ключ в настройках."
+                                            DavidLiveVisualState.OFFLINE -> "Нет соединения. Проверьте интернет."
+                                            else -> "Голосовой диалог недоступен. Попробуйте подключиться снова."
+                                        },
+                                        style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                                        color = com.example.ui.theme.Slate300,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    androidx.compose.material3.TextButton(
+                                        onClick = {
+                                            if (visualMetadata.sphereTapOpensApiSettings) onOpenApiKeySettings()
+                                            else onRetryConnection()
+                                        },
+                                        modifier = Modifier.testTag("david_live_contextual_action_button")
+                                    ) {
+                                        Text(if (visualMetadata.sphereTapOpensApiSettings) "Настройки" else "Повторить")
+                                    }
+                                }
+                            }
+                        }
+                        val speech = resolveDavidLiveSpeech(effectiveVisualState, liveSubtitle)
+                        if (speech != null) {
+                            Surface(
+                                color = com.example.ui.theme.ObsidianSurface,
+                                shape = androidx.compose.material3.MaterialTheme.shapes.medium,
+                                border = BorderStroke(1.dp, com.example.ui.theme.GlassBorder),
+                                modifier = Modifier.fillMaxWidth().testTag("david_live_subtitle_bubble")
+                            ) {
+                                Text(
+                                    text = extractActiveSpeechBubbleSegment(speech).activeText,
+                                    style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
+                                    color = com.example.ui.theme.Slate100,
+                                    maxLines = 4,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(16.dp)
+                                )
+                            }
+                        }
                     }
 
-                    Spacer(modifier = Modifier.weight(0.85f))
+                    Spacer(modifier = Modifier.weight(1f))
 
-                    // 2. Center Living 3D Energy Sphere + Under-Sphere Indicator + Contextual Cloud
+                    // 2. Center Morphing 3D Mesh Sphere Visualizer Area
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .offset { IntOffset(0, downwardShiftDp.dp.roundToPx()) },
                         contentAlignment = Alignment.Center
                     ) {
+                        // Stage A: 3D Mesh Sphere Visualizer
                         if (circularAlpha > 0.01f) {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier
-                                    .fillMaxWidth()
                                     .alpha(circularAlpha)
                                     .scale(circularScale)
                             ) {
@@ -1438,290 +1276,14 @@ fun DavidLiveSheet(
                                     activeSpeaker = activeSpeaker,
                                     isMicMuted = isMicMuted,
                                     onToggleMicMute = onToggleMicMute,
-                                    visualizerSize = if (isEmbeddedInModalCard) 268.dp else 308.dp,
+                                    visualizerSize = if (isEmbeddedInModalCard) 244.dp else 278.dp,
                                     visualState = effectiveVisualState,
                                     failureKind = effectiveFailureKind,
-                                    activeToolName = activeToolName,
                                     onRetryConnection = onRetryConnection,
-                                    onOpenApiKeySettings = {
-                                        apiCloudHighlightCount++
-                                        onOpenApiKeySettings()
-                                    }
+                                    onOpenApiKeySettings = onOpenApiKeySettings
                                 )
 
-                                Spacer(modifier = Modifier.height(if (isEmbeddedInModalCard) 6.dp else 10.dp))
 
-                                // Under-Sphere Indicator (matches the 8 states in the reference design):
-                                // - Audio waveform for IDLE_LISTENING (unmuted), USER_SPEAKING, DAVID_SPEAKING
-                                // - Glowing orbital spinner for THINKING, FINANCE_LOOKUP, ANALYZING, PREPARING_RESPONSE, CONNECTING
-                                // - State icon for MUTE (🔇), OFFLINE (📡), API_MISSING (⚠), ERROR (!)
-                                Box(
-                                    modifier = Modifier.height(32.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    when {
-                                        isVoiceWaveUnderSphere -> {
-                                            DavidLiveHorizontalWaveVisualizer(
-                                                rayMagnitudes = rayMagnitudes,
-                                                overallEnergy = effectiveEnergy,
-                                                connectionState = connectionState,
-                                                activeSpeaker = activeSpeaker,
-                                                isMicMuted = isMicMuted,
-                                                barCount = 24,
-                                                visualState = effectiveVisualState,
-                                                modifier = Modifier
-                                                    .width(176.dp)
-                                                    .height(28.dp)
-                                            )
-                                        }
-
-                                        isSpinnerUnderSphere -> {
-                                            DavidLiveThinkingOrbitalSpinner(
-                                                primaryColor = statePrimaryColor,
-                                                secondaryColor = stateSecondaryColor,
-                                                modifier = Modifier.size(26.dp)
-                                            )
-                                        }
-
-                                        else -> {
-                                            Icon(
-                                                imageVector = resolveVisualStateIcon(effectiveVisualState, isMicMuted),
-                                                contentDescription = null,
-                                                tint = statePrimaryColor,
-                                                modifier = Modifier.size(24.dp)
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(6.dp))
-
-                                // Primary status caption directly under the indicator
-                                Text(
-                                    text = statusText,
-                                    color = when (effectiveVisualState) {
-                                        DavidLiveVisualState.OFFLINE -> Color(0xFFFCA5A5)
-                                        DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
-                                        DavidLiveVisualState.ERROR -> Color(0xFFFBCFE8)
-                                        DavidLiveVisualState.SUCCESS -> Color(0xFF86EFAC)
-                                        else -> if (isMutedVisual) MutedSilverSecondary else Color.White
-                                    },
-                                    fontSize = 15.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.testTag("david_live_sphere_status_caption")
-                                )
-
-                                Spacer(modifier = Modifier.height(if (isEmbeddedInModalCard) 8.dp else 10.dp))
-
-                                // Compact Contextual Status / Subtitle Cloud (`david_live_subtitle_bubble`)
-                                val isAlertState = effectiveVisualState == DavidLiveVisualState.OFFLINE ||
-                                    effectiveVisualState == DavidLiveVisualState.API_MISSING ||
-                                    effectiveVisualState == DavidLiveVisualState.ERROR
-
-                                val cloudHighlightScale by animateFloatAsState(
-                                    targetValue = if (apiCloudHighlightCount % 2 == 1) 1.03f else 1f,
-                                    animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
-                                    label = "api_cloud_highlight_scale"
-                                )
-
-                                Box(
-                                    modifier = Modifier
-                                        .widthIn(min = 52.dp, max = 336.dp)
-                                        .scale(cloudHighlightScale)
-                                        .heightIn(min = 32.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(
-                                            Brush.linearGradient(
-                                                colors = listOf(
-                                                    SubtitleBubbleSurface.copy(alpha = 0.88f),
-                                                    lerp(
-                                                        SubtitleBubbleSurface,
-                                                        statePrimaryColor,
-                                                        if (isAlertState) 0.14f else 0.06f
-                                                    )
-                                                )
-                                            )
-                                        )
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (isAlertState || apiCloudHighlightCount > 0) {
-                                                statePrimaryColor.copy(alpha = 0.62f)
-                                            } else {
-                                                lerp(SubtitleBubbleBorder, statePrimaryColor, 0.28f)
-                                            },
-                                            shape = RoundedCornerShape(16.dp)
-                                        )
-                                        .animateContentSize(
-                                            animationSpec = tween(
-                                                durationMillis = 240,
-                                                easing = SmoothSubtitleEnterEasing
-                                            )
-                                        )
-                                        .padding(horizontal = 13.dp, vertical = 7.dp)
-                                        .testTag("david_live_subtitle_bubble"),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        val displayedPhrase = visualMetadata.subtitle
-                                        val slotVisualState = bubbleMetadataVisualState
-                                        val isSlotSpeaking = slotVisualState == DavidLiveVisualState.DAVID_SPEAKING ||
-                                            slotVisualState == DavidLiveVisualState.USER_SPEAKING
-                                        val isSlotAlert = slotVisualState == DavidLiveVisualState.OFFLINE ||
-                                            slotVisualState == DavidLiveVisualState.API_MISSING ||
-                                            slotVisualState == DavidLiveVisualState.ERROR
-                                        val baseTextColor = when (slotVisualState) {
-                                            DavidLiveVisualState.OFFLINE -> Color(0xFFFECACA)
-                                            DavidLiveVisualState.API_MISSING -> Color(0xFFFDE68A)
-                                            DavidLiveVisualState.ERROR -> Color(0xFFFBCFE8)
-                                            DavidLiveVisualState.SUCCESS -> Color(0xFFBBF7D0)
-                                            DavidLiveVisualState.DAVID_SPEAKING,
-                                            DavidLiveVisualState.USER_SPEAKING -> Color(0xFFF8FAFC)
-                                            else -> Color(0xFFE2E8F0)
-                                        }
-
-                                        // Единый стабильный текстовый узел без пересоздания AnimatedContent:
-                                        // само скруглённое облачко плавно расширяется (clip/background/border -> animateContentSize),
-                                        // а новые слова мягко проявляются на своём месте без повторной перерисовки карточки.
-                                        var previousRenderedPhrase by remember {
-                                            mutableStateOf(displayedPhrase)
-                                        }
-                                        var previousSlotKey by remember {
-                                            mutableStateOf(speechPhraseSlotKey)
-                                        }
-                                        var fadeStartIndex by remember {
-                                            mutableIntStateOf(displayedPhrase.length)
-                                        }
-                                        val latestTailAlpha = remember { Animatable(1f) }
-
-                                        LaunchedEffect(displayedPhrase, speechPhraseSlotKey) {
-                                            val prev = previousRenderedPhrase
-                                            val slotChanged = speechPhraseSlotKey != previousSlotKey
-                                            if (displayedPhrase != prev || slotChanged) {
-                                                val isReplacingPlaceholder = slotChanged ||
-                                                    (isDefaultStatusSubtitlePlaceholder(prev) &&
-                                                        !isDefaultStatusSubtitlePlaceholder(displayedPhrase))
-                                                val splitIdx = computeStreamingTextFadeSplitIndex(
-                                                    previousText = prev,
-                                                    currentText = displayedPhrase,
-                                                    isPreviousPlaceholder = isReplacingPlaceholder
-                                                )
-                                                previousRenderedPhrase = displayedPhrase
-                                                previousSlotKey = speechPhraseSlotKey
-                                                if (splitIdx < displayedPhrase.length) {
-                                                    fadeStartIndex = splitIdx
-                                                    latestTailAlpha.snapTo(0.24f)
-                                                    latestTailAlpha.animateTo(
-                                                        targetValue = 1f,
-                                                        animationSpec = tween(
-                                                            durationMillis = 180,
-                                                            easing = SmoothSubtitleEnterEasing
-                                                        )
-                                                    )
-                                                    fadeStartIndex = displayedPhrase.length
-                                                } else {
-                                                    fadeStartIndex = displayedPhrase.length
-                                                    latestTailAlpha.snapTo(1f)
-                                                }
-                                            }
-                                        }
-
-                                        val styledPhrase = remember(
-                                            displayedPhrase,
-                                            baseTextColor,
-                                            fadeStartIndex,
-                                            latestTailAlpha.value
-                                        ) {
-                                            val safeSplit = fadeStartIndex.coerceIn(0, displayedPhrase.length)
-                                            buildAnnotatedString {
-                                                if (safeSplit >= displayedPhrase.length || latestTailAlpha.value >= 0.99f) {
-                                                    append(displayedPhrase)
-                                                } else {
-                                                    append(displayedPhrase.substring(0, safeSplit))
-                                                    pushStyle(
-                                                        SpanStyle(
-                                                            color = baseTextColor.copy(
-                                                                alpha = latestTailAlpha.value.coerceIn(0.24f, 1f)
-                                                            )
-                                                        )
-                                                    )
-                                                    append(displayedPhrase.substring(safeSplit))
-                                                    pop()
-                                                }
-                                            }
-                                        }
-
-                                        Text(
-                                            text = styledPhrase,
-                                            color = baseTextColor,
-                                            fontSize = 15.sp,
-                                            fontWeight = if (isSlotSpeaking || isSlotAlert) {
-                                                FontWeight.Bold
-                                            } else {
-                                                FontWeight.SemiBold
-                                            },
-                                            lineHeight = 20.5.sp,
-                                            textAlign = TextAlign.Center,
-                                            maxLines = 3,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.testTag("david_live_subtitle_text")
-                                        )
-
-                                        AnimatedVisibility(
-                                            visible = visualMetadata.actionType != DavidLiveVisualActionType.NONE &&
-                                                visualMetadata.actionLabel != null,
-                                            enter = fadeIn(),
-                                            exit = fadeOut()
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(top = 8.dp),
-                                                horizontalArrangement = Arrangement.Center,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                val actionLabel = visualMetadata.actionLabel ?: ""
-                                                val isApiAction = visualMetadata.actionType == DavidLiveVisualActionType.OPEN_API_SETTINGS ||
-                                                    visualMetadata.actionType == DavidLiveVisualActionType.ADD_API_KEY ||
-                                                    visualMetadata.actionType == DavidLiveVisualActionType.UPDATE_API_KEY
-                                                Button(
-                                                    onClick = {
-                                                        if (isApiAction) {
-                                                            onOpenApiKeySettings()
-                                                        } else {
-                                                            onRetryConnection()
-                                                        }
-                                                    },
-                                                    colors = ButtonDefaults.buttonColors(
-                                                        containerColor = statePrimaryColor.copy(alpha = 0.20f),
-                                                        contentColor = statePrimaryColor
-                                                    ),
-                                                    shape = RoundedCornerShape(14.dp),
-                                                    modifier = Modifier
-                                                        .height(34.dp)
-                                                        .border(
-                                                            width = 1.dp,
-                                                            color = statePrimaryColor.copy(alpha = 0.65f),
-                                                            shape = RoundedCornerShape(14.dp)
-                                                        )
-                                                        .testTag("david_live_contextual_action_button")
-                                                ) {
-                                                    Icon(
-                                                        imageVector = if (isApiAction) Icons.Default.Key else Icons.Default.Refresh,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.size(14.dp)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(6.dp))
-                                                    Text(
-                                                        text = actionLabel,
-                                                        fontSize = 12.sp,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
                             }
                         }
 
@@ -1742,7 +1304,7 @@ fun DavidLiveSheet(
                                         .border(1.5.dp, statePrimaryColor.copy(alpha = 0.75f), CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    BrandFrogAvatar(size = 36.dp)
+                                    Text(text = "🐸", fontSize = 26.sp)
                                 }
 
                                 Spacer(modifier = Modifier.height(12.dp))
@@ -1781,7 +1343,7 @@ fun DavidLiveSheet(
 
                     Spacer(modifier = Modifier.weight(1f))
 
-                    // 3. Bottom Control Bar (matches reference mockup: Left Chat 💬, Center Large Mic 🎤/🔇, Right Red End Call 📞)
+                    // 3. Bottom Control Bar (Mute, Red End Call / Отменить, Minimize to Chat)
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
@@ -1794,92 +1356,17 @@ fun DavidLiveSheet(
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // 1. Left: Chat Button (`💬`)
+                            // Left: Mic Mute Toggle Button
                             Box(
                                 modifier = Modifier
-                                    .size(52.dp)
+                                    .size(50.dp)
                                     .clip(CircleShape)
-                                    .background(ControlCircleSurface)
-                                    .border(1.dp, ControlCircleBorder, CircleShape)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        role = Role.Button,
-                                        onClick = { (onMinimizeToChat ?: onMinimize)() }
+                                    .background(
+                                        if (isMicMuted) Color(0xFF94A3B8).copy(alpha = 0.16f) else CancelPillSurface
                                     )
-                                    .testTag("david_live_chat_minimize_button")
-                                    .semantics {
-                                        contentDescription = "Свернуть в чат"
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.Chat,
-                                    contentDescription = null,
-                                    tint = Color(0xFFCBD5E1),
-                                    modifier = Modifier.size(21.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(24.dp))
-
-                            // 2. Center: Large Focal Microphone Toggle Button (`🎤` / `🔇`)
-                            val isBrightActiveMic = !isMicMuted && (
-                                effectiveVisualState == DavidLiveVisualState.IDLE_LISTENING ||
-                                    effectiveVisualState == DavidLiveVisualState.USER_SPEAKING ||
-                                    effectiveVisualState == DavidLiveVisualState.DAVID_SPEAKING
-                                )
-                            val centerMicBgBrush = when {
-                                isMicMuted -> Brush.radialGradient(
-                                    colors = listOf(
-                                        Color(0xFF334155),
-                                        Color(0xFF1E293B)
-                                    )
-                                )
-                                isBrightActiveMic -> Brush.radialGradient(
-                                    colors = listOf(
-                                        stateSecondaryColor,
-                                        statePrimaryColor
-                                    )
-                                )
-                                else -> Brush.radialGradient(
-                                    colors = listOf(
-                                        Color(0xFF1A2436),
-                                        Color(0xFF111826)
-                                    )
-                                )
-                            }
-                            val centerMicBorderColor = when {
-                                isMicMuted -> MutedSlatePrimary.copy(alpha = 0.78f)
-                                isBrightActiveMic -> Color.White.copy(alpha = 0.55f)
-                                else -> ControlCircleBorder
-                            }
-                            val centerMicIconTint = when {
-                                isMicMuted -> MutedSilverSecondary
-                                isBrightActiveMic -> Color(0xFF022C22)
-                                else -> Color(0xFFCBD5E1)
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .size(68.dp)
-                                    .then(
-                                        if (isBrightActiveMic) {
-                                            Modifier.shadow(
-                                                elevation = 18.dp,
-                                                shape = CircleShape,
-                                                ambientColor = statePrimaryColor,
-                                                spotColor = statePrimaryColor
-                                            )
-                                        } else {
-                                            Modifier
-                                        }
-                                    )
-                                    .clip(CircleShape)
-                                    .background(centerMicBgBrush)
                                     .border(
-                                        width = 1.4.dp,
-                                        color = centerMicBorderColor,
+                                        width = 1.dp,
+                                        color = if (isMicMuted) Color(0xFF94A3B8).copy(alpha = 0.64f) else CancelPillBorder,
                                         shape = CircleShape
                                     )
                                     .clickable(
@@ -1897,36 +1384,30 @@ fun DavidLiveSheet(
                                 Icon(
                                     imageVector = if (isMicMuted) Icons.Default.MicOff else Icons.Default.Mic,
                                     contentDescription = null,
-                                    tint = centerMicIconTint,
-                                    modifier = Modifier.size(28.dp)
+                                    tint = if (isMicMuted) ErrorCrimson else Color(0xFFCBD5E1),
+                                    modifier = Modifier.size(21.dp)
                                 )
                             }
 
-                            Spacer(modifier = Modifier.width(24.dp))
+                            Spacer(modifier = Modifier.width(20.dp))
 
-                            // 3. Right: End Call Button (`📞` red hangup icon in dark crimson circle)
+                            // Centered end-call button
                             Box(
                                 modifier = Modifier
-                                    .size(52.dp)
+                                    .height(54.dp)
+                                    .width(160.dp)
                                     .shadow(
-                                        elevation = 10.dp,
-                                        shape = CircleShape,
-                                        ambientColor = ErrorCrimson.copy(alpha = 0.55f),
-                                        spotColor = ErrorCrimson.copy(alpha = 0.65f)
+                                        elevation = 12.dp,
+                                        shape = RoundedCornerShape(27.dp),
+                                        ambientColor = ErrorCrimson,
+                                        spotColor = ErrorCrimson
                                     )
-                                    .clip(CircleShape)
-                                    .background(
-                                        Brush.radialGradient(
-                                            colors = listOf(
-                                                Color(0xFF2B1219),
-                                                Color(0xFF170B10)
-                                            )
-                                        )
-                                    )
+                                    .clip(RoundedCornerShape(27.dp))
+                                    .background(ErrorCrimson)
                                     .border(
-                                        width = 1.2.dp,
-                                        color = ErrorCrimson.copy(alpha = 0.68f),
-                                        shape = CircleShape
+                                        width = 1.dp,
+                                        color = Color(0xFFF87171).copy(alpha = 0.65f),
+                                        shape = RoundedCornerShape(27.dp)
                                     )
                                     .clickable(
                                         interactionSource = remember { MutableInteractionSource() },
@@ -1934,17 +1415,44 @@ fun DavidLiveSheet(
                                         role = Role.Button,
                                         onClick = onEndSession
                                     )
-                                    .testTag("david_live_cancel_button")
+                                    .testTag("david_live_cancel_button"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Отменить",
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(20.dp))
+
+                            // Right: Minimize to Chat / Compact Capsule Button
+                            Box(
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(CircleShape)
+                                    .background(CancelPillSurface)
+                                    .border(1.dp, CancelPillBorder, CircleShape)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        role = Role.Button,
+                                        onClick = { (onMinimizeToChat ?: onMinimize)() }
+                                    )
+                                    .testTag("david_live_chat_minimize_button")
                                     .semantics {
-                                        contentDescription = "Завершить разговор"
+                                        contentDescription = "Свернуть в чат"
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.CallEnd,
+                                    imageVector = Icons.AutoMirrored.Filled.Chat,
                                     contentDescription = null,
-                                    tint = ErrorCrimson,
-                                    modifier = Modifier.size(22.dp)
+                                    tint = Color(0xFFCBD5E1),
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -1999,61 +1507,6 @@ fun DavidLiveSheet(
 }
 
 /**
- * Glowing orbital spinner displayed below the sphere in `THINKING`, `FINANCE_LOOKUP`,
- * `ANALYZING`, `PREPARING_RESPONSE`, and `CONNECTING` states (matching screen 3 of the reference mockup).
- */
-@Composable
-private fun DavidLiveThinkingOrbitalSpinner(
-    primaryColor: Color,
-    secondaryColor: Color,
-    modifier: Modifier = Modifier
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "thinking_orbital_spinner")
-    val spinDegrees by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "thinking_spinner_angle"
-    )
-
-    Canvas(modifier = modifier) {
-        val strokeWidth = 2.6.dp.toPx()
-        val diameter = size.minDimension - strokeWidth
-        val topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f)
-        val arcSize = Size(diameter, diameter)
-
-        drawArc(
-            color = primaryColor.copy(alpha = 0.22f),
-            startAngle = 0f,
-            sweepAngle = 360f,
-            useCenter = false,
-            topLeft = topLeft,
-            size = arcSize,
-            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-        )
-
-        drawArc(
-            brush = Brush.sweepGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    primaryColor.copy(alpha = 0.75f),
-                    secondaryColor
-                )
-            ),
-            startAngle = spinDegrees,
-            sweepAngle = 230f,
-            useCenter = false,
-            topLeft = topLeft,
-            size = arcSize,
-            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-        )
-    }
-}
-
-/**
  * Horizontal scrollable debug/preview strip allowing developers and QA to manually inspect
  * all 13 [DavidLiveVisualState] states and verify smooth transitions without a live Gemini WebSocket.
  */
@@ -2077,6 +1530,7 @@ fun DavidLiveDebugStateStrip(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // "AUTO (Live)" chip
         val isAuto = selectedState == null
         Box(
             modifier = Modifier
@@ -2125,4 +1579,93 @@ fun DavidLiveDebugStateStrip(
             }
         }
     }
+}
+
+internal fun isDefaultStatusSubtitlePlaceholder(text: String?): Boolean {
+    val trimmed = text?.trim().orEmpty()
+    return trimmed.isEmpty() ||
+        trimmed == "Я здесь, слушаю тебя" ||
+        trimmed == "Слушаю..." ||
+        trimmed == "Говорю..." ||
+        trimmed == "Вот что я думаю..." ||
+        trimmed == "Говорите, я слушаю..." ||
+        trimmed == "Давид отвечает..." ||
+        trimmed == "Слушаю вас" ||
+        trimmed == "Слушаю вас..." ||
+        trimmed == "Слушаю тебя..." ||
+        trimmed == "Микрофон отключён" ||
+        trimmed == "Подключаюсь к Давиду..."
+}
+internal fun computeHorizontalWaveBarTargetMagnitude(
+    barIndex: Int,
+    totalBars: Int,
+    rayMagnitudes: List<Float>,
+    radialEnvelope: FloatArray,
+    overallEnergy: Float,
+    wavePhaseRad: Float,
+    waveActivity: Float,
+    isMicMuted: Boolean,
+    isUserSpeaking: Boolean,
+    isDavidSpeaking: Boolean,
+    isProcessing: Boolean,
+    isIdleListeningUnmuted: Boolean
+): Float {
+    if (isMicMuted && !isDavidSpeaking && !isProcessing) {
+        return 0.06f
+    }
+
+    val normPos = (barIndex + 0.5f) / totalBars.coerceAtLeast(1).toFloat()
+    val centerEnvelope = sin(PI * normPos.toDouble()).toFloat().pow(1.22f)
+    val distFromCenter = kotlin.math.abs(normPos - 0.5f) * 2f
+
+    val rayCount = DavidLiveSpectrumAnalyzer.RAY_COUNT
+    // Направляем центральные столбики на голосовые форманты (индексы 6..20 и 30..44 соответствуют 140–2800 Гц),
+    // где сосредоточена основная энергия живого голоса пользователя
+    val vocalRayIdx = (8 + (distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
+    val neighborRayIdx = (vocalRayIdx + 2) % rayCount
+    val highRayIdx = ((distFromCenter * 12f).roundToInt() + (if (normPos >= 0.5f) 0 else 24)) % rayCount
+
+    val envVocal = radialEnvelope.getOrElse(vocalRayIdx) { 0.65f }.coerceAtLeast(0.38f)
+    val envNeighbor = radialEnvelope.getOrElse(neighborRayIdx) { 0.65f }.coerceAtLeast(0.38f)
+    val envHigh = radialEnvelope.getOrElse(highRayIdx) { 0.70f }.coerceAtLeast(0.38f)
+    val vocalRay = maxOf(
+        (rayMagnitudes.getOrElse(vocalRayIdx) { 0.06f } / envVocal).coerceIn(0f, 1f),
+        (rayMagnitudes.getOrElse(neighborRayIdx) { 0.06f } / envNeighbor).coerceIn(0f, 1f) * 0.92f
+    )
+    val highRay = (rayMagnitudes.getOrElse(highRayIdx) { 0.06f } / envHigh).coerceIn(0f, 1f)
+    val rawRay = (0.76f * vocalRay + 0.24f * highRay).coerceIn(0f, 1f)
+
+    var peakRay = 0f
+    var sumRay = 0f
+    for (r in rayMagnitudes) {
+        if (r > peakRay) peakRay = r
+        sumRay += r
+    }
+    val meanRay = if (rayMagnitudes.isNotEmpty()) sumRay / rayMagnitudes.size else 0f
+    val rawVoiceEnergy = maxOf(overallEnergy.coerceIn(0f, 1f), peakRay * 0.90f, meanRay * 1.55f).coerceIn(0f, 1f)
+
+    val isSpeakingActive = isUserSpeaking || isDavidSpeaking || (isIdleListeningUnmuted && rawVoiceEnergy > 0.045f)
+    if (isSpeakingActive) {
+        // Нелинейное усиление чувствительности для живого голоса (нормальная речь даёт 62%–96% амплитуды в центре)
+        val curvedEnergy = rawVoiceEnergy.coerceAtLeast(0.08f).pow(0.50f).coerceIn(0.24f, 1f)
+        val harmonicFloor = maxOf(rawRay, peakRay * 0.78f).coerceIn(0.12f, 1f)
+        val combinedSignal = maxOf(
+            curvedEnergy * 0.88f,
+            0.44f * harmonicFloor.pow(0.65f) + 0.62f * curvedEnergy
+        ).coerceIn(0.24f, 1f)
+
+        // Бегущая артикуляционная волна создаёт живое движение соседних столбиков в такт слогам речи
+        val waveA = ((sin(wavePhaseRad * 3.0 + barIndex * 0.78) + 1.0) * 0.5).toFloat()
+        val waveB = ((cos(wavePhaseRad * 5.0 - barIndex * 1.24) + 1.0) * 0.5).toFloat()
+        val dynamicArticulation = 0.74f + 0.52f * (0.62f * waveA + 0.38f * waveB)
+
+        val shaped = combinedSignal * dynamicArticulation * (0.36f + 0.78f * centerEnvelope) * waveActivity
+        return shaped.coerceIn(0.10f, 1f)
+    }
+
+    // Спокойное плавное дыхание волн в режиме ожидания (IDLE_LISTENING)
+    val idleBreathing = 0.55f + 0.45f * ((sin(wavePhaseRad * 1.0 + barIndex * 0.65) + 1.0) * 0.5).toFloat()
+    val idleContour = 0.10f + 0.24f * centerEnvelope * idleBreathing
+    val baseSignal = maxOf(rawRay * 0.65f, if (isIdleListeningUnmuted) idleContour else 0.08f)
+    return (baseSignal * (0.32f + 0.76f * centerEnvelope) * waveActivity).coerceIn(0.06f, 1f)
 }

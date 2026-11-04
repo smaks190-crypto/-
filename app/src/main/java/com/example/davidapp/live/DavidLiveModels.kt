@@ -454,6 +454,19 @@ object DavidLiveVisualStateResolver {
 }
 
 /**
+ * Визуальная фаза анимации состояния подключения David Live,
+ * синхронизированная с фактическим состоянием WebSocket-сессии и сети.
+ */
+enum class DavidLiveVisualPhase {
+    IDLE,
+    INITIAL_CONNECTING,
+    CONNECTION_LOST,
+    RECONNECTING,
+    READY_FLASH,
+    CONVERSATION_ACTIVE
+}
+
+/**
  * Актуальный сегмент произносимой реплики для отображения в облачке речи (`david_live_subtitle_bubble`).
  *
  * Гарантирует, что завершённые фразы не накапливаются в одном облачке в длинную историю:
@@ -597,7 +610,8 @@ data class DavidLiveTranscriptTurn(
     val speaker: DavidLiveSpeaker,
     val text: String,
     val timestampMs: Long = System.currentTimeMillis(),
-    val isFinal: Boolean = true
+    val isFinal: Boolean = true,
+    val wasInterrupted: Boolean = false
 )
 
 /**
