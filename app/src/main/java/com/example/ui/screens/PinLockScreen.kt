@@ -96,7 +96,10 @@ fun PinLockScreen(
     val haptic = LocalHapticFeedback.current
     val securityManager = remember { SecurityManager(context) }
     var enteredPin by remember { mutableStateOf("") }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var errorMessage by remember {
+        mutableStateOf<String?>(if (securityManager.isStorageAvailable) null else
+            "Защищённое хранилище недоступно. Перезапустите приложение. Данные не удалены.")
+    }
     var showResetDialog by remember { mutableStateOf(false) }
     var secondsRemaining by remember { mutableStateOf(securityManager.getRemainingBlockTimeSeconds()) }
 
@@ -138,6 +141,7 @@ fun PinLockScreen(
     }
 
     fun onKeyPress(digit: String) {
+        if (!securityManager.isStorageAvailable) return
         if (secondsRemaining > 0) return
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         if (enteredPin.length < 4) {
@@ -429,6 +433,7 @@ fun PinLockScreen(
 
             TextButton(
                 onClick = { showResetDialog = true },
+                enabled = securityManager.isStorageAvailable,
                 modifier = Modifier.testTag("forgot_pin_button")
             ) {
                 Text(
@@ -553,7 +558,7 @@ fun PinLockScreen(
                                 resetInputText = ""
                                 onResetSecurity()
                             },
-                            enabled = resetInputText.trim().equals("СБРОС", ignoreCase = true),
+                            enabled = securityManager.isStorageAvailable && resetInputText.trim().equals("СБРОС", ignoreCase = true),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Rose500,
                                 disabledContainerColor = Slate800

@@ -2,7 +2,6 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   // alias(libs.plugins.roborazzi)
-  alias(libs.plugins.secrets)
 }
 
 import java.io.File
@@ -44,28 +43,15 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystoreFile = file("${rootDir}/my-upload-key.jks")
-      if (keystoreFile.exists() && keystoreFile.length() > 0L) {
-        storeFile = keystoreFile
-        val storePass = System.getenv("STORE_PASSWORD")?.takeIf { it.isNotBlank() }
-        val keyPass = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() }
-        val alias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "upload"
+      val keystoreFile = rootProject.file(System.getenv("KEYSTORE_PATH") ?: "my-upload-key.jks")
+      storeFile = keystoreFile
+      val storePass = System.getenv("STORE_PASSWORD")?.takeIf { it.isNotBlank() }
+      val keyPass = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+      val alias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "upload"
 
-        storePassword = storePass ?: keyPass
-        keyAlias = alias
-        keyPassword = keyPass ?: storePass
-      } else {
-        storeFile = file("${rootDir}/debug.keystore")
-        storePassword = "android"
-        keyAlias = "androiddebugkey"
-        keyPassword = "android"
-      }
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+      storePassword = storePass ?: keyPass
+      keyAlias = alias
+      keyPassword = keyPass ?: storePass
     }
   }
 
@@ -78,7 +64,6 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
       isCrunchPngs = false
       isMinifyEnabled = false
       isShrinkResources = false
@@ -92,16 +77,13 @@ android {
     compose = true
     buildConfig = true
   }
+  // User keys are entered in the app. Never package CI or developer credentials in an APK.
+  defaultConfig.buildConfigField("String", "GEMINI_API_KEY", "\"\"")
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
 configurations.all {
   exclude(group = "androidx.compose.compiler", module = "compiler")
-}
-
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
 }
 
 dependencies {
@@ -177,13 +159,6 @@ tasks.withType<Test>().configureEach {
   onlyIf {
     System.getenv("GITHUB_ACTIONS") != "true" ||
       (ciChangeScope != "docs_only" && ciChangeScope != "android_test_only")
-  }
-  filter {
-    includeTestsMatching("com.example.utils.GlobalConsoleLoggerTest")
-    includeTestsMatching("com.example.ExampleUnitTest")
-    includeTestsMatching("com.example.davidapp.live.DavidLiveUnitTest")
-    includeTestsMatching("com.example.data.FinancialSemanticsCalculatorTest")
-    includeTestsMatching("com.example.data.safetospend.SafeToSpendCalculatorTest")
   }
 }
 
