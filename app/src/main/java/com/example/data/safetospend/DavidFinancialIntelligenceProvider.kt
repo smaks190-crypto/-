@@ -156,8 +156,15 @@ object DavidFinancialIntelligenceProvider {
             essentialCategoryMonthlyLimitsRub = essentialCategoryLimits
         )
 
-        // 5. Compute discretionary category remaining budget if discretionary category limits exist
-        val discretionaryCategoryRemainingRub: Double? = if (totalDiscretionaryBudgetLimit > 0.0) {
+        // A limit on one category is not a cap on the entire discretionary budget.
+        val discretionaryCategories = categories.filter {
+            it.type.equals("expense", ignoreCase = true) &&
+                !EssentialSpendingEstimator.isEssentialCategory(it.name) &&
+                !EssentialSpendingEstimator.isMandatoryCategory(it.name)
+        }
+        val hasComprehensiveDiscretionaryBudget = discretionaryCategories.isNotEmpty() &&
+            discretionaryCategories.all { (it.monthlyLimit ?: 0.0) > 0.0 }
+        val discretionaryCategoryRemainingRub: Double? = if (hasComprehensiveDiscretionaryBudget && totalDiscretionaryBudgetLimit > 0.0) {
             val spentBeforeTodayInDiscCats = transactions
                 .filter { tx ->
                     tx.type.equals("expense", ignoreCase = true) &&

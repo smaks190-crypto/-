@@ -4042,8 +4042,6 @@ class DavidLiveUnitTest {
         override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) = Unit
     }
 
-}
-
     @Test
     fun `mute visual palette applies dimmed silver-slate colors to mic states without masking priority states or David speaking`() {
         val micDrivenStates = listOf(
