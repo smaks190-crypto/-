@@ -2166,7 +2166,9 @@ class DavidLiveUnitTest {
             goalDao = null,
             accountDao = null
         )
-        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+        val controller = DavidLiveSessionController(financialToolsProvider = provider,
+            controllerDispatcher = QueuedLiveDispatcher())
+        controller.processServerMessageForTest("""{"setupComplete":{}}""")
 
         // Начальное состояние
         assertEquals(DavidLiveVisualState.IDLE_LISTENING, controller.visualState.value)
@@ -2293,7 +2295,8 @@ class DavidLiveUnitTest {
             goalDao = createReadOnlyGoalDao(emptyList()),
             accountDao = createReadOnlyAccountDao(fakeAccounts)
         )
-        val controller = DavidLiveSessionController(financialToolsProvider = provider)
+        val controller = DavidLiveSessionController(financialToolsProvider = provider,
+            controllerDispatcher = QueuedLiveDispatcher())
 
         // 1. SetupComplete подтверждает готовность сессии и переводит CONNECTING -> IDLE_LISTENING
         controller.processServerMessageForTest("""{"setupComplete": {}}""")
@@ -2885,6 +2888,11 @@ class DavidLiveUnitTest {
             (sin(2.0 * PI * frequencyHz * i / sampleRateHz) * amplitude).toInt().toShort()
         }
     }
+    // Keep pending tool work paused while asserting the synchronous state transition.
+    private class QueuedLiveDispatcher : kotlinx.coroutines.CoroutineDispatcher() {
+        override fun dispatch(context: kotlin.coroutines.CoroutineContext, block: Runnable) = Unit
+    }
+
 }
 
 

@@ -134,6 +134,9 @@ fun resolveDavidLiveStatusLabel(
     visualState: DavidLiveVisualState? = null,
     failureKind: DavidLiveConnectionFailureKind = DavidLiveConnectionFailureKind.NONE
 ): String {
+    if (visualState == null && failureKind == DavidLiveConnectionFailureKind.NONE) {
+        return resolveDavidLiveStatusLabel(connectionState, activeSpeaker, isMicMuted, DavidLiveVisualPhase.IDLE)
+    }
     val effectiveVisualState = visualState ?: DavidLiveVisualStateResolver.resolve(
         connectionState = connectionState,
         activeSpeaker = activeSpeaker,
