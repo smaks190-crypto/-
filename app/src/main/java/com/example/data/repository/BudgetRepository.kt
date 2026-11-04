@@ -429,6 +429,22 @@ class BudgetRepository(
         return recurringPaymentDao.insertRecurringPayment(payment)
     }
 
+    /** Update a current rule and preserve its execution history in the same database transaction. */
+    suspend fun updateRecurringPaymentDetails(
+        id: Long,
+        budgetId: String,
+        transform: (com.example.data.db.RecurringPaymentEntity) -> com.example.data.db.RecurringPaymentEntity
+    ): Boolean = db.withTransaction {
+        val existing = recurringPaymentDao.getRecurringPaymentById(id) ?: return@withTransaction false
+        if (existing.budgetId != budgetId) return@withTransaction false
+        val updated = transform(existing).copy(id = id, budgetId = budgetId)
+        require(updated.amount.isFinite() && updated.amount > 0.0)
+        val logs = recurringPaymentDao.getExecutionLogsByBudgetId(budgetId).first().filter { it.recurringId == id }
+        recurringPaymentDao.insertRecurringPayment(updated)
+        logs.forEach { recurringPaymentDao.insertExecutionLog(it) }
+        true
+    }
+
     suspend fun deleteRecurringPayment(id: Long) {
         recurringPaymentDao.deleteRecurringPaymentById(id)
     }

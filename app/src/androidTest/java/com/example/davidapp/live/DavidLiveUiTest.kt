@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -13,6 +14,7 @@ import androidx.compose.ui.test.performTouchInput
 import com.example.davidapp.ChatMessageType
 import com.example.davidapp.DavidChatInputBar
 import com.example.davidapp.DavidLiveSummaryBubble
+import com.example.davidapp.DavidTextBubble
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -347,6 +349,185 @@ class DavidLiveUiTest {
         composeTestRule.onNodeWithTag("david_live_circular_visualizer").assertIsDisplayed()
         composeTestRule.onNodeWithTag("david_live_state_badge").assertIsDisplayed()
     }
+
+    @Test
+    fun davidLiveMuteTogglesVisualStateAndPreservesOfflineAndApiMissingPriority() {
+        var isMuted by mutableStateOf(false)
+        var currentVisualState by mutableStateOf(DavidLiveVisualState.IDLE_LISTENING)
+
+        composeTestRule.setContent {
+            DavidLiveSheet(
+                connectionState = DavidLiveConnectionState.LISTENING,
+                liveSubtitle = "Слушаю тебя...",
+                rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.25f },
+                overallEnergy = 0.2f,
+                activeSpeaker = DavidLiveSpeaker.NONE,
+                isMicMuted = isMuted,
+                errorMessage = null,
+                onToggleMicMute = { isMuted = !isMuted },
+                onRetryConnection = {},
+                onOpenApiKeySettings = {},
+                onEndSession = {},
+                visualState = currentVisualState
+            )
+        }
+
+        // 1. В режиме ожидания с включённым микрофоном отображается "Слушаю тебя..."
+        composeTestRule.onNodeWithText("Слушаю тебя...").assertIsDisplayed()
+
+        // 2. Выключаем микрофон центральной нижней кнопкой -> статус меняется на "Микрофон выключен"
+        composeTestRule.onNodeWithTag("david_live_bottom_mute_button").performClick()
+        composeTestRule.waitForIdle()
+        assertTrue(isMuted)
+        composeTestRule.onNodeWithTag("david_live_sphere_status_caption").assertIsDisplayed()
+
+        // 3. При переходе в OFFLINE или API_MISSING при выключенном микрофоне системный статус сохраняет приоритет
+        currentVisualState = DavidLiveVisualState.OFFLINE
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Повторить").assertIsDisplayed()
+
+        currentVisualState = DavidLiveVisualState.API_MISSING
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Добавить API").assertIsDisplayed()
+    }
+
+    @Test
+    fun davidLiveHeaderAvatarHasNoCoinAndSpeechBubbleReplacesCompletedPhrasesAndSphereSeparatesHoldFromTap() {
+        var isMuted by mutableStateOf(false)
+        var currentVisualState by mutableStateOf(DavidLiveVisualState.DAVID_SPEAKING)
+        var liveSubtitle by mutableStateOf("Привет! Сейчас проверим твои расходы за неделю.")
+
+        composeTestRule.setContent {
+            DavidLiveSheet(
+                connectionState = DavidLiveConnectionState.DAVID_SPEAKING,
+                liveSubtitle = liveSubtitle,
+                rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.45f },
+                overallEnergy = 0.42f,
+                activeSpeaker = DavidLiveSpeaker.DAVID,
+                isMicMuted = isMuted,
+                errorMessage = null,
+                onToggleMicMute = { isMuted = !isMuted },
+                onRetryConnection = {},
+                onOpenApiKeySettings = {},
+                onEndSession = {},
+                visualState = currentVisualState
+            )
+        }
+
+        // 1. Аватар Давида в шапке чистый, без декоративной монетки "₽"
+        composeTestRule.onNodeWithTag("david_live_header_avatar").assertIsDisplayed()
+        assertTrue(composeTestRule.onAllNodesWithText("₽").fetchSemanticsNodes().isEmpty())
+
+        // 2. В облачке речи отображается только актуальная произносимая фраза, без накопления предыдущих предложений
+        composeTestRule.onNodeWithTag("david_live_subtitle_bubble").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Сейчас проверим твои расходы за неделю.").assertIsDisplayed()
+
+        // Когда Давид договаривает фразу и переходит в режим ожидания, завершённая фраза уходит вверх, оставляя чистый статус
+        currentVisualState = DavidLiveVisualState.IDLE_LISTENING
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Слушаю вас").assertIsDisplayed()
+
+        // Когда начинается новая реплика, она появляется как свежее сообщение без склейки со старой
+        currentVisualState = DavidLiveVisualState.DAVID_SPEAKING
+        liveSubtitle = "Привет! Сейчас проверим твои расходы за неделю. По подпискам всё чисто!"
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("По подпискам всё чисто!").assertIsDisplayed()
+
+        // 3. Удержание пальца (longClick) на сфере активирует 3D-притяжение света, НЕ переключая микрофон
+        currentVisualState = DavidLiveVisualState.IDLE_LISTENING
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("david_live_circular_visualizer").performTouchInput {
+            longClick()
+        }
+        composeTestRule.waitForIdle()
+        assertEquals(false, isMuted)
+
+        // Короткое нажатие (performClick) на сферу по-прежнему переключает микрофон
+        composeTestRule.onNodeWithTag("david_live_circular_visualizer").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(true, isMuted)
+    }
+
+    @Test
+    fun davidLiveSubtitleBubbleExpandsSmoothlyAndChatLiveBadgeRendersHorizontally() {
+        var liveSubtitle by mutableStateOf("Привет")
+        var chatMessageText by mutableStateOf("Привет, сколько у меня на счету сейчас?")
+
+        composeTestRule.setContent {
+            androidx.compose.foundation.layout.Column {
+                DavidLiveSheet(
+                    connectionState = DavidLiveConnectionState.DAVID_SPEAKING,
+                    liveSubtitle = liveSubtitle,
+                    rayMagnitudes = List(DavidLiveSpectrumAnalyzer.RAY_COUNT) { 0.4f },
+                    overallEnergy = 0.35f,
+                    activeSpeaker = DavidLiveSpeaker.DAVID,
+                    isMicMuted = false,
+                    errorMessage = null,
+                    onToggleMicMute = {},
+                    onRetryConnection = {},
+                    onOpenApiKeySettings = {},
+                    onEndSession = {},
+                    visualState = DavidLiveVisualState.DAVID_SPEAKING
+                )
+                DavidTextBubble(
+                    content = chatMessageText,
+                    timestamp = "12:45",
+                    isUser = true,
+                    isLiveVoiceTurn = true,
+                    messageId = "live_turn_user_1"
+                )
+            }
+        }
+
+        // 1. Облачко в окне David Live начинает с короткого слова и расширяется в ширину по мере добавления слов
+        val initialBubbleBounds = composeTestRule
+            .onNodeWithTag("david_live_subtitle_bubble")
+            .fetchSemanticsNode()
+            .boundsInRoot
+
+        liveSubtitle = "Привет, я внимательно проверил все твои расходы за эту неделю"
+        composeTestRule.waitForIdle()
+
+        val expandedBubbleBounds = composeTestRule
+            .onNodeWithTag("david_live_subtitle_bubble")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "Subtitle bubble must expand horizontally as spoken words are appended (${initialBubbleBounds.width} -> ${expandedBubbleBounds.width})",
+            expandedBubbleBounds.width > initialBubbleBounds.width
+        )
+
+        // 2. Бейдж LIVE в сообщении чата всегда отрисовывается горизонтально в одну строку (ширина > высоты), без вертикального переноса L/I/V/E
+        val liveBadgeBounds = composeTestRule
+            .onNodeWithTag("david_chat_live_badge")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val liveBadgeTextBounds = composeTestRule
+            .onNodeWithTag("david_chat_live_badge_text", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "LIVE badge container in chat must be horizontal (width=${liveBadgeBounds.width}, height=${liveBadgeBounds.height})",
+            liveBadgeBounds.width > liveBadgeBounds.height
+        )
+        assertTrue(
+            "LIVE badge text in chat must be rendered horizontally on a single line (width=${liveBadgeTextBounds.width}, height=${liveBadgeTextBounds.height})",
+            liveBadgeTextBounds.width > liveBadgeTextBounds.height
+        )
+
+        // 3. При потоковом дописывании реплики свыше 48 символов бейдж LIVE остаётся горизонтальным
+        chatMessageText = "Привет, сколько у меня на счету сейчас и хватит ли лимита на выходные дни в этой категории?"
+        composeTestRule.waitForIdle()
+        val liveBadgeTextBoundsAfterExpand = composeTestRule
+            .onNodeWithTag("david_chat_live_badge_text", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(
+            "LIVE badge text must remain horizontal after streaming expansion",
+            liveBadgeTextBoundsAfterExpand.width > liveBadgeTextBoundsAfterExpand.height
+        )
+    }
 }
+
 
 

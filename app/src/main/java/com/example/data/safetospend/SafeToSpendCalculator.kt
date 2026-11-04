@@ -41,7 +41,8 @@ object SafeToSpendCalculator {
                 val delta = (earliestGuaranteedIncomeDay - d0).toInt()
                 delta.coerceIn(1, MAX_DYNAMIC_HORIZON_WITH_INCOME_DAYS)
             }
-            else -> min(daysRemMonth, MAX_FALLBACK_HORIZON_DAYS).coerceAtLeast(1)
+            // Reserve across month boundaries when no future income date is known.
+            else -> MAX_FALLBACK_HORIZON_DAYS
         }
 
         // 3. Build unified obligation schedule (Overdue O_overdue and Horizon O_due(t))

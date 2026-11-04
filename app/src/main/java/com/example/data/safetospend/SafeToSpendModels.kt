@@ -259,6 +259,19 @@ data class SafeToSpendResult(
     val obligationsReservedTotalRub: Double
         get() = overdueObligationsRub + todayPendingObligationsRub + reservedFutureObligationsRub
 
+    val todayPendingGuaranteedIncomeRub: Double
+        get() = upcomingIncomes.filter {
+            it.incomeCertainty == IncomeCertainty.GUARANTEED && it.dueEpochDay == trajectory.firstOrNull()?.epochDay
+        }.sumOf { it.amountRub }
+
+    val upcomingGuaranteedIncomeRub: Double
+        get() {
+            val today = trajectory.firstOrNull()?.epochDay ?: return 0.0
+            return upcomingIncomes.filter {
+                it.incomeCertainty == IncomeCertainty.GUARANTEED && it.dueEpochDay > today && it.dueEpochDay < today + horizonDays
+            }.sumOf { it.amountRub }
+        }
+
     val netBalanceAfterObligationsBeforeSalaryRub: Double
         get() = availableBalanceRub - lockedGoalsAndReserveRub - obligationsReservedTotalRub
 

@@ -214,6 +214,19 @@ fun MorphingBottomBar(
     }
     val effectiveModal = if (activeModal != BottomCapsuleModal.None) activeModal else renderedModal
 
+    // Плавное звуковое сопровождение при раскрытии и сворачивании голосового ввода
+    var wasVoiceInputModalOpen by remember { mutableStateOf(false) }
+    val isVoiceInputModalCurrentlyOpen = activeModal is BottomCapsuleModal.VoiceInput
+    LaunchedEffect(isVoiceInputModalCurrentlyOpen) {
+        if (isVoiceInputModalCurrentlyOpen && !wasVoiceInputModalOpen) {
+            wasVoiceInputModalOpen = true
+            com.example.davidapp.SoundManager.playVoiceChatOpen(context)
+        } else if (!isVoiceInputModalCurrentlyOpen && wasVoiceInputModalOpen) {
+            wasVoiceInputModalOpen = false
+            com.example.davidapp.SoundManager.playVoiceChatClose(context)
+        }
+    }
+
     // Мгновенный тактильный отклик в руку на каждый пойманный или скорректированный голосом расход/доход (toolCall)
     LaunchedEffect(latestVoiceTickerEvent?.id) {
         if (latestVoiceTickerEvent != null && activeModal is BottomCapsuleModal.VoiceInput) {
