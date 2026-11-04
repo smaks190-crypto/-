@@ -64,6 +64,8 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
+      applicationIdSuffix = ".preview"
+      versionNameSuffix = "-preview"
       isCrunchPngs = false
       isMinifyEnabled = false
       isShrinkResources = false

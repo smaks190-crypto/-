@@ -7,8 +7,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.printToString
-import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.ui.theme.BudgetTheme
 import org.junit.Assert.assertEquals
@@ -22,6 +20,7 @@ class DavidLivePresentationUiTest {
     @Test fun connectionNoticeDoesNotAppearAsSpeech() {
         val state = mutableStateOf(DavidLiveConnectionState.NO_API_KEY)
         var settingsOpened = 0
+        compose.mainClock.autoAdvance = false
         compose.setContent {
             BudgetTheme {
                 DavidLiveSheet(
@@ -36,7 +35,6 @@ class DavidLivePresentationUiTest {
             }
         }
         compose.mainClock.advanceTimeBy(1000)
-        screenshot("voice-initial-layout")
         try {
             compose.waitUntil(5000) {
                 runCatching { compose.onNodeWithTag("david_live_connection_notice", useUnmergedTree = true).assertIsDisplayed(); true }.getOrDefault(false)
@@ -57,11 +55,12 @@ class DavidLivePresentationUiTest {
     }
 
     private fun screenshot(name: String) {
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val dir = File(instrumentation.targetContext.getExternalFilesDir(null), "release-screenshots").apply { mkdirs() }
-        val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
-        File(dir, "$name.png").outputStream().use {
-            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        automation.executeShellCommand("mkdir -p /sdcard/Download/release-screenshots").use {
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
+        }
+        automation.executeShellCommand("screencap -p /sdcard/Download/release-screenshots/$name.png").use {
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
         }
     }
 }

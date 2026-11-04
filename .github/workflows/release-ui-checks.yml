@@ -51,7 +51,7 @@ jobs:
             ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.ui.components.BudgetDocumentImportUiTest,com.example.davidapp.live.DavidLivePresentationUiTest
       - name: Collect screenshots
         if: always()
-        run: adb pull /sdcard/Android/data/ru.personalbudget.app.aadece/files/release-screenshots screenshots || true
+        run: adb pull /sdcard/Android/data/ru.personalbudget.app.aadece.preview/files/release-screenshots screenshots || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
