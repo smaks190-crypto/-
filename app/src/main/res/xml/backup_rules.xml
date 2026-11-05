@@ -3,4 +3,7 @@
     <exclude domain="sharedpref" path="budget_prefs.xml" />
     <exclude domain="sharedpref" path="reminder_prefs.xml" />
     <exclude domain="sharedpref" path="secure_prefs.xml" />
+    <exclude domain="sharedpref" path="app_security_prefs_secure.xml" />
+    <exclude domain="sharedpref" path="app_security_prefs.xml" />
+    <exclude domain="sharedpref" path="app_security_prefs_secure_fallback.xml" />
 </full-backup-content>

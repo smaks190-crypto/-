@@ -107,6 +107,7 @@ class TransactionStateDelegate(
             type = lastOp.type,
             isCorrection = false
         )
+        com.example.davidapp.SoundManager.playVoiceOperationCaptured(context)
         com.example.utils.GlobalConsoleLogger.i(
             "UI",
             "Gemini Live BidiGenerateContent: +${liveOps.size} операций (всего ${updatedList.size}), последняя: $lastOpTranscript"
@@ -147,6 +148,7 @@ class TransactionStateDelegate(
                 type = createdOp.type,
                 isCorrection = true
             )
+            com.example.davidapp.SoundManager.playVoiceOperationCaptured(context)
             return
         }
 
@@ -183,6 +185,7 @@ class TransactionStateDelegate(
             type = updatedOp.type,
             isCorrection = true
         )
+        com.example.davidapp.SoundManager.playVoiceOperationCaptured(context)
         com.example.utils.GlobalConsoleLogger.i(
             "UI",
             "Gemini Live BidiGenerateContent: исправлена последняя операция -> $updatedTranscript"
@@ -382,6 +385,7 @@ class TransactionStateDelegate(
                 amount = amount
             )
             repository.insertTransaction(tx)
+            com.example.davidapp.SoundManager.playTransactionCoins(context)
             toastMessage.emit("Операция добавлена!")
             checkAndTriggerCroakAlert(type, category, subcategory, amount)
             isGeneratingReaction.value = true
@@ -481,7 +485,7 @@ class TransactionStateDelegate(
         val currentBudgetId = selectedBudgetId.value ?: "default"
         scope.launch {
             ensureCategoryExists(category, type)
-            val tx = TransactionEntity(
+            val updated = repository.updateTransactionDetails(
                 id = id,
                 budgetId = currentBudgetId,
                 type = type,
@@ -490,8 +494,7 @@ class TransactionStateDelegate(
                 subcategory = subcategory,
                 amount = amount
             )
-            repository.insertTransaction(tx)
-            toastMessage.emit("Операция обновлена!")
+            toastMessage.emit(if (updated) "Операция обновлена!" else "Операция не найдена в текущем бюджете")
         }
     }
 
@@ -504,7 +507,8 @@ class TransactionStateDelegate(
         com.example.utils.GlobalConsoleLogger.i("UI", "Подтверждение операций (${operations.size} шт.), дата: $dateStr")
         scope.launch {
             if (operations.isEmpty()) return@launch
-            
+            com.example.davidapp.SoundManager.playTransactionCoins(context)
+
             isGeneratingReaction.value = true
             
             if (operations.size == 1) {
@@ -684,6 +688,7 @@ class TransactionStateDelegate(
                 amount = amount
             )
             repository.insertTransaction(tx)
+            com.example.davidapp.SoundManager.playTransactionCoins(context)
             
             try {
                 val extraCtx = if (updatedCurrent >= goal.targetAmount) {
@@ -751,6 +756,7 @@ class TransactionStateDelegate(
                     amount = current
                 )
                 repository.insertTransaction(tx)
+                com.example.davidapp.SoundManager.playTransactionCoins(context)
             }
 
             if (target > 0 && current >= target) {

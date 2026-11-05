@@ -2,7 +2,6 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   // alias(libs.plugins.roborazzi)
-  alias(libs.plugins.secrets)
 }
 
 import java.io.File
@@ -44,28 +43,15 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystoreFile = file("${rootDir}/my-upload-key.jks")
-      if (keystoreFile.exists() && keystoreFile.length() > 0L) {
-        storeFile = keystoreFile
-        val storePass = System.getenv("STORE_PASSWORD")?.takeIf { it.isNotBlank() }
-        val keyPass = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() }
-        val alias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "upload"
+      val keystoreFile = rootProject.file(System.getenv("KEYSTORE_PATH") ?: "my-upload-key.jks")
+      storeFile = keystoreFile
+      val storePass = System.getenv("STORE_PASSWORD")?.takeIf { it.isNotBlank() }
+      val keyPass = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+      val alias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "upload"
 
-        storePassword = storePass ?: keyPass
-        keyAlias = alias
-        keyPassword = keyPass ?: storePass
-      } else {
-        storeFile = file("${rootDir}/debug.keystore")
-        storePassword = "android"
-        keyAlias = "androiddebugkey"
-        keyPassword = "android"
-      }
-    }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+      storePassword = storePass ?: keyPass
+      keyAlias = alias
+      keyPassword = keyPass ?: storePass
     }
   }
 
@@ -78,13 +64,15 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      signingConfig = signingConfigs.getByName("debugConfig")
+      applicationIdSuffix = ".preview"
+      versionNameSuffix = "-preview"
       isCrunchPngs = false
       isMinifyEnabled = false
       isShrinkResources = false
     }
   }
   compileOptions {
+    isCoreLibraryDesugaringEnabled = true
     sourceCompatibility = JavaVersion.VERSION_11
     targetCompatibility = JavaVersion.VERSION_11
   }
@@ -92,6 +80,8 @@ android {
     compose = true
     buildConfig = true
   }
+  // User keys are entered in the app. Never package CI or developer credentials in an APK.
+  defaultConfig.buildConfigField("String", "GEMINI_API_KEY", "\"\"")
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
@@ -99,12 +89,8 @@ configurations.all {
   exclude(group = "androidx.compose.compiler", module = "compiler")
 }
 
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
-}
-
 dependencies {
+  coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
   implementation(platform(libs.androidx.compose.bom))
   implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.compose.material.icons.core)
@@ -171,19 +157,13 @@ val robolectricCacheDir = File(gradle.gradleUserHomeDir, "caches/robolectric-m2"
 
 // ЭТАП D: Параллельное выполнение Unit-тестов с переиспользованием JVM форков
 tasks.withType<Test>().configureEach {
+  testLogging.exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
   maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
   forkEvery = 0L
   systemProperty("maven.repo.local", robolectricCacheDir.absolutePath)
   onlyIf {
     System.getenv("GITHUB_ACTIONS") != "true" ||
       (ciChangeScope != "docs_only" && ciChangeScope != "android_test_only")
-  }
-  filter {
-    includeTestsMatching("com.example.utils.GlobalConsoleLoggerTest")
-    includeTestsMatching("com.example.ExampleUnitTest")
-    includeTestsMatching("com.example.davidapp.live.DavidLiveUnitTest")
-    includeTestsMatching("com.example.data.FinancialSemanticsCalculatorTest")
-    includeTestsMatching("com.example.data.safetospend.SafeToSpendCalculatorTest")
   }
 }
 
@@ -213,6 +193,7 @@ val ciStageBCompileKotlin = tasks.register("ciStageBCompileKotlin") {
 }
 
 val startCiAndroidEmulator = tasks.register<Exec>("startCiAndroidEmulator") {
+  onlyIf { System.getenv("CI_EXTERNAL_EMULATOR") != "true" }
   workingDir = rootProject.projectDir
   commandLine("bash", "${rootProject.projectDir}/ci/start_emulator.sh")
   mustRunAfter("packageDebugAndroidTest", "packageDebug")

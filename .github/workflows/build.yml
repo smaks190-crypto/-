@@ -3,13 +3,11 @@
 # 2. STORE_PASSWORD - Пароль от хранилища ключей (keystore password)
 # 3. KEY_PASSWORD - Пароль от ключа (key password, если отличается от STORE_PASSWORD)
 # 4. KEY_ALIAS - Алиас ключа (по умолчанию "upload")
-# 5. ENV_FILE - Содержимое файла .env (включая GEMINI_API_KEY)
 
 name: Build Android APK & AAB
 
 on:
   pull_request:
-    branches: [ "main" ]
     types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [ "main" ]
@@ -48,21 +46,20 @@ jobs:
           # PRs remain read-only; trusted manual feature builds may seed their branch cache.
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
-      # DEBUG ТОЛЬКО ДЛЯ PR И РУЧНОГО ЗАПУСКА НЕ ИЗ MAIN
-      - name: Generate debug keystore
-        if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')
-        run: |
-          mkdir -p ~/.android
-          keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-
-      # ВОССТАНАВЛИВАЕМ ФАЙЛ .ENV (С КЛЮЧОМ ИИ)
-      - name: Create .env file
-        run: echo "${{ secrets.ENV_FILE }}" > .env
-
       # СОБИРАЕМ APK С ПОМОЩЬЮ СИСТЕМНОГО GRADLE (ОТЛАДКА)
       - name: Build Debug APK
         if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')
-        run: gradle assembleDebug
+        run: ./gradlew assembleDebug
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          if-no-files-found: ignore
+          path: |
+            app/build/reports/tests/testDebugUnitTest
+            app/build/test-results/testDebugUnitTest
 
       # СОХРАНЯЕМ ГОТОВЫЙ ФАЙЛ ОТЛАДКИ
       - name: Upload APK artifact
@@ -119,7 +116,7 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        run: gradle assembleRelease bundleRelease --no-configuration-cache
+        run: ./gradlew assembleRelease bundleRelease --no-configuration-cache
 
       # СОХРАНЯЕМ ГОТОВЫЕ РЕЛИЗНЫЕ ФАЙЛЫ
       - name: Upload Release Artifacts
